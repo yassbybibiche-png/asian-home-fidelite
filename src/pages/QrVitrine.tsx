@@ -5,7 +5,7 @@ import { NOM_APP } from '../data/defaults'
 
 /** QR grand format, affichable en caisse ou imprimable (étiquettes de table, adhésif vitrine). */
 export default function QrVitrine() {
-  const { commerce } = useStore()
+  const { commerce, mode } = useStore()
   const url = urlAbsolue('jouer', commerce.id)
 
   return (
@@ -33,7 +33,9 @@ export default function QrVitrine() {
         </a>
         <p className="text-center text-xs break-all text-gray-500">{url}</p>
         <p className="text-center text-xs text-gray-500">
-          Démo : le QR pointe vers l’adresse actuelle de l’app. Hébergée en ligne, la même page servira telle quelle.
+          {mode === 'local'
+            ? 'Démo : le QR pointe vers l’adresse actuelle de l’app. Hébergée en ligne, la même page servira telle quelle.'
+            : 'Le QR pointe vers l’adresse actuelle de l’app : imprimez-le depuis l’adresse publique définitive (pas depuis localhost).'}
         </p>
       </div>
     </div>

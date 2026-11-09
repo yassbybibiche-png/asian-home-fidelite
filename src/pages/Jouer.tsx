@@ -1,20 +1,119 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, Tirage } from '../types'
 import { analyserContact } from '../lib/fidelite'
-import { estPerdant, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot } from '../lib/roulette'
+import { estPerdant, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
+import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ResultatTirage } from '../data/api'
+import { lancerTirage, memoireJoueur, type JoueurMemorise } from '../data/jeuApi'
 import { DUREE_ROTATION_MS, Roue } from '../components/Roue'
-import { BadgeDemo, LogoCommerce } from '../components/ui'
+import { BadgeDemo, BoutonCopier, LogoCommerce, MessageErreur } from '../components/ui'
 
 export function MessagePublic({ titre, children }: { titre: string; children: ReactNode }) {
   return (
     <div className="mx-auto max-w-md px-4 py-16 text-center">
       <h1 className="text-2xl font-bold">{titre}</h1>
-      <p className="mt-3 text-gray-600">{children}</p>
+      <div className="mt-3 text-gray-600">{children}</div>
     </div>
   )
 }
+
+/** Serveur injoignable sur une page publique : message clair + nouvel essai, jamais de faux résultat. */
+export function HorsLignePublic({ onReessayer }: { onReessayer(): void }) {
+  return (
+    <MessagePublic titre="Serveur injoignable">
+      <p>{MESSAGE_HORS_LIGNE}</p>
+      <button className="bouton mt-4 w-full" onClick={onReessayer}>
+        Réessayer
+      </button>
+    </MessagePublic>
+  )
+}
+
+/** Page publique #/jouer/<commerceId>, ouverte en scannant le QR vitrine. */
+export default function Jouer() {
+  const { api } = useStore()
+  return api ? <JouerApi api={api} /> : <JouerLocal />
+}
+
+function verifierCommerce(commerce: Commerce): ReactNode {
+  if (!commerce.actif) return <MessagePublic titre={commerce.nom}>Le jeu de ce commerce n’est plus disponible.</MessagePublic>
+  if (lotsJouables(commerce.lots).length === 0) return <MessagePublic titre={commerce.nom}>Aucun lot n’est configuré pour le moment.</MessagePublic>
+  return null
+}
+
+type Etape = 'pret' | 'rotation' | 'resultat'
+
+/** En-tête + roue, communs aux deux modes. */
+function Cadre({ commerce, rotation, children, pied }: { commerce: Commerce; rotation: number; children: ReactNode; pied: ReactNode }) {
+  return (
+    <div className="mx-auto max-w-md space-y-5 px-4 py-6">
+      <header className="flex items-center gap-3">
+        <LogoCommerce commerce={commerce} />
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-bold">{commerce.nom}</h1>
+          <p className="text-sm text-gray-600">Tournez la roue et gagnez un cadeau !</p>
+        </div>
+      </header>
+
+      {commerce.coordonnees && <p className="-mt-2 text-sm text-gray-500">{commerce.coordonnees}</p>}
+
+      <Roue lots={commerce.lots} rotation={rotation} />
+
+      {children}
+
+      <p className="text-center text-xs text-gray-500">{pied}</p>
+    </div>
+  )
+}
+
+function MessageSansVisite({ prenom, lienCarte }: { prenom: string; lienCarte: string }) {
+  return (
+    <section className="carte space-y-3 text-center" role="status">
+      <p className="text-lg font-bold">Bonjour {prenom} !</p>
+      <p className="text-gray-700">Pour jouer, validez d’abord votre visite du jour au comptoir.</p>
+      <p className="text-sm text-gray-500">Présentez votre carte de fidélité en caisse : 1 visite validée = 1 participation.</p>
+      <a href={lienCarte} className="bouton-secondaire w-full">
+        Voir ma carte de fidélité
+      </a>
+    </section>
+  )
+}
+
+function MessageDejaJoue({ prenom, lot, code }: { prenom: string; lot: string | null; code?: string }) {
+  return (
+    <section className="carte text-center" role="status">
+      <p className="text-lg font-bold">Vous avez déjà joué aujourd’hui, {prenom} !</p>
+      {lot && (
+        <p className="mt-1 text-gray-600">
+          Résultat du jour : <strong>{lot}</strong>
+        </p>
+      )}
+      {code && <CodeGagnant code={code} />}
+      <p className="mt-2 text-sm text-gray-500">1 tirage par personne et par jour. Revenez lors de votre prochaine visite !</p>
+    </section>
+  )
+}
+
+function Continuer({ prenom, onContinuer, onOublier }: { prenom: string; onContinuer(): void; onOublier(): void }) {
+  return (
+    <section className="carte space-y-2 text-center">
+      <p className="text-lg">
+        Re-bonjour <strong>{prenom}</strong> 👋
+      </p>
+      <button className="bouton w-full" onClick={onContinuer}>
+        Continuer en tant que {prenom}
+      </button>
+      <button className="min-h-11 w-full text-sm font-semibold text-gray-600 underline" onClick={onOublier}>
+        Ce n’est pas moi
+      </button>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// Mode local (démo dans ce navigateur)
+// ---------------------------------------------------------------------------------------------
 
 // Ce téléphone se souvient du dernier profil utilisé (comme le ferait un cookie en production).
 const cleJoueur = (commerceId: string) => `fidelite:joueur:${commerceId}`
@@ -34,22 +133,17 @@ function memoriserJoueur(commerceId: string, clientId: string | null) {
   }
 }
 
-/** Page publique #/jouer/<commerceId>, ouverte en scannant le QR vitrine. */
-export default function Jouer() {
+function JouerLocal() {
   const { param } = useRoute()
   const { etat } = useStore()
   const commerce = etat.commerces.find((c) => c.id === param)
 
   if (!commerce) return <MessagePublic titre="QR code inconnu">Ce QR code ne correspond à aucun commerce.</MessagePublic>
-  if (!commerce.actif) return <MessagePublic titre={commerce.nom}>Le jeu de ce commerce n’est plus disponible.</MessagePublic>
-  if (lotsJouables(commerce.lots).length === 0) return <MessagePublic titre={commerce.nom}>Aucun lot n’est configuré pour le moment.</MessagePublic>
-  return <Partie key={commerce.id} commerce={commerce} />
+  return verifierCommerce(commerce) ?? <PartieLocale key={commerce.id} commerce={commerce} />
 }
 
-type Etape = 'pret' | 'rotation' | 'resultat'
-
-function Partie({ commerce }: { commerce: Commerce }) {
-  const { etat, enregistrerTirage } = useStore()
+function PartieLocale({ commerce }: { commerce: Commerce }) {
+  const { etat, enregistrerTirage, inscrireClient } = useStore()
   const [joueurId, setJoueurId] = useState<string | null>(null)
   const [memoriseId, setMemoriseId] = useState(() => lireJoueurMemorise(commerce.id))
   const [etape, setEtape] = useState<Etape>('pret')
@@ -90,57 +184,31 @@ function Partie({ commerce }: { commerce: Commerce }) {
   }
 
   return (
-    <div className="mx-auto max-w-md space-y-5 px-4 py-6">
-      <header className="flex items-center gap-3">
-        <LogoCommerce commerce={commerce} />
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-bold">{commerce.nom}</h1>
-          <p className="text-sm text-gray-600">Tournez la roue et gagnez un cadeau !</p>
-        </div>
-      </header>
-
-      {commerce.coordonnees && <p className="-mt-2 text-sm text-gray-500">{commerce.coordonnees}</p>}
-
-      <Roue lots={commerce.lots} rotation={rotation} />
-
+    <Cadre
+      commerce={commerce}
+      rotation={rotation}
+      pied={
+        <>
+          <BadgeDemo>Démo</BadgeDemo> Données stockées dans ce navigateur uniquement. 1 participation par visite validée, 1 tirage par jour.
+        </>
+      }
+    >
       {!joueur ? (
         memorise ? (
-          <section className="carte space-y-2 text-center">
-            <p className="text-lg">
-              Re-bonjour <strong>{memorise.prenom}</strong> 👋
-            </p>
-            <button className="bouton w-full" onClick={() => choisirJoueur(memorise)}>
-              Continuer en tant que {memorise.prenom}
-            </button>
-            <button
-              className="min-h-11 w-full text-sm font-semibold text-gray-600 underline"
-              onClick={() => (memoriserJoueur(commerce.id, null), setMemoriseId(null))}
-            >
-              Ce n’est pas moi
-            </button>
-          </section>
+          <Continuer prenom={memorise.prenom} onContinuer={() => choisirJoueur(memorise)} onOublier={() => (memoriserJoueur(commerce.id, null), setMemoriseId(null))} />
         ) : (
-          <Identification commerce={commerce} onIdentifie={choisirJoueur} />
+          <Identification
+            onEnvoyer={async (prenom, contactSaisi) => {
+              choisirJoueur((await inscrireClient(commerce.id, prenom, contactSaisi)).client)
+            }}
+          />
         )
       ) : etape === 'resultat' && gain ? (
         <Resultat lot={gain.lot} prenom={joueur.prenom} />
       ) : dejaJoue ? (
-        <section className="carte text-center" role="status">
-          <p className="text-lg font-bold">Vous avez déjà joué aujourd’hui, {joueur.prenom} !</p>
-          <p className="mt-1 text-gray-600">
-            Résultat du jour : <strong>{dejaJoue.lot}</strong>
-          </p>
-          <p className="mt-2 text-sm text-gray-500">1 tirage par personne et par jour. Revenez demain !</p>
-        </section>
+        <MessageDejaJoue prenom={joueur.prenom} lot={dejaJoue.lot} />
       ) : statut === 'sansVisite' ? (
-        <section className="carte space-y-3 text-center" role="status">
-          <p className="text-lg font-bold">Bonjour {joueur.prenom} !</p>
-          <p className="text-gray-700">Pour jouer, validez d’abord votre visite du jour au comptoir.</p>
-          <p className="text-sm text-gray-500">Présentez votre carte de fidélité en caisse : 1 visite validée = 1 participation.</p>
-          <a href={`#/carte/${joueur.id}`} className="bouton-secondaire w-full">
-            Voir ma carte de fidélité
-          </a>
-        </section>
+        <MessageSansVisite prenom={joueur.prenom} lienCarte={`#/carte/${joueur.id}`} />
       ) : (
         <button className="bouton w-full py-4 text-lg" onClick={tourner} disabled={etape !== 'pret'}>
           {etape === 'rotation' ? 'La roue tourne…' : `🎡 Tourner la roue, ${joueur.prenom} !`}
@@ -155,26 +223,200 @@ function Partie({ commerce }: { commerce: Commerce }) {
           </a>
         </>
       )}
-
-      <p className="text-center text-xs text-gray-500">
-        <BadgeDemo>Démo</BadgeDemo> Données stockées dans ce navigateur uniquement. 1 participation par visite validée, 1 tirage par jour.
-      </p>
-    </div>
+    </Cadre>
   )
 }
 
-function Identification({ commerce, onIdentifie }: { commerce: Commerce; onIdentifie(client: Client): void }) {
-  const { inscrireClient } = useStore()
+// ---------------------------------------------------------------------------------------------
+// Mode API : le serveur vérifie la visite du jour, le tirage du jour, et tire le lot
+// ---------------------------------------------------------------------------------------------
+
+function stockageLocal(): Storage | null {
+  try {
+    return localStorage
+  } catch {
+    return null
+  }
+}
+
+function JouerApi({ api }: { api: ClientApi }) {
+  const { param } = useRoute()
+  const [commerce, setCommerce] = useState<Commerce | null>(null)
+  const [erreur, setErreur] = useState<'inconnu' | 'horsLigne' | null>(null)
+
+  const charger = useCallback(() => {
+    if (!param) return setErreur('inconnu')
+    setErreur(null)
+    api.commerce(param).then(setCommerce, (e) => setErreur(e instanceof ErreurApi && e.statut === 404 ? 'inconnu' : 'horsLigne'))
+  }, [api, param])
+  useEffect(charger, [charger])
+
+  if (erreur === 'inconnu') return <MessagePublic titre="QR code inconnu">Ce QR code ne correspond à aucun commerce.</MessagePublic>
+  if (erreur === 'horsLigne') return <HorsLignePublic onReessayer={charger} />
+  if (!commerce) return <MessagePublic titre="Chargement…">Un instant, la roue arrive.</MessagePublic>
+  return verifierCommerce(commerce) ?? <PartieApi key={commerce.id} api={api} commerce={commerce} />
+}
+
+function PartieApi({ api, commerce }: { api: ClientApi; commerce: Commerce }) {
+  const memoire = useMemo(() => memoireJoueur(stockageLocal(), commerce.id), [commerce.id])
+  const [joueur, setJoueur] = useState<JoueurMemorise | null>(null)
+  const [memorise, setMemorise] = useState(() => memoire.joueur())
+  const [jeu, setJeu] = useState<{ statut: StatutJeu; lotDuJour: string | null } | null>(null)
+  const [etape, setEtape] = useState<Etape>('pret')
+  const [rotation, setRotation] = useState(0)
+  const [gain, setGain] = useState<ResultatTirage | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [enCours, setEnCours] = useState(false)
+  const minuterie = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(minuterie.current), [])
+
+  // État du jeu du jour, vu par le serveur (visite validée ? déjà joué ?).
+  const majStatut = useCallback(
+    async (j: JoueurMemorise) => {
+      try {
+        const r = await api.carte(j.clientId)
+        setJeu(r.jeu)
+        setMessage(null)
+      } catch (e) {
+        if (e instanceof ErreurApi && e.statut === 404) {
+          // Carte effacée côté serveur : on oublie ce profil sur ce téléphone.
+          memoire.memoriser(null)
+          setJoueur(null)
+          setMemorise(null)
+          setJeu(null)
+        } else setMessage(e instanceof ErreurApi ? e.message : MESSAGE_HORS_LIGNE)
+      }
+    },
+    [api, memoire],
+  )
+
+  useEffect(() => {
+    if (!joueur || etape !== 'pret') return
+    void majStatut(joueur)
+    // En attente de la visite validée au comptoir : la roue se débloque toute seule (toutes les 10 s / au retour).
+    const siVisible = () => document.visibilityState === 'visible' && void majStatut(joueur)
+    const minuterieStatut = window.setInterval(siVisible, 10_000)
+    document.addEventListener('visibilitychange', siVisible)
+    window.addEventListener('focus', siVisible)
+    return () => {
+      window.clearInterval(minuterieStatut)
+      document.removeEventListener('visibilitychange', siVisible)
+      window.removeEventListener('focus', siVisible)
+    }
+  }, [joueur, etape, majStatut])
+
+  function choisirJoueur(j: JoueurMemorise) {
+    setJoueur(j)
+    memoire.memoriser(j)
+  }
+
+  async function tourner() {
+    if (!joueur || etape !== 'pret' || enCours) return
+    setEnCours(true)
+    setMessage(null)
+    const issue = await lancerTirage(api, commerce, joueur.contact, joueur.prenom)
+    setEnCours(false)
+    if (!issue.ok) {
+      // Refusé par le serveur ou serveur injoignable : la roue ne tourne pas, aucun lot n'est affiché.
+      setMessage(issue.message)
+      if (issue.refus) void majStatut(joueur)
+      return
+    }
+    setGain(issue.resultat)
+    memoire.memoriserGain({ ...issue.resultat, clientId: joueur.clientId })
+    if (issue.secteur) setRotation((r) => rotationCible(r, issue.secteur!))
+    setEtape('rotation')
+    minuterie.current = window.setTimeout(() => setEtape('resultat'), issue.secteur ? DUREE_ROTATION_MS + 200 : 0)
+  }
+
+  const gainMemorise = memoire.gain()
+  const codeDuJour =
+    gainMemorise && joueur && gainMemorise.clientId === joueur.clientId && new Date(gainMemorise.date).toDateString() === new Date().toDateString()
+      ? gainMemorise
+      : null
+
+  return (
+    <Cadre
+      commerce={commerce}
+      rotation={rotation}
+      pied={
+        <>
+          {commerce.demo && <BadgeDemo>Démo</BadgeDemo>} 1 participation par visite validée au comptoir, 1 tirage par jour. Tirage effectué par le serveur.
+        </>
+      }
+    >
+      {!joueur ? (
+        memorise ? (
+          <Continuer prenom={memorise.prenom} onContinuer={() => choisirJoueur(memorise)} onOublier={() => (memoire.memoriser(null), setMemorise(null))} />
+        ) : (
+          <Identification
+            onEnvoyer={async (prenom, contactSaisi) => {
+              const { client } = await api.inscrirePublic(commerce.id, prenom, contactSaisi)
+              choisirJoueur({ clientId: client.id, prenom: client.prenom, contact: contactSaisi.trim() })
+            }}
+          />
+        )
+      ) : etape !== 'pret' && gain ? (
+        etape === 'resultat' ? (
+          <Resultat lot={gain.lot} prenom={joueur.prenom} code={gain.perdant ? undefined : gain.code} />
+        ) : (
+          <button className="bouton w-full py-4 text-lg" disabled>
+            La roue tourne…
+          </button>
+        )
+      ) : !jeu ? (
+        message ? <MessageErreur>{message}</MessageErreur> : <p className="text-center text-gray-500">Vérification de votre carte…</p>
+      ) : jeu.statut === 'dejaJoue' ? (
+        <MessageDejaJoue prenom={joueur.prenom} lot={jeu.lotDuJour} code={codeDuJour && !codeDuJour.perdant ? codeDuJour.code : undefined} />
+      ) : jeu.statut === 'sansVisite' ? (
+        <>
+          <MessageSansVisite prenom={joueur.prenom} lienCarte={`#/carte/${joueur.clientId}`} />
+          <MessageErreur>{message}</MessageErreur>
+        </>
+      ) : (
+        <>
+          <MessageErreur>{message}</MessageErreur>
+          <button className="bouton w-full py-4 text-lg" onClick={() => void tourner()} disabled={enCours}>
+            {enCours ? 'Tirage en cours…' : `🎡 Tourner la roue, ${joueur.prenom} !`}
+          </button>
+        </>
+      )}
+
+      {joueur && (etape === 'resultat' || jeu?.statut === 'dejaJoue') && (
+        <>
+          <InvitationAvis commerce={commerce} />
+          <a href={`#/carte/${joueur.clientId}`} className="bouton-secondaire w-full">
+            Voir ma carte de fidélité
+          </a>
+        </>
+      )}
+    </Cadre>
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+
+function Identification({ onEnvoyer }: { onEnvoyer(prenom: string, contactSaisi: string): Promise<void> }) {
   const [prenom, setPrenom] = useState('')
   const [contactSaisi, setContactSaisi] = useState('')
   const [essaye, setEssaye] = useState(false)
+  const [enCours, setEnCours] = useState(false)
+  const [erreur, setErreur] = useState<string | null>(null)
   const contact = analyserContact(contactSaisi)
 
-  function envoyer(e: FormEvent) {
+  async function envoyer(e: FormEvent) {
     e.preventDefault()
     setEssaye(true)
-    if (!prenom.trim() || !contact) return
-    onIdentifie(inscrireClient(commerce.id, prenom, contact).client)
+    if (!prenom.trim() || !contact || enCours) return
+    setEnCours(true)
+    setErreur(null)
+    try {
+      await onEnvoyer(prenom.trim(), contactSaisi)
+    } catch (err) {
+      setErreur(err instanceof Error ? err.message : MESSAGE_HORS_LIGNE)
+    } finally {
+      setEnCours(false)
+    }
   }
 
   return (
@@ -201,14 +443,25 @@ function Identification({ commerce, onIdentifie }: { commerce: Commerce; onIdent
         {essaye && !contact && <p className="mt-1 text-sm text-red-600">Saisissez un numéro (10 chiffres) ou un e-mail valide.</p>}
         <p className="mt-1 text-xs text-gray-500">Déjà client ? Le même numéro ou e-mail retrouve votre carte de fidélité.</p>
       </div>
-      <button type="submit" className="bouton w-full" disabled={!prenom.trim() || !contactSaisi.trim()}>
-        C’est parti
+      <MessageErreur>{erreur}</MessageErreur>
+      <button type="submit" className="bouton w-full" disabled={!prenom.trim() || !contactSaisi.trim() || enCours}>
+        {enCours ? 'Un instant…' : 'C’est parti'}
       </button>
     </form>
   )
 }
 
-function Resultat({ lot, prenom }: { lot: string; prenom: string }) {
+function CodeGagnant({ code }: { code: string }) {
+  return (
+    <div className="mt-3 space-y-2">
+      <p className="text-sm text-gray-600">Code gagnant à montrer au comptoir :</p>
+      <p className="font-mono text-3xl font-extrabold tracking-[0.3em] text-gray-900 select-all">{code}</p>
+      <BoutonCopier texte={code} libelle="Copier le code" className="bouton-secondaire w-full" />
+    </div>
+  )
+}
+
+function Resultat({ lot, prenom, code }: { lot: string; prenom: string; code?: string }) {
   const perdu = estPerdant(lot)
   return (
     <section className={`carte text-center ${perdu ? '' : 'ring-2 ring-green-400'}`} role="status" aria-live="polite">
@@ -217,7 +470,8 @@ function Resultat({ lot, prenom }: { lot: string; prenom: string }) {
       </p>
       <p className="mt-1 text-lg font-bold">{perdu ? `Pas cette fois, ${prenom}…` : `Bravo ${prenom}, vous avez gagné :`}</p>
       <p className="mt-1 text-2xl font-extrabold text-marque-600">{lot}</p>
-      {!perdu && <p className="mt-2 text-sm text-gray-600">Montrez cet écran au comptoir pour profiter de votre lot.</p>}
+      {!perdu && !code && <p className="mt-2 text-sm text-gray-600">Montrez cet écran au comptoir pour profiter de votre lot.</p>}
+      {!perdu && code && <CodeGagnant code={code} />}
     </section>
   )
 }

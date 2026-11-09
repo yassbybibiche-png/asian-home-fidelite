@@ -263,3 +263,68 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
 - **Restes ouverts** : front pas encore branché (V2) ; pas d'import ni de sauvegarde complète par l'API ; pas de suppression
   de client (RGPD) ; code serveur non vérifié par `tsc` (pas de `@types/node`, couvert par les tests HTTP) ; un PIN court haché
   reste vulnérable si le fichier de base fuit ; pas de vérification du numéro du client (SMS).
+
+## 09/11/2026 — Phase V2 : front sur données partagées + optimisations
+- **Bascule (fait).** `VITE_API_URL` absente → démo locale inchangée (localStorage, bandeau « Démo locale — données sur cet
+  appareil seulement » sur chaque écran commerçant). Définie → mode API : `src/data/api.ts` (client HTTP, `fetch` injectable),
+  `src/data/depotApi.ts` (mêmes méthodes de lecture que `Depot` sur un cache localStorage + `chargerServeur` asynchrone),
+  `src/store.tsx` scindé en `StoreLocal` / `StoreApi`. Cache affiché d'abord, puis serveur ; rechargement 10 s (page visible),
+  `visibilitychange` / `focus` / `online`, et après chaque action. **Conflit : le serveur fait foi** (chaque chargement remplace
+  tout ; aucune action appliquée en local avant la réponse ; pas de file hors ligne) — documenté dans README et `depotApi.ts`.
+  Hors ligne : bandeau « Hors ligne — dernières données connues (heure) … Serveur injoignable — vérifiez la connexion » ;
+  toute action échouée affiche son erreur et **aucun « ✓ »** (inscription, visite, récompense, réglages, avis, PIN, création).
+  `npm run build:api` (`.env.api`, `VITE_API_URL=/`) : front servi par le serveur à la même adresse ; Render : build command mise à jour.
+- **Jeu public** : `#/jouer/:id` en mode API passe par `POST /tirages` (lot tiré par le serveur ; le navigateur n'envoie que
+  contact + prénom et anime la roue jusqu'au lot reçu, `src/data/jeuApi.ts`). Code gagnant affiché + « Copier le code » ;
+  le commerçant voit le même code (Tableau de bord, Roulette, fiche client). La roue se débloque seule quand la visite est validée.
+- **PIN** : écran « Espace commerçant » (`src/components/Verrou.tsx`) : commerce + PIN 4-6 chiffres, ou PIN admin. Champ masqué,
+  jamais affiché. Mémorisé pour l'onglet en sessionStorage **chiffré** (AES-GCM, clé non exportable dans IndexedDB,
+  `src/data/coffrePin.ts`) ; « 🔒 Verrouiller » efface PIN, clé et cache clients. Limite : une faille XSS pourrait utiliser la clé ;
+  sans WebCrypto (http:// hors localhost) le PIN n'est pas mémorisé. Page Admin réservée au PIN admin ; « Changer le PIN » par commerce.
+- **Onboarding** : Admin → « + Ajouter un commerce » = 4 champs (nom, type pré-rempli « Restaurant », lien Google optionnel,
+  PIN) → 1 requête `POST /commerces` (commerce + PIN) → ouvre Réglages du nouveau commerce. Clics sur téléphone, admin déjà
+  déverrouillé : Plus (1) → Admin (2) → « + Ajouter un commerce » (3) → « Créer » (4), avec 2 saisies obligatoires (nom, PIN).
+  Déverrouillage admin avant : onglet « Admin (tous) » + PIN + « Déverrouiller » (2 taps). **Chronométrage réel non fait**
+  (aucun navigateur) : pas de durée inventée.
+- **Serveur (modifié, documenté, testé)** : (1) **manque V1 trouvé** : la page publique `#/carte/:clientId` n'avait aucune route
+  pour lire une carte sans PIN → ajout `GET /api/v1/cartes/:clientId` (carte sans téléphone/e-mail, statut du jeu du jour, lot du
+  jour, jamais le code gagnant ; 404 / 409 inactif). (2) `clientsEnCsv` déplacé tel quel dans `src/lib/csv.ts` (partagé avec
+  l'export local). Aucune règle métier modifiée.
+- **Bug trouvé côté front (corrigé + test)** : `Response.text()` retire le BOM UTF-8 → le CSV téléchargé depuis l'API aurait
+  perdu ses accents dans Excel. Lecture en `TextDecoder('utf-8', { ignoreBOM: true })` ; tests « BOM conservé » (simulé + vrai serveur).
+- **Bug de dépôt git trouvé** : `.gitignore` contenait `data/`, ce qui ignorait aussi `src/data/` (nouveaux fichiers non suivis).
+  Remplacé par `/data/`.
+- **Optimisations** : recherche Clients via `src/lib/recherche.ts` (même règle que `cleContact` : 06 / +33 / 0033 / (0) /
+  espaces / points / tirets, numéros partiels ; prénoms sans accents ; champ désormais étiqueté). « Exporter (CSV) » sur Clients
+  (API : `/export.csv` avec PIN ; local : généré, même format). Copier : `copier()` utilisé partout où l'on copie — message de
+  relance (existant), **lien de la page de jeu** (ajouté, Roulette), **code gagnant** (ajouté) ; retour « ✓ Copié » /
+  « Copie impossible : sélectionnez le texte » ; repli `execCommand` désormais protégé (une exception = échec affiché, pas de faux ✓).
+  Le QR lui-même est une image SVG (rien à copier ; le lien à côté l'est). Formulaires : tous les champs ont un label
+  (y compris recherche et PIN), erreurs en français, nouveaux boutons ≥ 44 px (`min-h-11` / `.bouton` 48 px).
+- **Production vs démo** : mode API + `DEMO=0` → Asian Home Paris vide (test serveur « base neuve » : Asian Home seul,
+  `demo: false`, 0 client / avis / tirage ; `/sante` du serveur lancé : `"demo":false`).
+  Badge « Démo » en mode API seulement si `commerce.demo` (seed `DEMO=1`) : en-tête, Admin, jeu, carte, Avis, Offre, Plus,
+  Wallet, Tableau de bord. Textes sans « démo » pour le vrai commerce (« + Saisir un avis reçu », « Pas encore disponible »…).
+  Démo locale : bandeau « Démo locale » présent sur les 10 écrans commerçant du rendu HTML (pages publiques : badge en pied de page).
+- **Tests** : `tests/front-v2.test.ts` (24, sans serveur, `fetch` simulé) + 2 tests dans `tests/serveur.test.ts` (client du front
+  contre le vrai serveur, carte publique). `npm test` : **81/81 OK** (avant : 55). `npm run build` : OK. `npm run build:api` : OK.
+  `npm run preview` + curl → HTTP 200.
+- **Test HTTP réel** (`npm run serveur` + `npm run preview`, curl une commande à la fois) : créer commerce + PIN (201) → inscrire
+  (201) → tirage sans visite (409) → visite (200) → tirage serveur (201, lot + code) → 2e tirage, autre format du numéro (409) →
+  export CSV (200, BOM `ef bb bf`) ; sans PIN (401). Sortie complète : `PREUVE-HTTP-V2.txt`. Le serveur sert aussi le front API
+  (`/` → 200). `scripts/preuve-http-v2.sh` reprend ces appels mais **n'a pas été exécuté** comme script (bash refusé dans la session).
+  Le commerce « Preuve V2 Chez Lin » est resté dans la base de dev locale `data/fidelite.db` (non versionnée).
+- **Perf mobile** : JS 363 kB / **109 kB gzip** (V1 : 330 / 99 ; +10 kB gzip pour le mode API), CSS 32,8 kB / 6,5 kB gzip,
+  HTML 0,5 kB. **Aucun appel réseau externe au chargement** : grep des URL dans `dist/` → seulement l'espace de noms SVG (w3.org),
+  des liens cliquables (Google, `g.page` en placeholder), des URL de messages d'erreur React et un commentaire Tailwind ; ni
+  Google Fonts ni CDN (police système). Logo = initiales (une URL d'image n'est chargée que si le commerçant en saisit une).
+  Le seed de démo (27 Ko) reste dans le bundle en mode API (chargement à la demande possible plus tard).
+- **Rendu 390 px : NON vérifié visuellement.** Aucun navigateur lançable (chromium / firefox / chrome refusés ou absents). Essai
+  unique d'installation légère : `npm install --no-save playwright-core` OK, puis `playwright-core install chromium-headless-shell`
+  → « Download failure » (réseau) ; paquet retiré. Aucune capture n'a été faite. Vérification de repli : les 12 écrans rendus en HTML
+  avec `react-dom/server` (bundle SSR Vite temporaire hors dépôt), mode local : **12/12 sans erreur**. Le CSS du badge Démo
+  (`shrink-0 whitespace-nowrap`) est inchangé ; nouveau bouton « 🔒 Verrouiller » en `shrink-0` à côté du sélecteur (`min-w-0`).
+- **Restes ouverts** : rendu réel sur téléphone et parcours cliqué en mode API non vus à l'écran ; pas de file d'attente hors ligne ;
+  rechargement complet toutes les 10 s (1 requête `/etat` par commerce pour l'admin) ; le cache clients reste dans le navigateur
+  tant qu'on ne verrouille pas (fermer l'onglet ne l'efface pas) ; contact du joueur gardé sur son propre téléphone pour rejouer ;
+  `VITE_API_URL=http://localhost:3001 npm run dev` documenté mais non essayé ; hébergement toujours à décider (aucune dépense).

@@ -116,11 +116,37 @@ export async function copier(texte: string): Promise<boolean> {
     zone.style.position = 'fixed'
     zone.style.opacity = '0'
     document.body.appendChild(zone)
-    zone.select()
-    const ok = document.execCommand('copy')
-    zone.remove()
-    return ok
+    try {
+      zone.select()
+      return document.execCommand('copy')
+    } catch {
+      return false
+    } finally {
+      zone.remove()
+    }
   }
+}
+
+/** Message d'erreur d'une action (annoncé aux lecteurs d'écran). */
+export function MessageErreur({ children }: { children: ReactNode }) {
+  if (!children) return null
+  return (
+    <p className="rounded-xl bg-red-50 p-3 text-sm text-red-800 ring-1 ring-red-200" role="alert">
+      {children}
+    </p>
+  )
+}
+
+/** Propose un fichier au téléchargement (généré dans le navigateur ou reçu du serveur). */
+export function telecharger(nom: string, contenu: string, type = 'text/csv;charset=utf-8') {
+  const url = URL.createObjectURL(new Blob([contenu], { type }))
+  const lien = document.createElement('a')
+  lien.href = url
+  lien.download = nom
+  document.body.appendChild(lien)
+  lien.click()
+  lien.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export function BoutonCopier({ texte, libelle = 'Copier le message', className = 'bouton-secondaire' }: { texte: string; libelle?: string; className?: string }) {
@@ -140,8 +166,22 @@ export function BoutonCopier({ texte, libelle = 'Copier le message', className =
 }
 
 /** Wallet simulé : on le dit clairement, aucune fausse promesse. */
-export function BoutonWallet() {
+export function BoutonWallet({ demo = true }: { demo?: boolean }) {
   const [ouvert, setOuvert] = useState(false)
+  if (!demo) {
+    return (
+      <div>
+        <button type="button" className="bouton-secondaire w-full" onClick={() => setOuvert((o) => !o)} aria-expanded={ouvert}>
+          Ajouter à Wallet (Apple / Google)
+        </button>
+        {ouvert && (
+          <p className="mt-2 rounded-xl bg-gray-50 p-3 text-sm text-gray-700 ring-1 ring-gray-200" role="status">
+            Pas encore disponible : aucun pass Apple Wallet ou Google Wallet n’est créé. Gardez cette page en favori pour retrouver votre carte.
+          </p>
+        )}
+      </div>
+    )
+  }
   return (
     <div>
       <button type="button" className="bouton-secondaire w-full" onClick={() => setOuvert((o) => !o)} aria-expanded={ouvert}>

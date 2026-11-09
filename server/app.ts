@@ -10,8 +10,9 @@ import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, nouveauClient, offrirRecompense, recompenseDebloquee, validerVisite } from '../src/lib/fidelite.ts'
-import { estPerdant, lotsJouables, statutJeu, tirerLot } from '../src/lib/roulette.ts'
+import { estPerdant, lotsJouables, statutJeu, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles } from '../src/lib/avis.ts'
+import { clientsEnCsv } from '../src/lib/csv.ts'
 import { ouvrirStockage, type Pin, type Stockage } from './stockage.ts'
 
 export interface OptionsServeur {
@@ -193,24 +194,6 @@ function cartePublique(c: Client) {
   return reste
 }
 
-// ---------- CSV ----------
-
-function celluleCsv(v: string | number | null | undefined): string {
-  let s = v == null ? '' : String(v)
-  // Anti-injection de formules (Excel / LibreOffice), sauf pour un numéro de téléphone « +33… ».
-  if (/^[=+\-@\t\r]/.test(s) && !/^\+[\d\s.\-()]+$/.test(s)) s = `'${s}`
-  return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-}
-
-/** CSV « à la française » (séparateur ;, BOM UTF-8) : s'ouvre tel quel dans Excel. */
-export function clientsEnCsv(clients: Client[]): string {
-  const entete = ['prenom', 'telephone', 'email', 'tampons', 'visites', 'derniereVisite', 'creeLe']
-  const lignes = clients.map((c) =>
-    [c.prenom, c.telephone, c.email, c.tampons, c.visites.length, c.derniereVisite, c.creeLe].map(celluleCsv).join(';'),
-  )
-  return '﻿' + [entete.join(';'), ...lignes].join('\r\n') + '\r\n'
-}
-
 // ---------- Initialisation de la base ----------
 
 function initialiser(st: Stockage, o: OptionsServeur) {
@@ -376,6 +359,26 @@ export function creerServeur(o: OptionsServeur) {
 
     if (ressource === 'sante' && !id && m === 'GET') {
       return { json: { ok: true, version: o.version ?? '0.0.0', mode: o.production ? 'production' : 'developpement', stockage: 'sqlite', demo: !!o.demo } }
+    }
+    if (ressource === 'cartes' && id && !sous && m === 'GET') {
+      // PUBLIC (ajout V2) : la carte vue par le client (#/carte/<clientId>) et l'état de son jeu du jour.
+      // Mêmes informations que POST /clients en public : jamais de téléphone, d'e-mail ni de code gagnant.
+      for (const c of st.commerces()) {
+        const client = st.client(c.id, id)
+        if (!client) continue
+        exigerActif(c)
+        const tirages = st.tiragesClient(c.id, client.id)
+        const t = maintenant()
+        const duJour = tirageDuJour(tirages, c.id, client.id, t)
+        return {
+          json: {
+            client: cartePublique(client),
+            commerce: commercePublic(c),
+            jeu: { statut: statutJeu(client, tirages, c.id, t), lotDuJour: duJour?.lot ?? null },
+          },
+        }
+      }
+      throw err(404, 'Carte de fidélité introuvable.')
     }
     if (ressource !== 'commerces') throw err(404, 'Route inconnue.')
 

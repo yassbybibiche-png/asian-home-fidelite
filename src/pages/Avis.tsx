@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react'
-import { useDonneesCommerce, useStore } from '../store'
+import { useAction, useDonneesCommerce, useStore } from '../store'
 import type { Avis, StatutAvis } from '../types'
 import { noteMoyenne } from '../lib/stats'
 import { dateRelative } from '../lib/format'
 import { MODELES, appliquerRegles, modeleSuggere, statutAvis, texteModele } from '../lib/avis'
-import { BadgeDemo, EnTete, Etoiles, Vide } from '../components/ui'
+import { BadgeDemo, EnTete, Etoiles, MessageErreur, Vide } from '../components/ui'
 
 type Filtre = 'tous' | 'aTraiter' | 'negatifs'
 
@@ -16,7 +16,8 @@ const STATUTS: Record<StatutAvis, { libelle: string; classe: string }> = {
 
 export default function AvisPage() {
   const { commerce, avis } = useDonneesCommerce()
-  const { appliquerReglesAvis } = useStore()
+  const { appliquerReglesAvis, mode, estDemo } = useStore()
+  const regles = useAction()
   const [filtre, setFiltre] = useState<Filtre>('tous')
   const [simulation, setSimulation] = useState(false)
   const moyenne = noteMoyenne(avis)
@@ -34,7 +35,13 @@ export default function AvisPage() {
       />
 
       <p className="mb-4">
-        <BadgeDemo>Démo — avis simulés, aucune connexion à Google</BadgeDemo>
+        {estDemo ? (
+          <BadgeDemo>Démo — avis simulés, aucune connexion à Google</BadgeDemo>
+        ) : (
+          <span className="text-sm text-gray-600">
+            Pas encore de connexion à Google : les avis sont saisis ici à la main et aucune réponse n’est publiée sur Google (copiez-la vous-même).
+          </span>
+        )}
       </p>
 
       <div className="mb-4 grid gap-2 sm:grid-cols-2">
@@ -44,7 +51,7 @@ export default function AvisPage() {
           </a>
         )}
         <button className="bouton-secondaire" onClick={() => setSimulation((s) => !s)} aria-expanded={simulation}>
-          + Simuler un nouvel avis
+          {mode === 'local' ? '+ Simuler un nouvel avis' : '+ Saisir un avis reçu'}
         </button>
       </div>
 
@@ -64,9 +71,18 @@ export default function AvisPage() {
           modifier
         </a>
         {nbConcernes > 0 && (
-          <button className="bouton mt-2 min-h-11 w-full py-2" onClick={() => appliquerReglesAvis(commerce.id)}>
+          <button
+            className="bouton mt-2 min-h-11 w-full py-2"
+            disabled={regles.enCours}
+            onClick={() => void regles.executer(() => appliquerReglesAvis(commerce.id))}
+          >
             Appliquer les règles à {nbConcernes} avis en attente
           </button>
+        )}
+        {regles.erreur && (
+          <div className="mt-2">
+            <MessageErreur>Règles non appliquées : {regles.erreur}</MessageErreur>
+          </div>
         )}
       </div>
 
@@ -102,10 +118,16 @@ export default function AvisPage() {
 }
 
 function CarteAvis({ avis: a }: { avis: Avis }) {
-  const { commerce, majAvis } = useStore()
+  const { commerce, majAvis, estDemo } = useStore()
   const statut = statutAvis(a)
   const [edition, setEdition] = useState(false)
   const [texte, setTexte] = useState('')
+  const { executer, enCours, erreur } = useAction()
+
+  async function enregistrer(maj: { reponse?: string; brouillon?: string | null }) {
+    // L'éditeur ne se ferme qu'une fois la réponse réellement enregistrée.
+    if ((await executer(() => majAvis(a, maj))).ok) setEdition(false)
+  }
 
   function ouvrir() {
     setTexte(a.reponse ?? a.brouillon ?? texteModele(modeleSuggere(a), a, commerce))
@@ -146,28 +168,18 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
             Réponse à {a.auteur}
           </label>
           <textarea id={`rep-${a.id}`} className="champ min-h-32" value={texte} onChange={(e) => setTexte(e.target.value)} />
+          <MessageErreur>{erreur && `Non enregistré : ${erreur}`}</MessageErreur>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
               className="bouton-secondaire"
-              onClick={() => {
-                majAvis({ ...a, brouillon: texte.trim() || undefined })
-                setEdition(false)
-              }}
-              disabled={!!a.reponse}
+              onClick={() => void enregistrer({ brouillon: texte.trim() || null })}
+              disabled={!!a.reponse || enCours}
               title={a.reponse ? 'Déjà répondu' : undefined}
             >
               Garder en brouillon
             </button>
-            <button
-              type="button"
-              className="bouton"
-              disabled={!texte.trim()}
-              onClick={() => {
-                majAvis({ ...a, reponse: texte.trim(), reponseAuto: false, brouillon: undefined })
-                setEdition(false)
-              }}
-            >
+            <button type="button" className="bouton" disabled={!texte.trim() || enCours} onClick={() => void enregistrer({ reponse: texte.trim() })}>
               Marquer comme répondu
             </button>
           </div>
@@ -179,7 +191,11 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
         <>
           {(a.reponse || a.brouillon) && (
             <div className={`mt-3 rounded-xl p-3 text-sm ${a.reponse ? 'bg-gray-50' : 'bg-amber-50'}`}>
-              <span className="font-semibold text-gray-700">{a.reponse ? (a.reponseAuto ? 'Réponse automatique préparée (démo — rien n’est publié sur Google)' : 'Votre réponse') : 'Brouillon proposé'}</span>
+              <span className="font-semibold text-gray-700">{a.reponse
+                  ? a.reponseAuto
+                    ? `Réponse automatique préparée (${estDemo ? 'démo — ' : ''}rien n’est publié sur Google)`
+                    : 'Votre réponse'
+                  : 'Brouillon proposé'}</span>
               <p className="mt-1 text-gray-700">{a.reponse ?? a.brouillon}</p>
             </div>
           )}
@@ -193,29 +209,26 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
 }
 
 function FormulaireSimulation({ onFermer }: { onFermer(): void }) {
-  const { commerce, ajouterAvis } = useStore()
+  const { commerce, ajouterAvis, mode } = useStore()
   const [auteur, setAuteur] = useState('')
   const [note, setNote] = useState(5)
   const [texte, setTexte] = useState('')
+  const { executer, enCours, erreur } = useAction()
 
-  function envoyer(e: FormEvent) {
+  async function envoyer(e: FormEvent) {
     e.preventDefault()
-    if (!auteur.trim()) return
-    ajouterAvis({
-      id: `av-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      commerceId: commerce.id,
-      auteur: auteur.trim(),
-      note,
-      texte: texte.trim(),
-      date: new Date().toISOString(),
-    })
-    onFermer()
+    if (!auteur.trim() || enCours) return
+    if ((await executer(() => ajouterAvis(commerce.id, { auteur: auteur.trim(), note, texte: texte.trim() }))).ok) onFermer()
   }
 
   return (
     <form onSubmit={envoyer} className="carte mb-4 space-y-3">
-      <h2 className="text-lg font-bold">Simuler l’arrivée d’un avis</h2>
-      <p className="text-sm text-gray-600">Pour la démo : l’avis apparaît comme s’il venait de Google, et vos règles automatiques s’appliquent aussitôt.</p>
+      <h2 className="text-lg font-bold">{mode === 'local' ? 'Simuler l’arrivée d’un avis' : 'Saisir un avis reçu sur Google'}</h2>
+      <p className="text-sm text-gray-600">
+        {mode === 'local'
+          ? 'Pour la démo : l’avis apparaît comme s’il venait de Google, et vos règles automatiques s’appliquent aussitôt.'
+          : 'Recopiez un avis lu sur votre fiche Google : vos règles automatiques s’appliquent aussitôt (rien n’est publié sur Google).'}
+      </p>
       <div>
         <label className="etiquette" htmlFor="sim-auteur">
           Auteur
@@ -245,12 +258,13 @@ function FormulaireSimulation({ onFermer }: { onFermer(): void }) {
         </label>
         <textarea id="sim-texte" className="champ min-h-24" value={texte} onChange={(e) => setTexte(e.target.value)} />
       </div>
+      <MessageErreur>{erreur && `Avis non ajouté : ${erreur}`}</MessageErreur>
       <div className="grid grid-cols-2 gap-2">
         <button type="button" className="bouton-secondaire" onClick={onFermer}>
           Annuler
         </button>
-        <button type="submit" className="bouton" disabled={!auteur.trim()}>
-          Ajouter l’avis
+        <button type="submit" className="bouton" disabled={!auteur.trim() || enCours}>
+          {enCours ? 'Ajout…' : 'Ajouter l’avis'}
         </button>
       </div>
     </form>

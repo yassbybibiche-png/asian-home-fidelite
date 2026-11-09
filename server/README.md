@@ -11,7 +11,7 @@ voient enfin **les mêmes données**. Une seule instance Node pour tous les comm
 | Fichier | Rôle |
 |---|---|
 | `server/index.ts` | Point d'entrée (`npm run serveur`) : variables d'environnement, fuseau, démarrage. |
-| `server/app.ts` | Routes `/api/v1`, PIN, anti-bruteforce, validation, CSV, service du front compilé. |
+| `server/app.ts` | Routes `/api/v1`, PIN, anti-bruteforce, validation, service du front compilé (CSV : `src/lib/csv.ts`, partagé avec le front depuis la V2). |
 | `server/stockage.ts` | Base SQLite (schéma + requêtes). |
 | `tests/serveur.test.ts` | Tests HTTP réels (port éphémère, base temporaire, `fetch`), lancés par `npm test`. |
 
@@ -32,7 +32,8 @@ atomique » prévu en secours **n'a pas été écrit** (inutile ici).
 
 ```bash
 npm install          # uniquement pour le front ; le serveur n'a besoin de rien
-npm run build        # optionnel : le serveur sert alors aussi le front (dist/) sur le même port
+npm run build:api    # optionnel : le serveur sert alors aussi le front en mode API (dist/) sur le même port
+                     # (`npm run build` seul produirait la démo locale, qui n'utilise pas le serveur)
 npm run serveur      # → http://localhost:3001/api/v1/sante
 ```
 
@@ -76,6 +77,7 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `GET /sante` | public | `{ ok, version, mode, stockage, demo }` |
 | `GET /commerces` | public | Fiches publiques (jamais de PIN ni de hash). |
 | `GET /commerces/:id` | public | Une fiche publique. |
+| `GET /cartes/:clientId` | public | **Ajout V2** (page `#/carte/:clientId` et état de la roue) : `{ client (sans téléphone ni e-mail), commerce (fiche publique), jeu: { statut: 'pret' \| 'sansVisite' \| 'dejaJoue', lotDuJour } }`. Jamais de code gagnant. 404 inconnue, 409 commerce inactif. |
 | `POST /commerces` | admin | `{ nom, type, lienGoogle?, pin, …réglages? }` → crée le commerce (défauts de `nouveauCommerce`). |
 | `PATCH /commerces/:id` | commerçant | Réglages : `nom, type, logo, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, actif`. Tout autre champ → 400. Réapplique les règles d'avis (comme le front). |
 | `PUT /commerces/:id/pin` | commerçant ou admin | `{ pin }` : change le PIN (PIN perdu → l'admin le réinitialise). |
@@ -120,7 +122,7 @@ Prérequis : le code sur un dépôt GitHub (privé possible) — **à faire par 
 2. **New +** → **Web Service** → choisir le dépôt.
 3. Réglages :
    - **Language / Runtime** : Node
-   - **Build Command** : `npm ci && npm run build`
+   - **Build Command** : `npm ci && npm run build:api` (front en mode API, servi à la même adresse que l'API)
    - **Start Command** : `npm run serveur`
    - **Instance Type** : **Free**
 4. **Environment Variables** (bouton « Add Environment Variable ») :
@@ -165,7 +167,10 @@ Total indicatif ≈ 7,25 $/mois : pas de veille, données conservées entre les 
   connaît le numéro d'un client voit son prénom et ses tampons, et peut jouer à sa place s'il a une visite validée ce jour-là.
 - Pas de route d'import, pas de suppression de client (RGPD : à faire à la main dans la base pour l'instant).
 - Le code serveur n'est pas vérifié par `tsc` (pas de `@types/node` installé, pour ne rien ajouter) : il est couvert par les tests HTTP.
-- Le front n'utilise pas encore cette API (bascule prévue en V2).
+- Le front en mode API (V2) recharge tout l'état toutes les 10 s : avec le PIN admin, une requête `/etat` par
+  commerce. Suffisant pour quelques commerces ; au-delà, prévoir une route agrégée ou un rechargement incrémental.
+- `GET /cartes/:clientId` (V2) parcourt les commerces pour trouver le client (pas d'index par identifiant seul) :
+  sans importance à cette échelle.
 
 ## Migration future (non faite, rien n'a été créé)
 

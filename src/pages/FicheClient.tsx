@@ -1,16 +1,17 @@
 import { useState } from 'react'
-import { useStore } from '../store'
+import { useAction, useStore } from '../store'
 import { useRoute } from '../router'
 import { recompenseDebloquee } from '../lib/fidelite'
 import { dateCourte, dateRelative } from '../lib/format'
 import { CarteFidelite } from '../components/CarteFidelite'
-import { BoutonWallet, EnTete, Vide } from '../components/ui'
+import { BoutonWallet, EnTete, MessageErreur, Vide } from '../components/ui'
 
 /** Fiche client côté commerçant : la carte + les actions de caisse. */
 export default function FicheClient() {
   const { param } = useRoute()
-  const { etat, validerVisite, offrirRecompense } = useStore()
+  const { etat, validerVisite, offrirRecompense, estDemo, mode } = useStore()
   const [annonce, setAnnonce] = useState('')
+  const { executer, enCours, erreur } = useAction()
   const client = etat.clients.find((c) => c.id === param)
   const commerce = client && etat.commerces.find((c) => c.id === client.commerceId)
 
@@ -48,8 +49,9 @@ export default function FicheClient() {
         <h2 className="font-bold">En caisse</h2>
         <button
           className="bouton w-full"
-          onClick={() => {
-            validerVisite(client.id)
+          disabled={enCours}
+          onClick={async () => {
+            if (!(await executer(() => validerVisite(client.id))).ok) return
             annoncer(
               debloquee
                 ? 'Visite enregistrée (+1 tampon, reporté sur la carte suivante) — offrez la récompense.'
@@ -62,8 +64,9 @@ export default function FicheClient() {
         {debloquee && (
           <button
             className="bouton w-full bg-green-600 hover:bg-green-700 active:bg-green-800"
-            onClick={() => {
-              offrirRecompense(client.id)
+            disabled={enCours}
+            onClick={async () => {
+              if (!(await executer(() => offrirRecompense(client.id))).ok) return
               const reportes = client.tampons - commerce.seuilTampons
               annoncer(
                 `🎁 Récompense offerte : ${commerce.recompense}. ${
@@ -75,6 +78,7 @@ export default function FicheClient() {
             🎁 Offrir la récompense
           </button>
         )}
+        <MessageErreur>{erreur && `Rien n’a été enregistré : ${erreur}`}</MessageErreur>
         {annonce && (
           <p className="rounded-xl bg-green-50 p-3 text-sm font-semibold text-green-900 ring-1 ring-green-200" role="status">
             {annonce}
@@ -83,11 +87,13 @@ export default function FicheClient() {
         <p className="text-xs text-gray-500">
           {debloquee
             ? 'Tant que la récompense n’est pas offerte, les visites sont enregistrées mais la carte reste pleine.'
-            : 'En vrai, vous scannez le QR du client ; dans la démo, un tap suffit.'}
+            : mode === 'local'
+              ? 'En vrai, vous scannez le QR du client ; dans la démo, un tap suffit.'
+              : 'Vérifiez la carte du client (son QR ou son numéro) avant de valider.'}
         </p>
       </section>
 
-      <BoutonWallet />
+      <BoutonWallet demo={estDemo} />
 
       <a href={`#/carte/${client.id}`} className="bouton-secondaire w-full">
         Voir la carte comme le client ↗
@@ -110,7 +116,7 @@ export default function FicheClient() {
           </div>
         </dl>
         <ul className="mt-3 divide-y divide-gray-100 text-sm">
-          {[...(client.recompensesOffertes ?? []).map((r) => ({ date: r.date, texte: `🎁 Récompense offerte : ${r.libelle}` })), ...gains.map((g) => ({ date: g.date, texte: `🎡 Roulette : ${g.lot}` }))]
+          {[...(client.recompensesOffertes ?? []).map((r) => ({ date: r.date, texte: `🎁 Récompense offerte : ${r.libelle}` })), ...gains.map((g) => ({ date: g.date, texte: `🎡 Roulette : ${g.lot}${g.code ? ` (code ${g.code})` : ''}` }))]
             .sort((a, b) => b.date.localeCompare(a.date))
             .slice(0, 10)
             .map((l, i) => (

@@ -8,6 +8,8 @@ import type { AddressInfo } from 'node:net'
 
 import { creerServeur, type OptionsServeur } from '../server/app.ts'
 import type { Client, Commerce } from '../src/types.ts'
+import { creerClientApi, type ClientApi, type ErreurApi } from '../src/data/api.ts'
+import { lancerTirage } from '../src/data/jeuApi.ts'
 
 const ADMIN = '98765432'
 const ASIAN_HOME = 'c-asian-home-paris'
@@ -287,5 +289,67 @@ describe('Serveur : DEMO=1 et anti-bruteforce', () => {
 
   test('base vide sans PIN initial → démarrage refusé avec un message clair', () => {
     assert.throws(() => creerServeur({ fichierDb: join(dossier, 'vide.db'), adminPin: ADMIN }), /PIN_ASIAN_HOME/)
+  })
+})
+
+// V2 : le client HTTP du front (src/data/api.ts) contre le vrai serveur, et la carte publique GET /cartes/:id.
+describe('V2 : front ↔ serveur (contrat) et carte publique', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-v2-'))
+  let app: Awaited<ReturnType<typeof demarrer>>['app']
+  let api: ClientApi
+
+  before(async () => {
+    horloge = new Date(2026, 10, 9, 12, 0)
+    const srv = await demarrer(join(dossier, 'v2.db'), { maintenant: () => new Date() })
+    app = srv.app
+    api = creerClientApi(`http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`)
+  })
+  after(async () => {
+    await app.fermer()
+    rmSync(dossier, { recursive: true, force: true })
+  })
+
+  test('parcours complet avec le client du front : création → inscription → visite → tirage → refus → CSV', async () => {
+    const commerce = await api.creerCommerce(ADMIN, { nom: 'Chez Lin', type: 'restaurant', lienGoogle: '', pin: '5555' })
+    const acces = { role: 'commerce' as const, commerceId: commerce.id, pin: '5555' }
+    await assert.rejects(api.etat(commerce.id, { ...acces, pin: '0000' }), (e: ErreurApi) => e.statut === 401 && /PIN/.test(e.message))
+
+    const { client } = await api.inscrirePublic(commerce.id, 'Linh', '06 12 34 56 78')
+    assert.equal((client as Client).telephone, undefined)
+
+    const avant = await api.carte(client.id)
+    assert.equal(avant.jeu.statut, 'sansVisite')
+    assert.equal(avant.commerce.id, commerce.id)
+    const refus = await lancerTirage(api, commerce, '+33 6 12 34 56 78', 'Linh')
+    assert.ok(!refus.ok && refus.refus && /visite/.test(refus.message))
+
+    assert.equal((await api.visite(commerce.id, acces, client.id)).tampons, 1)
+    assert.equal((await api.carte(client.id)).jeu.statut, 'pret')
+
+    const gagne = await lancerTirage(api, commerce, '0612345678', 'Linh')
+    assert.ok(gagne.ok)
+    assert.equal(gagne.secteur?.lot.libelle, gagne.resultat.lot, 'le lot du serveur existe sur la roue')
+    const apres = await api.carte(client.id)
+    assert.deepEqual(apres.jeu, { statut: 'dejaJoue', lotDuJour: gagne.resultat.lot })
+    assert.doesNotMatch(JSON.stringify(apres), new RegExp(`${gagne.resultat.code}|0612|telephone|email`), 'ni code gagnant ni contact en public')
+
+    const encore = await lancerTirage(api, commerce, '0033612345678', 'Linh')
+    assert.ok(!encore.ok && encore.refus)
+
+    const csv = await api.exportCsv(commerce.id, acces)
+    assert.ok(csv.startsWith('﻿prenom;telephone;email;'), 'BOM conservé par le client du front')
+    assert.match(csv, /\r\nLinh;06 12 34 56 78;;1;1;/)
+
+    const etat = await api.etat(commerce.id, { role: 'admin', pin: ADMIN })
+    assert.equal(etat.tirages.length, 1)
+    assert.equal(etat.tirages[0].code, gagne.resultat.code, 'le commerçant voit le code pour le vérifier')
+  })
+
+  test('carte publique : inconnue → 404 ; commerce inactif → 409', async () => {
+    await assert.rejects(api.carte('cl-inconnu'), (e: ErreurApi) => e.statut === 404)
+    const commerce = await api.creerCommerce(ADMIN, { nom: 'Salon Ana', type: 'salon', lienGoogle: '', pin: '6666' })
+    const { client } = await api.inscrirePublic(commerce.id, 'Ana', 'ana@exemple.fr')
+    await api.majCommerce(commerce.id, { role: 'admin', pin: ADMIN }, { actif: false })
+    await assert.rejects(api.carte(client.id), (e: ErreurApi) => e.statut === 409)
   })
 })

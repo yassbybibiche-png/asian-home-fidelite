@@ -1,0 +1,74 @@
+Preuve HTTP réelle — phase V2 — 09/11/2026 vers 12 h 54 (UTC)
+Serveur : `npm run serveur` (port 3001, mode développement, PIN admin de dev 000000, base data/fidelite.db, DEMO non).
+Front : `npm run preview` (port 4173). Chaque commande a été lancée séparément avec curl ; sorties copiées telles quelles.
+Les PIN visibles ci-dessous sont des PIN de développement / de test, jamais utilisables en production.
+
+$ curl -s -o /dev/null -w "preview %{http_code}" localhost:4173/
+preview 200
+
+$ curl -s localhost:3001/api/v1/sante
+{"ok":true,"version":"0.1.0","mode":"developpement","stockage":"sqlite","demo":false}
+
+### 1. Créer un commerce (admin) + son PIN commerçant, en une seule requête
+$ curl -s -X POST localhost:3001/api/v1/commerces -H 'X-Admin-PIN: 000000' -H 'Content-Type: application/json' \
+    -d '{"nom":"Preuve V2 Chez Lin","type":"restaurant","pin":"4321"}'
+{"commerce":{"id":"c-mw99iu77-dfgm","nom":"Preuve V2 Chez Lin","type":"restaurant","logo":"","actif":true,"lienGoogle":"","recompense":"Une récompense offerte au 10e passage","seuilTampons":10,"lots":[{"libelle":"-10 % sur le prochain passage","probabilite":20},{"libelle":"Un petit cadeau offert","probabilite":20},{"libelle":"-5 % sur le prochain passage","probabilite":30},{"libelle":"Pas de chance, à la prochaine !","probabilite":30}],"reglesReponseAuto":{"auto5Etoiles":true,"auto4Etoiles":false,"brouillonAutres":true},"demo":false}}
+HTTP 201
+
+### 2. Inscrire un client (PIN commerçant)
+$ curl -s -X POST localhost:3001/api/v1/commerces/c-mw99iu77-dfgm/clients -H 'X-Commerce-PIN: 4321' -H 'Content-Type: application/json' \
+    -d '{"prenom":"Linh","contact":"06 12 34 56 78"}'
+{"client":{"id":"cl-mw99ix4v-9kcb","commerceId":"c-mw99iu77-dfgm","prenom":"Linh","telephone":"06 12 34 56 78","tampons":0,"visites":[],"derniereVisite":null,"creeLe":"2026-11-09T12:53:59.743Z"},"existant":false}
+HTTP 201
+
+### 2b. Tirage avant la visite → refusé
+$ curl -s -X POST localhost:3001/api/v1/commerces/c-mw99iu77-dfgm/tirages -H 'Content-Type: application/json' -d '{"contact":"0612345678"}'
+{"erreur":"Pour jouer, faites d’abord valider votre visite du jour au comptoir."}
+HTTP 409
+
+### 2c. Carte publique (route ajoutée en V2) — sans téléphone ni e-mail
+$ curl -s localhost:3001/api/v1/cartes/cl-mw99ix4v-9kcb
+{"client":{"id":"cl-mw99ix4v-9kcb","commerceId":"c-mw99iu77-dfgm","prenom":"Linh","tampons":0,"visites":[],"derniereVisite":null,"creeLe":"2026-11-09T12:53:59.743Z"},"commerce":{…fiche publique…,"demo":false},"jeu":{"statut":"sansVisite","lotDuJour":null}}
+HTTP 200
+
+### 3. Valider la visite (PIN commerçant)
+$ curl -s -X POST localhost:3001/api/v1/commerces/c-mw99iu77-dfgm/clients/cl-mw99ix4v-9kcb/visite -H 'X-Commerce-PIN: 4321'
+{"client":{"id":"cl-mw99ix4v-9kcb","commerceId":"c-mw99iu77-dfgm","prenom":"Linh","telephone":"06 12 34 56 78","tampons":1,"visites":["2026-11-09T12:54:03.532Z"],"derniereVisite":"2026-11-09T12:54:03.532Z","creeLe":"2026-11-09T12:53:59.743Z"}}
+HTTP 200
+
+### 4. Tirer — tirage fait par le serveur (route publique ; autre format du même numéro)
+$ curl -s -X POST localhost:3001/api/v1/commerces/c-mw99iu77-dfgm/tirages -H 'Content-Type: application/json' -d '{"contact":"+33 6 12 34 56 78","prenom":"Linh"}'
+{"lot":"-5 % sur le prochain passage","code":"RD3XUN","date":"2026-11-09T12:54:05.728Z","perdant":false}
+HTTP 201
+
+### 5. 2e tirage le même jour → refusé
+$ curl -s -X POST localhost:3001/api/v1/commerces/c-mw99iu77-dfgm/tirages -H 'Content-Type: application/json' -d '{"contact":"0033612345678"}'
+{"erreur":"Vous avez déjà tourné la roue aujourd’hui. Revenez lors de votre prochaine visite !"}
+HTTP 409
+
+$ curl -s localhost:3001/api/v1/cartes/cl-mw99ix4v-9kcb
+{…,"jeu":{"statut":"dejaJoue","lotDuJour":"-5 % sur le prochain passage"}}     (pas de code gagnant en public)
+HTTP 200
+
+### 6. Export CSV (PIN commerçant)
+$ curl -s -D - localhost:3001/api/v1/commerces/c-mw99iu77-dfgm/export.csv -H 'X-Commerce-PIN: 4321'
+HTTP/1.1 200 OK
+Content-Type: text/csv; charset=utf-8
+Content-Disposition: attachment; filename="clients-c-mw99iu77-dfgm.csv"
+Cache-Control: no-store
+
+prenom;telephone;email;tampons;visites;derniereVisite;creeLe
+Linh;06 12 34 56 78;;1;1;2026-11-09T12:54:03.532Z;2026-11-09T12:53:59.743Z
+
+$ curl -s …/export.csv -H 'X-Commerce-PIN: 4321' -o data/e2e-export.csv ; od -An -tx1 -N 3 data/e2e-export.csv
+ ef bb bf          (BOM UTF-8 présent : Excel lit les accents)
+
+$ curl -s localhost:3001/api/v1/commerces/c-mw99iu77-dfgm/export.csv
+{"erreur":"PIN commerçant manquant (en-tête X-Commerce-PIN)."}
+HTTP 401
+
+### Front en mode API servi par le serveur (npm run build:api, VITE_API_URL=/)
+$ curl -s localhost:3001/
+<!doctype html> … <script type="module" crossorigin src="/assets/index-Ci7pGQlE.js"></script> …
+HTTP 200
+(le bundle contient bien la base « /api/v1 »)

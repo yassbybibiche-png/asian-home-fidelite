@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react'
-import { useStore } from '../store'
+import { useAction, useStore } from '../store'
 import type { Commerce, Lot, TypeCommerce } from '../types'
 import { TYPES_COMMERCE } from '../data/defaults'
-import { EnTete, Interrupteur, LogoCommerce } from '../components/ui'
+import { EnTete, Interrupteur, LogoCommerce, MessageErreur } from '../components/ui'
 
 export default function Reglages() {
   const { commerce } = useStore()
@@ -11,7 +11,8 @@ export default function Reglages() {
 }
 
 function FormulaireReglages({ commerce }: { commerce: Commerce }) {
-  const { majCommerce } = useStore()
+  const { majCommerce, estDemo } = useStore()
+  const { executer, enCours, erreur } = useAction()
   const [brouillon, setBrouillon] = useState<Commerce>(commerce)
   const [lotsEdites, setLotsEdites] = useState<Lot[]>(commerce.lots)
   const [enregistre, setEnregistre] = useState(false)
@@ -33,18 +34,21 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
     setEnregistre(false)
   }
 
-  function enregistrer(e: FormEvent) {
+  async function enregistrer(e: FormEvent) {
     e.preventDefault()
-    if (!valide) return
-    majCommerce({
+    if (!valide || enCours) return
+    const r = await executer(() =>
+      majCommerce({
       ...brouillon,
       nom: brouillon.nom.trim(),
       lienGoogle: brouillon.lienGoogle.trim(),
       logo: brouillon.logo?.trim(),
       coordonnees: brouillon.coordonnees?.trim() || undefined,
       lots,
-    })
-    setEnregistre(true)
+      }),
+    )
+    // « ✓ Enregistré » seulement si le serveur (ou la démo locale) a bien pris les réglages.
+    setEnregistre(r.ok)
   }
 
   return (
@@ -237,15 +241,16 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, brouillonAutres: v })}
         />
         <p className="pt-2 text-sm text-gray-500">
-          Les règles s’appliquent aux nouveaux avis et, à l’enregistrement, aux avis encore sans réponse ni brouillon (un brouillon existant n’est jamais remplacé). Démo : aucune réponse n’est réellement
+          Les règles s’appliquent aux nouveaux avis et, à l’enregistrement, aux avis encore sans réponse ni brouillon (un brouillon existant n’est jamais remplacé). {estDemo ? 'Démo : a' : 'A'}ucune réponse n’est réellement
           publiée sur Google.
         </p>
       </fieldset>
 
       {/* Au-dessus de la barre d'onglets (64 px + zone de sécurité de l'iPhone). */}
-      <div className="sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-10 md:bottom-4">
-        <button type="submit" className="bouton w-full shadow-lg" disabled={!valide}>
-          {enregistre ? '✓ Enregistré' : 'Enregistrer'}
+      <div className="sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-10 space-y-2 md:bottom-4">
+        <MessageErreur>{erreur && `Réglages non enregistrés : ${erreur}`}</MessageErreur>
+        <button type="submit" className="bouton w-full shadow-lg" disabled={!valide || enCours}>
+          {enCours ? 'Enregistrement…' : enregistre ? '✓ Enregistré' : 'Enregistrer'}
         </button>
       </div>
     </form>

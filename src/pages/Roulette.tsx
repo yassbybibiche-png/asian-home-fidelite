@@ -2,7 +2,7 @@ import { useDonneesCommerce } from '../store'
 import { urlAbsolue } from '../router'
 import { dateRelative } from '../lib/format'
 import { lotsJouables, totalProbabilites } from '../lib/roulette'
-import { EnTete, QrCode, Vide } from '../components/ui'
+import { BoutonCopier, EnTete, QrCode, Vide } from '../components/ui'
 
 export default function Roulette() {
   const { commerce, tirages, clients } = useDonneesCommerce()
@@ -29,6 +29,7 @@ export default function Roulette() {
               Ouvrir la page client
             </a>
           </div>
+          <BoutonCopier texte={url} libelle="Copier le lien de la page de jeu" className="bouton-secondaire w-full" />
         </div>
       </section>
 
@@ -59,6 +60,7 @@ export default function Roulette() {
               <li key={t.id} className="flex justify-between gap-3 py-2.5">
                 <span>
                   <span className="font-semibold">{prenom(t.clientId)}</span> — {t.lot}
+                  {t.code && <span className="block font-mono text-sm text-gray-600">code {t.code}</span>}
                 </span>
                 <span className="shrink-0 text-sm text-gray-500">{dateRelative(t.date)}</span>
               </li>

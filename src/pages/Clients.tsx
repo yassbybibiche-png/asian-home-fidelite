@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from 'react'
-import { useDonneesCommerce, useStore } from '../store'
+import { useAction, useDonneesCommerce, useStore } from '../store'
 import type { Client } from '../types'
 import { estActif, estARelancer, joursDepuis } from '../lib/stats'
 import { dateRelative } from '../lib/format'
 import { analyserContact, messageRelance, recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
-import { BoutonCopier, EnTete, Vide } from '../components/ui'
+import { correspondRecherche } from '../lib/recherche'
+import { BoutonCopier, EnTete, MessageErreur, telecharger, Vide } from '../components/ui'
 
 type Filtre = 'tous' | 'actifs' | 'relancer'
 
@@ -15,10 +16,10 @@ export default function Clients() {
   const [inscription, setInscription] = useState(false)
   const [annonce, setAnnonce] = useState<{ client: Client; existant: boolean } | null>(null)
 
-  const q = recherche.trim().toLowerCase()
   const liste = clients
     .filter((c) => (filtre === 'tous' ? true : filtre === 'actifs' ? estActif(c) : estARelancer(c)))
-    .filter((c) => !q || [c.prenom, c.telephone, c.email].some((v) => v?.toLowerCase().includes(q)))
+    // Téléphone quel que soit le format (06…, +33, 0033, espaces, points), prénom sans accents.
+    .filter((c) => correspondRecherche(c, recherche))
     // Sans visite (null) : en fin de liste « Tous » ; jamais dans « À relancer ».
     .sort((a, b) => {
       const da = a.derniereVisite ?? ''
@@ -58,7 +59,17 @@ export default function Clients() {
         </p>
       )}
 
-      <input className="champ" type="search" placeholder="Rechercher un prénom, un téléphone…" value={recherche} onChange={(e) => setRecherche(e.target.value)} />
+      <label className="sr-only" htmlFor="recherche-clients">
+        Rechercher un client
+      </label>
+      <input
+        id="recherche-clients"
+        className="champ"
+        type="search"
+        placeholder="Rechercher un prénom, un téléphone…"
+        value={recherche}
+        onChange={(e) => setRecherche(e.target.value)}
+      />
 
       <div className="mt-3 mb-4 flex gap-2 overflow-x-auto" role="tablist">
         {(
@@ -80,6 +91,8 @@ export default function Clients() {
         ))}
       </div>
 
+      <BoutonExport />
+
       {filtre === 'relancer' && (
         <p className="mb-3 text-sm text-gray-600">
           Clients déjà venus, mais sans visite depuis plus de 30 jours. Copiez le message et envoyez-le vous-même (SMS, WhatsApp, e-mail) : l’app n’envoie rien.
@@ -97,19 +110,47 @@ export default function Clients() {
   )
 }
 
+/** Export de la liste des clients : depuis le serveur en mode API, généré dans le navigateur en mode local. */
+function BoutonExport() {
+  const { commerce, exporterCsv } = useStore()
+  const { executer, enCours, erreur } = useAction()
+  return (
+    <div className="mb-4">
+      <button
+        type="button"
+        className="bouton-secondaire w-full"
+        disabled={enCours}
+        onClick={async () => {
+          const r = await executer(() => exporterCsv(commerce.id))
+          if (r.ok) telecharger(r.valeur.nom, r.valeur.contenu)
+        }}
+      >
+        {enCours ? 'Export en cours…' : 'Exporter (CSV)'}
+      </button>
+      {erreur && (
+        <div className="mt-2">
+          <MessageErreur>Export impossible : {erreur}</MessageErreur>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onInscrit(r: { client: Client; existant: boolean }): void }) {
   const { commerce, inscrireClient } = useStore()
   const [prenom, setPrenom] = useState('')
   const [contactSaisi, setContactSaisi] = useState('')
   const [essaye, setEssaye] = useState(false)
+  const { executer, enCours, erreur } = useAction()
   const contact = analyserContact(contactSaisi)
   const valide = prenom.trim().length > 0 && contact !== null
 
-  function envoyer(e: FormEvent) {
+  async function envoyer(e: FormEvent) {
     e.preventDefault()
     setEssaye(true)
-    if (!valide || !contact) return
-    onInscrit(inscrireClient(commerce.id, prenom, contact))
+    if (!valide || enCours) return
+    const r = await executer(() => inscrireClient(commerce.id, prenom, contactSaisi))
+    if (r.ok) onInscrit(r.valeur)
   }
 
   return (
@@ -136,12 +177,13 @@ function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onIn
         />
         {essaye && !contact && <p className="mt-1 text-sm text-red-600">Saisissez un numéro (10 chiffres) ou un e-mail valide.</p>}
       </div>
+      <MessageErreur>{erreur && `Inscription non enregistrée : ${erreur}`}</MessageErreur>
       <div className="grid grid-cols-2 gap-2">
         <button type="button" className="bouton-secondaire" onClick={onFermer}>
           Annuler
         </button>
-        <button type="submit" className="bouton" disabled={!prenom.trim() || !contactSaisi.trim()}>
-          Inscrire
+        <button type="submit" className="bouton" disabled={!prenom.trim() || !contactSaisi.trim() || enCours}>
+          {enCours ? 'Inscription…' : 'Inscrire'}
         </button>
       </div>
     </form>
@@ -151,6 +193,7 @@ function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onIn
 function LigneClient({ client: c }: { client: Client }) {
   const { commerce, validerVisite } = useStore()
   const [valide, setValide] = useState(false)
+  const { executer, enCours, erreur } = useAction()
   const tampons = tamponsAffiches(c, commerce)
   const pct = Math.round((tampons / commerce.seuilTampons) * 100)
   const debloquee = recompenseDebloquee(c, commerce)
@@ -184,13 +227,15 @@ function LigneClient({ client: c }: { client: Client }) {
       <div className="mt-3 flex gap-2">
         <button
           className="bouton min-h-11 flex-1 py-2"
-          onClick={() => {
-            validerVisite(c.id)
+          disabled={enCours}
+          onClick={async () => {
+            // Le « ✓ » ne s'affiche qu'une fois la visite réellement enregistrée.
+            if (!(await executer(() => validerVisite(c.id))).ok) return
             setValide(true)
             setTimeout(() => setValide(false), 1500)
           }}
         >
-          {valide ? '✓ Tampon ajouté' : 'Valider une visite (+1)'}
+          {enCours ? 'Enregistrement…' : valide ? '✓ Tampon ajouté' : 'Valider une visite (+1)'}
         </button>
         {debloquee && (
           <a href={`#/client/${c.id}`} className="bouton-secondaire min-h-11 border-green-300 bg-green-50 py-2 text-green-800">
@@ -198,6 +243,11 @@ function LigneClient({ client: c }: { client: Client }) {
           </a>
         )}
       </div>
+      {erreur && (
+        <div className="mt-2">
+          <MessageErreur>Visite non enregistrée : {erreur}</MessageErreur>
+        </div>
+      )}
     </li>
   )
 }

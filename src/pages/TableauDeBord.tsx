@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useDonneesCommerce } from '../store'
+import { useDonneesCommerce, useStore } from '../store'
 import { calculerChiffres, noteMoyenne } from '../lib/stats'
 import { dateRelative } from '../lib/format'
 import { Etoiles, Vide } from '../components/ui'
@@ -16,6 +16,7 @@ function Chiffre({ valeur, libelle, aide }: { valeur: string | number; libelle: 
 
 export default function TableauDeBord() {
   const { commerce, clients, avis, tirages } = useDonneesCommerce()
+  const { estDemo } = useStore()
   const chiffres = calculerChiffres(clients, avis)
   const moyenne = noteMoyenne(avis)
   const prenom = (id: string) => clients.find((c) => c.id === id)?.prenom ?? 'Client'
@@ -39,7 +40,7 @@ export default function TableauDeBord() {
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Chiffre valeur={chiffres.clientsActifs} libelle="Clients actifs" aide="venus ces 30 derniers jours" />
         <Chiffre valeur={chiffres.visitesCeMois} libelle="Visites ce mois" aide="tampons validés" />
-        <Chiffre valeur={chiffres.avisCeMois} libelle="Avis ce mois" aide="sur Google (démo)" />
+        <Chiffre valeur={chiffres.avisCeMois} libelle="Avis ce mois" aide={estDemo ? 'sur Google (démo)' : 'saisis dans l’app'} />
         <Chiffre valeur={`${chiffres.tauxRetour} %`} libelle="Taux de retour" aide="clients venus 2 fois ou +" />
       </section>
 
@@ -89,6 +90,7 @@ export default function TableauDeBord() {
                   <span>
                     <span className="font-semibold">{prenom(t.clientId)}</span>
                     <span className="block text-gray-700">🎁 {t.lot}</span>
+                    {t.code && <span className="block font-mono text-sm text-gray-600">code {t.code}</span>}
                   </span>
                   <span className="shrink-0 text-sm text-gray-500">{dateRelative(t.date)}</span>
                 </li>

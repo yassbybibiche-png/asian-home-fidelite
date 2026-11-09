@@ -9,7 +9,7 @@ const LIENS: { page: Page; titre: string; aide: string }[] = [
   { page: 'admin', titre: 'Admin', aide: 'Tous les commerces, ajout, activation, réinitialisation de la démo' },
 ]
 
-const SIMULE = [
+const SIMULE_LOCAL = [
   'Les données sont stockées dans ce navigateur (localStorage) : aucun serveur.',
   'Les avis Google sont des exemples ; aucune réponse n’est publiée sur Google.',
   'Aucun SMS ni e-mail n’est envoyé ; Apple Wallet / Google Wallet sont simulés.',
@@ -17,8 +17,16 @@ const SIMULE = [
   'Asian Home Paris : vraies coordonnées publiques, mais clients, avis et tirages fictifs.',
 ]
 
+const SIMULE_API = [
+  'Données partagées sur le serveur : le comptoir et le téléphone du client voient les mêmes cartes et tirages.',
+  'Les avis Google sont saisis à la main ; aucune réponse n’est publiée sur Google.',
+  'Aucun SMS ni e-mail n’est envoyé ; Apple Wallet / Google Wallet ne sont pas encore disponibles.',
+  'Aucun paiement ni souscription réelle.',
+]
+
 export default function Plus() {
-  const { commerce } = useStore()
+  const { commerce, mode, estDemo } = useStore()
+  const simule = mode === 'local' ? SIMULE_LOCAL : estDemo ? [...SIMULE_API, 'Ce commerce est un commerce de démonstration : ses données sont fictives.'] : SIMULE_API
 
   return (
     <div className="space-y-5">
@@ -58,10 +66,10 @@ export default function Plus() {
       </nav>
 
       <section className="carte">
-        <h2 className="font-bold">À propos de cette démo</h2>
-        <p className="mt-1 text-sm text-gray-600">{NOM_APP} — fidélité, roulette et avis Google pour tous les commerces. Ce qui est simulé :</p>
+        <h2 className="font-bold">{mode === 'local' ? 'À propos de cette démo' : 'Ce qui est réel, ce qui ne l’est pas encore'}</h2>
+        <p className="mt-1 text-sm text-gray-600">{NOM_APP} — fidélité, roulette et avis Google pour tous les commerces. {mode === 'local' ? 'Ce qui est simulé :' : 'En bref :'}</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
-          {SIMULE.map((s) => (
+          {simule.map((s) => (
             <li key={s}>{s}</li>
           ))}
         </ul>

@@ -1,3 +1,4 @@
+import { useStore } from '../store'
 import { BadgeDemo, EnTete } from '../components/ui'
 import { NOM_APP } from '../data/defaults'
 
@@ -15,9 +16,10 @@ const INCLUS = [
 ]
 
 export default function Offre() {
+  const { estDemo } = useStore()
   return (
     <div className="space-y-5">
-      <EnTete titre={`L’offre ${NOM_APP}`} sousTitre="Un seul produit, pour tous les commerces." action={<BadgeDemo />} />
+      <EnTete titre={`L’offre ${NOM_APP}`} sousTitre="Un seul produit, pour tous les commerces." action={estDemo ? <BadgeDemo /> : undefined} />
 
       <section className="carte overflow-hidden p-0">
         <div className="bg-marque-500 px-5 py-6 text-white">
@@ -54,12 +56,12 @@ export default function Offre() {
           ))}
         </ul>
         <p className="mt-2 text-sm text-gray-500">
-          Le QR code à imprimer est généré par l’app (page « QR vitrine »). L’impression des supports n’est pas incluse dans cette démo.
+          Le QR code à imprimer est généré par l’app (page « QR vitrine »). L’impression des supports n’est pas incluse dans l’app.
         </p>
       </section>
 
       <p className="rounded-xl bg-amber-50 px-4 py-3 text-center font-semibold text-amber-800 ring-1 ring-amber-200">
-        Démo — aucune souscription réelle, aucun paiement
+        {estDemo ? 'Démo — ' : ''}Aucune souscription ni aucun paiement dans l’app
       </p>
     </div>
   )
