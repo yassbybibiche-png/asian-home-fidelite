@@ -4,12 +4,17 @@
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Avis, Client, Commerce, Tirage } from '../src/types.ts'
+import type { Avis, Client, Commerce, EntreeJournal, MembreEquipe, Menu, Tirage } from '../src/types.ts'
 import { cleContact } from '../src/lib/fidelite.ts'
 
 export interface Pin {
   hash: string
   sel: string
+}
+
+export interface MembreStocke {
+  membre: MembreEquipe
+  code: Pin
 }
 
 type P<T> = T | Promise<T>
@@ -40,6 +45,18 @@ export interface Stockage {
   unAvis(commerceId: string, id: string): P<Avis | undefined>
   ajouterAvis(a: Avis): P<void>
   majAvis(a: Avis): P<void>
+  /** Équipe : le code (haché + salé) est rangé à part, jamais dans `donnees`. */
+  membres(commerceId: string): P<MembreStocke[]>
+  ajouterMembre(m: MembreEquipe, code: Pin): P<void>
+  majMembre(m: MembreEquipe, code?: Pin): P<void>
+  supprimerMembre(commerceId: string, id: string): P<void>
+  /** Journal d'audit, du plus récent au plus ancien. */
+  journal(commerceId: string, limite: number): P<EntreeJournal[]>
+  ajouterJournal(e: EntreeJournal): P<void>
+  menu(commerceId: string): P<Menu | undefined>
+  majMenu(m: Menu): P<void>
+  /** Tables de la migration 0003 présentes (toujours vrai sous SQLite, le schéma est créé au démarrage). */
+  schemaCartiz(): P<boolean>
   /** Pas d'imbrication. SQLite : vraie transaction. Supabase : voir `stockage-supabase.ts` (pas de transaction multi-requêtes). */
   transaction<T>(fn: () => P<T>): Promise<T>
   fermer(): P<void>
@@ -50,6 +67,17 @@ export interface Stockage {
  * ou, sous Supabase, ligne modifiée par une autre requête entre la lecture et l'écriture. Le serveur répond 409.
  */
 export class ErreurConflit extends Error {}
+
+/**
+ * Table de la migration 0003 (equipe / journal / menus) absente de la base Supabase : migration pas encore appliquée.
+ * Les lectures renvoient du vide et le journal est ignoré (l'existant continue de marcher) ; les nouvelles écritures
+ * (équipe, menu) lèvent cette erreur → 503 explicite.
+ */
+export class ErreurMigrationManquante extends Error {
+  constructor(table: string) {
+    super(`Fonction pas encore activée : la table « ${table} » n’existe pas. Appliquez la migration supabase/migrations/0003_cartiz.sql dans le SQL Editor de Supabase.`)
+  }
+}
 
 /** Insertion SQLite : une violation d'unicité devient une `ErreurConflit`, comme sous Supabase. */
 function inserer(requete: StatementSync, ...args: SQLInputValue[]) {
@@ -78,6 +106,14 @@ const SCHEMA = `
     id TEXT PRIMARY KEY, commerce_id TEXT NOT NULL, date TEXT NOT NULL, donnees TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS avis_commerce ON avis (commerce_id);
+  CREATE TABLE IF NOT EXISTS equipe (
+    id TEXT PRIMARY KEY, commerce_id TEXT NOT NULL, donnees TEXT NOT NULL, code_hash TEXT NOT NULL, code_sel TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS journal (
+    id TEXT PRIMARY KEY, commerce_id TEXT NOT NULL, date TEXT NOT NULL, donnees TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS journal_commerce ON journal (commerce_id, date);
+  CREATE TABLE IF NOT EXISTS menus (commerce_id TEXT PRIMARY KEY, donnees TEXT NOT NULL);
 `
 
 type Ligne = { donnees: string }
@@ -110,6 +146,15 @@ export function ouvrirStockage(fichier: string) {
     unAvis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? AND id = ?'),
     ajoutAvis: db.prepare('INSERT INTO avis (id, commerce_id, date, donnees) VALUES (?, ?, ?, ?)'),
     majAvis: db.prepare('UPDATE avis SET donnees = ? WHERE id = ?'),
+    membres: db.prepare('SELECT donnees, code_hash AS hash, code_sel AS sel FROM equipe WHERE commerce_id = ? ORDER BY rowid'),
+    ajoutMembre: db.prepare('INSERT INTO equipe (id, commerce_id, donnees, code_hash, code_sel) VALUES (?, ?, ?, ?, ?)'),
+    majMembre: db.prepare('UPDATE equipe SET donnees = ? WHERE id = ? AND commerce_id = ?'),
+    majCodeMembre: db.prepare('UPDATE equipe SET code_hash = ?, code_sel = ? WHERE id = ? AND commerce_id = ?'),
+    supprimerMembre: db.prepare('DELETE FROM equipe WHERE commerce_id = ? AND id = ?'),
+    journal: db.prepare('SELECT donnees FROM journal WHERE commerce_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
+    ajoutJournal: db.prepare('INSERT INTO journal (id, commerce_id, date, donnees) VALUES (?, ?, ?, ?)'),
+    menu: db.prepare('SELECT donnees FROM menus WHERE commerce_id = ?'),
+    majMenu: db.prepare('INSERT INTO menus (commerce_id, donnees) VALUES (?, ?) ON CONFLICT (commerce_id) DO UPDATE SET donnees = excluded.donnees'),
   }
 
   // Les transactions peuvent contenir des `await` (contrat commun avec Supabase) : elles passent une par une
@@ -144,6 +189,23 @@ export function ouvrirStockage(fichier: string) {
     unAvis: (commerceId: string, id: string) => lire<Avis>(q.unAvis.all(commerceId, id))[0],
     ajouterAvis: (a: Avis) => inserer(q.ajoutAvis, a.id, a.commerceId, a.date, JSON.stringify(a)),
     majAvis: (a: Avis) => void q.majAvis.run(JSON.stringify(a), a.id),
+
+    membres: (commerceId: string) =>
+      (q.membres.all(commerceId) as { donnees: string; hash: string; sel: string }[]).map((l) => ({
+        membre: JSON.parse(l.donnees) as MembreEquipe,
+        code: { hash: l.hash, sel: l.sel },
+      })),
+    ajouterMembre: (m: MembreEquipe, code: Pin) => inserer(q.ajoutMembre, m.id, m.commerceId, JSON.stringify(m), code.hash, code.sel),
+    majMembre: (m: MembreEquipe, code?: Pin) => {
+      q.majMembre.run(JSON.stringify(m), m.id, m.commerceId)
+      if (code) q.majCodeMembre.run(code.hash, code.sel, m.id, m.commerceId)
+    },
+    supprimerMembre: (commerceId: string, id: string) => void q.supprimerMembre.run(commerceId, id),
+    journal: (commerceId: string, limite: number) => lire<EntreeJournal>(q.journal.all(commerceId, limite)),
+    ajouterJournal: (e: EntreeJournal) => inserer(q.ajoutJournal, e.id, e.commerceId, e.date, JSON.stringify(e)),
+    menu: (commerceId: string) => lire<Menu>(q.menu.all(commerceId))[0],
+    majMenu: (m: Menu) => void q.majMenu.run(m.commerceId, JSON.stringify(m)),
+    schemaCartiz: () => true,
 
     /** Exécute `fn` d'un bloc : tout est écrit, ou rien. */
     transaction<T>(fn: () => T | Promise<T>): Promise<T> {

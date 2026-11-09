@@ -1,5 +1,7 @@
 import type { Client, Commerce } from '../types'
 import { recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
+import { eurosParPoint, soldePoints } from '../lib/points'
+import { assombrir, estCouleur } from '../lib/apparence'
 import { dateRelative } from '../lib/format'
 import { urlAbsolue } from '../router'
 import { LogoCommerce, QrCode } from './ui'
@@ -12,36 +14,55 @@ function colonnes(seuil: number): string {
   return 'grid-cols-5'
 }
 
+export function libelleTaux(commerce: Pick<Commerce, 'eurosParPoint'>): string {
+  const e = eurosParPoint(commerce)
+  return e === 1 ? '1 point par euro dépensé' : `1 point tous les ${e.toLocaleString('fr-FR')} € dépensés`
+}
+
 /** La carte telle que le client la voit sur son téléphone (aussi affichée dans la fiche commerçant). */
-export function CarteFidelite({ client, commerce }: { client: Client; commerce: Commerce }) {
+export function CarteFidelite({ client, commerce, sansQr = false }: { client: Client; commerce: Commerce; sansQr?: boolean }) {
   const tampons = tamponsAffiches(client, commerce)
   const pct = Math.round((tampons / commerce.seuilTampons) * 100)
   const debloquee = recompenseDebloquee(client, commerce)
   const restants = Math.max(0, commerce.seuilTampons - tampons)
+  const { couleur, fond, banniere } = commerce.apparence ?? {}
+  // Couleurs personnalisées (Réglages → Apparence, contraste vérifié) ; sinon la charte par défaut (classes ci-dessous).
+  const styleBandeau = estCouleur(couleur) ? { background: `linear-gradient(135deg, ${couleur}, ${assombrir(couleur)})` } : undefined
+  const points = soldePoints(client)
 
   return (
-    <section className="overflow-hidden rounded-3xl bg-white shadow-relief ring-1 ring-gray-900/5">
+    <section className="overflow-hidden rounded-3xl bg-white shadow-relief ring-1 ring-gray-900/5" style={estCouleur(fond) ? { backgroundColor: fond } : undefined}>
+      {banniere && <img src={banniere} alt="" className="h-24 w-full object-cover" />}
       {/* Recto : bandeau laque façon carte physique. */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-marque-500 via-marque-600 to-marque-800 px-5 pt-5 pb-6 text-white">
+      <div
+        className={`relative overflow-hidden px-5 pt-5 pb-6 text-white ${styleBandeau ? '' : 'bg-gradient-to-br from-marque-500 via-marque-600 to-marque-800'}`}
+        style={styleBandeau}
+      >
         <div className="pointer-events-none absolute -top-16 -right-12 h-44 w-44 rounded-full border-[18px] border-white/10" aria-hidden />
         <div className="relative flex items-center gap-3">
           <LogoCommerce commerce={commerce} taille="md" />
           <div className="min-w-0">
             <div className="truncate font-titre text-lg font-bold">{commerce.nom}</div>
-            <div className="text-sm text-marque-100">Carte de fidélité</div>
+            <div className="text-sm text-white">Carte de fidélité</div>
           </div>
         </div>
         <div className="relative mt-5 flex items-end justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-xs tracking-[0.14em] text-marque-100 uppercase">Titulaire</div>
+            <div className="text-xs tracking-[0.14em] text-white uppercase">Titulaire</div>
             <div className="truncate text-xl font-semibold">{client.prenom}</div>
           </div>
-          <div className="shrink-0 text-right">
-            <div className="text-3xl leading-none font-extrabold">
-              {tampons}
-              <span className="text-lg font-semibold text-marque-100">/{commerce.seuilTampons}</span>
+          <div className="flex shrink-0 gap-4 text-right">
+            <div>
+              <div className="text-3xl leading-none font-extrabold">
+                {tampons}
+                <span className="text-lg font-semibold text-white">/{commerce.seuilTampons}</span>
+              </div>
+              <div className="text-xs text-white">tampons</div>
             </div>
-            <div className="text-xs text-marque-100">tampons</div>
+            <div>
+              <div className="text-3xl leading-none font-extrabold tabular-nums">{points}</div>
+              <div className="text-xs text-white">point{points > 1 ? 's' : ''}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -95,15 +116,37 @@ export function CarteFidelite({ client, commerce }: { client: Client; commerce: 
           </p>
         )}
 
-        <div className="mt-5 flex flex-col items-center border-t border-dashed border-gray-200 pt-5">
-          <div className="rounded-2xl bg-white p-2 ring-1 ring-gray-200">
-            <QrCode texte={urlAbsolue('carte', client.id)} className="h-40 w-40" titre={`QR code personnel de ${client.prenom}`} />
+        {!!commerce.catalogue?.length && (
+          <div className="mt-4">
+            <p className="surtitre">Vos points · {libelleTaux(commerce)}</p>
+            <ul className="mt-1.5 space-y-1.5">
+              {commerce.catalogue.map((r) => {
+                const ok = points >= r.cout
+                return (
+                  <li key={r.id} className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm ring-1 ${ok ? 'bg-green-50 text-green-900 ring-green-200' : 'bg-gray-50 text-gray-700 ring-gray-900/5'}`}>
+                    <span className="min-w-0">
+                      <span className="font-semibold">{r.nom}</span>
+                      {r.description && <span className="block text-xs">{r.description}</span>}
+                    </span>
+                    <span className="shrink-0 font-semibold tabular-nums">{ok ? '✓ ' : ''}{r.cout} pts</span>
+                  </li>
+                )
+              })}
+            </ul>
           </div>
-          <p className="mt-2 text-center text-sm text-gray-600">À présenter en caisse pour valider votre visite</p>
-          <p className="mt-1 text-xs text-gray-500">
-            Dernière visite : {client.derniereVisite ? dateRelative(client.derniereVisite) : 'aucune pour l’instant'}
-          </p>
-        </div>
+        )}
+
+        {!sansQr && (
+          <div className="mt-5 flex flex-col items-center border-t border-dashed border-gray-200 pt-5">
+            <div className="rounded-2xl bg-white p-2 ring-1 ring-gray-200">
+              <QrCode texte={urlAbsolue('carte', client.id)} className="h-40 w-40" titre={`QR code personnel de ${client.prenom}`} />
+            </div>
+            <p className="mt-2 text-center text-sm text-gray-600">À présenter en caisse pour valider votre visite</p>
+            <p className="mt-1 text-xs text-gray-600">
+              Dernière visite : {client.derniereVisite ? dateRelative(client.derniereVisite) : 'aucune pour l’instant'}
+            </p>
+          </div>
+        )}
       </div>
     </section>
   )

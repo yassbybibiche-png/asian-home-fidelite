@@ -16,12 +16,20 @@ import FicheClient from './pages/FicheClient'
 import QrVitrine from './pages/QrVitrine'
 import Jouer from './pages/Jouer'
 import CartePublique from './pages/CartePublique'
+import Caisse from './pages/Caisse'
+import MenuPublic from './pages/MenuPublic'
+import Equipe from './pages/Equipe'
+import Messages from './pages/Messages'
+import MenuCarte from './pages/MenuCarte'
 
 const ONGLETS: { page: Page; libelle: string }[] = [
   { page: 'accueil', libelle: 'Tableau de bord' },
   { page: 'clients', libelle: 'Clients' },
   { page: 'roulette', libelle: 'Roulette' },
   { page: 'avis', libelle: 'Avis' },
+  { page: 'messages', libelle: 'Messages' },
+  { page: 'menuCarte', libelle: 'Menu' },
+  { page: 'equipe', libelle: 'Équipe' },
   { page: 'reglages', libelle: 'Réglages' },
   { page: 'offre', libelle: 'Offre' },
   { page: 'admin', libelle: 'Admin' },
@@ -35,7 +43,7 @@ const ONGLETS_MOBILE: { page: Page; libelle: string }[] = [
   { page: 'avis', libelle: 'Avis' },
   { page: 'plus', libelle: 'Plus' },
 ]
-const PAGES_SOUS_PLUS: Page[] = ['plus', 'reglages', 'offre', 'admin']
+const PAGES_SOUS_PLUS: Page[] = ['plus', 'reglages', 'offre', 'admin', 'equipe', 'messages', 'menuCarte']
 
 const COMPOSANTS: Record<Page, ComponentType> = {
   accueil: TableauDeBord,
@@ -50,6 +58,11 @@ const COMPOSANTS: Record<Page, ComponentType> = {
   qr: QrVitrine,
   jouer: Jouer,
   carte: CartePublique,
+  caisse: Caisse,
+  menu: MenuPublic,
+  equipe: Equipe,
+  messages: Messages,
+  menuCarte: MenuCarte,
 }
 
 /** Onglet surligné pour les sous-pages (fiche client → Clients, QR vitrine → Roulette). */

@@ -36,6 +36,97 @@ export interface Commerce {
   creeLe: string
   /** Commerce de démonstration (données fictives) : à étiqueter « Démo » dans l'UI. */
   demo?: boolean
+  /** Points : 1 point par tranche de `eurosParPoint` € dépensés (défaut 1 → 1 point par euro). */
+  eurosParPoint?: number
+  /** Catalogue de récompenses échangeables contre des points. */
+  catalogue?: RecompensePoints[]
+  /** Messages automatiques activés (absent = tous désactivés). */
+  messagesAuto?: ReglesMessages
+  /** Couleurs / bannière de la carte (absent = charte par défaut : rouge laque, fond ivoire). */
+  apparence?: Apparence
+}
+
+export interface RecompensePoints {
+  id: string
+  nom: string
+  cout: number
+  description?: string
+}
+
+export type TypeMessageAuto = 'bienvenue' | 'recompense' | 'presque' | 'inactif' | 'anniversaire' | 'avis'
+export type ReglesMessages = Record<TypeMessageAuto, boolean>
+
+export interface Apparence {
+  /** Couleur principale (bandeau de la carte), #rrggbb. Texte blanc dessus : contraste ≥ 4,5:1 exigé. */
+  couleur?: string
+  /** Fond de la carte, #rrggbb. Texte foncé dessus : contraste ≥ 4,5:1 exigé. */
+  fond?: string
+  /** Bannière : adresse https d'une image. */
+  banniere?: string
+}
+
+export interface MessageClient {
+  id: string
+  type: TypeMessageAuto | 'commercant'
+  texte: string
+  date: string
+  lu?: boolean
+}
+
+export interface EchangePoints {
+  id: string
+  date: string
+  recompenseId: string
+  libelle: string
+  cout: number
+  soldeAvant: number
+  soldeApres: number
+  /** Nom de l'auteur (membre de l'équipe ou « Gérant »). */
+  auteur: string
+}
+
+export interface MembreEquipe {
+  id: string
+  commerceId: string
+  nom: string
+  creeLe: string
+}
+
+export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu'
+
+/** Journal d'audit : qui a fait quoi, pour quel client, quand. Jamais de code équipe ni de PIN. */
+export interface EntreeJournal {
+  id: string
+  commerceId: string
+  date: string
+  action: ActionJournal
+  auteur: { type: 'membre' | 'gerant'; id?: string; nom: string }
+  clientId?: string
+  clientPrenom?: string
+  details: string
+}
+
+export interface Produit {
+  id: string
+  nom: string
+  description?: string
+  /** Prix en centimes. */
+  prix: number
+  /** https://… ou image compressée (data:image/jpeg;base64,…). */
+  photo?: string
+  allergenes: string[]
+}
+
+export interface CategorieMenu {
+  id: string
+  nom: string
+  produits: Produit[]
+}
+
+export interface Menu {
+  commerceId: string
+  categories: CategorieMenu[]
+  majLe: string
 }
 
 export interface Client {
@@ -58,6 +149,19 @@ export interface Client {
    * tant qu'il n'est pas vrai, le serveur refuse tout envoi de relance, même avec un prestataire configuré.
    */
   consentementRelance?: boolean
+  /** Solde de points (calculé et stocké par le serveur). */
+  points?: number
+  /** Total dépensé déclaré en caisse, en centimes. */
+  depenseCentimes?: number
+  echangesPoints?: EchangePoints[]
+  /** Boîte de réception du client (messages automatiques et messages du commerçant). */
+  messages?: MessageClient[]
+  /** Clés des messages automatiques déjà envoyés (anti-doublon). */
+  clesMessages?: string[]
+  /** Anniversaire « MM-JJ » (optionnel). */
+  anniversaire?: string
+  /** Identifiants des dernières actions de caisse traitées (idempotence de la file hors ligne). */
+  actionsTraitees?: string[]
 }
 
 export interface RecompenseOfferte {
@@ -101,4 +205,7 @@ export interface Donnees {
 
 export interface Etat extends Donnees {
   commerceActifId: string
+  /** Mode serveur uniquement : équipe et journal d'audit des commerces déverrouillés. */
+  membres?: MembreEquipe[]
+  journal?: EntreeJournal[]
 }

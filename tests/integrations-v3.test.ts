@@ -3,14 +3,17 @@
 // avis Google (0 avis fictif en production, étiquette démo), textes de l'UI.
 import { test, describe, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createHash, createVerify, generateKeyPairSync } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 
 import { creerServeur, type OptionsServeur } from '../server/app.ts'
 import { ouvrirStockage } from '../server/stockage.ts'
-import { ISSUER_PLACEHOLDER, payloadGoogleWallet } from '../server/wallet.ts'
+import { enregistrerClasseGoogle, ISSUER_PLACEHOLDER, jetonAccesGoogle, payloadGoogleWallet } from '../server/wallet.ts'
+import { appleWalletConfigure, construirePkpass, crc32, ErreurAppleNonConfigure, manifeste, passJsonApple, signatureCms, zip } from '../server/wallet-apple.ts'
+import { execFileSync } from 'node:child_process'
 import { configDepuisEnv, creerNotifications } from '../server/notifications/index.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import { nouveauClient, validerVisite } from '../src/lib/fidelite.ts'
@@ -87,23 +90,63 @@ describe('Google Wallet : charge utile non signée', () => {
     }
   })
 
-  test('endpoint configuré : charge utile renvoyée, explicitement NON signée', async () => {
-    const { app, api, inscrire } = await demarrer('wallet-avec.db', {
+  test('configuré mais clé illisible : 503, aucun pass généré', async () => {
+    const { app, api, inscrire } = await demarrer('wallet-cle-absente.db', {
       googleWallet: { issuerId: '3388000000000000000', fichierCleService: '/inexistant/cle.json' },
+    })
+    try {
+      const c = await inscrire('0622222220')
+      const r = await api('GET', `/commerces/${AH}/clients/${c.id}/pass.json`, undefined, PIN)
+      assert.equal(r.statut, 503)
+      assert.match(r.contenu.erreur, /aucun pass généré/)
+      assert.equal(r.contenu.urlEnregistrement, undefined)
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('configuré avec une clé de TEST (générée ici, pas un compte Google) : JWT RS256 signé et vérifiable', async () => {
+    const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+    const fichierCle = join(dossier, 'cle-test.json')
+    writeFileSync(fichierCle, JSON.stringify({ client_email: 'test@projet-test.iam.gserviceaccount.com', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) }))
+    const { app, api, inscrire } = await demarrer('wallet-avec.db', {
+      googleWallet: { issuerId: '3388000000000000000', fichierCleService: fichierCle },
       urlPublique: 'https://fidelite.exemple/',
     })
     try {
       const c = await inscrire('0622222222')
       const r = await api('GET', `/commerces/${AH}/clients/${c.id}/pass.json`, undefined, PIN)
       assert.equal(r.statut, 200)
-      assert.match(r.contenu.avertissement, /NON signée/)
-      assert.equal(r.contenu.payload.signe, false)
-      const o = r.contenu.payload.genericObjects[0]
+      assert.equal(r.contenu.signe, true)
+      const jwt = String(r.contenu.urlEnregistrement).replace('https://pay.google.com/gp/v/save/', '')
+      const [t, corps, sig] = jwt.split('.')
+      assert.ok(createVerify('RSA-SHA256').update(`${t}.${corps}`).verify(publicKey, Buffer.from(sig, 'base64url')), 'signature RS256 valide')
+      const claims = JSON.parse(Buffer.from(corps, 'base64url').toString())
+      assert.equal(claims.aud, 'google')
+      assert.equal(claims.typ, 'savetowallet')
+      assert.equal(claims.iss, 'test@projet-test.iam.gserviceaccount.com')
+      const o = claims.payload.genericObjects[0]
       assert.ok(o.id.startsWith('3388000000000000000.'))
       assert.equal(o.barcode.value, `https://fidelite.exemple/#/carte/${c.id}`)
+      assert.doesNotMatch(JSON.stringify(claims), /0622222222|telephone/)
     } finally {
       await app.fermer()
     }
+  })
+
+  test('API REST Google Wallet (fetch simulé) : jeton OAuth JWT-bearer puis création de classe', async () => {
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+    const cle = { client_email: 'test@x.iam.gserviceaccount.com', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) as string }
+    const appels: { url: string; init: RequestInit }[] = []
+    const f = (async (url: string, init: RequestInit) => {
+      appels.push({ url, init })
+      return url.includes('oauth2') ? new Response(JSON.stringify({ access_token: 'jeton-test' })) : new Response('{}', { status: 409 })
+    }) as unknown as typeof fetch
+    const jeton = await jetonAccesGoogle(cle, f)
+    assert.equal(jeton, 'jeton-test')
+    assert.equal(new URLSearchParams(String(appels[0].init.body)).get('grant_type'), 'urn:ietf:params:oauth:grant-type:jwt-bearer')
+    assert.equal(await enregistrerClasseGoogle({ ...nouveauCommerce('X', 'autre', ''), id: 'c-x' }, '33880', jeton, f), 'existante')
+    assert.equal(appels[1].url, 'https://walletobjects.googleapis.com/walletobjects/v1/genericClass')
   })
 })
 
@@ -116,15 +159,61 @@ describe('Apple Wallet : en suspens', () => {
     })
   }
 
-  test('aucun code de génération ou de signature de pass Apple dans server/, src/, scripts/', () => {
+  // 09/11/2026 (mission Cartiz) : l'utilisateur demande le VRAI code de génération, qui doit refuser sans certificat.
+  // Ce code vit uniquement dans server/wallet-apple.ts et n'est branché sur aucune route.
+  test('code de pass Apple confiné à server/wallet-apple.ts, importé par aucun autre fichier', () => {
     const racine = join(import.meta.dirname, '..')
-    // Les scripts de preuve HTTP (scripts/preuve-*) appellent seulement l'URL d'un pass Apple pour montrer le 404 : exclus.
     const fichiers = ['server', 'src', 'scripts'].flatMap((d) => fichiersCode(join(racine, d))).filter((f) => !/[\\/]preuve-[^\\/]+$/.test(f))
     assert.ok(fichiers.length > 20)
     for (const f of fichiers) {
+      if (f.endsWith(join('server', 'wallet-apple.ts'))) continue
       const contenu = readFileSync(f, 'utf8')
-      assert.doesNotMatch(contenu, /pkpass|vnd\.apple|passTypeIdentifier|manifest\.json|signpass|pkcs7/i, f)
+      assert.doesNotMatch(contenu, /from\s+['"][^'"]*wallet-apple|vnd\.apple|passTypeIdentifier|signpass|pkcs7|construirePkpass/i, f)
     }
+  })
+
+  test('sans certificat : construirePkpass refuse, rien n’est signé', () => {
+    assert.equal(appleWalletConfigure(undefined), false)
+    assert.equal(appleWalletConfigure({ passTypeIdentifier: 'pass.x', teamIdentifier: 'ABCDE12345' }), false)
+    assert.throws(() => construirePkpass({ 'pass.json': Buffer.from('{}') }, undefined), ErreurAppleNonConfigure)
+    assert.throws(() => construirePkpass({ 'pass.json': Buffer.from('{}') }, { passTypeIdentifier: 'pass.x', teamIdentifier: 'T' }), /aucun pass n’est signé/i)
+  })
+
+  test('signature CMS détachée acceptée par OpenSSL (certificat auto-signé de TEST, octets quelconques — pas un pass)', (t) => {
+    const ossl = (args: string[]) => execFileSync('openssl', args, { stdio: 'pipe' })
+    try {
+      ossl(['version'])
+    } catch {
+      return t.skip('openssl absent de cette machine')
+    }
+    const d = mkdtempSync(join(dossier, 'cms-'))
+    const [cle, cert, ca, caCle] = ['cle.pem', 'cert.pem', 'ca.pem', 'ca-cle.pem'].map((n) => join(d, n))
+    ossl(['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', caCle, '-out', ca, '-days', '1', '-subj', '/CN=AC de test'])
+    ossl(['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', cle, '-out', cert, '-days', '1', '-subj', '/CN=Signataire de test'])
+    const contenu = Buffer.from('{"exemple.txt":"0123"}')
+    const sig = signatureCms(contenu, readFileSync(cert, 'utf8'), readFileSync(cle, 'utf8'), readFileSync(ca, 'utf8'))
+    writeFileSync(join(d, 'sig.der'), sig)
+    writeFileSync(join(d, 'contenu'), contenu)
+    // -noverify : on vérifie la signature et le condensat, pas la chaîne (certificats de test).
+    ossl(['cms', '-verify', '-binary', '-noverify', '-inform', 'DER', '-in', join(d, 'sig.der'), '-content', join(d, 'contenu'), '-out', join(d, 'sortie')])
+    writeFileSync(join(d, 'altere'), Buffer.from('{"exemple.txt":"9999"}'))
+    assert.throws(() => ossl(['cms', '-verify', '-binary', '-noverify', '-inform', 'DER', '-in', join(d, 'sig.der'), '-content', join(d, 'altere'), '-out', join(d, 'sortie2')]))
+  })
+
+  test('pass.json (storeCard) et manifeste SHA-1 corrects ; zip relisible (CRC)', () => {
+    const commerce = { ...nouveauCommerce('Chez Lin', 'restaurant', ''), seuilTampons: 4 }
+    const client = { ...nouveauClient(commerce.id, 'Lina', { telephone: '0612345678' }), tampons: 2, points: 30 }
+    const p = passJsonApple(commerce, client, 'https://x/#/carte/1', { passTypeIdentifier: 'pass.x', teamIdentifier: 'T' })
+    assert.equal(p.storeCard.primaryFields[0].value, '2/4')
+    assert.equal(p.backgroundColor, 'rgb(179, 38, 45)')
+    assert.doesNotMatch(JSON.stringify(p), /0612345678/)
+    const fichiers = { 'pass.json': Buffer.from(JSON.stringify(p)), 'icon.png': Buffer.from([1, 2, 3]) }
+    assert.equal(manifeste(fichiers)['icon.png'], createHash('sha1').update(Buffer.from([1, 2, 3])).digest('hex'))
+    const z = zip(fichiers)
+    assert.equal(z.readUInt32LE(0), 0x04034b50)
+    assert.equal(z.readUInt32LE(14), crc32(fichiers['pass.json']))
+    assert.equal(z.readUInt32LE(z.length - 22), 0x06054b50)
+    assert.equal(z.readUInt16LE(z.length - 22 + 10), 2)
   })
 
   test('aucune route ne sert de pass Apple', async () => {
@@ -251,8 +340,14 @@ describe('Avis Google : jamais de faux avis présentés comme réels', () => {
 
 describe('Textes : aucune promesse d’ajout ou d’envoi réel', () => {
   test('Wallet « à brancher » + lien vers la carte ; relances « à brancher » ; RGPD complet', () => {
-    assert.equal(textes.LIBELLE_WALLET, 'Ajouter à Wallet — à brancher')
-    assert.match(textes.EXPLICATION_WALLET, /aucun pass/)
+    // Mission Cartiz : « Carte Wallet : bientôt », encart d'information (plus de bouton « Ajouter »).
+    assert.equal(textes.LIBELLE_WALLET, 'Carte Wallet : bientôt')
+    assert.match(textes.EXPLICATION_WALLET, /Aucun pass/)
+    assert.deepEqual(textes.ETATS_WALLET, ['Apple Wallet : en suspens.', 'Google Wallet : à brancher (aucun compte émetteur pour l’instant).'])
+    const ui = readFileSync(join(import.meta.dirname, '../src/components/ui.tsx'), 'utf8')
+    const encart = ui.slice(ui.indexOf('export function EncartWallet'), ui.indexOf('/** Mentions RGPD'))
+    assert.doesNotMatch(encart, /<button/, 'aucun bouton qui prétendrait ajouter une carte')
+    assert.doesNotMatch(readFileSync(join(import.meta.dirname, '../src/lib/integrations.ts'), 'utf8'), /Ajouter à (Apple|Google)? ?Wallet/)
     assert.equal(textes.MENTION_ENVOI, 'Envoi SMS/e-mail à brancher')
     const rgpd = textes.MENTIONS_RGPD.join(' ')
     for (const mot of [/prénom/, /téléphone ou e-mail/, /Finalité/, /Conservation/, /Export/, /suppression/, /Hébergement/, /Union européenne/]) assert.match(rgpd, mot)

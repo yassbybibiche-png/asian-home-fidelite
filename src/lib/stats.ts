@@ -41,6 +41,32 @@ export function calculerChiffres(clients: Client[], avis: Avis[], maintenant = n
   }
 }
 
+export interface ChiffresCartes {
+  cartesEmises: number
+  passagesTotal: number
+  passages30j: number
+  /** Récompenses tampons offertes + échanges de points. */
+  recompensesDonnees: number
+  pointsEnCirculation: number
+  plusFideles: { id: string; prenom: string; passages: number; points: number }[]
+}
+
+export function calculerChiffresCartes(clients: Client[], maintenant = new Date()): ChiffresCartes {
+  const t = maintenant.getTime()
+  return {
+    cartesEmises: clients.length,
+    passagesTotal: clients.reduce((n, c) => n + c.visites.length, 0),
+    passages30j: clients.reduce((n, c) => n + c.visites.filter((v) => t - new Date(v).getTime() <= JOURS_INACTIVITE * JOUR).length, 0),
+    recompensesDonnees: clients.reduce((n, c) => n + (c.recompensesOffertes?.length ?? 0) + (c.echangesPoints?.length ?? 0), 0),
+    pointsEnCirculation: clients.reduce((n, c) => n + (c.points ?? 0), 0),
+    plusFideles: clients
+      .filter((c) => c.visites.length > 0)
+      .sort((a, b) => b.visites.length - a.visites.length || (b.points ?? 0) - (a.points ?? 0))
+      .slice(0, 5)
+      .map((c) => ({ id: c.id, prenom: c.prenom, passages: c.visites.length, points: c.points ?? 0 })),
+  }
+}
+
 export function noteMoyenne(avis: Avis[]): number | null {
   if (!avis.length) return null
   return Math.round((avis.reduce((s, a) => s + a.note, 0) / avis.length) * 10) / 10

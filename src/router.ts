@@ -2,12 +2,32 @@ import { useEffect, useState } from 'react'
 
 // Routeur minimal par hash (#/clients, #/client/<id>, #/jouer/<commerceId>) :
 // fonctionne sur n'importe quel hébergement statique, et le bouton « retour » du téléphone marche.
-export type Page = 'accueil' | 'clients' | 'client' | 'roulette' | 'qr' | 'avis' | 'reglages' | 'offre' | 'admin' | 'plus' | 'jouer' | 'carte'
+export type Page =
+  | 'accueil'
+  | 'clients'
+  | 'client'
+  | 'roulette'
+  | 'qr'
+  | 'avis'
+  | 'reglages'
+  | 'offre'
+  | 'admin'
+  | 'plus'
+  | 'jouer'
+  | 'carte'
+  | 'caisse'
+  | 'menu'
+  | 'equipe'
+  | 'messages'
+  | 'menuCarte'
 
-const PAGES: Page[] = ['accueil', 'clients', 'client', 'roulette', 'qr', 'avis', 'reglages', 'offre', 'admin', 'plus', 'jouer', 'carte']
+const PAGES: Page[] = ['accueil', 'clients', 'client', 'roulette', 'qr', 'avis', 'reglages', 'offre', 'admin', 'plus', 'jouer', 'carte', 'caisse', 'menu', 'equipe', 'messages', 'menuCarte']
 
-/** Pages publiques côté client final : pas d'en-tête ni de navigation commerçant. */
-export const PAGES_PUBLIQUES: Page[] = ['jouer', 'carte']
+/**
+ * Pages sans en-tête ni navigation commerçant : pages du client final (jeu, carte, menu) et la caisse
+ * (tablette du comptoir, déverrouillée par le code équipe et non par le PIN du gérant).
+ */
+export const PAGES_PUBLIQUES: Page[] = ['jouer', 'carte', 'menu', 'caisse']
 
 export interface Route {
   page: Page

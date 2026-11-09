@@ -16,9 +16,21 @@
 // d'un commerce peut enregistrer les réglages puis échouer sur un des avis réévalués.
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createClient, type PostgrestError } from '@supabase/supabase-js'
-import type { Avis, Client, Commerce, Tirage } from '../src/types.ts'
+import type { Avis, Client, Commerce, EntreeJournal, MembreEquipe, Menu, Tirage } from '../src/types.ts'
 import { cleContact } from '../src/lib/fidelite.ts'
-import { ErreurConflit, type Pin, type Stockage } from './stockage.ts'
+import { ErreurConflit, ErreurMigrationManquante, type Pin, type Stockage } from './stockage.ts'
+
+const TABLES_0003 = ['equipe', 'journal', 'menus']
+
+/** Lecture d'une table de la migration 0003 : vide tant que la migration n'est pas appliquée (l'existant continue de marcher). */
+async function ouVide<T>(lecture: Promise<T>, vide: T): Promise<T> {
+  try {
+    return await lecture
+  } catch (e) {
+    if (e instanceof ErreurMigrationManquante) return vide
+    throw e
+  }
+}
 
 export interface ConfigSupabase {
   /** https://<projet>.supabase.co */
@@ -59,6 +71,8 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     const { data, error } = await requete
     if (error) {
       if (error.code === '23505') throw new ErreurConflit(`Doublon refusé par la base (${table}) : ${error.message}`)
+      // Table inconnue (PostgREST : PGRST205 ; Postgres : 42P01) → migration 0003 pas encore appliquée.
+      if (TABLES_0003.includes(table) && (error.code === 'PGRST205' || error.code === '42P01')) throw new ErreurMigrationManquante(table)
       throw new Error(`Supabase (${table}) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
     }
     return data as T
@@ -123,6 +137,52 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     unAvis: async (commerceId, id) => (await lire<Avis>('avis', sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).eq('id', id)))[0],
     ajouterAvis: async (a) => void (await ok('avis', sb.from('avis').insert({ id: a.id, commerce_id: a.commerceId, date: a.date, donnees: a }))),
     majAvis: (a) => majVersionnee('avis', a.id, a),
+
+    // ---- Cartiz (0003_cartiz.sql) ----
+    membres: async (commerceId) => {
+      const lignes = await ouVide(
+        ok<{ donnees: MembreEquipe; code_hash: string; code_sel: string }[]>(
+          'equipe',
+          sb.from('equipe').select('donnees,code_hash,code_sel').eq('commerce_id', commerceId).order('ordre'),
+        ),
+        [],
+      )
+      return lignes.map((l) => ({ membre: l.donnees, code: { hash: l.code_hash, sel: l.code_sel } }))
+    },
+    ajouterMembre: async (m, code) =>
+      void (await ok('equipe', sb.from('equipe').insert({ id: m.id, commerce_id: m.commerceId, donnees: m, code_hash: code.hash, code_sel: code.sel }))),
+    majMembre: async (m, code) =>
+      void (await ok(
+        'equipe',
+        sb
+          .from('equipe')
+          .update({ donnees: m, ...(code ? { code_hash: code.hash, code_sel: code.sel } : {}) })
+          .eq('id', m.id)
+          .eq('commerce_id', m.commerceId),
+      )),
+    supprimerMembre: async (commerceId, id) => void (await ok('equipe', sb.from('equipe').delete().eq('commerce_id', commerceId).eq('id', id))),
+    journal: (commerceId, limite) =>
+      ouVide(lire<EntreeJournal>('journal', sb.from('journal').select('donnees').eq('commerce_id', commerceId).order('date', { ascending: false }).limit(limite)), []),
+    ajouterJournal: async (e) => {
+      try {
+        await ok('journal', sb.from('journal').insert({ id: e.id, commerce_id: e.commerceId, date: e.date, donnees: e }))
+      } catch (err) {
+        // Migration 0003 pas appliquée : l'action (visite, récompense…) reste enregistrée, seule la trace manque.
+        if (!(err instanceof ErreurMigrationManquante)) throw err
+        console.warn(`[stockage] journal non écrit (${e.action}) : ${err.message}`)
+      }
+    },
+    menu: async (commerceId) => (await ouVide(lire<Menu>('menus', sb.from('menus').select('donnees').eq('commerce_id', commerceId)), []))[0],
+    schemaCartiz: async () => {
+      try {
+        for (const t of TABLES_0003) await ok(t, sb.from(t).select('*').limit(0))
+        return true
+      } catch (e) {
+        if (e instanceof ErreurMigrationManquante) return false
+        throw e
+      }
+    },
+    majMenu: async (m) => void (await ok('menus', sb.from('menus').upsert({ commerce_id: m.commerceId, donnees: m }, { onConflict: 'commerce_id' }))),
 
     /** PAS de « tout ou rien » (voir l'en-tête du fichier) : verrou optimiste sur les lignes lues pendant `fn`. */
     transaction: (fn) => versions.run(new Map(), async () => fn()),

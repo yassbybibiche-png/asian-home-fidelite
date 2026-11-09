@@ -1,10 +1,12 @@
 // Textes des intégrations « à brancher » (V3) et mentions RGPD : regroupés ici pour être testés
 // (aucun écran ne doit promettre un envoi, un pass ou une connexion Google qui n'existe pas).
 
-export const LIBELLE_WALLET = 'Ajouter à Wallet — à brancher'
+export const LIBELLE_WALLET = 'Carte Wallet : bientôt'
+
+export const ETATS_WALLET = ['Apple Wallet : en suspens.', 'Google Wallet : à brancher (aucun compte émetteur pour l’instant).']
 
 export const EXPLICATION_WALLET =
-  'Pas encore disponible : aucun pass Apple Wallet ou Google Wallet n’est créé (Apple Wallet est en suspens ; Google Wallet attend un compte émetteur). En attendant, gardez la carte en favori ou ajoutez-la à l’écran d’accueil : son QR code suffit au comptoir.'
+  'Aucun pass Wallet n’est créé pour l’instant. En attendant, gardez cette carte en favori ou ajoutez-la à l’écran d’accueil : son QR code suffit au comptoir.'
 
 export const MENTION_ENVOI = 'Envoi SMS/e-mail à brancher'
 

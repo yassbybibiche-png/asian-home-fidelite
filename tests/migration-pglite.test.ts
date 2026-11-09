@@ -124,6 +124,32 @@ describe('Migration Supabase exécutée sur Postgres (PGlite)', () => {
     assert.equal(rows[0].valeur, '2')
   })
 
+  test('0003_cartiz : passe après 0001/0002, rejouable ; equipe / journal / menus avec RLS, sans policy, fermées à anon', async () => {
+    await db.exec(sql('0003_cartiz.sql'))
+    await db.exec(sql('0003_cartiz.sql'))
+    const t = await db.query<{ relname: string; relrowsecurity: boolean }>(
+      `select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname in ('equipe', 'journal', 'menus') order by 1`)
+    assert.deepEqual(t.rows.map((r) => [r.relname, r.relrowsecurity]), [['equipe', true], ['journal', true], ['menus', true]])
+    assert.equal((await db.query<{ n: number }>(`select count(*)::int as n from pg_policies where schemaname = 'public'`)).rows[0].n, 0)
+    for (const role of ['anon', 'authenticated']) {
+      for (const table of ['equipe', 'journal', 'menus']) {
+        const { rows } = await db.query<{ ok: boolean }>(`select has_table_privilege($1, $2, 'select') or has_table_privilege($1, $2, 'insert') as ok`, [role, `public.${table}`])
+        assert.equal(rows[0].ok, false, `${role} sur ${table}`)
+      }
+    }
+    // Un code en clair dans `donnees` est refusé par la base ; menu : un seul par commerce ; version incrémentée.
+    assert.equal(await codeErreur(db.query(`insert into public.equipe (id, commerce_id, donnees, code_hash, code_sel) values ('m0', 'c2', '{"id":"m0","commerceId":"c2","code":"1234"}', 'h', 's')`)), '23514')
+    await db.query(`insert into public.equipe (id, commerce_id, donnees, code_hash, code_sel) values ('m1', 'c2', '{"id":"m1","commerceId":"c2","nom":"Mai"}', 'h', 's')`)
+    await db.query(`insert into public.journal (id, commerce_id, date, donnees) values ('j1', 'c2', now(), '{"id":"j1","commerceId":"c2"}')`)
+    await db.query(`insert into public.menus (commerce_id, donnees) values ('c2', '{"commerceId":"c2","categories":[]}') on conflict (commerce_id) do update set donnees = excluded.donnees`)
+    await db.query(`insert into public.menus (commerce_id, donnees) values ('c2', '{"commerceId":"c2","categories":[1]}') on conflict (commerce_id) do update set donnees = excluded.donnees`)
+    const menu = await db.query<{ version: number }>(`select version from public.menus where commerce_id = 'c2'`)
+    assert.deepEqual(menu.rows.map((r) => r.version), [2])
+    await db.query(`delete from public.commerces where id = 'c2'`)
+    const { rows } = await db.query<{ n: number }>(`select (select count(*) from public.equipe) + (select count(*) from public.journal) + (select count(*) from public.menus) as n`)
+    assert.equal(Number(rows[0].n), 0, 'suppression en cascade')
+  })
+
   test('suppression d’un commerce : clients et tirages supprimés en cascade', async () => {
     await db.query(`delete from public.commerces where id = 'c1'`)
     const { rows } = await db.query<{ n: number }>(

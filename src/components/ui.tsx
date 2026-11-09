@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import qrcode from 'qrcode-generator'
 import type { Commerce } from '../types'
 import { initiales } from '../lib/format'
-import { EXPLICATION_WALLET, LIBELLE_WALLET, MENTIONS_RGPD } from '../lib/integrations'
+import { ETATS_WALLET, EXPLICATION_WALLET, LIBELLE_WALLET, MENTIONS_RGPD } from '../lib/integrations'
 
 export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Commerce, 'nom' | 'logo'>; taille?: 'sm' | 'md' | 'lg' }) {
   const dims = { sm: 'h-9 w-9 text-sm', md: 'h-11 w-11 text-base', lg: 'h-16 w-16 text-xl' }[taille]
@@ -79,6 +79,10 @@ const CHEMINS: Record<string, string> = {
   admin: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1M14 9h1M9 13h1M14 13h1M10 21v-4h4v4',
   plus: 'M5 12h.01M12 12h.01M19 12h.01',
   qr: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM14 18h2M18 14h2',
+  caisse: 'M4 10h16v10H4zM7 10V6h10v4M8 14h2M14 14h2M8 17h8',
+  equipe: 'M9 11a4 4 0 100-8 4 4 0 000 8zM2 21v-1a6 6 0 0112 0v1M17 11a3 3 0 100-6M22 21v-1a5 5 0 00-4-4.9',
+  messages: 'M4 5h16v11H8l-4 4zM8 9h8M8 12h5',
+  menuCarte: 'M6 3h12v18H6zM9 7h6M9 11h6M9 15h4',
 }
 
 export function Icone({ nom, className = 'h-6 w-6' }: { nom: string; className?: string }) {
@@ -172,25 +176,28 @@ export function BoutonCopier({ texte, libelle = 'Copier le message', className =
   )
 }
 
-/** Wallet à brancher : le bouton le dit, aucune fausse promesse ; renvoie vers la carte publique (QR) en attendant. */
-export function BoutonWallet({ demo = true, lienCarte }: { demo?: boolean; lienCarte?: string }) {
-  const [ouvert, setOuvert] = useState(false)
+/**
+ * Wallet : simple encart d'information, JAMAIS un bouton « Ajouter » (aucun pass n'existe).
+ * Apple Wallet en suspens, Google Wallet à brancher ; en attendant, la carte web et son QR suffisent.
+ */
+export function EncartWallet({ demo = false, lienCarte }: { demo?: boolean; lienCarte?: string }) {
   return (
-    <div>
-      <button type="button" className="bouton-secondaire w-full" onClick={() => setOuvert((o) => !o)} aria-expanded={ouvert}>
-        {LIBELLE_WALLET}
-      </button>
-      {ouvert && (
-        <div className={`mt-2 rounded-xl p-3 text-sm ring-1 ${demo ? 'bg-amber-50 text-amber-900 ring-amber-200' : 'bg-gray-50 text-gray-700 ring-gray-200'}`} role="status">
-          {demo && <BadgeDemo>Démo</BadgeDemo>} {EXPLICATION_WALLET}
-          {lienCarte && (
-            <a href={lienCarte} className="mt-2 flex min-h-11 items-center font-semibold text-marque-600 underline">
-              Ouvrir la carte publique (QR) ↗
-            </a>
-          )}
-        </div>
+    <section className="rounded-2xl bg-gray-50 p-4 text-sm text-gray-700 ring-1 ring-gray-200" aria-label={LIBELLE_WALLET}>
+      <p className="flex items-center gap-2 font-semibold text-gray-900">
+        <span aria-hidden>👛</span> {LIBELLE_WALLET} {demo && <BadgeDemo>Démo</BadgeDemo>}
+      </p>
+      <ul className="mt-1.5 space-y-0.5">
+        {ETATS_WALLET.map((e) => (
+          <li key={e}>· {e}</li>
+        ))}
+      </ul>
+      <p className="mt-1.5">{EXPLICATION_WALLET}</p>
+      {lienCarte && (
+        <a href={lienCarte} className="mt-1 flex min-h-11 items-center font-semibold text-marque-700 underline">
+          Ouvrir la carte publique (QR) ↗
+        </a>
       )}
-    </div>
+    </section>
   )
 }
 

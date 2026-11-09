@@ -68,7 +68,11 @@ interface Store {
   /** Applique les règles automatiques aux avis sans réponse du commerce. */
   appliquerReglesAvis(commerceId: string): Promise<void>
   exporterCsv(commerceId: string): Promise<{ nom: string; contenu: string }>
+  /** Mode serveur : appel avec le PIN mémorisé, puis rechargement de l'état. Mode local : refusé (fonction serveur). */
+  avecPin<T>(f: (a: Acces, api: ClientApi) => Promise<T>): Promise<T>
 }
+
+export const MESSAGE_MODE_SERVEUR = 'Disponible avec le serveur (données partagées) : pas dans la démo locale.'
 
 const Contexte = createContext<Store | null>(null)
 
@@ -176,6 +180,9 @@ function StoreLocal({ children, depot }: { children: ReactNode; depot: Depot }) 
         setEtat((e) => ({ ...e, avis: e.avis.map((a) => (a.id === avis.id ? nouveau : a)) }))
       },
       appliquerReglesAvis: async (commerceId: string) => setEtat((e) => avecReglesAppliquees(e, commerceId)),
+      avecPin: async () => {
+        throw new Error(MESSAGE_MODE_SERVEUR)
+      },
     }),
     [depot, majClient],
   )
@@ -385,6 +392,10 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
             seuilTampons: c.seuilTampons,
             lots: c.lots,
             reglesReponseAuto: c.reglesReponseAuto,
+            ...(c.eurosParPoint !== undefined ? { eurosParPoint: c.eurosParPoint } : {}),
+            ...(c.catalogue ? { catalogue: c.catalogue } : {}),
+            ...(c.messagesAuto ? { messagesAuto: c.messagesAuto } : {}),
+            ...(c.apparence ? { apparence: c.apparence } : {}),
           })
         }),
       creerCommerce: (n: NouveauCommerce) =>
@@ -419,6 +430,7 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
         if (!a) throw new Error('Déverrouillez d’abord avec votre PIN.')
         return { nom: nomFichierCsv(commerceId), contenu: await api.exportCsv(commerceId, a) }
       },
+      avecPin: <T,>(f: (a: Acces, api: ClientApi) => Promise<T>) => avecPin((a) => f(a, api)),
     }),
     [api, avecPin, commerceDe, depot, deverrouiller, etat.commerces, recharger, verrouiller],
   )
@@ -461,6 +473,8 @@ export function useDonneesCommerce() {
       clients: etat.clients.filter((c) => c.commerceId === commerce.id),
       tirages: etat.tirages.filter((t) => t.commerceId === commerce.id).sort((a, b) => b.date.localeCompare(a.date)),
       avis: etat.avis.filter((a) => a.commerceId === commerce.id).sort((a, b) => b.date.localeCompare(a.date)),
+      membres: (etat.membres ?? []).filter((m) => m.commerceId === commerce.id),
+      journal: (etat.journal ?? []).filter((j) => j.commerceId === commerce.id).sort((a, b) => b.date.localeCompare(a.date)),
     }),
     [etat, commerce],
   )

@@ -4,7 +4,10 @@ import { BlocRgpd, EnTete, Icone, LogoCommerce } from '../components/ui'
 import { NOM_APP } from '../data/defaults'
 
 const LIENS: { page: Page; titre: string; aide: string }[] = [
-  { page: 'reglages', titre: 'Réglages', aide: 'Nom, logo, lien Google, récompense, lots, réponses auto' },
+  { page: 'equipe', titre: 'Équipe et caisse', aide: 'Membres, codes à 4 chiffres, lien de la caisse du comptoir' },
+  { page: 'messages', titre: 'Messages', aide: 'Messages automatiques et ciblés, texte prêt à copier' },
+  { page: 'menuCarte', titre: 'Menu', aide: 'Catégories, produits, prix, photos, allergènes, QR du menu' },
+  { page: 'reglages', titre: 'Réglages', aide: 'Récompenses, points, messages auto, apparence de la carte, lots, avis' },
   { page: 'offre', titre: `L’offre ${NOM_APP}`, aide: 'Gratuit · kit de lancement (flyers, étiquettes QR, vitrine)' },
   { page: 'admin', titre: 'Admin', aide: 'Tous les commerces, ajout, activation, réinitialisation de la démo' },
 ]
@@ -20,8 +23,9 @@ const SIMULE_LOCAL = [
 const SIMULE_API = [
   'Données partagées sur le serveur : le comptoir et le téléphone du client voient les mêmes cartes et tirages.',
   'Avis Google : pas de connexion à Google (à brancher) ; avis saisis à la main, aucune réponse n’est publiée sur Google.',
-  'Relances : à copier-coller, aucun SMS ni e-mail n’est envoyé (envoi à brancher).',
-  'Wallet : à brancher — Apple Wallet en suspens, Google Wallet sans compte émetteur ; aucun pass créé.',
+  'Messages : affichés dans l’espace client (sur sa carte) et à copier-coller ; aucun SMS ni e-mail n’est envoyé (envoi à brancher).',
+  'Caisse : fonctionne hors ligne sur l’appareil du comptoir ; les actions sont envoyées au retour du réseau, sans double comptage.',
+  'Wallet : bientôt — Apple Wallet en suspens, Google Wallet sans compte émetteur ; aucun pass créé.',
   'Aucun paiement ni souscription réelle.',
 ]
 

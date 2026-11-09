@@ -47,6 +47,10 @@ const SCHEMA: Record<string, { pk: string; uniques: Unicite[]; fk?: [string, str
     fk: [['commerce_id', 'commerces'], ['client_id', 'clients']],
   },
   avis: { pk: 'id', uniques: [], fk: [['commerce_id', 'commerces']], version: true },
+  // 0003_cartiz.sql
+  equipe: { pk: 'id', uniques: [], fk: [['commerce_id', 'commerces']], ordre: true, version: true },
+  journal: { pk: 'id', uniques: [], fk: [['commerce_id', 'commerces']] },
+  menus: { pk: 'commerce_id', uniques: [], fk: [['commerce_id', 'commerces']], version: true },
 }
 
 interface Requete {
@@ -57,7 +61,9 @@ interface Requete {
   corps: unknown
 }
 
-function fauxPostgrest() {
+/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). */
+function fauxPostgrest({ sans0003 = false } = {}) {
+  const absentes = new Set(sans0003 ? ['equipe', 'journal', 'menus'] : [])
   const tables: Record<string, Ligne[]> = Object.fromEntries(Object.keys(SCHEMA).map((t) => [t, []]))
   const requetes: Requete[] = []
   const rejets: string[] = []
@@ -82,7 +88,8 @@ function fauxPostgrest() {
       const val = (l: Ligne) => (col === 'date' ? Date.parse(String(l[col])) : Number(l[col]))
       lignes = [...lignes].sort((a, b) => (val(a) - val(b)) * (sens === 'desc' ? -1 : 1))
     }
-    return lignes
+    const limite = params.get('limit')
+    return limite ? lignes.slice(0, Number(limite)) : lignes
   }
 
   const projeter = (lignes: Ligne[], select: string | null) =>
@@ -103,7 +110,7 @@ function fauxPostgrest() {
   async function traiter(methode: string, table: string, params: URLSearchParams, entetes: Headers, corps: unknown): Promise<Response> {
     if (entetes.get('apikey') !== CLE || entetes.get('authorization') !== `Bearer ${CLE}`) return erreur(401, 'PGRST301', 'clé absente')
     if (panne) return erreur(500, 'XX000', 'base indisponible') // (503 / 520 : supabase-js réessaie seul les lectures)
-    if (!SCHEMA[table]) return erreur(404, 'PGRST205', `table inconnue ${table}`)
+    if (!SCHEMA[table] || absentes.has(table)) return erreur(404, 'PGRST205', `Could not find the table 'public.${table}' in the schema cache`)
     const s = SCHEMA[table]
     const representation = (entetes.get('prefer') ?? '').includes('return=representation')
 
@@ -143,6 +150,12 @@ function fauxPostgrest() {
         Object.assign(l, apres)
       }
       return representation ? json(200, projeter(cibles, params.get('select'))) : new Response(null, { status: 204 })
+    }
+
+    if (methode === 'DELETE') {
+      const cibles = new Set(filtrer(table, params))
+      tables[table] = tables[table].filter((l) => !cibles.has(l))
+      return new Response(null, { status: 204 })
     }
     return erreur(405, 'PGRST000', 'méthode non gérée')
   }
@@ -434,6 +447,66 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.deepEqual(f.tables.meta.map((m) => m.cle), ['initialise'], 'pas de ligne meta « demo »')
       const etat = (await api('GET', `/commerces/${AH}/etat`, undefined, { 'X-Commerce-PIN': '4826' })).contenu
       assert.deepEqual([etat.clients.length, etat.tirages.length, etat.avis.length], [0, 0, 0])
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('production AVANT la migration 0003 : l’existant marche (visite, récompense, état, roue), les nouveautés → 503 explicite', async () => {
+    const f = fauxPostgrest({ sans0003: true })
+    const { app, api } = await demarrer(f)
+    try {
+      assert.equal((await api('GET', '/sante')).contenu.migrations.cartiz, false)
+      const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
+      const v = await api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)
+      assert.equal(v.statut, 200, 'la visite reste enregistrée (seule la trace du journal manque)')
+      assert.equal(v.contenu.client.tampons, 1)
+      const etat = await api('GET', `/commerces/${AH}/etat`, undefined, PIN)
+      assert.deepEqual([etat.statut, etat.contenu.membres, etat.contenu.journal], [200, [], []])
+      assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).statut, 201)
+      assert.equal((await api('GET', `/cartes/${c.id}`)).statut, 200)
+      const m = await api('POST', `/commerces/${AH}/equipe`, { nom: 'Mai', code: '2468' }, PIN)
+      assert.equal(m.statut, 503)
+      assert.match(m.contenu.erreur, /0003_cartiz\.sql/)
+      assert.equal((await api('PUT', `/commerces/${AH}/menu`, { categories: [] }, PIN)).statut, 503)
+      assert.equal((await api('GET', `/commerces/${AH}/caisse`, undefined, { 'X-Equipe-Code': '2468' })).statut, 503, 'pas « code incorrect »')
+      assert.equal((await api('GET', `/commerces/${AH}/menu`)).statut, 200)
+    } finally {
+      await app.fermer()
+    }
+    // Après la migration : /sante le dit.
+    const g = fauxPostgrest()
+    const apres = await demarrer(g)
+    try {
+      assert.equal((await apres.api('GET', '/sante')).contenu.migrations.cartiz, true)
+    } finally {
+      await apres.app.fermer()
+    }
+  })
+
+  test('Cartiz sous Supabase : équipe (code haché hors donnees), caisse + points, journal, menu, suppression d’un membre', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const m = await api('POST', `/commerces/${AH}/equipe`, { nom: 'Mai', code: '2468' }, PIN)
+      assert.equal(m.statut, 201)
+      assert.match(String(f.tables.equipe[0].code_hash), /^[0-9a-f]{64}$/)
+      assert.ok(!JSON.stringify(f.tables.equipe).includes('2468'), 'code jamais stocké en clair')
+      const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
+      const p = await api('POST', `/commerces/${AH}/caisse/passage`, { clientId: c.id, montantCentimes: 1200, actionId: 'act-sb-0001' }, { 'X-Equipe-Code': '2468' })
+      assert.deepEqual([p.statut, p.contenu.client.tampons, p.contenu.client.points], [200, 1, 12])
+      const bis = await api('POST', `/commerces/${AH}/caisse/passage`, { clientId: c.id, montantCentimes: 1200, actionId: 'act-sb-0001' }, { 'X-Equipe-Code': '2468' })
+      assert.equal(bis.contenu.dejaTraite, true)
+      assert.equal((f.tables.clients[0].donnees as Client).points, 12)
+      assert.equal(f.tables.journal.length, 2, 'ajout du membre + 1 passage (le rejeu n’est pas journalisé)')
+      assert.equal((await api('PUT', `/commerces/${AH}/menu`, { categories: [{ nom: 'Plats', produits: [{ nom: 'Pho', prix: 1290, allergenes: [] }] }] }, PIN)).statut, 200)
+      assert.equal((await api('PUT', `/commerces/${AH}/menu`, { categories: [{ nom: 'Plats', produits: [{ nom: 'Pho', prix: 1390, allergenes: [] }] }] }, PIN)).statut, 200)
+      assert.equal(f.tables.menus.length, 1, 'upsert : un seul menu par commerce')
+      assert.equal(((await api('GET', `/commerces/${AH}/menu`)).contenu.menu.categories[0].produits[0].prix), 1390)
+      const etat = (await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu
+      assert.deepEqual(etat.journal.map((e: { action: string }) => e.action).sort(), ['equipe', 'menu', 'menu', 'passage'])
+      assert.equal((await api('DELETE', `/commerces/${AH}/equipe/${m.contenu.membre.id}`, undefined, PIN)).statut, 200)
+      assert.equal(f.tables.equipe.length, 0)
     } finally {
       await app.fermer()
     }

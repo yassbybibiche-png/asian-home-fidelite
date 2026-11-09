@@ -1,8 +1,18 @@
 import { useState } from 'react'
 import { useDonneesCommerce, useStore } from '../store'
-import { calculerChiffres, noteMoyenne } from '../lib/stats'
+import { calculerChiffres, calculerChiffresCartes, noteMoyenne } from '../lib/stats'
 import { dateRelative } from '../lib/format'
 import { Etoiles, Vide } from '../components/ui'
+import type { ActionJournal } from '../types'
+
+const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
+  passage: 'Passage',
+  recompense: 'Récompense',
+  echange: 'Échange de points',
+  message: 'Message',
+  equipe: 'Équipe',
+  menu: 'Menu',
+}
 
 function Chiffre({ valeur, libelle, aide }: { valeur: string | number; libelle: string; aide: string }) {
   return (
@@ -27,9 +37,11 @@ function Raccourci({ href, icone, libelle }: { href: string; icone: string; libe
 }
 
 export default function TableauDeBord() {
-  const { commerce, clients, avis, tirages } = useDonneesCommerce()
-  const { estDemo } = useStore()
+  const { commerce, clients, avis, tirages, journal } = useDonneesCommerce()
+  const { estDemo, mode } = useStore()
   const chiffres = calculerChiffres(clients, avis)
+  const cartes = calculerChiffresCartes(clients)
+  const [toutLeJournal, setToutLeJournal] = useState(false)
   const moyenne = noteMoyenne(avis)
   const prenom = (id: string) => clients.find((c) => c.id === id)?.prenom ?? 'Client'
   const [toutLesGains, setToutLesGains] = useState(false)
@@ -57,11 +69,80 @@ export default function TableauDeBord() {
         <Chiffre valeur={`${chiffres.tauxRetour} %`} libelle="Taux de retour" aide="clients venus 2 fois ou +" />
       </section>
 
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-4" aria-label="Cartes de fidélité">
+        <Chiffre valeur={cartes.cartesEmises} libelle="Cartes émises" aide="clients inscrits" />
+        <Chiffre valeur={cartes.passagesTotal} libelle="Passages" aide={`dont ${cartes.passages30j} sur 30 jours`} />
+        <Chiffre valeur={cartes.recompensesDonnees} libelle="Récompenses données" aide="cartes complètes + échanges de points" />
+        <Chiffre valeur={cartes.pointsEnCirculation} libelle="Points en cours" aide="soldes des clients" />
+      </section>
+
       <nav className="grid grid-cols-3 gap-2" aria-label="Actions rapides">
-        <Raccourci href="#/clients" icone="✓" libelle="Valider une visite" />
+        {mode === 'api' ? (
+          <Raccourci href={`#/caisse/${commerce.id}`} icone="🧾" libelle="Caisse" />
+        ) : (
+          <Raccourci href="#/clients" icone="✓" libelle="Valider une visite" />
+        )}
         <Raccourci href="#/qr" icone="▦" libelle="QR vitrine" />
         <Raccourci href="#/avis" icone="★" libelle="Répondre aux avis" />
+        <Raccourci href="#/equipe" icone="👥" libelle="Équipe" />
+        <Raccourci href="#/menuCarte" icone="📖" libelle="Menu" />
+        <Raccourci href="#/messages" icone="✉" libelle="Messages" />
       </nav>
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <section>
+          <h2 className="titre-carte mb-2">Clients les plus fidèles</h2>
+          {cartes.plusFideles.length === 0 ? (
+            <Vide>Aucun passage pour l’instant.</Vide>
+          ) : (
+            <ol className="carte divide-y divide-gray-100 py-1 sm:py-1">
+              {cartes.plusFideles.map((c, i) => (
+                <li key={c.id}>
+                  <a href={`#/client/${c.id}`} className="flex min-h-12 items-center justify-between gap-3 py-2">
+                    <span className="font-semibold">
+                      {i + 1}. {c.prenom}
+                    </span>
+                    <span className="shrink-0 text-sm text-gray-600 tabular-nums">
+                      {c.passages} passage{c.passages > 1 ? 's' : ''} · {c.points} pts
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+
+        {mode === 'api' && (
+          <section>
+            <div className="mb-2 flex items-baseline justify-between">
+              <h2 className="titre-carte">Journal de l’équipe</h2>
+              {journal.length > 8 && (
+                <button className="lien" onClick={() => setToutLeJournal((t) => !t)}>
+                  {toutLeJournal ? 'Réduire' : `Tout voir (${journal.length})`}
+                </button>
+              )}
+            </div>
+            {journal.length === 0 ? (
+              <Vide>Aucune action pour l’instant. Chaque passage, récompense et échange y sera tracé (qui, quel client, quand).</Vide>
+            ) : (
+              <ul className="carte divide-y divide-gray-100 py-1 text-sm sm:py-1">
+                {(toutLeJournal ? journal : journal.slice(0, 8)).map((e) => (
+                  <li key={e.id} className="py-2.5">
+                    <p className="flex justify-between gap-3">
+                      <span>
+                        <strong>{e.auteur.nom}</strong> · {LIBELLES_JOURNAL[e.action]}
+                        {e.clientPrenom && <> · {e.clientPrenom}</>}
+                      </span>
+                      <span className="shrink-0 text-gray-600">{dateRelative(e.date)}</span>
+                    </p>
+                    <p className="text-gray-700">{e.details}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+      </div>
 
       <div className="grid gap-6 md:grid-cols-2">
         <section>

@@ -1,10 +1,90 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { useAction, useStore } from '../store'
 import { useRoute } from '../router'
+import type { Client, Commerce } from '../types'
 import { recompenseDebloquee } from '../lib/fidelite'
+import { soldePoints, formaterPrix } from '../lib/points'
+import { analyserAnniversaire, anniversaireAffiche } from '../lib/messages'
+import { nouvelIdAction } from '../lib/fileCaisse'
 import { dateCourte, dateRelative } from '../lib/format'
 import { CarteFidelite } from '../components/CarteFidelite'
-import { BoutonWallet, EnTete, MessageErreur, Vide } from '../components/ui'
+import { EncartWallet, EnTete, MessageErreur, Vide } from '../components/ui'
+
+/** Mode serveur : points (échange contre le catalogue), historique des échanges, anniversaire. */
+function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: Commerce }) {
+  const { avecPin } = useStore()
+  const { executer, enCours, erreur } = useAction()
+  const [anniv, setAnniv] = useState(anniversaireAffiche(client.anniversaire))
+  const [annonce, setAnnonce] = useState('')
+  const valeur = analyserAnniversaire(anniv)
+  const solde = soldePoints(client)
+
+  async function enregistrerAnniv(e: FormEvent) {
+    e.preventDefault()
+    if (valeur === null) return
+    const r = await executer(() => avecPin((a, api) => api.majClient(commerce.id, a, client.id, { anniversaire: valeur })))
+    if (r.ok) setAnnonce('✓ Anniversaire enregistré')
+  }
+
+  return (
+    <section className="carte space-y-3">
+      <h2 className="titre-carte">Points : {solde}</h2>
+      <p className="text-sm text-gray-600">
+        Dépensé au total : {formaterPrix(client.depenseCentimes ?? 0)}. Les points se gagnent en caisse (montant du passage).
+      </p>
+      {!!commerce.catalogue?.length && (
+        <ul className="space-y-2">
+          {commerce.catalogue.map((r) => (
+            <li key={r.id}>
+              <button
+                className="bouton-secondaire min-h-12 w-full justify-between"
+                disabled={enCours || solde < r.cout}
+                onClick={async () => {
+                  if (!window.confirm(`Échanger ${r.cout} points contre « ${r.nom} » ?`)) return
+                  const res = await executer(() => avecPin((a, api) => api.actionCaisse(commerce.id, a, 'echange', { clientId: client.id, recompenseId: r.id, actionId: nouvelIdAction() })))
+                  if (res.ok) setAnnonce(`✓ Échange enregistré : ${r.nom}`)
+                }}
+              >
+                <span>Échanger : {r.nom}</span>
+                <span className="tabular-nums">{r.cout} pts</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!!client.echangesPoints?.length && (
+        <ul className="divide-y divide-gray-100 text-sm">
+          {[...client.echangesPoints].reverse().slice(0, 10).map((e) => (
+            <li key={e.id} className="flex justify-between gap-3 py-2">
+              <span>
+                🔁 {e.libelle} (−{e.cout} pts, {e.soldeAvant} → {e.soldeApres}) · {e.auteur}
+              </span>
+              <span className="shrink-0 text-gray-600">{dateRelative(e.date)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={enregistrerAnniv} className="flex items-end gap-2 border-t border-gray-100 pt-3">
+        <div className="min-w-0 flex-1">
+          <label className="etiquette" htmlFor="anniv">
+            Anniversaire (JJ/MM, optionnel)
+          </label>
+          <input id="anniv" className="champ" inputMode="numeric" placeholder="21/03" value={anniv} onChange={(e) => (setAnniv(e.target.value), setAnnonce(''))} />
+        </div>
+        <button className="bouton-secondaire h-12 shrink-0" disabled={enCours || valeur === null}>
+          Enregistrer
+        </button>
+      </form>
+      {valeur === null && <p className="text-sm text-red-700">Format attendu : JJ/MM (ex : 21/03).</p>}
+      <MessageErreur>{erreur}</MessageErreur>
+      {annonce && (
+        <p className="alerte-succes" role="status">
+          {annonce}
+        </p>
+      )}
+    </section>
+  )
+}
 
 /** Fiche client côté commerçant : la carte + les actions de caisse. */
 export default function FicheClient() {
@@ -93,7 +173,9 @@ export default function FicheClient() {
         </p>
       </section>
 
-      <BoutonWallet demo={estDemo} lienCarte={`#/carte/${client.id}`} />
+      {mode === 'api' && <PointsEtAnniversaire client={client} commerce={commerce} />}
+
+      <EncartWallet demo={estDemo} lienCarte={`#/carte/${client.id}`} />
 
       <a href={`#/carte/${client.id}`} className="bouton-secondaire w-full">
         Voir la carte comme le client ↗

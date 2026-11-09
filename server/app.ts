@@ -5,17 +5,21 @@ import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Avis, Client, Commerce, Lot, Tirage, TypeCommerce } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, EntreeJournal, Lot, MembreEquipe, RecompensePoints, ReglesMessages, Tirage, TypeCommerce } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
-import { analyserContact, cleContact, messageRelance, nouveauClient, offrirRecompense, recompenseDebloquee, validerVisite } from '../src/lib/fidelite.ts'
+import { analyserContact, cleContact, messageRelance, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches, validerVisite } from '../src/lib/fidelite.ts'
 import { estPerdant, lotsJouables, statutJeu, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles } from '../src/lib/avis.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
-import { ErreurConflit, ouvrirStockage, type Pin, type Stockage } from './stockage.ts'
+import { actionDejaTraitee, avecAction, echangerPoints, enregistrerPassage, formaterPrix } from '../src/lib/points.ts'
+import { clientsCibles, deposerMessage, genererMessages, marquerLus, TYPES_MESSAGES, type Cible, type Evenement } from '../src/lib/messages.ts'
+import { problemesApparence } from '../src/lib/apparence.ts'
+import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
+import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type Pin, type Stockage } from './stockage.ts'
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
-import { payloadGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
+import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications } from './notifications/index.ts'
 
 export interface OptionsServeur {
@@ -154,7 +158,41 @@ function lots(v: unknown): Lot[] {
   return liste
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif']
+function catalogue(v: unknown): RecompensePoints[] {
+  if (!Array.isArray(v) || v.length > 30) throw err(400, '« catalogue » doit être une liste de 30 récompenses maximum.')
+  const ids = new Set<string>()
+  return v.map((x: unknown, i) => {
+    const o = (x ?? {}) as Corps
+    const cout = o.cout
+    if (typeof cout !== 'number' || !Number.isInteger(cout) || cout < 1 || cout > 100_000) throw err(400, `Récompense n° ${i + 1} : le coût doit être un nombre entier de points (1 à 100 000).`)
+    const id = typeof o.id === 'string' && /^[\w-]{1,60}$/.test(o.id) ? o.id : `rp-${randomUUID().slice(0, 8)}`
+    if (ids.has(id)) throw err(400, 'Identifiant de récompense en double.')
+    ids.add(id)
+    const r: RecompensePoints = { id, nom: texte(o.nom, `récompense n° ${i + 1}`, 80, { requis: true }), cout }
+    const description = o.description == null ? '' : texte(o.description, `description de la récompense n° ${i + 1}`, 200)
+    if (description) r.description = description
+    return r
+  })
+}
+
+function reglesMessages(v: unknown): ReglesMessages {
+  const o = (v ?? {}) as Corps
+  return Object.fromEntries(TYPES_MESSAGES.map(({ type }) => [type, booleen(o[type] ?? false, type)])) as ReglesMessages
+}
+
+function apparence(v: unknown): Apparence {
+  const o = (v ?? {}) as Corps
+  const a: Apparence = {}
+  for (const k of ['couleur', 'fond', 'banniere'] as const) {
+    const s = o[k] == null ? '' : texte(o[k], k, 500)
+    if (s) a[k] = s
+  }
+  const p = problemesApparence(a)
+  if (p.length) throw err(400, p.join(' '))
+  return a
+}
+
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence']
 
 /** Réglages modifiables d'un commerce : tout autre champ est refusé (400). */
 function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGES): Commerce {
@@ -182,7 +220,24 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
     }
   }
   if ('actif' in corps) r.actif = booleen(corps.actif, 'actif')
+  if ('eurosParPoint' in corps) {
+    const e = corps.eurosParPoint
+    if (typeof e !== 'number' || !Number.isFinite(e) || e < 0.1 || e > 1000 || Math.round(e * 100) !== e * 100) {
+      throw err(400, '« eurosParPoint » : nombre d’euros pour 1 point, entre 0,10 et 1 000 (2 décimales maximum).')
+    }
+    r.eurosParPoint = e
+  }
+  if ('catalogue' in corps) r.catalogue = catalogue(corps.catalogue)
+  if ('messagesAuto' in corps) r.messagesAuto = reglesMessages(corps.messagesAuto)
+  if ('apparence' in corps) r.apparence = apparence(corps.apparence)
   return r
+}
+
+const CODE_EQUIPE = /^\d{4}$/
+
+function codeEquipe(v: unknown): string {
+  if (typeof v !== 'string' || !CODE_EQUIPE.test(v)) throw err(400, 'Le code équipe doit contenir exactement 4 chiffres.')
+  return v
 }
 
 function contactOuErreur(v: unknown) {
@@ -195,13 +250,19 @@ function contactOuErreur(v: unknown) {
 
 /** Fiche publique d'un commerce (le PIN est stocké à part et n'en fait jamais partie). */
 function commercePublic(c: Commerce) {
-  const { id, nom, type, logo, actif, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, demo } = c
-  return { id, nom, type, logo, actif, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, demo: !!demo }
+  const { id, nom, type, logo, actif, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, demo, eurosParPoint, catalogue, apparence } = c
+  return { id, nom, type, logo, actif, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, demo: !!demo, eurosParPoint, catalogue, apparence }
 }
 
-/** Carte vue par le client lui-même (page publique) : sans téléphone ni e-mail. */
+/** Carte vue par le client lui-même (page publique) : sans téléphone, e-mail ni données techniques. */
 function cartePublique(c: Client) {
-  const { telephone: _t, email: _e, ...reste } = c
+  const { telephone: _t, email: _e, actionsTraitees: _a, clesMessages: _k, ...reste } = c
+  return reste
+}
+
+/** Client vu en caisse : contact (pour la recherche) et soldes, sans la boîte de réception ni les données techniques. */
+function clientCaisse(c: Client) {
+  const { messages: _m, clesMessages: _k, actionsTraitees: _a, ...reste } = c
   return reste
 }
 
@@ -278,13 +339,15 @@ function servirStatique(dossier: string, chemin: string, res: ServerResponse): b
 // ---------- Serveur ----------
 
 const TAILLE_MAX_CORPS = 64 * 1024
+/** Le menu peut contenir des photos compressées (60 Ko chacune au plus). */
+const TAILLE_MAX_MENU = 3 * 1024 * 1024
 
-async function lireCorps(req: IncomingMessage): Promise<Corps> {
+async function lireCorps(req: IncomingMessage, max = TAILLE_MAX_CORPS): Promise<Corps> {
   let taille = 0
   const morceaux: Buffer[] = []
   for await (const m of req) {
     taille += (m as Buffer).length
-    if (taille > TAILLE_MAX_CORPS) throw err(413, 'Requête trop volumineuse.')
+    if (taille > max) throw err(413, 'Requête trop volumineuse.')
     morceaux.push(m as Buffer)
   }
   if (!taille) return {}
@@ -356,6 +419,79 @@ export async function creerServeur(o: OptionsServeur) {
 
   const aUnPin = (req: IncomingMessage) => !!(enTete(req, 'x-commerce-pin') || enTete(req, 'x-admin-pin'))
 
+  type Auteur = EntreeJournal['auteur']
+
+  /**
+   * Auteur d'une action de caisse : membre de l'équipe (X-Equipe-Code, 4 chiffres) ou gérant (PIN commerce / admin).
+   * Le code n'est jamais renvoyé ni écrit dans le journal : seul le nom du membre l'est.
+   */
+  async function exigerAuteur(req: IncomingMessage, commerceId: string): Promise<{ auteur: Auteur; membre?: MembreEquipe }> {
+    const code = enTete(req, 'x-equipe-code')
+    if (!code) {
+      await exigerCommercant(req, commerceId)
+      return { auteur: { type: 'gerant', nom: enTete(req, 'x-admin-pin') ? 'Admin' : 'Gérant' } }
+    }
+    const ip = ipDe(req)
+    limiteur.verifier(ip)
+    const trouve = CODE_EQUIPE.test(code) ? (await st.membres(commerceId)).find((m) => pinCorrect(code, m.code)) : undefined
+    if (!trouve) {
+      if (!(await schemaCartiz())) throw new ErreurMigrationManquante('equipe')
+      limiteur.echec(ip)
+      throw err(401, 'Code équipe incorrect.')
+    }
+    return { auteur: { type: 'membre', id: trouve.membre.id, nom: trouve.membre.nom }, membre: trouve.membre }
+  }
+
+  async function journaliser(commerceId: string, auteur: Auteur, action: EntreeJournal['action'], details: string, client?: Client, date = maintenant()) {
+    const e: EntreeJournal = { id: `jr-${randomUUID()}`, commerceId, date: date.toISOString(), action, auteur, details }
+    if (client) {
+      e.clientId = client.id
+      e.clientPrenom = client.prenom
+    }
+    await st.ajouterJournal(e)
+  }
+
+  const nouvelIdMessage = () => `msg-${randomUUID()}`
+
+  // Vérifié au plus une fois par minute tant que la migration manque ; une fois présente, plus de vérification.
+  let cartizPresent = false
+  let cartizVerifieLe = 0
+  async function schemaCartiz(): Promise<boolean> {
+    if (cartizPresent || Date.now() - cartizVerifieLe < 60_000) return cartizPresent
+    cartizVerifieLe = Date.now()
+    try {
+      cartizPresent = await st.schemaCartiz()
+    } catch {
+      cartizPresent = false
+    }
+    return cartizPresent
+  }
+
+  /** Messages automatiques dus pour cet événement (règles du commerce). */
+  const avecMessages = (client: Client, commerce: Commerce, evenement: Evenement, t = maintenant()) =>
+    genererMessages(client, commerce, evenement, t, nouvelIdMessage).client
+
+  /** Heure réelle d'une action faite hors ligne : acceptée si elle date de moins de 72 h (sinon : maintenant). */
+  function quandAction(v: unknown): Date {
+    const t = maintenant()
+    if (typeof v !== 'string') return t
+    const d = new Date(v)
+    const ecart = t.getTime() - d.getTime()
+    return Number.isNaN(d.getTime()) || ecart > 72 * 3600_000 || ecart < -5 * 60_000 ? t : d
+  }
+
+  function idAction(v: unknown): string | undefined {
+    if (v == null) return undefined
+    if (typeof v !== 'string' || !/^[\w-]{8,80}$/.test(v)) throw err(400, '« actionId » invalide.')
+    return v
+  }
+
+  async function verifierCodeLibre(commerceId: string, code: string, sauf?: string) {
+    if ((await st.membres(commerceId)).some((m) => m.membre.id !== sauf && pinCorrect(code, m.code))) {
+      throw err(409, 'Ce code est déjà utilisé par un autre membre de l’équipe : choisissez-en un autre.')
+    }
+  }
+
   async function commerceOu404(id: string): Promise<Commerce> {
     const c = await st.commerce(id)
     if (!c) throw err(404, 'Commerce inconnu.')
@@ -373,11 +509,12 @@ export async function creerServeur(o: OptionsServeur) {
   }
 
   /** Inscrit le client, ou retrouve celui qui a déjà ce téléphone / e-mail dans ce commerce. */
-  async function inscrireOuRetrouver(commerceId: string, prenom: string, contactSaisi: unknown) {
+  async function inscrireOuRetrouver(commerce: Commerce, prenom: string, contactSaisi: unknown) {
+    const commerceId = commerce.id
     const contact = contactOuErreur(contactSaisi)
     const existant = await st.clientParContact(commerceId, contact)
     if (existant) return { client: existant, existant: true }
-    const client = nouveauClient(commerceId, prenom, contact, maintenant())
+    const client = avecMessages(nouveauClient(commerceId, prenom, contact, maintenant()), commerce, 'inscription')
     try {
       await st.ajouterClient(client)
     } catch (e) {
@@ -396,25 +533,67 @@ export async function creerServeur(o: OptionsServeur) {
     const [ressource, id, sous, sousId, action] = chemin
 
     if (ressource === 'sante' && !id && m === 'GET') {
-      return { json: { ok: true, version: o.version ?? '0.0.0', mode: o.production ? 'production' : 'developpement', stockage: st.type, demo: !!o.demo, integrations: integrations() } }
+      return {
+        json: {
+          ok: true,
+          version: o.version ?? '0.0.0',
+          mode: o.production ? 'production' : 'developpement',
+          stockage: st.type,
+          demo: !!o.demo,
+          integrations: integrations(),
+          // Migration 0003 (équipe, journal, menu) appliquée sur la base ?
+          migrations: { cartiz: await schemaCartiz() },
+        },
+      }
     }
     if (ressource === 'cartes' && id && !sous && m === 'GET') {
       // PUBLIC (ajout V2) : la carte vue par le client (#/carte/<clientId>) et l'état de son jeu du jour.
       // Mêmes informations que POST /clients en public : jamais de téléphone, d'e-mail ni de code gagnant.
       for (const c of await st.commerces()) {
-        const client = await st.client(c.id, id)
+        let client = await st.client(c.id, id)
         if (!client) continue
         exigerActif(c)
         const tirages = await st.tiragesClient(c.id, client.id)
         const t = maintenant()
         const duJour = tirageDuJour(tirages, c.id, client.id, t)
+        // Ouverture de la carte : relance des inactifs / anniversaire, si ces règles sont activées (une seule fois chacune).
+        const avec = avecMessages(client, c, 'ouverture', t)
+        if (avec !== client) {
+          try {
+            await st.transaction(async () => {
+              const frais = await clientOu404(c.id, id)
+              const maj = avecMessages(frais, c, 'ouverture', t)
+              if (maj !== frais) await st.majClient(maj)
+            })
+            client = avec
+          } catch (e) {
+            // Écriture concurrente : la carte s'affiche quand même, le message viendra à la prochaine ouverture.
+            if (!(e instanceof ErreurConflit)) throw e
+          }
+        }
+        const menu = await st.menu(c.id)
         return {
           json: {
             client: cartePublique(client),
             commerce: commercePublic(c),
             jeu: { statut: statutJeu(client, tirages, c.id, t), lotDuJour: duJour?.lot ?? null },
+            menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
           },
         }
+      }
+      throw err(404, 'Carte de fidélité introuvable.')
+    }
+    if (ressource === 'cartes' && id && sous === 'lus' && m === 'POST') {
+      // PUBLIC : le client marque ses messages comme lus (même niveau d'accès que la lecture de sa carte).
+      for (const c of await st.commerces()) {
+        if (!(await st.client(c.id, id))) continue
+        exigerActif(c)
+        await st.transaction(async () => {
+          const avant = await clientOu404(c.id, id)
+          const apres = marquerLus(avant)
+          if (apres !== avant) await st.majClient(apres)
+        })
+        return { json: { ok: true } }
       }
       throw err(404, 'Carte de fidélité introuvable.')
     }
@@ -457,7 +636,16 @@ export async function creerServeur(o: OptionsServeur) {
 
     if (sous === 'etat' && m === 'GET') {
       await exigerCommercant(req, id)
-      return { json: { commerce, clients: await st.clients(id), tirages: await st.tirages(id), avis: await st.avis(id) } }
+      return {
+        json: {
+          commerce,
+          clients: (await st.clients(id)).map(clientCaisse),
+          tirages: await st.tirages(id),
+          avis: await st.avis(id),
+          membres: (await st.membres(id)).map((m) => m.membre),
+          journal: await st.journal(id, 200),
+        },
+      }
     }
 
     if (sous === 'pin' && m === 'PUT') {
@@ -479,38 +667,226 @@ export async function creerServeur(o: OptionsServeur) {
       else exigerActif(commerce)
       const corps = await lireCorps(req)
       const prenom = texte(corps.prenom ?? '', 'prenom', 40, { requis: true })
-      const { client, existant } = await st.transaction(() => inscrireOuRetrouver(id, prenom, corps.contact))
+      const { client, existant } = await st.transaction(() => inscrireOuRetrouver(commerce, prenom, corps.contact))
       return { statut: existant ? 200 : 201, json: { client: commercant ? client : cartePublique(client), existant } }
     }
 
     if (sous === 'clients' && sousId && m === 'POST' && (action === 'visite' || action === 'recompense')) {
-      await exigerCommercant(req, id)
+      const { auteur } = await exigerAuteur(req, id)
       const client = await st.transaction(async () => {
         const avant = await clientOu404(id, sousId)
         if (action === 'recompense' && !recompenseDebloquee(avant, commerce)) {
           throw err(409, `Récompense pas encore débloquée : ${avant.tampons}/${commerce.seuilTampons} tampons.`)
         }
-        const apres = action === 'visite' ? validerVisite(avant, commerce, maintenant()) : offrirRecompense(avant, commerce, maintenant())
+        const apres =
+          action === 'visite' ? avecMessages(validerVisite(avant, commerce, maintenant()), commerce, 'passage') : offrirRecompense(avant, commerce, maintenant())
+        await st.majClient(apres)
+        await journaliser(
+          id,
+          auteur,
+          action === 'visite' ? 'passage' : 'recompense',
+          action === 'visite' ? `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})` : `Récompense offerte : ${commerce.recompense}`,
+          apres,
+        )
+        return apres
+      })
+      return { json: { client: clientCaisse(client) } }
+    }
+
+    // ---------- Caisse (code équipe ou PIN) ----------
+
+    if (sous === 'caisse' && !sousId && m === 'GET') {
+      const { auteur } = await exigerAuteur(req, id)
+      exigerActif(commerce)
+      return { json: { auteur, commerce, clients: (await st.clients(id)).map(clientCaisse) } }
+    }
+
+    if (sous === 'caisse' && (sousId === 'passage' || sousId === 'recompense' || sousId === 'echange') && !action && m === 'POST') {
+      const { auteur } = await exigerAuteur(req, id)
+      exigerActif(commerce)
+      const corps = await lireCorps(req)
+      const clientId = texte(corps.clientId, 'clientId', 80, { requis: true })
+      const actionId = idAction(corps.actionId)
+      const quand = quandAction(corps.faitLe)
+      let centimes = 0
+      if (sousId === 'passage' && corps.montantCentimes != null) {
+        const v = corps.montantCentimes
+        if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 100_000_00) throw err(400, '« montantCentimes » : montant en centimes entre 0 et 100 000 €.')
+        centimes = v
+      }
+      const resultat = await st.transaction(async () => {
+        const avant = await clientOu404(id, clientId)
+        // Idempotence : une action déjà reçue (file hors ligne rejouée, double tap) ne compte jamais deux fois.
+        if (actionDejaTraitee(avant, actionId)) return { client: avant, dejaTraite: true }
+        let apres: Client
+        let details: string
+        let journalAction: EntreeJournal['action'] = sousId
+        if (sousId === 'passage') {
+          try {
+            apres = enregistrerPassage(avant, commerce, centimes, quand, actionId)
+          } catch (e) {
+            throw err(409, (e as Error).message)
+          }
+          apres = avecMessages(apres, commerce, 'passage', quand)
+          const gagnes = (apres.points ?? 0) - (avant.points ?? 0)
+          details = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${centimes ? ` · ${formaterPrix(centimes)} → +${gagnes} point${gagnes > 1 ? 's' : ''} (solde ${apres.points})` : ''}`
+        } else if (sousId === 'recompense') {
+          if (!recompenseDebloquee(avant, commerce)) throw err(409, `Récompense pas encore débloquée : ${avant.tampons}/${commerce.seuilTampons} tampons.`)
+          apres = avecAction(offrirRecompense(avant, commerce, quand), actionId)
+          details = `Récompense offerte : ${commerce.recompense}`
+        } else {
+          const recompenseId = texte(corps.recompenseId, 'recompenseId', 80, { requis: true })
+          const r = (commerce.catalogue ?? []).find((x) => x.id === recompenseId)
+          if (!r) throw err(404, 'Récompense inconnue dans le catalogue.')
+          try {
+            apres = echangerPoints(avant, r, auteur.nom, quand, `ech-${randomUUID()}`, actionId).client
+          } catch (e) {
+            throw err(409, (e as Error).message)
+          }
+          const e = apres.echangesPoints!.at(-1)!
+          details = `Échange : ${r.nom} (−${r.cout} points, solde ${e.soldeAvant} → ${e.soldeApres})`
+          journalAction = 'echange'
+        }
+        await st.majClient(apres)
+        await journaliser(id, auteur, journalAction, details, apres, quand)
+        return { client: apres, dejaTraite: false }
+      })
+      return { json: { client: clientCaisse(resultat.client), dejaTraite: resultat.dejaTraite } }
+    }
+
+    // ---------- Fiche client (gérant) : anniversaire ----------
+
+    if (sous === 'clients' && sousId && !action && m === 'PATCH') {
+      await exigerCommercant(req, id)
+      const corps = await lireCorps(req)
+      const inconnus = Object.keys(corps).filter((k) => k !== 'anniversaire')
+      if (inconnus.length) throw err(400, `Champ non modifiable : ${inconnus.join(', ')}.`)
+      const a = corps.anniversaire == null ? '' : texte(corps.anniversaire, 'anniversaire', 5)
+      if (a && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(a)) throw err(400, '« anniversaire » : format MM-JJ attendu (ex. 03-21).')
+      const client = await st.transaction(async () => {
+        const avant = await clientOu404(id, sousId)
+        const apres: Client = { ...avant }
+        if (a) apres.anniversaire = a
+        else delete apres.anniversaire
         await st.majClient(apres)
         return apres
       })
-      return { json: { client } }
+      return { json: { client: clientCaisse(client) } }
+    }
+
+    // ---------- Équipe (gérant uniquement) ----------
+
+    if (sous === 'equipe') {
+      await exigerCommercant(req, id)
+      if (!sousId && m === 'GET') return { json: { membres: (await st.membres(id)).map((x) => x.membre) } }
+      if (!sousId && m === 'POST') {
+        const corps = await lireCorps(req)
+        const nom = texte(corps.nom, 'nom', 40, { requis: true })
+        const code = codeEquipe(corps.code)
+        if ((await st.membres(id)).length >= 30) throw err(409, '30 membres maximum par commerce.')
+        await verifierCodeLibre(id, code)
+        const membre: MembreEquipe = { id: `mb-${randomUUID()}`, commerceId: id, nom, creeLe: maintenant().toISOString() }
+        await st.ajouterMembre(membre, hacherPin(code))
+        await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'equipe', `Membre ajouté : ${nom}`)
+        return { statut: 201, json: { membre } }
+      }
+      if (sousId && !action && (m === 'PATCH' || m === 'DELETE')) {
+        const existant = (await st.membres(id)).find((x) => x.membre.id === sousId)
+        if (!existant) throw err(404, 'Membre inconnu dans cette équipe.')
+        if (m === 'DELETE') {
+          await st.supprimerMembre(id, sousId)
+          await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'equipe', `Membre retiré : ${existant.membre.nom}`)
+          return { json: { ok: true } }
+        }
+        const corps = await lireCorps(req)
+        const inconnus = Object.keys(corps).filter((k) => k !== 'nom' && k !== 'code')
+        if (inconnus.length) throw err(400, `Champ non modifiable : ${inconnus.join(', ')}.`)
+        const membre = { ...existant.membre }
+        if ('nom' in corps) membre.nom = texte(corps.nom, 'nom', 40, { requis: true })
+        let code: Pin | undefined
+        if ('code' in corps) {
+          const c = codeEquipe(corps.code)
+          await verifierCodeLibre(id, c, sousId)
+          code = hacherPin(c)
+        }
+        await st.majMembre(membre, code)
+        // Jamais le code dans le journal : seulement le fait qu'il a changé.
+        await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'equipe', `Membre modifié : ${membre.nom}${code ? ' (nouveau code)' : ''}`)
+        return { json: { membre } }
+      }
+      throw err(405, 'Méthode non autorisée.')
+    }
+
+    // ---------- Messagerie (gérant) : message déposé dans l'espace client des clients ciblés ----------
+
+    if (sous === 'messages' && !sousId && m === 'GET') {
+      // Les 100 messages les plus récents (automatiques et ciblés) avec le contact du client : texte prêt à copier.
+      await exigerCommercant(req, id)
+      const messages = (await st.clients(id))
+        .flatMap((c) => (c.messages ?? []).map((msg) => ({ ...msg, clientId: c.id, prenom: c.prenom, contact: c.telephone ?? c.email ?? '' })))
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 100)
+      return { json: { messages } }
+    }
+
+    if (sous === 'messages' && !sousId && m === 'POST') {
+      await exigerCommercant(req, id)
+      const corps = await lireCorps(req)
+      const cibles: Cible[] = ['tous', 'inactifs', 'proches', 'nouveaux']
+      if (!cibles.includes(corps.cible as Cible)) throw err(400, `« cible » doit valoir : ${cibles.join(', ')}.`)
+      const contenu = texte(corps.texte, 'texte', 600, { requis: true })
+      const t = maintenant()
+      let n = 0
+      for (const c of clientsCibles(await st.clients(id), commerce, corps.cible as Cible, t)) {
+        await st.transaction(async () => {
+          const avant = await clientOu404(id, c.id)
+          await st.majClient(deposerMessage(avant, { id: nouvelIdMessage(), type: 'commercant', texte: contenu, date: t.toISOString() }))
+        })
+        n++
+      }
+      await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'message', `Message déposé dans l’espace client de ${n} client${n > 1 ? 's' : ''} (cible : ${corps.cible})`)
+      return { json: { destinataires: n } }
+    }
+
+    // ---------- Menu digital ----------
+
+    if (sous === 'menu' && !sousId) {
+      if (m === 'GET') {
+        exigerActif(commerce)
+        return { json: { menu: (await st.menu(id)) ?? { commerceId: id, categories: [], majLe: '' }, commerce: commercePublic(commerce) } }
+      }
+      if (m === 'PUT') {
+        await exigerCommercant(req, id)
+        let menu
+        try {
+          menu = validerMenu(await lireCorps(req, TAILLE_MAX_MENU), id, maintenant())
+        } catch (e) {
+          if (e instanceof ErreurMenu) throw err(400, e.message)
+          throw e
+        }
+        await st.majMenu(menu)
+        const n = menu.categories.reduce((s, c) => s + c.produits.length, 0)
+        await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'menu', `Menu enregistré : ${menu.categories.length} catégorie(s), ${n} produit(s)`)
+        return { json: { menu } }
+      }
+      throw err(405, 'Méthode non autorisée.')
     }
 
     if (sous === 'clients' && sousId && action === 'pass.json' && m === 'GET') {
-      // V3 — Google Wallet : architecture prête, NON branchée. Sans émetteur + clé de service → 501.
-      // Même configuré, la charge utile renvoyée n'est PAS signée (signature JWT non implémentée).
+      // Google Wallet : génération réelle (JWT signé) derrière la configuration. Sans émetteur + clé de service → 501,
+      // rien n'est généré. Clé illisible → 503, rien n'est généré.
       await exigerCommercant(req, id)
       const client = await clientOu404(id, sousId)
       if (!walletConfigure(o.googleWallet)) {
         throw err(501, 'Google Wallet à brancher : aucun compte émetteur ni clé de service configurés sur ce serveur. Aucun pass n’est généré.')
       }
       const site = (o.urlPublique || `http://${enTete(req, 'host') ?? 'localhost'}`).replace(/\/+$/, '')
-      return {
-        json: {
-          avertissement: 'Charge utile NON signée : ce n’est pas un pass utilisable. La signature JWT « Save to Google Wallet » avec la clé de service n’est pas implémentée.',
-          payload: payloadGoogleWallet(commerce, client, `${site}/#/carte/${client.id}`, o.googleWallet!.issuerId),
-        },
+      try {
+        const { urlEnregistrement } = lienGoogleWallet(o.googleWallet, commerce, client, `${site}/#/carte/${client.id}`, site, maintenant())
+        return { json: { signe: true, urlEnregistrement } }
+      } catch (e) {
+        if (e instanceof ErreurWallet) throw err(503, e.message)
+        throw e
       }
     }
 
@@ -540,7 +916,7 @@ export async function creerServeur(o: OptionsServeur) {
       const prenom = corps.prenom == null ? '' : texte(corps.prenom, 'prenom', 40)
       const dejaJoue = 'Vous avez déjà tourné la roue aujourd’hui. Revenez lors de votre prochaine visite !'
       const resultat = await st.transaction(async () => {
-        const { client } = await inscrireOuRetrouver(id, prenom, corps.contact)
+        const { client } = await inscrireOuRetrouver(commerce, prenom, corps.contact)
         const t = maintenant()
         const statut = statutJeu(client, await st.tiragesClient(id, client.id), id, t)
         if (statut === 'dejaJoue') return { refus: dejaJoue }
@@ -624,8 +1000,8 @@ export async function creerServeur(o: OptionsServeur) {
   const serveur = createServer(async (req, res) => {
     const entetes: Record<string, string> = {
       'Access-Control-Allow-Origin': o.origineCors ?? '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Commerce-PIN, X-Admin-PIN',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Commerce-PIN, X-Admin-PIN, X-Equipe-Code',
       'Access-Control-Max-Age': '600',
     }
     const url = new URL(req.url ?? '/', 'http://localhost')
@@ -656,7 +1032,12 @@ export async function creerServeur(o: OptionsServeur) {
       res.end(JSON.stringify(r.json))
     } catch (erreur) {
       // Conflit d'écriture (doublon refusé par la base, ligne modifiée entre-temps) : 409, l'utilisateur peut réessayer.
-      const e = erreur instanceof ErreurConflit ? err(409, 'Modification simultanée : réessayez.') : erreur
+      const e =
+        erreur instanceof ErreurConflit
+          ? err(409, 'Modification simultanée : réessayez.')
+          : erreur instanceof ErreurMigrationManquante
+            ? err(503, erreur.message)
+            : erreur
       const http = e instanceof ErreurHttp
       if (!http) console.error(`[serveur] ${req.method} ${url.pathname} :`, e)
       const statut = http ? e.statut : 500

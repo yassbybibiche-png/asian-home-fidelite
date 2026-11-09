@@ -16,8 +16,6 @@ export interface RangementCle {
   effacer(): Promise<void>
 }
 
-const CLE_SESSION = 'fidelite:acces'
-
 const enBase64 = (o: ArrayBuffer | Uint8Array) => btoa(String.fromCharCode(...new Uint8Array(o instanceof Uint8Array ? o : new Uint8Array(o))))
 const deBase64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 
@@ -26,7 +24,13 @@ function estAcces(x: unknown): x is Acces {
   return !!a && typeof a.pin === 'string' && /^\d{4,12}$/.test(a.pin) && (a.role === 'admin' || (a.role === 'commerce' && typeof a.commerceId === 'string'))
 }
 
-export function creerCoffrePin(session: Stockage | null, rangement: RangementCle | null, subtle: SubtleCrypto | null | undefined = globalThis.crypto?.subtle) {
+export function creerCoffrePin(
+  session: Stockage | null,
+  rangement: RangementCle | null,
+  subtle: SubtleCrypto | null | undefined = globalThis.crypto?.subtle,
+  /** Clé de session (la caisse a la sienne, distincte du PIN du gérant). */
+  CLE_SESSION = 'fidelite:acces',
+) {
   const disponible = !!(session && rangement && subtle)
 
   async function cle(creer: boolean): Promise<CryptoKey | null> {
@@ -80,7 +84,7 @@ export function creerCoffrePin(session: Stockage | null, rangement: RangementCle
 export type CoffrePin = ReturnType<typeof creerCoffrePin>
 
 /** Rangement de la clé dans IndexedDB (navigateur). Null si IndexedDB est indisponible. */
-export function rangementIndexedDb(): RangementCle | null {
+export function rangementIndexedDb(nom = 'pin'): RangementCle | null {
   if (typeof indexedDB === 'undefined') return null
   const ouvrir = () =>
     new Promise<IDBDatabase>((ok, ko) => {
@@ -99,8 +103,8 @@ export function rangementIndexedDb(): RangementCle | null {
         }),
     )
   return {
-    lire: async () => (await operation<CryptoKey | undefined>('readonly', (s) => s.get('pin'))) ?? null,
-    ecrire: async (cle) => void (await operation('readwrite', (s) => s.put(cle, 'pin'))),
-    effacer: async () => void (await operation('readwrite', (s) => s.delete('pin'))),
+    lire: async () => (await operation<CryptoKey | undefined>('readonly', (s) => s.get(nom))) ?? null,
+    ecrire: async (cle) => void (await operation('readwrite', (s) => s.put(cle, nom))),
+    effacer: async () => void (await operation('readwrite', (s) => s.delete(nom))),
   }
 }

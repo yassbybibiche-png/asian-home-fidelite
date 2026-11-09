@@ -1,7 +1,8 @@
 // Client HTTP de l'API /api/v1 (server/). Aucune règle métier ici : le serveur décide de tout
 // (tampons, récompense, tirage). `fetch` est injectable pour les tests (aucun vrai serveur dans `npm test`).
-import type { Avis, Client, Commerce, Tirage, TypeCommerce } from '../types'
+import type { Avis, Client, Commerce, EntreeJournal, MembreEquipe, Menu, MessageClient, Tirage, TypeCommerce } from '../types'
 import type { StatutJeu } from '../lib/roulette'
+import type { Cible } from '../lib/messages'
 
 export const MESSAGE_HORS_LIGNE = 'Serveur injoignable — vérifiez la connexion.'
 
@@ -26,6 +27,23 @@ export interface EtatCommerce {
   clients: Client[]
   tirages: Tirage[]
   avis: Avis[]
+  membres?: MembreEquipe[]
+  journal?: EntreeJournal[]
+}
+
+/** Accès à la caisse : code équipe (4 chiffres) ou PIN du gérant. */
+export type AccesCaisse = { code: string } | Acces
+
+export interface ReponseCaisse {
+  auteur: EntreeJournal['auteur']
+  commerce: Commerce
+  clients: Client[]
+}
+
+export interface MessageCommercant extends MessageClient {
+  clientId: string
+  prenom: string
+  contact: string
 }
 
 export interface ResultatTirage {
@@ -42,10 +60,14 @@ export interface ReponseCarte {
   client: CartePublique
   commerce: Commerce
   jeu: { statut: StatutJeu; lotDuJour: string | null }
+  menuDisponible?: boolean
 }
 
 export type ChampsReglages = Partial<
-  Pick<Commerce, 'nom' | 'type' | 'logo' | 'lienGoogle' | 'coordonnees' | 'recompense' | 'seuilTampons' | 'lots' | 'reglesReponseAuto' | 'actif'>
+  Pick<
+    Commerce,
+    'nom' | 'type' | 'logo' | 'lienGoogle' | 'coordonnees' | 'recompense' | 'seuilTampons' | 'lots' | 'reglesReponseAuto' | 'actif' | 'eurosParPoint' | 'catalogue' | 'messagesAuto' | 'apparence'
+  >
 >
 
 /**
@@ -59,15 +81,16 @@ export function baseApi(valeur: string | undefined): string | null {
   return sansSlash.endsWith('/api/v1') ? sansSlash : `${sansSlash}/api/v1`
 }
 
-function entetesAcces(acces: Acces | null | undefined): Record<string, string> {
+function entetesAcces(acces: AccesCaisse | null | undefined): Record<string, string> {
   if (!acces) return {}
+  if ('code' in acces) return { 'X-Equipe-Code': acces.code }
   return acces.role === 'admin' ? { 'X-Admin-PIN': acces.pin } : { 'X-Commerce-PIN': acces.pin }
 }
 
 const enc = encodeURIComponent
 
 export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(...a), delaiMs = 10_000) {
-  async function requete(methode: string, chemin: string, options: { acces?: Acces | null; corps?: unknown; texte?: boolean } = {}) {
+  async function requete(methode: string, chemin: string, options: { acces?: AccesCaisse | null; corps?: unknown; texte?: boolean } = {}) {
     const entetes: Record<string, string> = { ...entetesAcces(options.acces) }
     if (options.corps !== undefined) entetes['Content-Type'] = 'application/json'
     let r: Response
@@ -132,6 +155,34 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     majAvis: async (commerceId: string, acces: Acces, avisId: string, maj: { reponse?: string | null; brouillon?: string | null }) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}/avis/${enc(avisId)}`, { acces, corps: maj })) as { avis: Avis }).avis,
     exportCsv: (commerceId: string, acces: Acces) => requete('GET', `/commerces/${enc(commerceId)}/export.csv`, { acces, texte: true }) as Promise<string>,
+    majClient: async (commerceId: string, acces: Acces, clientId: string, champs: { anniversaire: string }) =>
+      ((await requete('PATCH', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}`, { acces, corps: champs })) as { client: Client }).client,
+
+    // ---- Caisse (code équipe ou PIN) ----
+    caisse: (commerceId: string, acces: AccesCaisse) => requete('GET', `/commerces/${enc(commerceId)}/caisse`, { acces }) as Promise<ReponseCaisse>,
+    actionCaisse: (
+      commerceId: string,
+      acces: AccesCaisse,
+      type: 'passage' | 'recompense' | 'echange',
+      corps: { clientId: string; actionId: string; faitLe?: string; montantCentimes?: number; recompenseId?: string },
+    ) => requete('POST', `/commerces/${enc(commerceId)}/caisse/${type}`, { acces, corps }) as Promise<{ client: Client; dejaTraite: boolean }>,
+
+    // ---- Équipe, messages, menu (gérant) ----
+    equipe: async (commerceId: string, acces: Acces) => ((await requete('GET', `/commerces/${enc(commerceId)}/equipe`, { acces })) as { membres: MembreEquipe[] }).membres,
+    ajouterMembre: (commerceId: string, acces: Acces, nom: string, code: string) =>
+      requete('POST', `/commerces/${enc(commerceId)}/equipe`, { acces, corps: { nom, code } }) as Promise<{ membre: MembreEquipe }>,
+    majMembre: (commerceId: string, acces: Acces, membreId: string, champs: { nom?: string; code?: string }) =>
+      requete('PATCH', `/commerces/${enc(commerceId)}/equipe/${enc(membreId)}`, { acces, corps: champs }) as Promise<{ membre: MembreEquipe }>,
+    supprimerMembre: (commerceId: string, acces: Acces, membreId: string) => requete('DELETE', `/commerces/${enc(commerceId)}/equipe/${enc(membreId)}`, { acces }),
+    messages: async (commerceId: string, acces: Acces) =>
+      ((await requete('GET', `/commerces/${enc(commerceId)}/messages`, { acces })) as { messages: MessageCommercant[] }).messages,
+    envoyerMessage: async (commerceId: string, acces: Acces, cible: Cible, texte: string) =>
+      ((await requete('POST', `/commerces/${enc(commerceId)}/messages`, { acces, corps: { cible, texte } })) as { destinataires: number }).destinataires,
+    menu: (commerceId: string) => requete('GET', `/commerces/${enc(commerceId)}/menu`) as Promise<{ menu: Menu; commerce: Commerce }>,
+    majMenu: async (commerceId: string, acces: Acces, menu: Pick<Menu, 'categories'>) =>
+      ((await requete('PUT', `/commerces/${enc(commerceId)}/menu`, { acces, corps: menu })) as { menu: Menu }).menu,
+    /** Public : le client marque ses messages comme lus. */
+    marquerLus: (clientId: string) => requete('POST', `/cartes/${enc(clientId)}/lus`),
 
     // ---- Admin ----
     creerCommerce: async (pinAdmin: string, champs: { nom: string; type: TypeCommerce; lienGoogle: string; pin: string }) =>
