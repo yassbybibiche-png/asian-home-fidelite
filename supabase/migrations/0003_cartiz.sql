@@ -1,9 +1,39 @@
 -- Asian Home Fidélité — modules caisse / points / équipe / messages / menu (09/11/2026).
 -- À exécuter APRÈS 0001_schema_initial.sql et 0002_rls.sql, dans Supabase → SQL Editor. Rejouable (IF NOT EXISTS).
 --
+-- AUTONOME depuis le correctif du 09/11/2026 (voir section ci-dessous) : la 0003 ne dépend plus de la 0001.
+-- En production, la base live n'avait jamais reçu l'intégralité de la 0001 (fonction incrementer_version()
+-- et triggers de version absents — 1re exécution d'un ancien schéma, puis ajout manuel de la colonne `ordre`),
+-- et la 0003 a échoué avec « function public.incrementer_version() does not exist » (42883).
+--
 -- Ce qui ne demande PAS de nouvelle table : points, échanges, messages et anniversaire du client vivent dans
 -- `clients.donnees` (JSONB, comme les tampons) ; taux de points, catalogue, règles de messages et apparence de la carte
 -- dans `commerces.donnees`. Seuls l'équipe, le journal d'audit et le menu ont leur table.
+
+-- ---------- autonomie : fonction de version + triggers manquants éventuels (correctif 09/11/2026) ----------
+-- Corps identique à celui de 0001. CREATE OR REPLACE : sans effet si la fonction existe déjà avec le même corps.
+-- Les triggers commerces / clients / avis sont recréés de façon idempotente (DROP IF EXISTS + CREATE) : si la base
+-- live ne les a pas, la concurrence optimiste du serveur (UPDATE … WHERE version = lue) est affaiblie sans eux.
+create or replace function public.incrementer_version() returns trigger
+  language plpgsql
+  set search_path = ''
+as $$
+begin
+  new.version := old.version + 1;
+  return new;
+end
+$$;
+revoke all on function public.incrementer_version() from public, anon, authenticated;
+
+drop trigger if exists commerces_version on public.commerces;
+create trigger commerces_version before update on public.commerces
+  for each row execute function public.incrementer_version();
+drop trigger if exists clients_version on public.clients;
+create trigger clients_version before update on public.clients
+  for each row execute function public.incrementer_version();
+drop trigger if exists avis_version on public.avis;
+create trigger avis_version before update on public.avis
+  for each row execute function public.incrementer_version();
 
 -- ---------- équipe : membres + code à 4 chiffres (haché + salé par le serveur, jamais en clair) ----------
 create table if not exists public.equipe (

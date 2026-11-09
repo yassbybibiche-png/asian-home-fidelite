@@ -157,3 +157,59 @@ describe('Migration Supabase exécutée sur Postgres (PGlite)', () => {
     assert.equal(Number(rows[0].n), 0)
   })
 })
+
+// Correctif 09/11/2026 — la 0003 a échoué en production avec « function public.incrementer_version()
+// does not exist » (42883) : la base live n'avait jamais reçu l'intégralité de la 0001 (fonction et
+// triggers de version absents — 1re exécution d'un ancien schéma, puis ajout manuel de `ordre`).
+// La 0003 corrigée doit donc passer SEULE sur une base qui a les tables (avec `donnees`) mais sans
+// la fonction ni les triggers de version, et y recréer les deux.
+describe('Migration 0003 autonome sur une base « live » (tables sans fonction ni triggers)', () => {
+  let db: PGlite
+
+  before(async () => {
+    db = new PGlite()
+    await db.exec('create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;')
+    // 0001 SANS sa section « version » : tables + index + contraintes, mais ni incrementer_version()
+    // ni les triggers commerces_version / clients_version / avis_version — l'état de la base live.
+    const sql0001SansVersion = sql('0001_schema_initial.sql').split('-- ---------- version')[0]
+    assert.ok(!sql0001SansVersion.includes('incrementer_version'), 'la 0001 tronquée ne doit pas définir la fonction')
+    await db.exec(sql0001SansVersion)
+    await db.exec(sql('0002_rls.sql'))
+    await db.exec(`insert into public.commerces (id, donnees, pin_hash, pin_sel) values ('c1', '{"id":"c1"}', 'h', 's');
+      insert into public.clients (id, commerce_id, cle_contact, donnees) values ('k1', 'c1', '0612345678', '{"id":"k1","commerceId":"c1"}');
+      insert into public.avis (id, commerce_id, date, donnees) values ('a1', 'c1', now(), '{"id":"a1"}');`)
+  })
+  after(() => db.close())
+
+  test('avant 0003 : la fonction et les triggers de version sont bien absents (état live reproduit)', async () => {
+    const f = await db.query<{ n: number }>(`select count(*)::int as n from pg_proc where proname = 'incrementer_version'`)
+    assert.equal(f.rows[0].n, 0)
+    const t = await db.query<{ n: number }>(`select count(*)::int as n from pg_trigger where tgname in ('commerces_version', 'clients_version', 'avis_version') and not tgisinternal`)
+    assert.equal(t.rows[0].n, 0)
+  })
+
+  test('0003 corrigée passe seule, rejouable, et recrée fonction + triggers sur les 5 tables versionnées', async () => {
+    await db.exec(sql('0003_cartiz.sql'))
+    await db.exec(sql('0003_cartiz.sql'))
+    const f = await db.query<{ n: number }>(`select count(*)::int as n from pg_proc where proname = 'incrementer_version' and pronamespace = 'public'::regnamespace`)
+    assert.equal(f.rows[0].n, 1)
+    const triggers = await db.query<{ tgname: string }>(
+      `select tgname from pg_trigger where tgname in ('commerces_version', 'clients_version', 'avis_version', 'equipe_version', 'menus_version') and not tgisinternal order by 1`)
+    assert.deepEqual(triggers.rows.map((r) => r.tgname), ['avis_version', 'clients_version', 'commerces_version', 'equipe_version', 'menus_version'])
+    const t = await db.query<{ relname: string; relrowsecurity: boolean }>(
+      `select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname in ('equipe', 'journal', 'menus') order by 1`)
+    assert.deepEqual(t.rows.map((r) => [r.relname, r.relrowsecurity]), [['equipe', true], ['journal', true], ['menus', true]])
+  })
+
+  test('les triggers recréés incrémentent bien `version` sur commerces, clients et avis', async () => {
+    for (const [table, id] of [['commerces', 'c1'], ['clients', 'k1'], ['avis', 'a1']] as const) {
+      const lire = async () => (await db.query<{ version: number }>(`select version from public.${table} where id = $1`, [id])).rows[0].version
+      const v = await lire()
+      await db.query(`update public.${table} set donnees = donnees where id = $1`, [id])
+      assert.equal(await lire(), v + 1, `${table} : version +1`)
+      // Verrou optimiste : UPDATE conditionné à l'ancienne version ne touche plus rien.
+      const r = await db.query(`update public.${table} set donnees = donnees where id = $1 and version = $2`, [id, v])
+      assert.equal(r.affectedRows, 0, `${table} : version périmée → 0 ligne`)
+    }
+  })
+})

@@ -587,3 +587,26 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   mode local, aucun « Fideliz » ni prix).
 - **Non vérifié** : rendu réel à 390 px, caméra et scan QR sur un vrai téléphone, comportement hors ligne réel du navigateur (seule la
   logique de file est testée), compression de photo (canvas) — aucun navigateur sur la VM.
+
+## 09/11/2026 — Correctif migration 0003 Cartiz : rendue autonome (échec en production)
+- Échec vérifié (tâche navigateur ~20h36) : exécution verbatim de `supabase/migrations/0003_cartiz.sql` dans le SQL Editor →
+  « ERROR: 42883: function public.incrementer_version() does not exist », 0 ligne, transaction annulée, aucune des
+  3 tables (equipe, journal, menus) créée. `/sante` : `"migrations":{"cartiz":false}`. Production existante non affectée.
+- Cause : la base live n'a jamais reçu l'intégralité de la 0001 du dépôt (fonction + triggers de version absents — la 1re
+  tâche navigateur avait exécuté un ancien schéma normalisé sans `donnees`, la 2e avait dû ajouter manuellement la colonne
+  `ordre` que la 0001 définit pourtant). Les fichiers du dépôt sont corrects ; c'est la base live qui diverge.
+- Correctif (fichier `0003_cartiz.sql` uniquement, rien d'autre) : la 0003 est désormais AUTONOME — en tête, définition
+  `CREATE OR REPLACE FUNCTION public.incrementer_version()` (corps identique à 0001 : `new.version := old.version + 1`,
+  `search_path` vide, `revoke` comme en 0001), puis (re)création idempotente (`DROP TRIGGER IF EXISTS` + `CREATE TRIGGER`)
+  des triggers de version sur commerces / clients / avis, avant les tables equipe / journal / menus et leurs propres triggers.
+  Le reste de 0003 (tables, index, RLS sans policy) est inchangé.
+- Tests (PGlite, vrai Postgres en mémoire) : 3 nouveaux tests — la 0003 corrigée passe SEULE sur une base simulant l'état
+  live (tables 0001 sans la section « version », donc sans fonction ni triggers), rejouable, recrée fonction + 5 triggers
+  (commerces, clients, avis, equipe, menus) et les triggers incrémentent bien `version` (verrou optimiste vérifié sur les
+  3 tables). Chaîne complète 0001 → 0002 → 0003 toujours vérifiée par les tests existants. `npm test` **173/173** (170 avant,
+  +3), `npm run build` et `build:api` OK.
+- Réapplication en production (à faire par tâche navigateur, fichier corrigé) : Supabase → SQL Editor du projet
+  asian-home-fidelite → exécuter `supabase/migrations/0003_cartiz.sql` verbatim (branche master, commit ci-dessous).
+  Vérifications attendues : « Success. No rows returned », tables equipe / journal / menus présentes avec RLS = true,
+  fonction `incrementer_version()` présente, triggers commerces/clients/avis/equipe/menus présents, puis `/sante` :
+  `"migrations":{"cartiz":true}` (et redéploiement Render non nécessaire — aucun code serveur modifié, seule la migration SQL).
