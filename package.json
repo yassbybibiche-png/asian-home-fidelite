@@ -13,9 +13,10 @@
     "preview": "vite preview",
     "test": "node --test \"tests/*.test.ts\"",
     "seed": "node scripts/generer-seed.mjs",
-    "serveur": "node server/index.ts"
+    "serveur": "node --env-file-if-exists=.env server/index.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.119.0",
     "qrcode-generator": "^2.0.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

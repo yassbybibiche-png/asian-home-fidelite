@@ -165,9 +165,9 @@ Badge « Démo » : en mode API, il n'apparaît **que** sur les commerces venant
 
 ## Tests
 
-`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (94 tests : 36 de logique,
+`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (109 tests : 36 de logique,
 21 du serveur dans `tests/serveur.test.ts`, 24 du front V2 dans `tests/front-v2.test.ts`, 13 des intégrations V3 dans
-`tests/integrations-v3.test.ts`).
+`tests/integrations-v3.test.ts`, 15 du stockage Supabase dans `tests/supabase.test.ts`).
 Pas de Vitest : Node exécute le TypeScript directement, ça évite une dépendance et ne touche pas au build.
 
 Les tests portent sur la **logique pure** (hors React) :
@@ -197,7 +197,12 @@ Les tests portent sur la **logique pure** (hors React) :
   `pass.json` → 501 sans config et « NON signée » avec config ; aucun code de pass Apple dans `server/`, `src/`, `scripts/` et
   aucune route Apple ; relances SMS / e-mail → 501 sans clé (aucun appel réseau), refus sans consentement, requêtes Twilio /
   Brevo bien formées (avec un `fetch` simulé, **jamais contre les vrais services**) ; production : 0 avis, aucun avis du seed ;
-  textes « à brancher », démo « avis simulés », bloc RGPD.
+  textes « à brancher », démo « avis simulés », bloc RGPD ;
+- Supabase (S1, **sans vrai projet** : client officiel `@supabase/supabase-js` branché sur un faux PostgREST en mémoire) :
+  requêtes envoyées (tables, colonnes, filtres, tri), déduplication par `cleContact` refusée par la contrainte unique,
+  2e tirage du jour refusé par l'index unique (jour à Paris), double tirage / double visite / double inscription
+  simultanés, choix SQLite / Supabase selon les variables d'environnement, parcours complet du serveur sur Supabase avec
+  les mêmes fonctions métier, migration SQL (contraintes, RLS sans policy), `.env.example` sans vraie clé.
 
 Preuve HTTP manuelle (V2 + V3) : `npm run serveur` puis `node scripts/preuve-http-v3.mjs` — sortie dans `PREUVE-HTTP-V3.txt`.
 
@@ -208,8 +213,9 @@ téléphone (390 px) n'a jamais été vu à l'écran — y compris les blocs ajo
 
 ## Limites pour une vraie mise en production
 
-- **Hébergement du serveur** : fait en local seulement. Rien n'est déployé ; l'offre gratuite de Render efface
-  la base à chaque mise en veille (voir `server/README.md`) — un hébergement payant avec disque est à valider.
+- **Hébergement du serveur** : fait en local seulement. Rien n'est déployé. Base de production choisie : **Supabase
+  gratuit** — schéma, RLS et adaptateur prêts (phase S1), **projet pas encore créé** et jamais testé contre un vrai Supabase
+  (voir `server/README.md`, « Supabase »).
 - **Authentification** : un PIN par commerce (partagé par l'équipe) + un PIN admin ; pas de vrais comptes ni de
   journal « qui a fait quoi ». La validation d'une visite reste un bouton (pas de scan du QR client par le commerçant).
 - **Anti-abus** : vérifié côté serveur (1 tirage par client et par jour, visite du jour obligatoire), mais le
@@ -237,7 +243,8 @@ src/data/       seed.json, valeurs par défaut, persistance locale (depot), mode
                 dépôt API + cache (depotApi), PIN chiffré (coffrePin), tirage serveur (jeuApi)
 src/store.tsx   état de l'app : StoreLocal (démo) ou StoreApi (serveur), choisi par VITE_API_URL
 src/pages/      écrans (tableau de bord, clients, roulette, avis, réglages, offre, admin, pages publiques)
-server/         backend partagé (API /api/v1, SQLite) — voir server/README.md
+server/         backend partagé (API /api/v1, SQLite en local ou Supabase en production) — voir server/README.md
+supabase/       migrations SQL Supabase (schéma, contraintes, RLS)
 scripts/        générateur du seed, preuves HTTP (preuve-http-v3.mjs)
 tests/          tests node --test
 ```

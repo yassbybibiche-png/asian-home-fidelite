@@ -375,3 +375,44 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   Google Business Profile (client + utilisateur), Apple Developer (utilisateur — en suspens), Google Wallet émetteur
   (utilisateur), prestataire SMS / e-mail (utilisateur), hébergement backend (utilisateur), nom de domaine (utilisateur ou client).
 - Rien publié, rien poussé, aucune dépense, aucun compte créé, aucune clé configurée, aucun message envoyé.
+
+## 09/11/2026 — Phase Supabase S1 : schéma, migration SQL, RLS, adaptateur stockage (SQLite en fallback)
+- **Aucun compte Supabase, aucun projet, aucune clé, rien de facturable, rien poussé.** Donc **aucun test contre un vrai
+  Supabase / Postgres** : la couche est testée avec le client officiel `@supabase/supabase-js` branché sur un **faux PostgREST
+  en mémoire** (transport `fetch` injecté) qui reproduit le contrat HTTP et les contraintes de la migration. Le SQL n'a
+  jamais été exécuté par un vrai Postgres (pas de Postgres dans la VM) : seule sa forme est vérifiée par les tests.
+- **Ajouté** : `supabase/migrations/0001_schema_initial.sql` (tables `meta`, `commerces`, `clients`, `tirages`, `avis`, JSONB
+  `donnees` + colonnes indexées, `pin_hash` / `pin_sel`, unique `(commerce_id, cle_contact)`, index tirages / avis, **index
+  unique 1 tirage par client et par jour à Paris**, colonne `version` + trigger), `0002_rls.sql` (RLS sur les 5 tables, aucune
+  policy, droits anon / authenticated retirés), `server/stockage-supabase.ts`, `.env.example`, `tests/supabase.test.ts` (15).
+  Dépendance : `@supabase/supabase-js` **2.119.0** (épinglée).
+- **Modifié** : `server/stockage.ts` (interface `Stockage` commune, `ErreurConflit`, transaction acceptant des `await` avec file
+  d'attente), `server/app.ts` (`await` sur chaque appel au stockage, `creerServeur` devient async, choix Supabase / SQLite,
+  `/sante.stockage` = stockage actif, conflits → 409), `server/index.ts` (`configSupabaseDepuisEnv`), `npm run serveur` lit un
+  `.env` facultatif (`--env-file-if-exists`), `.gitignore` (`.env`), 2 tests existants adaptés à `creerServeur` async
+  (`await`, `assert.rejects`), README + `server/README.md`.
+- **Choix tranchés** :
+  - Le contrat SQLite était synchrone ; Supabase ne peut pas l'être. Plutôt qu'un cache mémoire (faux sous plusieurs
+    instances), même interface avec des valeurs « T ou Promise<T> » : SQLite reste synchrone (le test V3 qui l'ouvre directement
+    marche sans changement), le serveur `await` tout. Aucune règle métier touchée : mêmes fonctions de `src/lib/`.
+  - **Transaction Supabase : pas de vraie transaction** (REST). Remplacée par : contraintes uniques (inscription, tirage du
+    jour) + verrou optimiste par `version` sur clients / avis lus dans la transaction (AsyncLocalStorage). Double visite
+    simultanée → 1 réussite + 1 409 « réessayez » (aucun tampon perdu en silence). **Non garanti** : une suite d'écritures
+    coupée au milieu n'est pas annulée (ex. PATCH commerce puis réévaluation des avis).
+  - Tirage du jour : unicité **en base** sur `(commerce_id, client_id, (date at time zone 'Europe/Paris')::date)` ; le serveur
+    transforme le refus en 409 « déjà tourné la roue ». Testé avec deux requêtes réellement simultanées (barrière dans le faux
+    PostgREST) : les deux lectures ne voient rien, c'est la contrainte qui refuse le 2e INSERT. Hypothèse non vérifiée sur un vrai
+    Postgres : l'expression `timestamptz at time zone 'Europe/Paris'` est acceptée dans un index (fonction immuable) — à
+    confirmer en S2 à l'exécution de la migration.
+  - `SUPABASE_ANON_KEY` **non incluse** (inutile : le navigateur ne parle jamais à Supabase). Une seule des deux variables
+    Supabase → refus de démarrer (plutôt qu'un repli silencieux sur un SQLite éphémère).
+  - Initialisation rendue rejouable (commerce déjà présent ou doublon ignoré), nécessaire sans transaction.
+  - `ordre` (identité) remplace le `rowid` SQLite pour garder l'ordre d'insertion ; `date` en `timestamptz`.
+- **Tests** : `npm test` **109/109** (avant : 94 ; +15 dans `tests/supabase.test.ts`). `npm run build` : OK (bundle front inchangé,
+  366,6 kB / 110,6 kB gzip — le client Supabase n'est pas dans le front). `npm run serveur` sans variables : `/sante` →
+  `"stockage":"sqlite"`.
+- **Reste (S2)** : créer le projet Supabase gratuit (région UE) — par l'utilisateur ; SQL Editor → exécuter `0001` puis `0002` ;
+  vérifier dans le dashboard l'emplacement exact des clés (legacy service_role ou `sb_secret_…`) ; poser `SUPABASE_URL` +
+  `SUPABASE_SERVICE_ROLE_KEY` chez l'hébergeur du serveur ; `/sante` → `supabase` ; refaire le parcours HTTP
+  (`scripts/preuve-http-v3.mjs`) contre le vrai projet, dont le double tirage simultané ; décider de l'hébergement du serveur
+  Node lui-même ; import éventuel d'un `fidelite.db`. Apple : toujours en suspens, rien touché.

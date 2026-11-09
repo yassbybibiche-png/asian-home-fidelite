@@ -10,6 +10,7 @@ import { resolve } from 'node:path'
 import pkg from '../package.json' with { type: 'json' }
 import { creerServeur } from './app.ts'
 import { configDepuisEnv } from './notifications/index.ts'
+import { configSupabaseDepuisEnv } from './stockage-supabase.ts'
 
 const env = process.env
 const production = env.NODE_ENV === 'production' || !!env.RENDER
@@ -33,11 +34,15 @@ if (!pinInitial && !production) pinInitial = '1234'
 
 const dossierStatique = resolve(env.STATIC_DIR ?? 'dist')
 const fichierDb = resolve(env.DB_FILE ?? 'data/fidelite.db')
+let supabase: ReturnType<typeof configSupabaseDepuisEnv>
 
 let app
 try {
-  app = creerServeur({
+  // Supabase (S1) seulement si SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY sont définies ; sinon SQLite (DB_FILE).
+  supabase = configSupabaseDepuisEnv(env)
+  app = await creerServeur({
     fichierDb,
+    supabase,
     adminPin,
     pinInitial,
     demo: env.DEMO === '1',
@@ -58,7 +63,7 @@ try {
 const port = Number(env.PORT ?? 3001)
 app.serveur.listen(port, () => {
   console.log(`[serveur] Asian Home Fidélité ${pkg.version} — http://localhost:${port}/api/v1/sante`)
-  console.log(`[serveur] mode ${production ? 'production' : 'développement'} · base ${fichierDb} · démo ${env.DEMO === '1' ? 'oui' : 'non'} · fuseau ${env.TZ}`)
+  console.log(`[serveur] mode ${production ? 'production' : 'développement'} · base ${supabase ? `Supabase ${new URL(supabase.url).host}` : fichierDb} · démo ${env.DEMO === '1' ? 'oui' : 'non'} · fuseau ${env.TZ}`)
   console.log('[serveur] intégrations : voir /api/v1/sante (Apple Wallet en suspens ; Google Wallet, SMS, e-mail actifs seulement si leurs variables sont définies)')
 })
 

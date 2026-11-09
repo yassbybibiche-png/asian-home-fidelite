@@ -13,13 +13,16 @@ import { analyserContact, cleContact, messageRelance, nouveauClient, offrirRecom
 import { estPerdant, lotsJouables, statutJeu, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles } from '../src/lib/avis.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
-import { ouvrirStockage, type Pin, type Stockage } from './stockage.ts'
+import { ErreurConflit, ouvrirStockage, type Pin, type Stockage } from './stockage.ts'
+import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { payloadGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications } from './notifications/index.ts'
 
 export interface OptionsServeur {
-  /** Fichier SQLite (créé au besoin). */
+  /** Fichier SQLite (créé au besoin) : stockage utilisé quand Supabase n'est pas configuré. */
   fichierDb: string
+  /** Supabase (S1) : présent = base Postgres Supabase au lieu du fichier SQLite. */
+  supabase?: ConfigSupabase
   /** PIN admin (création de commerces, réinitialisation des PIN). */
   adminPin: string
   /** PIN commerçant d'Asian Home Paris, utilisé UNE fois à l'initialisation de la base. */
@@ -204,28 +207,40 @@ function cartePublique(c: Client) {
 
 // ---------- Initialisation de la base ----------
 
-function initialiser(st: Stockage, o: OptionsServeur) {
-  if (!st.meta('initialise')) {
+/** Ignore un doublon (ligne déjà créée par un démarrage précédent ou une autre instance). */
+async function sansDoublon(ecriture: unknown) {
+  try {
+    await ecriture
+  } catch (e) {
+    if (!(e instanceof ErreurConflit)) throw e
+  }
+}
+
+async function initialiser(st: Stockage, o: OptionsServeur) {
+  if (!(await st.meta('initialise'))) {
     if (!o.pinInitial || !PIN_VALIDE.test(o.pinInitial)) {
       throw new Error('Base vide : un PIN initial (4 à 6 chiffres) est requis pour Asian Home Paris (variable PIN_ASIAN_HOME).')
     }
     const [asianHome] = seed.commerces as unknown as Commerce[]
-    st.transaction(() => {
+    await st.transaction(async () => {
       // Le vrai commerce, SANS les clients / avis / tirages fictifs du seed.
-      st.ajouterCommerce({ ...asianHome, creeLe: new Date().toISOString(), demo: false }, hacherPin(o.pinInitial!))
-      st.majMeta('initialise', new Date().toISOString())
+      // (Déjà présent : démarrage précédent interrompu avant la ligne `meta` — possible sous Supabase, sans transaction.)
+      if (!(await st.commerce(asianHome.id))) {
+        await sansDoublon(st.ajouterCommerce({ ...asianHome, creeLe: new Date().toISOString(), demo: false }, hacherPin(o.pinInitial!)))
+      }
+      await st.majMeta('initialise', new Date().toISOString())
     })
   }
-  if (o.demo && !st.meta('demo')) {
+  if (o.demo && !(await st.meta('demo'))) {
     const pin = o.pinInitial && PIN_VALIDE.test(o.pinInitial) ? o.pinInitial : '1234'
     const demo = seedRecale()
     const ids = new Set(demo.commerces.slice(1).map((c) => c.id))
-    st.transaction(() => {
-      for (const c of demo.commerces) if (ids.has(c.id) && !st.commerce(c.id)) st.ajouterCommerce({ ...c, demo: true }, hacherPin(pin))
-      for (const c of demo.clients) if (ids.has(c.commerceId)) st.ajouterClient(c)
-      for (const t of demo.tirages) if (ids.has(t.commerceId)) st.ajouterTirage(t)
-      for (const a of demo.avis) if (ids.has(a.commerceId)) st.ajouterAvis(a)
-      st.majMeta('demo', new Date().toISOString())
+    await st.transaction(async () => {
+      for (const c of demo.commerces) if (ids.has(c.id) && !(await st.commerce(c.id))) await sansDoublon(st.ajouterCommerce({ ...c, demo: true }, hacherPin(pin)))
+      for (const c of demo.clients) if (ids.has(c.commerceId)) await sansDoublon(st.ajouterClient(c))
+      for (const t of demo.tirages) if (ids.has(t.commerceId)) await sansDoublon(st.ajouterTirage(t))
+      for (const a of demo.avis) if (ids.has(a.commerceId)) await sansDoublon(st.ajouterAvis(a))
+      await st.majMeta('demo', new Date().toISOString())
     })
   }
 }
@@ -287,12 +302,13 @@ function codeGagnant(): string {
   return Array.from({ length: 6 }, () => alphabet[randomInt(alphabet.length)]).join('')
 }
 
-export function creerServeur(o: OptionsServeur) {
-  const st = ouvrirStockage(o.fichierDb)
+export async function creerServeur(o: OptionsServeur) {
+  // Supabase seulement s'il est configuré ; sinon SQLite local (dev, tests, comportement d'avant S1).
+  const st: Stockage = o.supabase ? ouvrirStockageSupabase(o.supabase) : ouvrirStockage(o.fichierDb)
   try {
-    initialiser(st, o)
+    await initialiser(st, o)
   } catch (e) {
-    st.fermer()
+    await st.fermer()
     throw e
   }
   const limiteur = creerLimiteur()
@@ -326,13 +342,13 @@ export function creerServeur(o: OptionsServeur) {
   }
 
   /** PIN du commerce (X-Commerce-PIN) ; le PIN admin (X-Admin-PIN) ouvre aussi tous les commerces. */
-  function exigerCommercant(req: IncomingMessage, commerceId: string) {
+  async function exigerCommercant(req: IncomingMessage, commerceId: string) {
     if (enTete(req, 'x-admin-pin')) return exigerAdmin(req)
     const pin = enTete(req, 'x-commerce-pin')
     if (!pin) throw err(401, 'PIN commerçant manquant (en-tête X-Commerce-PIN).')
     const ip = ipDe(req)
     limiteur.verifier(ip)
-    if (!pinCorrect(pin, st.pin(commerceId)!)) {
+    if (!pinCorrect(pin, (await st.pin(commerceId))!)) {
       limiteur.echec(ip)
       throw err(401, 'PIN commerçant incorrect.')
     }
@@ -340,14 +356,14 @@ export function creerServeur(o: OptionsServeur) {
 
   const aUnPin = (req: IncomingMessage) => !!(enTete(req, 'x-commerce-pin') || enTete(req, 'x-admin-pin'))
 
-  function commerceOu404(id: string): Commerce {
-    const c = st.commerce(id)
+  async function commerceOu404(id: string): Promise<Commerce> {
+    const c = await st.commerce(id)
     if (!c) throw err(404, 'Commerce inconnu.')
     return c
   }
 
-  function clientOu404(commerceId: string, id: string): Client {
-    const c = st.client(commerceId, id)
+  async function clientOu404(commerceId: string, id: string): Promise<Client> {
+    const c = await st.client(commerceId, id)
     if (!c) throw err(404, 'Client inconnu dans ce commerce.')
     return c
   }
@@ -357,12 +373,19 @@ export function creerServeur(o: OptionsServeur) {
   }
 
   /** Inscrit le client, ou retrouve celui qui a déjà ce téléphone / e-mail dans ce commerce. */
-  function inscrireOuRetrouver(commerceId: string, prenom: string, contactSaisi: unknown) {
+  async function inscrireOuRetrouver(commerceId: string, prenom: string, contactSaisi: unknown) {
     const contact = contactOuErreur(contactSaisi)
-    const existant = st.clientParContact(commerceId, contact)
+    const existant = await st.clientParContact(commerceId, contact)
     if (existant) return { client: existant, existant: true }
     const client = nouveauClient(commerceId, prenom, contact, maintenant())
-    st.ajouterClient(client)
+    try {
+      await st.ajouterClient(client)
+    } catch (e) {
+      // Double inscription simultanée : la contrainte unique (commerce, contact) a refusé la 2e → on reprend la 1re.
+      const gagnant = e instanceof ErreurConflit ? await st.clientParContact(commerceId, contact) : undefined
+      if (!gagnant) throw e
+      return { client: gagnant, existant: true }
+    }
     return { client, existant: false }
   }
 
@@ -373,16 +396,16 @@ export function creerServeur(o: OptionsServeur) {
     const [ressource, id, sous, sousId, action] = chemin
 
     if (ressource === 'sante' && !id && m === 'GET') {
-      return { json: { ok: true, version: o.version ?? '0.0.0', mode: o.production ? 'production' : 'developpement', stockage: 'sqlite', demo: !!o.demo, integrations: integrations() } }
+      return { json: { ok: true, version: o.version ?? '0.0.0', mode: o.production ? 'production' : 'developpement', stockage: st.type, demo: !!o.demo, integrations: integrations() } }
     }
     if (ressource === 'cartes' && id && !sous && m === 'GET') {
       // PUBLIC (ajout V2) : la carte vue par le client (#/carte/<clientId>) et l'état de son jeu du jour.
       // Mêmes informations que POST /clients en public : jamais de téléphone, d'e-mail ni de code gagnant.
-      for (const c of st.commerces()) {
-        const client = st.client(c.id, id)
+      for (const c of await st.commerces()) {
+        const client = await st.client(c.id, id)
         if (!client) continue
         exigerActif(c)
-        const tirages = st.tiragesClient(c.id, client.id)
+        const tirages = await st.tiragesClient(c.id, client.id)
         const t = maintenant()
         const duJour = tirageDuJour(tirages, c.id, client.id, t)
         return {
@@ -398,7 +421,7 @@ export function creerServeur(o: OptionsServeur) {
     if (ressource !== 'commerces') throw err(404, 'Route inconnue.')
 
     if (!id) {
-      if (m === 'GET') return { json: { commerces: st.commerces().map(commercePublic) } }
+      if (m === 'GET') return { json: { commerces: (await st.commerces()).map(commercePublic) } }
       if (m === 'POST') {
         exigerAdmin(req)
         const corps = await lireCorps(req)
@@ -406,24 +429,24 @@ export function creerServeur(o: OptionsServeur) {
         const pinClair = pinNeuf(pin)
         const base = nouveauCommerce(texte(nom, 'nom', 80, { requis: true }), typeCommerce(type ?? 'autre'), lien(lienGoogle ?? ''))
         const commerce = appliquerReglages(base, reglages, CHAMPS_REGLAGES.filter((k) => !['nom', 'type', 'lienGoogle'].includes(k)))
-        st.ajouterCommerce(commerce, hacherPin(pinClair))
+        await st.ajouterCommerce(commerce, hacherPin(pinClair))
         return { statut: 201, json: { commerce: commercePublic(commerce) } }
       }
       throw err(405, 'Méthode non autorisée.')
     }
 
-    const commerce = commerceOu404(id)
+    const commerce = await commerceOu404(id)
 
     if (!sous) {
       if (m === 'PATCH') {
-        exigerCommercant(req, id)
+        await exigerCommercant(req, id)
         const maj = appliquerReglages(commerce, await lireCorps(req))
         // Comme le front : enregistrer les réglages réapplique les règles aux avis en attente.
-        st.transaction(() => {
-          st.majCommerce(maj)
-          for (const a of st.avis(id)) {
+        await st.transaction(async () => {
+          await st.majCommerce(maj)
+          for (const a of await st.avis(id)) {
             const r = appliquerRegles(a, maj)
-            if (r !== a) st.majAvis(r)
+            if (r !== a) await st.majAvis(r)
           }
         })
         return { json: { commerce: maj } }
@@ -433,42 +456,42 @@ export function creerServeur(o: OptionsServeur) {
     }
 
     if (sous === 'etat' && m === 'GET') {
-      exigerCommercant(req, id)
-      return { json: { commerce, clients: st.clients(id), tirages: st.tirages(id), avis: st.avis(id) } }
+      await exigerCommercant(req, id)
+      return { json: { commerce, clients: await st.clients(id), tirages: await st.tirages(id), avis: await st.avis(id) } }
     }
 
     if (sous === 'pin' && m === 'PUT') {
-      exigerCommercant(req, id)
+      await exigerCommercant(req, id)
       const corps = await lireCorps(req)
-      st.majPin(id, hacherPin(pinNeuf(corps.pin)))
+      await st.majPin(id, hacherPin(pinNeuf(corps.pin)))
       return { json: { ok: true } }
     }
 
     if (sous === 'export.csv' && m === 'GET') {
-      exigerCommercant(req, id)
-      return { csv: { nom: `clients-${id}.csv`, contenu: clientsEnCsv(st.clients(id)) } }
+      await exigerCommercant(req, id)
+      return { csv: { nom: `clients-${id}.csv`, contenu: clientsEnCsv(await st.clients(id)) } }
     }
 
     if (sous === 'clients' && !sousId && m === 'POST') {
       // Public (auto-inscription depuis la page de jeu) ou commerçant (PIN) : un PIN fourni est toujours vérifié.
       const commercant = aUnPin(req)
-      if (commercant) exigerCommercant(req, id)
+      if (commercant) await exigerCommercant(req, id)
       else exigerActif(commerce)
       const corps = await lireCorps(req)
       const prenom = texte(corps.prenom ?? '', 'prenom', 40, { requis: true })
-      const { client, existant } = st.transaction(() => inscrireOuRetrouver(id, prenom, corps.contact))
+      const { client, existant } = await st.transaction(() => inscrireOuRetrouver(id, prenom, corps.contact))
       return { statut: existant ? 200 : 201, json: { client: commercant ? client : cartePublique(client), existant } }
     }
 
     if (sous === 'clients' && sousId && m === 'POST' && (action === 'visite' || action === 'recompense')) {
-      exigerCommercant(req, id)
-      const client = st.transaction(() => {
-        const avant = clientOu404(id, sousId)
+      await exigerCommercant(req, id)
+      const client = await st.transaction(async () => {
+        const avant = await clientOu404(id, sousId)
         if (action === 'recompense' && !recompenseDebloquee(avant, commerce)) {
           throw err(409, `Récompense pas encore débloquée : ${avant.tampons}/${commerce.seuilTampons} tampons.`)
         }
         const apres = action === 'visite' ? validerVisite(avant, commerce, maintenant()) : offrirRecompense(avant, commerce, maintenant())
-        st.majClient(apres)
+        await st.majClient(apres)
         return apres
       })
       return { json: { client } }
@@ -477,8 +500,8 @@ export function creerServeur(o: OptionsServeur) {
     if (sous === 'clients' && sousId && action === 'pass.json' && m === 'GET') {
       // V3 — Google Wallet : architecture prête, NON branchée. Sans émetteur + clé de service → 501.
       // Même configuré, la charge utile renvoyée n'est PAS signée (signature JWT non implémentée).
-      exigerCommercant(req, id)
-      const client = clientOu404(id, sousId)
+      await exigerCommercant(req, id)
+      const client = await clientOu404(id, sousId)
       if (!walletConfigure(o.googleWallet)) {
         throw err(501, 'Google Wallet à brancher : aucun compte émetteur ni clé de service configurés sur ce serveur. Aucun pass n’est généré.')
       }
@@ -493,8 +516,8 @@ export function creerServeur(o: OptionsServeur) {
 
     if (sous === 'clients' && sousId && action === 'relance' && m === 'POST') {
       // V3 — envoi SMS / e-mail préparé : 501 sans prestataire, et jamais sans consentement explicite du client.
-      exigerCommercant(req, id)
-      const client = clientOu404(id, sousId)
+      await exigerCommercant(req, id)
+      const client = await clientOu404(id, sousId)
       const corps = await lireCorps(req)
       if (corps.canal !== 'sms' && corps.canal !== 'email') throw err(400, '« canal » doit valoir "sms" ou "email".')
       const canal = corps.canal as Canal
@@ -515,17 +538,24 @@ export function creerServeur(o: OptionsServeur) {
       exigerActif(commerce)
       const corps = await lireCorps(req)
       const prenom = corps.prenom == null ? '' : texte(corps.prenom, 'prenom', 40)
-      const resultat = st.transaction(() => {
-        const { client } = inscrireOuRetrouver(id, prenom, corps.contact)
+      const dejaJoue = 'Vous avez déjà tourné la roue aujourd’hui. Revenez lors de votre prochaine visite !'
+      const resultat = await st.transaction(async () => {
+        const { client } = await inscrireOuRetrouver(id, prenom, corps.contact)
         const t = maintenant()
-        const statut = statutJeu(client, st.tiragesClient(id, client.id), id, t)
-        if (statut === 'dejaJoue') return { refus: 'Vous avez déjà tourné la roue aujourd’hui. Revenez lors de votre prochaine visite !' }
+        const statut = statutJeu(client, await st.tiragesClient(id, client.id), id, t)
+        if (statut === 'dejaJoue') return { refus: dejaJoue }
         if (statut === 'sansVisite') return { refus: 'Pour jouer, faites d’abord valider votre visite du jour au comptoir.' }
         const jouables = lotsJouables(commerce.lots)
         if (!jouables.length) return { refus: 'Aucun lot n’est configuré pour le moment.' }
         const lot = jouables[tirerLot(commerce.lots)].libelle
         const tirage: Tirage = { id: `ti-${randomUUID()}`, commerceId: id, clientId: client.id, lot, date: t.toISOString(), code: codeGagnant() }
-        st.ajouterTirage(tirage)
+        try {
+          await st.ajouterTirage(tirage)
+        } catch (e) {
+          // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e.
+          if (e instanceof ErreurConflit) return { refus: dejaJoue }
+          throw e
+        }
         return { tirage }
       })
       // Le client éventuellement créé reste inscrit même en cas de refus (la transaction est validée).
@@ -535,7 +565,7 @@ export function creerServeur(o: OptionsServeur) {
     }
 
     if (sous === 'avis' && !sousId && m === 'POST') {
-      exigerCommercant(req, id)
+      await exigerCommercant(req, id)
       const corps = await lireCorps(req)
       const note = corps.note
       if (typeof note !== 'number' || !Number.isInteger(note) || note < 1 || note > 5) throw err(400, '« note » doit être un nombre entier de 1 à 5.')
@@ -554,17 +584,17 @@ export function creerServeur(o: OptionsServeur) {
         date,
       }
       const avis = appliquerRegles(brut, commerce)
-      st.ajouterAvis(avis)
+      await st.ajouterAvis(avis)
       return { statut: 201, json: { avis } }
     }
 
     if (sous === 'avis' && sousId && !action && m === 'PATCH') {
-      exigerCommercant(req, id)
+      await exigerCommercant(req, id)
       const corps = await lireCorps(req)
       const inconnus = Object.keys(corps).filter((k) => k !== 'reponse' && k !== 'brouillon')
       if (inconnus.length) throw err(400, `Champ non modifiable : ${inconnus.join(', ')}.`)
-      const avis = st.transaction(() => {
-        const a = st.unAvis(id, sousId)
+      const avis = await st.transaction(async () => {
+        const a = await st.unAvis(id, sousId)
         if (!a) throw err(404, 'Avis inconnu dans ce commerce.')
         const r: Avis = { ...a }
         if ('brouillon' in corps) {
@@ -582,7 +612,7 @@ export function creerServeur(o: OptionsServeur) {
           } else delete r.reponse
         }
         const final = appliquerRegles(r, commerce)
-        st.majAvis(final)
+        await st.majAvis(final)
         return final
       })
       return { json: { avis } }
@@ -624,7 +654,9 @@ export function creerServeur(o: OptionsServeur) {
       }
       res.writeHead(r.statut ?? 200, { ...entetes, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
       res.end(JSON.stringify(r.json))
-    } catch (e) {
+    } catch (erreur) {
+      // Conflit d'écriture (doublon refusé par la base, ligne modifiée entre-temps) : 409, l'utilisateur peut réessayer.
+      const e = erreur instanceof ErreurConflit ? err(409, 'Modification simultanée : réessayez.') : erreur
       const http = e instanceof ErreurHttp
       if (!http) console.error(`[serveur] ${req.method} ${url.pathname} :`, e)
       const statut = http ? e.statut : 500
@@ -639,7 +671,7 @@ export function creerServeur(o: OptionsServeur) {
       limiteur.arreter()
       serveur.closeAllConnections()
       await new Promise<void>((ok) => serveur.close(() => ok()))
-      st.fermer()
+      await st.fermer()
     },
   }
 }

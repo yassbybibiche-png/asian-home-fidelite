@@ -3,7 +3,8 @@
 Backend partagé : le commerçant (tablette / téléphone au comptoir) et le client qui scanne le QR
 voient enfin **les mêmes données**. Une seule instance Node pour tous les commerces.
 
-- Node 24, **zéro dépendance npm** : `node:http`, `node:sqlite`, `node:crypto`.
+- Node 24 : `node:http`, `node:sqlite`, `node:crypto` ; une seule dépendance npm, `@supabase/supabase-js`, utilisée
+  uniquement quand Supabase est configuré (phase S1).
 - TypeScript exécuté directement par Node 24 (suppression des types intégrée, comme `npm test`) : pas de compilation.
 - Les règles métier ne sont **pas dupliquées** : le serveur importe `src/lib/fidelite.ts`, `roulette.ts`,
   `avis.ts`, `src/data/defaults.ts` et `seed.json` — exactement le code testé du front.
@@ -12,7 +13,9 @@ voient enfin **les mêmes données**. Une seule instance Node pour tous les comm
 |---|---|
 | `server/index.ts` | Point d'entrée (`npm run serveur`) : variables d'environnement, fuseau, démarrage. |
 | `server/app.ts` | Routes `/api/v1`, PIN, anti-bruteforce, validation, service du front compilé (CSV : `src/lib/csv.ts`, partagé avec le front depuis la V2). |
-| `server/stockage.ts` | Base SQLite (schéma + requêtes). |
+| `server/stockage.ts` | Base SQLite (schéma + requêtes) et contrat `Stockage` commun aux deux bases. |
+| `server/stockage-supabase.ts` | **S1** : même contrat sur Supabase (API REST PostgREST, clé service_role). |
+| `supabase/migrations/` | **S1** : schéma Postgres (`0001_schema_initial.sql`) et RLS (`0002_rls.sql`). |
 | `server/wallet.ts`, `server/notifications/` | **V3** : intégrations préparées, inactives (voir « Intégrations préparées »). |
 | `tests/serveur.test.ts` | Tests HTTP réels (port éphémère, base temporaire, `fetch`), lancés par `npm test`. |
 
@@ -57,10 +60,59 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `CORS_ORIGIN` | `*` | Origine autorisée pour un front hébergé ailleurs (ex. `https://mon-front.example`). |
 | `STATIC_DIR` | `dist` | Dossier du front compilé servi sur `/` (s'il contient `index.html`). |
 | `PUBLIC_URL` | — (déduit de l'en-tête `Host`) | **V3.** Adresse publique du site (`https://…`), encodée dans le QR des passes Google Wallet. |
+| `SUPABASE_URL` | — | **S1.** URL du projet Supabase (`https://<projet>.supabase.co`). Avec la suivante : stockage Supabase au lieu de SQLite. |
+| `SUPABASE_SERVICE_ROLE_KEY` | — | **S1. Secret serveur.** Clé service_role / `sb_secret_…`. Voir « Supabase » ci-dessous. |
 | `GOOGLE_WALLET_ISSUER_ID` | — | **V3, non configuré.** Identifiant émetteur Google Wallet. |
 | `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` | — | **V3, non configuré.** Chemin du fichier JSON de la clé du compte de service Google. Les deux variables Google Wallet sont nécessaires, sinon `pass.json` répond 501. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | — | **V3, non configuré.** SMS via Twilio (`TWILIO_FROM` = numéro expéditeur `+33…` ou identifiant de Messaging Service `MG…`). Les trois sont nécessaires, sinon 501. |
 | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | — | **V3, non configuré.** E-mail via Brevo (adresse expéditrice à valider chez Brevo ; nom optionnel). Clé + adresse nécessaires, sinon 501. |
+
+## Supabase (phase S1) — prêt, projet PAS encore créé
+
+Backend de production retenu : **Supabase gratuit** (au lieu de Render Starter payant). Aucun compte, aucun projet, aucune
+clé n'existe encore : rien n'a été testé contre un vrai Supabase (uniquement contre un faux PostgREST, `tests/supabase.test.ts`).
+
+**Choix du stockage** (au démarrage) : `SUPABASE_URL` **et** `SUPABASE_SERVICE_ROLE_KEY` définies → Supabase ; aucune des deux →
+SQLite (`DB_FILE`), exactement comme avant ; une seule des deux → refus de démarrer (pour ne jamais écrire par erreur dans un
+SQLite éphémère). `GET /api/v1/sante` indique `"stockage": "sqlite"` ou `"supabase"`. `npm run serveur` lit aussi un fichier
+`.env` s'il existe (modèle : `.env.example` à la racine ; `.env` est ignoré par git).
+
+**Variables** (modèle `.env.example`, placeholders seulement) :
+
+| Variable | Où la trouver (dashboard Supabase) | Règle |
+|---|---|---|
+| `SUPABASE_URL` | Project Settings → API (Data API) → *Project URL* | Pas secrète, mais à mettre dans l'environnement du serveur. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API → *service_role* (clés « legacy ») **ou** Project Settings → API Keys → clé secrète `sb_secret_…` | **Serveur uniquement.** Contourne la RLS : jamais dans le navigateur, jamais dans une variable `VITE_…`, jamais commitée, jamais affichée dans un log (le serveur n'affiche que l'hôte du projet). |
+| ~~`SUPABASE_ANON_KEY`~~ | — | **Pas utilisée** : le navigateur ne parle jamais à Supabase (tout passe par `/api/v1`), et la RLS ne lui ouvre rien. |
+
+(Emplacements dans le dashboard notés d'après la doc Supabase connue, à vérifier à la création du projet.)
+
+**Schéma** (`supabase/migrations/0001_schema_initial.sql`, rejouable) : tables `meta`, `commerces`, `clients`, `tirages`, `avis` ;
+objets métier en JSONB `donnees` (forme de `src/types.ts`, inchangée) ; colonnes `commerce_id`, `client_id`, `cle_contact`, `date`
+(timestamptz) ; PIN en `pin_hash` + `pin_sel` (SHA-256 + sel, jamais en clair) ; unique `(commerce_id, cle_contact)` ;
+index `tirages (commerce_id, client_id)` et `avis (commerce_id, date)` ; **index unique 1 tirage par client et par jour**
+`(commerce_id, client_id, jour à Europe/Paris)` ; colonne `version` incrémentée par trigger (verrou optimiste).
+
+**RLS** (`0002_rls.sql`) : activée sur les 5 tables, **aucune policy** ; droits de `anon` / `authenticated` retirés. Seul le
+serveur (service_role, qui contourne la RLS) lit et écrit ; c'est lui qui applique PIN et règles métier.
+
+**Transactions — limite honnête.** Le client JS passe par l'API REST : **pas de transaction sur plusieurs requêtes**. Sous
+Supabase, `transaction()` n'est donc pas « tout ou rien » ; chaque écriture est atomique seule, et les cas sensibles sont
+protégés par la base :
+- inscription : contrainte unique (commerce, contact) — une double inscription simultanée donne un seul client ;
+- tirage : index unique (client, jour à Paris) — un double tirage simultané est **rejeté par la base** (409), pas seulement
+  par le test applicatif ;
+- visite / récompense / modification d'avis : écriture conditionnée à la `version` lue — une double validation simultanée
+  donne une réussite et un 409 « réessayez », jamais un tampon perdu en silence ;
+- non couvert : une suite d'écritures coupée au milieu n'est pas annulée (ex. `PATCH /commerces/:id` peut enregistrer les
+  réglages puis échouer sur la réévaluation d'un avis ; le relancer suffit). Le premier démarrage est rejouable.
+- l'index du tirage du jour suppose le fuseau Europe/Paris (celui que le serveur force) : à changer avec lui.
+
+Sous SQLite, rien ne change : vraies transactions (`BEGIN IMMEDIATE`), passées une par une.
+
+**Reste à faire (S2)** : créer le projet (région UE), exécuter `0001` puis `0002` dans le SQL Editor, renseigner les deux
+variables chez l'hébergeur du serveur, vérifier `/sante` → `supabase`, refaire le parcours HTTP contre le vrai projet, et
+(si besoin) importer les données d'un `fidelite.db` existant.
 
 ## Données au premier démarrage (migration)
 
@@ -169,7 +221,8 @@ Total indicatif ≈ 7,25 $/mois : pas de veille, données conservées entre les 
 
 ## Limites honnêtes
 
-- 1 seule instance (SQLite est un fichier local) : pas de répartition sur plusieurs serveurs.
+- SQLite : 1 seule instance (fichier local). Sous Supabase, plusieurs instances partagent la base, mais l'anti-bruteforce
+  reste en mémoire par instance.
 - Anti-bruteforce et blocages en mémoire : remis à zéro au redémarrage.
 - Pas de comptes utilisateurs : un PIN par commerce, partagé par l'équipe ; pas de journal « qui a fait quoi ».
 - Le client se reconnaît par son téléphone / e-mail sans vérification (pas de SMS de confirmation) : quelqu'un qui
@@ -227,7 +280,7 @@ Variables : voir le tableau ci-dessus. Garde-fous déjà codés : 501 sans prest
 `consentementRelance: true` ; mention de désinscription ajoutée à chaque message (« STOP » en SMS, réponse « désinscription »
 en e-mail — un vrai lien de désinscription géré par le prestataire reste à prévoir).
 
-## Migration future (non faite, rien n'a été créé)
+## Migration future (écrite avant S1 — Supabase est désormais préparé, voir plus haut)
 
 Supabase ou Firebase seraient la voie suivante quand :
 - un commerce dépasse **quelques centaines de clients actifs** ou qu'il y a **beaucoup de commerces** (plusieurs instances, sauvegardes gérées) ;

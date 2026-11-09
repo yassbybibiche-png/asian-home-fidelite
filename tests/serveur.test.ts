@@ -18,7 +18,7 @@ const ASIAN_HOME = 'c-asian-home-paris'
 let horloge = new Date(2026, 10, 9, 12, 0)
 
 async function demarrer(fichierDb: string, options: Partial<OptionsServeur> = {}) {
-  const app = creerServeur({ fichierDb, adminPin: ADMIN, pinInitial: '1234', version: 'test', maintenant: () => horloge, ...options })
+  const app = await creerServeur({ fichierDb, adminPin: ADMIN, pinInitial: '1234', version: 'test', maintenant: () => horloge, ...options })
   await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
   const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
   async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = {}) {
@@ -287,8 +287,8 @@ describe('Serveur : DEMO=1 et anti-bruteforce', () => {
     }
   })
 
-  test('base vide sans PIN initial → démarrage refusé avec un message clair', () => {
-    assert.throws(() => creerServeur({ fichierDb: join(dossier, 'vide.db'), adminPin: ADMIN }), /PIN_ASIAN_HOME/)
+  test('base vide sans PIN initial → démarrage refusé avec un message clair', async () => {
+    await assert.rejects(() => creerServeur({ fichierDb: join(dossier, 'vide.db'), adminPin: ADMIN }), /PIN_ASIAN_HOME/)
   })
 })
 

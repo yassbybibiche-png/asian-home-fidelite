@@ -26,7 +26,7 @@ after(() => rmSync(dossier, { recursive: true, force: true }))
 
 async function demarrer(nom: string, options: Partial<OptionsServeur> = {}) {
   const fichierDb = join(dossier, nom)
-  const app = creerServeur({ fichierDb, adminPin: ADMIN, pinInitial: '1234', version: 'test', ...options })
+  const app = await creerServeur({ fichierDb, adminPin: ADMIN, pinInitial: '1234', version: 'test', ...options })
   await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
   const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
   async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = {}) {

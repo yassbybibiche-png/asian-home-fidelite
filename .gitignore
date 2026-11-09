@@ -2,5 +2,8 @@ node_modules/
 dist/
 *.log
 .DS_Store
+# Secrets (Supabase…) : seul .env.example (placeholders) est versionné
+.env
+.env.local
 # Base SQLite du serveur (à la racine seulement : src/data/ contient du code)
 /data/
