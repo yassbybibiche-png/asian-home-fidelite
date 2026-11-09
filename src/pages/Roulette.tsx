@@ -16,7 +16,9 @@ export default function Roulette() {
 
       <section className="carte flex flex-col items-center gap-3 text-center sm:flex-row sm:text-left">
         <a href="#/qr" aria-label="Agrandir le QR vitrine">
-          <QrCode texte={url} className="h-36 w-36" titre={`QR code de la roulette de ${commerce.nom}`} />
+          <span className="block rounded-2xl bg-white p-2 ring-1 ring-gray-200">
+            <QrCode texte={url} className="h-36 w-36" titre={`QR code de la roulette de ${commerce.nom}`} />
+          </span>
         </a>
         <div className="w-full min-w-0 space-y-2">
           <p className="text-sm text-gray-600">Ce QR code est unique à votre commerce. Il ouvre la page de jeu :</p>
@@ -35,23 +37,25 @@ export default function Roulette() {
 
       <section>
         <div className="mb-2 flex items-baseline justify-between">
-          <h2 className="text-lg font-bold">Lots configurés</h2>
-          <a href="#/reglages" className="inline-flex min-h-11 items-center font-semibold text-marque-600">
+          <h2 className="titre-carte">Lots configurés</h2>
+          <a href="#/reglages" className="lien">
             Modifier
           </a>
         </div>
         <ul className="carte divide-y divide-gray-100 py-1">
           {lotsJouables(commerce.lots).map((lot, i) => (
-            <li key={i} className="flex justify-between gap-3 py-2.5">
+            <li key={i} className="flex items-center justify-between gap-3 py-2.5">
               <span>🎁 {lot.libelle}</span>
-              <span className="shrink-0 font-semibold text-gray-600">{Math.round((lot.probabilite / total) * 100)} %</span>
+              <span className="shrink-0 rounded-full bg-marque-50 px-2.5 py-0.5 text-sm font-semibold text-marque-700 tabular-nums">
+                {Math.round((lot.probabilite / total) * 100)} %
+              </span>
             </li>
           ))}
         </ul>
       </section>
 
       <section>
-        <h2 className="mb-2 text-lg font-bold">Gains récents</h2>
+        <h2 className="titre-carte mb-2">Gains récents</h2>
         {tirages.length === 0 ? (
           <Vide>Aucun tirage pour l’instant.</Vide>
         ) : (
@@ -62,7 +66,7 @@ export default function Roulette() {
                   <span className="font-semibold">{prenom(t.clientId)}</span> — {t.lot}
                   {t.code && <span className="block font-mono text-sm text-gray-600">code {t.code}</span>}
                 </span>
-                <span className="shrink-0 text-sm text-gray-500">{dateRelative(t.date)}</span>
+                <span className="shrink-0 text-sm text-gray-600">{dateRelative(t.date)}</span>
               </li>
             ))}
           </ul>

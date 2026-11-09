@@ -6,6 +6,7 @@ import { dateRelative } from '../lib/format'
 import { MODELES, appliquerRegles, modeleSuggere, statutAvis, texteModele } from '../lib/avis'
 import { ETAPES_CONNEXION_GOOGLE, TEXTE_AVIS_DEMO, TEXTE_AVIS_VIDE_PRODUCTION } from '../lib/integrations'
 import { BadgeDemo, EnTete, Etoiles, MessageErreur, Vide } from '../components/ui'
+import { InvitationAvis } from '../components/InvitationAvis'
 
 type Filtre = 'tous' | 'aTraiter' | 'negatifs'
 
@@ -61,7 +62,9 @@ export default function AvisPage() {
 
       {simulation && <FormulaireSimulation onFermer={() => setSimulation(false)} />}
 
-      <div className="mb-4 rounded-xl bg-white p-3 text-sm text-gray-600 ring-1 ring-gray-200">
+      <ApercuInvitation />
+
+      <div className="carte mb-4 text-sm text-gray-600 sm:p-4">
         Règles actives :{' '}
         {[
           commerce.reglesReponseAuto.auto5Etoiles && 'réponse auto aux 5★',
@@ -71,7 +74,7 @@ export default function AvisPage() {
           .filter(Boolean)
           .join(' · ') || 'aucune'}{' '}
         —{' '}
-        <a href="#/reglages" className="inline-flex min-h-11 items-center font-semibold text-marque-600 underline">
+        <a href="#/reglages" className="lien">
           modifier
         </a>
         {nbConcernes > 0 && (
@@ -101,7 +104,8 @@ export default function AvisPage() {
           <button
             key={valeur}
             onClick={() => setFiltre(valeur)}
-            className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-semibold ${filtre === valeur ? 'bg-marque-500 text-white' : 'bg-white text-gray-700 ring-1 ring-gray-300'}`}
+            aria-pressed={filtre === valeur}
+            className="puce"
           >
             {libelle}
           </button>
@@ -120,6 +124,25 @@ export default function AvisPage() {
         </ul>
       )}
     </div>
+  )
+}
+
+/** Ce que voit le client après la roue : 5 étoiles pré-remplies DANS l'app, puis le lien Google direct. */
+function ApercuInvitation() {
+  const { commerce } = useStore()
+  return (
+    <details className="carte mb-4">
+      <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 font-bold">
+        Invitation à l’avis vue par le client <span className="text-sm font-semibold text-marque-600">aperçu</span>
+      </summary>
+      <p className="mt-2 text-sm text-gray-600">
+        Après la roue, le client voit 5 étoiles déjà sélectionnées dans l’app (modifiables d’un tap), puis ouvre votre lien Google. Google ne permet pas de
+        pré-remplir la note : le client confirme ses étoiles sur Google avant de publier.
+      </p>
+      <div className="mt-3">
+        <InvitationAvis commerce={commerce} />
+      </div>
+    </details>
   )
 }
 
@@ -177,7 +200,7 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
         <span className="min-w-0 truncate font-semibold">{a.auteur}</span>
         <Etoiles note={a.note} />
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-600">
         <span>{dateRelative(a.date)}</span>
         <span className={`rounded-full px-2 py-0.5 font-semibold ring-1 ${STATUTS[statut].classe}`}>{STATUTS[statut].libelle}</span>
         {a.reponseAuto && <span className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold text-gray-600">auto</span>}

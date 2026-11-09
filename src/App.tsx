@@ -67,7 +67,7 @@ function SelecteurCommerce() {
           <span className="truncate font-bold leading-tight">{commerce.nom}</span>
           {mode === 'api' && commerce.demo && <BadgeDemo />}
         </span>
-        <span className="block text-xs text-gray-500">
+        <span className="block text-xs text-gray-600">
           {libelleType(commerce.type)}
           {choix ? ' · changer de commerce ▾' : ''}
         </span>
@@ -134,15 +134,15 @@ export default function App() {
   }
 
   // Mode API : pages commerçant derrière le PIN.
-  if (mode === 'api' && !accesPret) return <p className="px-4 py-16 text-center text-gray-500">Chargement…</p>
+  if (mode === 'api' && !accesPret) return <p className="px-4 py-16 text-center text-gray-600" role="status">Chargement…</p>
   if (mode === 'api' && (!acces || !commerce)) return <Verrou />
 
   return (
     <div className="min-h-dvh pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8">
-      <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 backdrop-blur print:hidden">
+      <header className="sticky top-0 z-20 border-b border-gray-900/5 bg-white/90 shadow-[0_1px_8px_-4px_rgb(17_24_39/0.12)] backdrop-blur-md print:hidden">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2">
           <SelecteurCommerce />
-          <span className="hidden shrink-0 text-lg font-extrabold text-marque-500 sm:block">{NOM_APP}</span>
+          <span className="hidden shrink-0 font-titre text-lg font-bold text-marque-600 sm:block">{NOM_APP}</span>
           {mode === 'api' && (
             <button
               className="min-h-11 shrink-0 rounded-xl px-3 text-sm font-semibold text-gray-700 ring-1 ring-gray-300 active:bg-gray-100"
@@ -158,7 +158,8 @@ export default function App() {
             <a
               key={o.page}
               href={`#/${o.page}`}
-              className={`border-b-2 px-3 py-2.5 font-medium whitespace-nowrap ${
+              aria-current={onglet === o.page ? 'page' : undefined}
+              className={`border-b-2 px-3 py-2.5 font-medium whitespace-nowrap transition-colors ${
                 onglet === o.page ? 'border-marque-500 text-marque-600' : 'border-transparent text-gray-600 hover:text-gray-900'
               }`}
             >
@@ -188,7 +189,7 @@ export default function App() {
       </main>
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden print:hidden"
+        className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-gray-900/5 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_-8px_rgb(17_24_39/0.15)] backdrop-blur-md md:hidden print:hidden"
         aria-label="Navigation principale"
       >
         {ONGLETS_MOBILE.map((o) => {
@@ -197,10 +198,12 @@ export default function App() {
             <a
               key={o.page}
               href={`#/${o.page}`}
-              className={`flex min-h-16 flex-col items-center justify-center gap-0.5 text-xs font-medium ${actif ? 'text-marque-500' : 'text-gray-500'}`}
+              className={`flex min-h-16 flex-col items-center justify-center gap-0.5 text-xs font-semibold ${actif ? 'text-marque-600' : 'text-gray-600'}`}
               aria-current={actif ? 'page' : undefined}
             >
-              <Icone nom={o.page} />
+              <span className={`flex h-8 w-14 items-center justify-center rounded-full transition-colors ${actif ? 'bg-marque-50' : ''}`}>
+                <Icone nom={o.page} />
+              </span>
               {o.libelle}
             </a>
           )

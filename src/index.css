@@ -5,10 +5,20 @@
   --color-marque-50: #fdf3f2;
   --color-marque-100: #fbe3e1;
   --color-marque-200: #f5c2be;
+  --color-marque-300: #e98f89;
   --color-marque-500: #b3262d;
   --color-marque-600: #9c1f26;
   --color-marque-700: #7f1a1f;
+  --color-marque-800: #5e1317;
+  /* Or des étoiles et des récompenses (décor ; le texte doré utilise amber-800, contraste ≥ 4,5:1). */
+  --color-or-300: #f2d48a;
+  --color-or-500: #d4a73c;
+  /* Fond chaud, légèrement ivoire, plus doux qu'un gris froid. */
+  --color-fond: #f7f5f2;
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-titre: ui-serif, 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  --shadow-douce: 0 1px 2px rgb(17 24 39 / 0.04), 0 4px 16px -4px rgb(17 24 39 / 0.08);
+  --shadow-relief: 0 2px 4px rgb(17 24 39 / 0.06), 0 12px 32px -8px rgb(17 24 39 / 0.18);
 }
 
 html {
@@ -17,26 +27,85 @@ html {
 }
 
 body {
-  @apply bg-gray-100 text-gray-900 antialiased;
+  @apply bg-fond text-gray-900 antialiased;
+  line-height: 1.55;
   /* Un e-mail ou une URL très longs passent à la ligne au lieu d'élargir la page sur téléphone. */
   overflow-wrap: anywhere;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+/* Focus clavier visible partout, discret au toucher. */
+:where(a, button, select, summary, [role='radio'], [role='tab'], [role='switch']):focus-visible {
+  outline: 3px solid var(--color-marque-200);
+  outline-offset: 2px;
+  border-radius: 0.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+@keyframes apparition {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* Champs de formulaire lisibles et faciles à toucher (≥ 48 px de haut). */
 @layer components {
   .champ {
-    @apply block w-full min-h-12 rounded-xl border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-marque-500 focus:ring-2 focus:ring-marque-200 focus:outline-none;
+    @apply block w-full min-h-12 rounded-xl border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 shadow-[inset_0_1px_2px_rgb(17_24_39/0.04)] transition-colors placeholder:text-gray-500 focus:border-marque-500 focus:ring-2 focus:ring-marque-200 focus:outline-none aria-invalid:border-red-500;
   }
   .etiquette {
     @apply mb-1.5 block text-sm font-semibold text-gray-700;
   }
+  /* Boutons : primaire (laque), secondaire (contour), états nets — pression, focus, chargement, désactivé. */
   .bouton {
-    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-marque-500 px-5 py-3 text-base font-semibold text-white shadow-sm active:bg-marque-700 hover:bg-marque-600 disabled:opacity-50;
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-marque-500 px-5 py-3 text-center text-base font-semibold text-white shadow-[0_1px_0_rgb(255_255_255/0.15)_inset,0_2px_6px_-1px_rgb(127_26_31/0.35)] transition hover:bg-marque-600 active:scale-[0.98] active:bg-marque-700 disabled:cursor-not-allowed disabled:bg-gray-500 disabled:shadow-none disabled:active:scale-100 aria-disabled:cursor-not-allowed;
   }
   .bouton-secondaire {
-    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-5 py-3 text-base font-semibold text-gray-800 active:bg-gray-100 hover:bg-gray-50;
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-5 py-3 text-center text-base font-semibold text-gray-800 shadow-[0_1px_2px_rgb(17_24_39/0.05)] transition hover:border-gray-400 hover:bg-gray-50 active:scale-[0.98] active:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-500 disabled:active:scale-100;
+  }
+  .lien {
+    @apply inline-flex min-h-11 items-center font-semibold text-marque-600 underline decoration-marque-200 underline-offset-4 hover:decoration-marque-500;
   }
   .carte {
-    @apply rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-200;
+    @apply rounded-2xl bg-white p-4 shadow-douce ring-1 ring-gray-900/5 sm:p-5;
+  }
+  .titre-carte {
+    @apply text-lg font-bold tracking-tight text-gray-900;
+  }
+  .surtitre {
+    @apply text-xs font-semibold tracking-[0.12em] text-gray-600 uppercase;
+  }
+  /* Filtres en pilules (listes clients, avis, accès). */
+  .puce {
+    @apply min-h-11 shrink-0 rounded-full bg-white px-4 text-sm font-semibold text-gray-700 ring-1 ring-gray-300 transition hover:ring-gray-400 aria-selected:bg-marque-500 aria-selected:text-white aria-selected:ring-marque-500 aria-pressed:bg-marque-500 aria-pressed:text-white aria-pressed:ring-marque-500;
+  }
+  /* Messages d'état cohérents. */
+  .alerte-succes {
+    @apply rounded-xl bg-green-50 p-3 text-sm font-semibold text-green-900 ring-1 ring-green-200;
+  }
+  .etoile {
+    @apply inline-flex h-12 w-12 items-center justify-center rounded-xl transition-transform active:scale-90;
+  }
+  .apparition {
+    animation: apparition 0.35s ease-out both;
   }
 }

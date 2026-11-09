@@ -16,14 +16,14 @@ export default function CartePublique() {
 function Carte({ client, commerce, demo, pied }: { client: Client; commerce: Commerce; demo: boolean; pied: ReactNode }) {
   if (!commerce.actif) return <MessagePublic titre={commerce.nom}>La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
   return (
-    <div className="mx-auto max-w-md space-y-4 px-4 py-6">
+    <div className="mx-auto max-w-md space-y-4 px-4 pt-6 pb-10">
       <CarteFidelite client={client} commerce={commerce} />
-      <BoutonWallet demo={demo} />
-      <a href={`#/jouer/${commerce.id}`} className="bouton-secondaire w-full">
+      <a href={`#/jouer/${commerce.id}`} className="bouton w-full">
         🎡 Tourner la roue du jour
       </a>
+      <BoutonWallet demo={demo} />
       {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}
-      <p className="text-center text-xs text-gray-500">{pied}</p>
+      <p className="text-center text-xs text-gray-600">{pied}</p>
     </div>
   )
 }

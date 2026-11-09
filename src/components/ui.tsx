@@ -11,7 +11,10 @@ export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Comme
     return <img src={logo} alt="" className={`${dims} shrink-0 rounded-xl bg-white object-cover ring-1 ring-gray-200`} />
   }
   return (
-    <span className={`${dims} inline-flex shrink-0 items-center justify-center rounded-xl bg-marque-500 font-bold text-white`} aria-hidden>
+    <span
+      className={`${dims} inline-flex shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-marque-500 to-marque-700 font-bold tracking-wide text-white shadow-sm ring-1 ring-black/5`}
+      aria-hidden
+    >
       {(logo || initiales(commerce.nom)).slice(0, 3).toUpperCase()}
     </span>
   )
@@ -19,7 +22,7 @@ export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Comme
 
 export function Etoiles({ note }: { note: number }) {
   return (
-    <span className="whitespace-nowrap text-amber-500" aria-label={`${note} sur 5`}>
+    <span className="whitespace-nowrap tracking-wider text-amber-500" role="img" aria-label={`${note} sur 5`}>
       {'★'.repeat(note)}
       <span className="text-gray-300">{'★'.repeat(5 - note)}</span>
     </span>
@@ -32,10 +35,10 @@ export function BadgeDemo({ children = 'Démo' }: { children?: ReactNode }) {
 
 export function EnTete({ titre, sousTitre, action }: { titre: string; sousTitre?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="mb-4 flex items-start justify-between gap-3">
+    <div className="mb-5 flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <h1 className="text-2xl font-bold tracking-tight">{titre}</h1>
-        {sousTitre && <p className="mt-1 text-gray-600">{sousTitre}</p>}
+        <h1 className="font-titre text-[1.75rem] font-bold tracking-tight text-gray-900">{titre}</h1>
+        {sousTitre && <p className="mt-1 text-[0.95rem] text-gray-600">{sousTitre}</p>}
       </div>
       {action}
     </div>
@@ -63,7 +66,7 @@ export function Interrupteur({ actif, onChange, libelle, aide }: { actif: boolea
 }
 
 export function Vide({ children }: { children: ReactNode }) {
-  return <p className="rounded-2xl border border-dashed border-gray-300 p-6 text-center text-gray-500">{children}</p>
+  return <p className="rounded-2xl border border-dashed border-gray-300 bg-white/60 p-6 text-center text-gray-600">{children}</p>
 }
 
 const CHEMINS: Record<string, string> = {
@@ -132,8 +135,11 @@ export async function copier(texte: string): Promise<boolean> {
 export function MessageErreur({ children }: { children: ReactNode }) {
   if (!children) return null
   return (
-    <p className="rounded-xl bg-red-50 p-3 text-sm text-red-800 ring-1 ring-red-200" role="alert">
-      {children}
+    <p className="flex gap-2 rounded-xl bg-red-50 p-3 text-sm text-red-800 ring-1 ring-red-200" role="alert">
+      <span aria-hidden className="font-bold">
+        !
+      </span>
+      <span className="min-w-0">{children}</span>
     </p>
   )
 }
@@ -192,7 +198,7 @@ export function BoutonWallet({ demo = true, lienCarte }: { demo?: boolean; lienC
 export function BlocRgpd() {
   return (
     <section className="carte">
-      <h2 className="font-bold">Données personnelles (RGPD)</h2>
+      <h2 className="titre-carte">Données personnelles (RGPD)</h2>
       <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
         {MENTIONS_RGPD.map((m) => (
           <li key={m}>{m}</li>

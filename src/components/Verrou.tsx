@@ -26,8 +26,8 @@ export function Verrou() {
   return (
     <div className="mx-auto max-w-md space-y-4 px-4 py-10">
       <div className="text-center">
-        <p className="text-lg font-extrabold text-marque-500">{NOM_APP}</p>
-        <h1 className="mt-2 text-2xl font-bold">Espace commerçant</h1>
+        <p className="font-titre text-lg font-bold text-marque-600">{NOM_APP}</p>
+        <h1 className="mt-2 font-titre text-[1.75rem] font-bold tracking-tight">Espace commerçant</h1>
         <p className="mt-1 text-gray-600">Saisissez le PIN de votre commerce pour ouvrir votre tableau de bord.</p>
       </div>
 
@@ -55,7 +55,7 @@ export function Verrou() {
             role="tab"
             aria-selected={role === valeur}
             onClick={() => (setRole(valeur), setPin(''))}
-            className={`min-h-11 rounded-full px-4 text-sm font-semibold ${role === valeur ? 'bg-marque-500 text-white' : 'bg-white text-gray-700 ring-1 ring-gray-300'}`}
+            className="puce"
           >
             {libelle}
           </button>
@@ -107,7 +107,7 @@ export function Verrou() {
             aria-describedby={erreur ? 'verrou-erreur' : undefined}
           />
           {erreur && (
-            <p id="verrou-erreur" className="mt-1 text-sm text-red-600" role="alert">
+            <p id="verrou-erreur" className="mt-1 text-sm text-red-700" role="alert">
               {erreur}
             </p>
           )}

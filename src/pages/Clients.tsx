@@ -52,7 +52,7 @@ export default function Clients() {
       )}
 
       {annonce && (
-        <p className="mb-4 rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200" role="status">
+        <p className="alerte-succes apparition mb-4 font-normal" role="status">
           {annonce.existant ? `${annonce.client.prenom} était déjà inscrit(e) avec ce contact.` : `✓ ${annonce.client.prenom} est inscrit(e).`}{' '}
           <a href={`#/client/${annonce.client.id}`} className="font-semibold underline">
             Voir sa carte
@@ -85,7 +85,7 @@ export default function Clients() {
             role="tab"
             aria-selected={filtre === valeur}
             onClick={() => setFiltre(valeur)}
-            className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-semibold ${filtre === valeur ? 'bg-marque-500 text-white' : 'bg-white text-gray-700 ring-1 ring-gray-300'}`}
+            className="puce"
           >
             {libelle}
           </button>
@@ -157,7 +157,7 @@ function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onIn
 
   return (
     <form onSubmit={envoyer} className="carte mb-4 space-y-3">
-      <h2 className="text-lg font-bold">Nouveau client</h2>
+      <h2 className="titre-carte">Nouveau client</h2>
       <div>
         <label className="etiquette" htmlFor="ins-prenom">
           Prénom
@@ -177,7 +177,7 @@ function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onIn
           value={contactSaisi}
           onChange={(e) => setContactSaisi(e.target.value)}
         />
-        {essaye && !contact && <p className="mt-1 text-sm text-red-600">Saisissez un numéro (10 chiffres) ou un e-mail valide.</p>}
+        {essaye && !contact && <p className="mt-1 text-sm text-red-700">Saisissez un numéro (10 chiffres) ou un e-mail valide.</p>}
       </div>
       <MessageErreur>{erreur && `Inscription non enregistrée : ${erreur}`}</MessageErreur>
       <div className="grid grid-cols-2 gap-2">
@@ -206,21 +206,23 @@ function LigneClient({ client: c }: { client: Client }) {
         <a href={`#/client/${c.id}`} className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="text-lg font-semibold text-gray-900 underline decoration-gray-300 underline-offset-4">{c.prenom}</span>
-            {estARelancer(c) && <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-semibold text-gray-600">inactif</span>}
+            {estARelancer(c) && <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-semibold text-gray-700">inactif</span>}
+            {debloquee && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">récompense</span>}
           </span>
-          <span className="block truncate text-sm text-gray-500">{c.telephone ?? c.email}</span>
+          <span className="block truncate text-sm text-gray-600">{c.telephone ?? c.email}</span>
         </a>
         <div className="shrink-0 text-right">
-          <div className="font-bold">
-            {tampons}/{commerce.seuilTampons}
+          <div className="text-lg font-extrabold tabular-nums">
+            {tampons}
+            <span className="text-sm font-semibold text-gray-600">/{commerce.seuilTampons}</span>
           </div>
-          <div className="text-xs text-gray-500">tampons</div>
+          <div className="text-xs text-gray-600">tampons</div>
         </div>
       </div>
-      <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-gray-100" aria-hidden>
-        <div className="h-full rounded-full bg-marque-500 transition-all" style={{ width: `${pct}%` }} />
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100" aria-hidden>
+        <div className={`h-full rounded-full transition-all duration-500 ${debloquee ? 'bg-or-500' : 'bg-marque-500'}`} style={{ width: `${pct}%` }} />
       </div>
-      <div className="mt-2 flex justify-between text-xs text-gray-500">
+      <div className="mt-2 flex justify-between gap-3 text-xs text-gray-600">
         <span>Dernière visite : {c.derniereVisite ? dateRelative(c.derniereVisite) : 'aucune'}</span>
         <span>
           {c.visites.length} visite{c.visites.length > 1 ? 's' : ''}
@@ -240,7 +242,7 @@ function LigneClient({ client: c }: { client: Client }) {
           {enCours ? 'Enregistrement…' : valide ? '✓ Tampon ajouté' : 'Valider une visite (+1)'}
         </button>
         {debloquee && (
-          <a href={`#/client/${c.id}`} className="bouton-secondaire min-h-11 border-green-300 bg-green-50 py-2 text-green-800">
+          <a href={`#/client/${c.id}`} className="bouton-secondaire min-h-11 border-or-500 bg-amber-50 py-2 text-amber-900 hover:bg-amber-100">
             🎁 Récompense
           </a>
         )}
@@ -263,9 +265,9 @@ function LigneRelance({ client: c }: { client: Client }) {
         <a href={`#/client/${c.id}`} className="text-lg font-semibold underline decoration-gray-300 underline-offset-4">
           {c.prenom}
         </a>
-        <span className="text-sm text-gray-500">sans visite depuis {c.derniereVisite ? joursDepuis(c.derniereVisite) : '?'} j</span>
+        <span className="shrink-0 text-sm text-gray-600">sans visite depuis {c.derniereVisite ? joursDepuis(c.derniereVisite) : '?'} j</span>
       </div>
-      <div className="truncate text-sm text-gray-500">{c.telephone ?? c.email}</div>
+      <div className="truncate text-sm text-gray-600">{c.telephone ?? c.email}</div>
       <p className="mt-2 rounded-xl bg-gray-50 p-3 text-sm text-gray-800 select-all">{message}</p>
       <BoutonCopier texte={message} className="bouton-secondaire mt-2 w-full" />
     </li>

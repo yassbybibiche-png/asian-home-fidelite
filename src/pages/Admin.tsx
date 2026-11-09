@@ -76,14 +76,14 @@ export default function Admin() {
                 <LogoCommerce commerce={c} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-bold">{c.nom}</p>
-                  <p className="flex items-center gap-2 text-sm text-gray-500">
+                  <p className="flex items-center gap-2 text-sm text-gray-600">
                     {libelleType(c.type)}
                     {mode === 'api' && c.demo && <BadgeDemo />}
                   </p>
                 </div>
                 <span
                   className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                    c.actif ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600'
+                    c.actif ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'
                   }`}
                 >
                   {c.actif ? 'Actif' : 'Inactif'}
@@ -122,7 +122,7 @@ export default function Admin() {
 
       {mode === 'local' && (
       <section className="carte">
-        <h2 className="font-bold">Démo</h2>
+        <h2 className="titre-carte">Démo</h2>
         <p className="mt-1 text-sm text-gray-600">
           Les données sont enregistrées dans ce navigateur uniquement. La réinitialisation restaure les 3 commerces d’exemple.
         </p>
@@ -177,10 +177,10 @@ function FormulairePin({ commerceId, onFermer }: { commerceId: string; onFermer(
   return (
     <form onSubmit={envoyer} className="mt-3 space-y-2 border-t border-gray-100 pt-3">
       <ChampPin id={`pin-${commerceId}`} libelle="Nouveau PIN (4 à 6 chiffres)" valeur={pin} onChange={(v) => (setPin(v), setFait(false))} />
-      {pin && !PIN_COMMERCE.test(pin) && <p className="text-sm text-red-600">Le PIN doit contenir 4 à 6 chiffres.</p>}
+      {pin && !PIN_COMMERCE.test(pin) && <p className="text-sm text-red-700">Le PIN doit contenir 4 à 6 chiffres.</p>}
       <MessageErreur>{erreur && `PIN non changé : ${erreur}`}</MessageErreur>
       {fait && (
-        <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200" role="status">
+        <p className="alerte-succes" role="status">
           ✓ PIN changé. Communiquez-le au commerçant.
         </p>
       )}
@@ -222,7 +222,7 @@ function FormulaireAjout({ onFermer }: { onFermer: () => void }) {
 
   return (
     <form onSubmit={ajouter} className="carte space-y-4">
-      <h2 className="text-lg font-bold">Nouveau commerce</h2>
+      <h2 className="titre-carte">Nouveau commerce</h2>
       <div>
         <label className="etiquette" htmlFor="nouveau-nom">
           Nom du commerce
@@ -254,13 +254,13 @@ function FormulaireAjout({ onFermer }: { onFermer: () => void }) {
           value={lienGoogle}
           onChange={(e) => setLienGoogle(e.target.value)}
         />
-        {essaye && !lienValide && <p className="mt-1 text-sm text-red-600">Le lien doit commencer par https:// (ou laissez vide).</p>}
+        {essaye && !lienValide && <p className="mt-1 text-sm text-red-700">Le lien doit commencer par https:// (ou laissez vide).</p>}
       </div>
       {avecPin && (
         <div>
           <ChampPin id="nouveau-pin" libelle="PIN du commerçant (4 à 6 chiffres)" valeur={pin} onChange={setPin} />
           {essaye && !PIN_COMMERCE.test(pin) ? (
-            <p className="mt-1 text-sm text-red-600">Le PIN doit contenir 4 à 6 chiffres.</p>
+            <p className="mt-1 text-sm text-red-700">Le PIN doit contenir 4 à 6 chiffres.</p>
           ) : (
             <p className="mt-1 text-sm text-gray-500">À donner au commerçant : il lui ouvre son tableau de bord (et seulement le sien).</p>
           )}

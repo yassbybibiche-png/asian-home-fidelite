@@ -22,9 +22,9 @@ export default function Offre() {
       <EnTete titre={`L’offre ${NOM_APP}`} sousTitre="Un seul produit, pour tous les commerces." action={estDemo ? <BadgeDemo /> : undefined} />
 
       <section className="carte overflow-hidden p-0">
-        <div className="bg-marque-500 px-5 py-6 text-white">
+        <div className="bg-gradient-to-br from-marque-500 via-marque-600 to-marque-800 px-5 py-6 text-white">
           <p className="text-sm font-semibold tracking-wide text-marque-100 uppercase">Abonnement</p>
-          <p className="mt-1 text-5xl font-extrabold">Gratuit</p>
+          <p className="mt-1 font-titre text-5xl font-bold">Gratuit</p>
           <p className="mt-2 font-medium">Sans engagement, sans frais de mise en place</p>
         </div>
         <ul className="space-y-3 px-5 py-4">
@@ -40,7 +40,7 @@ export default function Offre() {
       </section>
 
       <section className="carte">
-        <h2 className="text-lg font-bold">Kit de lancement</h2>
+        <h2 className="titre-carte">Kit de lancement</h2>
         <p className="mt-1 text-gray-600">De quoi faire connaître la carte et la roulette dès le premier jour :</p>
         <ul className="mt-3 divide-y divide-gray-100">
           {KIT_LANCEMENT.map((m) => (
@@ -50,7 +50,7 @@ export default function Offre() {
               </span>
               <span className="min-w-0">
                 <span className="block font-semibold">{m.libelle.charAt(0).toUpperCase() + m.libelle.slice(1)}</span>
-                <span className="block text-sm text-gray-500">{m.detail}</span>
+                <span className="block text-sm text-gray-600">{m.detail}</span>
               </span>
             </li>
           ))}

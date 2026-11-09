@@ -38,7 +38,7 @@ export default function FicheClient() {
 
   return (
     <div className="mx-auto max-w-md space-y-4">
-      <a href="#/clients" className="inline-flex min-h-11 items-center font-semibold text-marque-600">
+      <a href="#/clients" className="lien no-underline">
         ‹ Clients
       </a>
       <EnTete titre={client.prenom} sousTitre={`${client.telephone ?? client.email} · client depuis le ${dateCourte(client.creeLe)}`} />
@@ -46,7 +46,7 @@ export default function FicheClient() {
       <CarteFidelite client={client} commerce={commerce} />
 
       <section className="carte space-y-2">
-        <h2 className="font-bold">En caisse</h2>
+        <h2 className="titre-carte">En caisse</h2>
         <button
           className="bouton w-full"
           disabled={enCours}
@@ -63,7 +63,7 @@ export default function FicheClient() {
         </button>
         {debloquee && (
           <button
-            className="bouton w-full bg-green-600 hover:bg-green-700 active:bg-green-800"
+            className="bouton w-full bg-green-700 hover:bg-green-800 active:bg-green-900"
             disabled={enCours}
             onClick={async () => {
               if (!(await executer(() => offrirRecompense(client.id))).ok) return
@@ -80,11 +80,11 @@ export default function FicheClient() {
         )}
         <MessageErreur>{erreur && `Rien n’a été enregistré : ${erreur}`}</MessageErreur>
         {annonce && (
-          <p className="rounded-xl bg-green-50 p-3 text-sm font-semibold text-green-900 ring-1 ring-green-200" role="status">
+          <p className="alerte-succes apparition" role="status">
             {annonce}
           </p>
         )}
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-gray-600">
           {debloquee
             ? 'Tant que la récompense n’est pas offerte, les visites sont enregistrées mais la carte reste pleine.'
             : mode === 'local'
@@ -100,19 +100,19 @@ export default function FicheClient() {
       </a>
 
       <section className="carte">
-        <h2 className="font-bold">Historique</h2>
-        <dl className="mt-2 grid grid-cols-3 gap-2 text-center">
-          <div>
-            <dt className="text-xs text-gray-500">Visites</dt>
-            <dd className="text-xl font-bold">{client.visites.length}</dd>
+        <h2 className="titre-carte">Historique</h2>
+        <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-xl bg-gray-50 py-2">
+            <dt className="text-xs text-gray-600">Visites</dt>
+            <dd className="text-xl font-bold tabular-nums">{client.visites.length}</dd>
           </div>
-          <div>
-            <dt className="text-xs text-gray-500">Récompenses</dt>
-            <dd className="text-xl font-bold">{client.recompensesOffertes?.length ?? 0}</dd>
+          <div className="rounded-xl bg-gray-50 py-2">
+            <dt className="text-xs text-gray-600">Récompenses</dt>
+            <dd className="text-xl font-bold tabular-nums">{client.recompensesOffertes?.length ?? 0}</dd>
           </div>
-          <div>
-            <dt className="text-xs text-gray-500">Gains roulette</dt>
-            <dd className="text-xl font-bold">{gains.length}</dd>
+          <div className="rounded-xl bg-gray-50 py-2">
+            <dt className="text-xs text-gray-600">Gains roulette</dt>
+            <dd className="text-xl font-bold tabular-nums">{gains.length}</dd>
           </div>
         </dl>
         <ul className="mt-3 divide-y divide-gray-100 text-sm">
@@ -122,7 +122,7 @@ export default function FicheClient() {
             .map((l, i) => (
               <li key={i} className="flex justify-between gap-3 py-2">
                 <span>{l.texte}</span>
-                <span className="shrink-0 text-gray-500">{dateRelative(l.date)}</span>
+                <span className="shrink-0 text-gray-600">{dateRelative(l.date)}</span>
               </li>
             ))}
         </ul>

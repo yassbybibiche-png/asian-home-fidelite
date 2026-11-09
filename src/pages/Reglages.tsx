@@ -57,7 +57,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
 
       <fieldset className="carte space-y-4">
         <legend className="sr-only">Le commerce</legend>
-        <h2 className="text-lg font-bold">Le commerce</h2>
+        <h2 className="titre-carte">Le commerce</h2>
         <div>
           <label className="etiquette" htmlFor="nom">
             Nom du commerce
@@ -123,7 +123,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
 
       <fieldset className="carte space-y-4">
         <legend className="sr-only">Fidélité</legend>
-        <h2 className="text-lg font-bold">Carte de fidélité</h2>
+        <h2 className="titre-carte">Carte de fidélité</h2>
         <div>
           <label className="etiquette" htmlFor="recompense">
             Récompense
@@ -150,13 +150,13 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
             value={Number.isNaN(brouillon.seuilTampons) ? '' : brouillon.seuilTampons}
             onChange={(e) => maj('seuilTampons', e.target.valueAsNumber)}
           />
-          {!seuilValide && <p className="mt-1 text-sm text-red-600">Entre 2 et 50 tampons.</p>}
+          {!seuilValide && <p className="mt-1 text-sm text-red-700">Entre 2 et 50 tampons.</p>}
         </div>
       </fieldset>
 
       <fieldset className="carte space-y-2">
         <legend className="sr-only">Roulette</legend>
-        <h2 className="text-lg font-bold">Lots de la roulette</h2>
+        <h2 className="titre-carte">Lots de la roulette</h2>
         <p className="text-sm text-gray-500">Texte libre + chance de sortir (en %). Un lot « Pas de chance » est possible.</p>
         <ul className="space-y-2">
           {lotsEdites.map((lot, i) => (
@@ -190,7 +190,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
               </div>
               <button
                 type="button"
-                className="h-12 w-12 shrink-0 rounded-xl text-xl text-gray-500 ring-1 ring-gray-300 active:bg-gray-100"
+                className="h-12 w-12 shrink-0 rounded-xl bg-white text-xl text-gray-600 ring-1 ring-gray-300 transition hover:text-red-700 hover:ring-red-200 active:bg-gray-100"
                 aria-label={`Supprimer le lot ${i + 1}`}
                 onClick={() => majLot(i, null)}
               >
@@ -206,7 +206,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
         >
           + Ajouter un lot
         </button>
-        <p className={`text-sm ${lots.length >= 2 && probasValides && total > 0 ? 'text-gray-500' : 'text-red-600'}`}>
+        <p className={`text-sm ${lots.length >= 2 && probasValides && total > 0 ? 'text-gray-500' : 'text-red-700'}`}>
           {lots.length} lot{lots.length > 1 ? 's' : ''} · total {total} %
           {lots.length < 2
             ? ' — il en faut au moins 2'
@@ -222,7 +222,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
 
       <fieldset className="carte divide-y divide-gray-100">
         <legend className="sr-only">Réponses aux avis</legend>
-        <h2 className="pb-2 text-lg font-bold">Réponses automatiques aux avis</h2>
+        <h2 className="titre-carte pb-2">Réponses automatiques aux avis</h2>
         <Interrupteur
           libelle="Répondre automatiquement aux 5★"
           aide="La réponse modèle est appliquée aussitôt, marquée « auto »."

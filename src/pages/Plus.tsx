@@ -37,8 +37,8 @@ export default function Plus() {
         <div className="flex items-center gap-3">
           <LogoCommerce commerce={commerce} />
           <div className="min-w-0">
-            <h2 className="font-bold">QR code vitrine</h2>
-            <p className="truncate text-sm text-gray-500">{commerce.nom}</p>
+            <h2 className="titre-carte">QR code vitrine</h2>
+            <p className="truncate text-sm text-gray-600">{commerce.nom}</p>
           </div>
         </div>
         <p className="mt-3 text-sm text-gray-600">
@@ -51,15 +51,15 @@ export default function Plus() {
 
       <nav className="carte divide-y divide-gray-100 py-1" aria-label="Autres pages">
         {LIENS.map((l) => (
-          <a key={l.page} href={`#/${l.page}`} className="flex min-h-16 items-center gap-4 py-3 active:bg-gray-50">
+          <a key={l.page} href={`#/${l.page}`} className="-mx-2 flex min-h-16 items-center gap-4 rounded-xl px-2 py-3 transition-colors hover:bg-gray-50 active:bg-gray-100">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-marque-50 text-marque-500">
               <Icone nom={l.page} />
             </span>
             <span className="min-w-0 flex-1">
               <span className="block font-semibold">{l.titre}</span>
-              <span className="block text-sm text-gray-500">{l.aide}</span>
+              <span className="block text-sm text-gray-600">{l.aide}</span>
             </span>
-            <span className="text-gray-400" aria-hidden>
+            <span className="text-xl text-gray-500" aria-hidden>
               ›
             </span>
           </a>
@@ -67,7 +67,7 @@ export default function Plus() {
       </nav>
 
       <section className="carte">
-        <h2 className="font-bold">{mode === 'local' ? 'À propos de cette démo' : 'Ce qui est réel, ce qui ne l’est pas encore'}</h2>
+        <h2 className="titre-carte">{mode === 'local' ? 'À propos de cette démo' : 'Ce qui est réel, ce qui ne l’est pas encore'}</h2>
         <p className="mt-1 text-sm text-gray-600">{NOM_APP} — fidélité, roulette et avis Google pour tous les commerces. {mode === 'local' ? 'Ce qui est simulé :' : 'En bref :'}</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
           {simule.map((s) => (

@@ -7,13 +7,16 @@ import { estPerdant, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ResultatTirage } from '../data/api'
 import { lancerTirage, memoireJoueur, type JoueurMemorise } from '../data/jeuApi'
 import { DUREE_ROTATION_MS, Roue } from '../components/Roue'
+import { InvitationAvis } from '../components/InvitationAvis'
 import { BadgeDemo, BoutonCopier, LogoCommerce, MessageErreur } from '../components/ui'
 
 export function MessagePublic({ titre, children }: { titre: string; children: ReactNode }) {
   return (
-    <div className="mx-auto max-w-md px-4 py-16 text-center">
-      <h1 className="text-2xl font-bold">{titre}</h1>
-      <div className="mt-3 text-gray-600">{children}</div>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <div className="carte px-6 py-8 text-center">
+        <h1 className="font-titre text-2xl font-bold">{titre}</h1>
+        <div className="mt-3 text-gray-600">{children}</div>
+      </div>
     </div>
   )
 }
@@ -47,22 +50,23 @@ type Etape = 'pret' | 'rotation' | 'resultat'
 /** En-tête + roue, communs aux deux modes. */
 function Cadre({ commerce, rotation, children, pied }: { commerce: Commerce; rotation: number; children: ReactNode; pied: ReactNode }) {
   return (
-    <div className="mx-auto max-w-md space-y-5 px-4 py-6">
-      <header className="flex items-center gap-3">
-        <LogoCommerce commerce={commerce} />
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-bold">{commerce.nom}</h1>
-          <p className="text-sm text-gray-600">Tournez la roue et gagnez un cadeau !</p>
+    <div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
+      <header className="text-center">
+        <div className="flex justify-center">
+          <LogoCommerce commerce={commerce} taille="lg" />
         </div>
+        <h1 className="mt-3 font-titre text-2xl font-bold tracking-tight">{commerce.nom}</h1>
+        <p className="mt-1 font-semibold text-marque-600">Tournez la roue et gagnez un cadeau !</p>
+        {commerce.coordonnees && <p className="mt-1 text-sm text-gray-600">{commerce.coordonnees}</p>}
       </header>
 
-      {commerce.coordonnees && <p className="-mt-2 text-sm text-gray-500">{commerce.coordonnees}</p>}
-
-      <Roue lots={commerce.lots} rotation={rotation} />
+      <div className="py-2">
+        <Roue lots={commerce.lots} rotation={rotation} />
+      </div>
 
       {children}
 
-      <p className="text-center text-xs text-gray-500">{pied}</p>
+      <p className="text-center text-xs text-gray-600">{pied}</p>
     </div>
   )
 }
@@ -70,9 +74,9 @@ function Cadre({ commerce, rotation, children, pied }: { commerce: Commerce; rot
 function MessageSansVisite({ prenom, lienCarte }: { prenom: string; lienCarte: string }) {
   return (
     <section className="carte space-y-3 text-center" role="status">
-      <p className="text-lg font-bold">Bonjour {prenom} !</p>
+      <p className="titre-carte">Bonjour {prenom} !</p>
       <p className="text-gray-700">Pour jouer, validez d’abord votre visite du jour au comptoir.</p>
-      <p className="text-sm text-gray-500">Présentez votre carte de fidélité en caisse : 1 visite validée = 1 participation.</p>
+      <p className="text-sm text-gray-600">Présentez votre carte de fidélité en caisse : 1 visite validée = 1 participation.</p>
       <a href={lienCarte} className="bouton-secondaire w-full">
         Voir ma carte de fidélité
       </a>
@@ -83,14 +87,14 @@ function MessageSansVisite({ prenom, lienCarte }: { prenom: string; lienCarte: s
 function MessageDejaJoue({ prenom, lot, code }: { prenom: string; lot: string | null; code?: string }) {
   return (
     <section className="carte text-center" role="status">
-      <p className="text-lg font-bold">Vous avez déjà joué aujourd’hui, {prenom} !</p>
+      <p className="titre-carte">Vous avez déjà joué aujourd’hui, {prenom} !</p>
       {lot && (
         <p className="mt-1 text-gray-600">
-          Résultat du jour : <strong>{lot}</strong>
+          Résultat du jour : <strong className="text-gray-900">{lot}</strong>
         </p>
       )}
       {code && <CodeGagnant code={code} />}
-      <p className="mt-2 text-sm text-gray-500">1 tirage par personne et par jour. Revenez lors de votre prochaine visite !</p>
+      <p className="mt-2 text-sm text-gray-600">1 tirage par personne et par jour. Revenez lors de votre prochaine visite !</p>
     </section>
   )
 }
@@ -421,7 +425,7 @@ function Identification({ onEnvoyer }: { onEnvoyer(prenom: string, contactSaisi:
 
   return (
     <form onSubmit={envoyer} className="carte space-y-3">
-      <p className="font-semibold">Pour jouer, dites-nous qui vous êtes :</p>
+      <p className="titre-carte">Pour jouer, dites-nous qui vous êtes</p>
       <div>
         <label className="etiquette" htmlFor="j-prenom">
           Prénom
@@ -440,8 +444,8 @@ function Identification({ onEnvoyer }: { onEnvoyer(prenom: string, contactSaisi:
           value={contactSaisi}
           onChange={(e) => setContactSaisi(e.target.value)}
         />
-        {essaye && !contact && <p className="mt-1 text-sm text-red-600">Saisissez un numéro (10 chiffres) ou un e-mail valide.</p>}
-        <p className="mt-1 text-xs text-gray-500">Déjà client ? Le même numéro ou e-mail retrouve votre carte de fidélité.</p>
+        {essaye && !contact && <p className="mt-1 text-sm text-red-700">Saisissez un numéro (10 chiffres) ou un e-mail valide.</p>}
+        <p className="mt-1 text-xs text-gray-600">Déjà client ? Le même numéro ou e-mail retrouve votre carte de fidélité.</p>
       </div>
       <MessageErreur>{erreur}</MessageErreur>
       <button type="submit" className="bouton w-full" disabled={!prenom.trim() || !contactSaisi.trim() || enCours}>
@@ -455,7 +459,9 @@ function CodeGagnant({ code }: { code: string }) {
   return (
     <div className="mt-3 space-y-2">
       <p className="text-sm text-gray-600">Code gagnant à montrer au comptoir :</p>
-      <p className="font-mono text-3xl font-extrabold tracking-[0.3em] text-gray-900 select-all">{code}</p>
+      <p className="rounded-xl border-2 border-dashed border-or-500 bg-amber-50 py-3 font-mono text-3xl font-extrabold tracking-[0.3em] text-gray-900 select-all">
+        {code}
+      </p>
       <BoutonCopier texte={code} libelle="Copier le code" className="bouton-secondaire w-full" />
     </div>
   )
@@ -464,31 +470,18 @@ function CodeGagnant({ code }: { code: string }) {
 function Resultat({ lot, prenom, code }: { lot: string; prenom: string; code?: string }) {
   const perdu = estPerdant(lot)
   return (
-    <section className={`carte text-center ${perdu ? '' : 'ring-2 ring-green-400'}`} role="status" aria-live="polite">
-      <p className="text-4xl" aria-hidden>
+    <section
+      className={`carte apparition text-center ${perdu ? '' : 'bg-gradient-to-b from-amber-50 to-white ring-2 ring-or-500'}`}
+      role="status"
+      aria-live="polite"
+    >
+      <p className="text-5xl" aria-hidden>
         {perdu ? '🍀' : '🎉'}
       </p>
-      <p className="mt-1 text-lg font-bold">{perdu ? `Pas cette fois, ${prenom}…` : `Bravo ${prenom}, vous avez gagné :`}</p>
-      <p className="mt-1 text-2xl font-extrabold text-marque-600">{lot}</p>
+      <p className="mt-2 text-lg font-bold">{perdu ? `Pas cette fois, ${prenom}…` : `Bravo ${prenom}, vous avez gagné :`}</p>
+      <p className="mt-1 font-titre text-3xl font-bold text-marque-600">{lot}</p>
       {!perdu && !code && <p className="mt-2 text-sm text-gray-600">Montrez cet écran au comptoir pour profiter de votre lot.</p>}
       {!perdu && code && <CodeGagnant code={code} />}
-    </section>
-  )
-}
-
-/** Invitation à l'avis Google, toujours APRÈS le jeu et jamais en condition du lot. */
-function InvitationAvis({ commerce }: { commerce: Commerce }) {
-  return (
-    <section className="carte space-y-2 text-center">
-      <p className="font-semibold">Vous avez aimé votre passage ?</p>
-      <p className="text-sm text-gray-600">Le lot n’est pas conditionné à l’avis — gagnez d’abord, avis libre ensuite.</p>
-      {commerce.lienGoogle ? (
-        <a href={commerce.lienGoogle} target="_blank" rel="noopener noreferrer" className="bouton-secondaire w-full">
-          ⭐ Laisser un avis Google ↗
-        </a>
-      ) : (
-        <p className="text-sm text-gray-500">(Le commerce n’a pas encore renseigné son lien Google.)</p>
-      )}
     </section>
   )
 }
