@@ -509,3 +509,34 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
 - PIN : admin 9589857737, restaurant 45986 (générés par l'assistant, transmis à l'utilisateur à la livraison).
 - Limites connues : « Gains récents » côté commerçant vide tant que la page n'est pas rechargée (cache 10 s) ; Apple Wallet en suspens ; Google Wallet / Google Business / SMS / e-mail non branchés (501) ; pause Supabase gratuite après 7 jours d'inactivité.
 - **URL de production : https://asian-home-fidelite.onrender.com**
+
+## 09/11/2026 — Visuel pro + invitation à l'avis avec 5 étoiles pré-remplies (dans l'app)
+- **Limite Google (ne pas contourner)** : le lien `writereview?placeid=…` ne permet pas de pré-sélectionner une note ; les
+  5 étoiles pré-remplies n'existent que DANS l'app, le client confirme ses étoiles sur Google. Lien Asian Home inchangé
+  (Place ID `ChIJAV70Kqxt5kcRnhPY0L6yaf0`), aucun paramètre ajouté.
+- **Invitation à l'avis** (`src/components/InvitationAvis.tsx` + logique pure `src/lib/invitationAvis.ts`) : 5 étoiles dorées
+  remplies par défaut (radiogroup, cibles 48 px), un tap sur l'étoile n → note n (1 à 5), libellé « n/5 · Excellent… »,
+  bouton « Laisser un avis n★ sur Google ↗ » = lien Google du commerce tel quel. Texte : « Votre avis compte — touchez une
+  étoile pour ajuster, puis laissez votre avis sur Google. » ; après le tap : « sélectionnez-y vos étoiles et publiez ».
+  Toujours après le tirage (gagnant ou perdant, ou déjà joué), jamais conditionnée au lot. Utilisée sur la page de jeu
+  (modes local et API, remplace l'ancienne invitation) et en aperçu repliable sur la page Avis.
+- **Visuel, écran par écran** (fonctionnalités et flux inchangés) :
+  - Thème (`index.css`) : fond ivoire, titres serif système, ombres douces, `.carte` arrondie, boutons avec états nets
+    (pression, focus clavier, désactivé gris lisible), pilules de filtre `.puce`, `.lien`, `.alerte-succes`, animation
+    d'apparition (désactivée si « réduire les animations »). Texte secondaire passé en gris-600 / rouge-700 (≥ 4,5:1).
+  - En-tête / navigation : barre translucide, onglet actif en pastille laque ; titres de page en serif.
+  - Tableau de bord : KPI avec surtitre + liseré laque, 3 actions rapides (valider une visite, QR vitrine, avis).
+  - Clients : pilules, badge « récompense », barre dorée quand la carte est pleine. Fiche client : historique en tuiles.
+  - Carte de fidélité : bandeau laque façon carte physique (titulaire, x/10), grille de tampons alignée (cadeau sur le
+    dernier), progression « encore n tampons », récompense en attente encadrée d'or, QR en pied de carte.
+  - Roue : anneau laque fixe à perles dorées, secteurs laque / ivoire / encre / or, moyeu doré, pointeur ; seule la
+    couche des secteurs tourne (même animation 4,5 s). Page de jeu : en-tête centré, résultat gagnant doré, code en
+    cadre pointillé.
+  - Avis, Réglages, Admin, Plus, Offre, QR vitrine (cadre laque autour du QR), carte publique (bouton roue en primaire),
+    écran PIN : titres, contrastes et pilules harmonisés.
+- **Tests** : `tests/invitation-avis.test.ts` (+9 : 5 étoiles par défaut, tap 3 → 3 sélectionnées, bornes, lien = seed
+  avec Place ID et seul paramètre `placeid`, textes honnêtes, même invitation sur Jouer/Avis). `npm test` **133/133**
+  (avant : 124). `npm run build` et `build:api` : OK (373,9 kB / 112,7 kB gzip). Rendu SSR des composants vérifié
+  (5 étoiles cochées, href exact, 10 tampons, 5 secteurs).
+- Commit `ec51d20` (code + tests) ; ce journal en commit séparé.
+- **Non vérifié** : rendu visuel réel à 390 px sur téléphone (aucun navigateur sur la VM).
