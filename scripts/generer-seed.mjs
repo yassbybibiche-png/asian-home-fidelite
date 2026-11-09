@@ -21,28 +21,49 @@ function alea() {
 const entre = (min, max) => Math.floor(alea() * (max - min + 1)) + min
 const choisir = (liste) => liste[Math.floor(alea() * liste.length)]
 
-/** Date ISO il y a `jours` jours, à une heure d'ouverture plausible. */
-function ilYa(jours, heureMin = 9, heureMax = 19) {
+/**
+ * Date ISO il y a `jours` jours, à une heure plausible (heure de Paris, UTC+1 en novembre).
+ * `creneaux` : plages d'ouverture [heureMin, heureMax]. Jamais dans le futur.
+ */
+function ilYa(jours, creneaux = [[9, 19]]) {
+  const [heureMin, heureMax] = choisir(creneaux)
   const d = new Date(REF - jours * JOUR)
   d.setUTCHours(entre(heureMin, heureMax) - 1, entre(0, 59), 0, 0)
+  if (d.getTime() > REF) return new Date(REF - entre(10, 120) * 60 * 1000).toISOString()
   return d.toISOString()
+}
+
+// Asian Home Paris : service du midi et du soir (11h30-14h30, 18h30-23h30).
+const HORAIRES = {
+  'c-asian-home-paris': [
+    [12, 13],
+    [19, 22],
+  ],
+  'c-atelier-camille': [[9, 18]],
+  'c-maison-lila': [[10, 18]],
 }
 
 const commerces = [
   {
-    id: 'c-bistrot-halles',
-    nom: 'Le Bistrot des Halles',
+    // Commerce vitrine : vraies coordonnées publiques (vérifiées le 09/11/2026).
+    // Clients, avis et tirages restent FICTIFS (démo).
+    id: 'c-asian-home-paris',
+    nom: 'Asian Home Paris',
     type: 'restaurant',
     logo: '',
-    lienGoogle: 'https://g.page/r/demo-bistrot-des-halles/review',
-    recompense: 'Dessert offert au 10e repas',
+    // Lien de recherche Google Maps (public). Le vrai lien « laisser un avis » s'obtient
+    // depuis la fiche Google Business Profile du restaurant.
+    lienGoogle: 'https://www.google.com/maps/search/?api=1&query=Asian+Home+Paris+11+rue+Andr%C3%A9+Joineau+Le+Pr%C3%A9-Saint-Gervais',
+    coordonnees:
+      '11 rue André Joineau, 93310 Le Pré-Saint-Gervais · 07 82 97 48 01 · Instagram @asianhomeparis · Tous les jours 11h30-14h30 et 18h30-23h30 · Halal',
+    recompense: 'Un plat offert au 10e repas',
     seuilTampons: 10,
     lots: [
-      { libelle: 'Dessert offert', probabilite: 15 },
-      { libelle: 'Café offert', probabilite: 30 },
+      { libelle: 'Nems offerts', probabilite: 20 },
+      { libelle: 'Thé glacé maison offert', probabilite: 25 },
+      { libelle: 'Mochi offert', probabilite: 15 },
       { libelle: '-10 % sur l’addition', probabilite: 10 },
-      { libelle: 'Boisson offerte', probabilite: 25 },
-      { libelle: 'Pas de chance, à la prochaine !', probabilite: 20 },
+      { libelle: 'Pas de chance, à la prochaine !', probabilite: 30 },
     ],
     reglesReponseAuto: { auto5Etoiles: true, auto4Etoiles: false, brouillonAutres: true },
     actif: true,
@@ -87,7 +108,7 @@ const commerces = [
 ]
 
 const prenomsParCommerce = {
-  'c-bistrot-halles': ['Julien', 'Sophie', 'Karim', 'Nathalie', 'Thomas', 'Léa', 'Mehdi', 'Isabelle', 'Antoine', 'Chloé', 'Patrick', 'Inès'],
+  'c-asian-home-paris': ['Karim', 'Sophie', 'Linh', 'Nathalie', 'Thomas', 'Aïcha', 'Mehdi', 'Isabelle', 'Kevin', 'Chloé', 'Samir', 'Inès'],
   'c-atelier-camille': ['Manon', 'Sarah', 'Émilie', 'Yasmine', 'Lucas', 'Camille', 'Aurélie', 'Nadia', 'Hugo', 'Margaux'],
   'c-maison-lila': ['Claire', 'Élodie', 'Fatima', 'Pauline', 'Marc', 'Juliette', 'Sandrine', 'Océane', 'Romain'],
 }
@@ -100,12 +121,21 @@ for (const commerce of commerces) {
   prenomsParCommerce[commerce.id].forEach((prenom, i) => {
     // Profils variés : habitués, occasionnels, clients perdus de vue (> 30 j).
     const profil = i % 4 === 3 ? 'inactif' : i % 3 === 0 ? 'habitue' : 'occasionnel'
-    const nbVisites = profil === 'habitue' ? entre(7, 16) : profil === 'occasionnel' ? entre(2, 6) : entre(1, 4)
+    // Le 1er habitué de chaque commerce a une carte pleine : la récompense l'attend (démo du bouton « Offrir »).
+    const cartePleine = i === 0
+    const seuil = commerce.seuilTampons
+    const nbVisites = cartePleine ? seuil : profil === 'habitue' ? entre(7, 16) : profil === 'occasionnel' ? entre(2, 6) : entre(1, 4)
     const derniere = profil === 'inactif' ? entre(35, 90) : entre(0, 20)
     const premiere = derniere + entre(nbVisites * 5, nbVisites * 9 + 10)
     const jours = new Set(nbVisites === 1 ? [derniere] : [derniere, premiere])
     while (jours.size < nbVisites) jours.add(entre(derniere, premiere))
-    const visites = [...jours].sort((a, b) => b - a).map((j) => ilYa(j))
+    // Ordre chronologique (du plus ancien au plus récent), comme dans l'app.
+    const visites = [...jours].sort((a, b) => b - a).map((j) => ilYa(j, HORAIRES[commerce.id]))
+    // Mêmes règles que l'app : la carte se remplit, la récompense est offerte, la carte repart à zéro.
+    // Récompense remise à la visite suivante celle qui a rempli la carte (ou laissée en attente).
+    const cyclesOfferts = cartePleine ? 0 : Math.floor((visites.length - 1) / seuil)
+    const recompensesOffertes = Array.from({ length: cyclesOfferts }, (_, k) => ({ date: visites[(k + 1) * seuil], libelle: commerce.recompense }))
+    const tampons = visites.length - cyclesOfferts * seuil
     const parEmail = i % 2 === 1
     clients.push({
       id: `${commerce.id}-cl-${i + 1}`,
@@ -113,23 +143,25 @@ for (const commerce of commerces) {
       prenom,
       telephone: parEmail ? undefined : `06 ${entre(10, 99)} ${entre(10, 99)} ${entre(10, 99)} ${entre(10, 99)}`,
       email: parEmail ? `${sansAccent(prenom)}.${entre(10, 99)}@${choisir(domaines)}` : undefined,
-      tampons: visites.length % commerce.seuilTampons,
+      tampons,
       visites,
       derniereVisite: visites[visites.length - 1],
       creeLe: visites[0],
+      ...(recompensesOffertes.length ? { recompensesOffertes } : {}),
     })
   })
 }
 
 const avisParCommerce = {
-  'c-bistrot-halles': [
-    ['Sophie M.', 5, 'Cuisine maison excellente, le plat du jour était parfait. Service rapide et souriant.', 2, 'Merci beaucoup Sophie ! Toute l’équipe est ravie, à très bientôt aux Halles.'],
-    ['Karim B.', 5, 'Mon QG du midi. La carte de fidélité sur le téléphone, c’est top.', 6],
-    ['Nathalie R.', 4, 'Très bon repas, un peu d’attente pour le dessert mais ça valait le coup.', 9, 'Merci Nathalie, on travaille sur le rythme du service en salle. Au plaisir de vous revoir !'],
-    ['Jean-Pierre L.', 2, 'Plat arrivé tiède et serveur débordé ce samedi.', 14],
+  // Avis FICTIFS (démo) : aucun n'est tiré de la vraie fiche Google du restaurant.
+  'c-asian-home-paris': [
+    ['Sophie M.', 5, 'Pad thaï et bo bun excellents, portions généreuses. Service rapide et souriant.', 2, 'Merci beaucoup Sophie ! Toute l’équipe d’Asian Home est ravie, à très bientôt.'],
+    ['Karim B.', 5, 'Enfin un asiatique halal avec autant de choix. La carte de fidélité sur le téléphone, c’est top.', 6],
+    ['Nathalie R.', 4, 'Très bon repas, un peu d’attente le vendredi soir mais ça valait le coup.', 9, 'Merci Nathalie, on renforce l’équipe le week-end. Au plaisir de vous revoir !'],
+    ['Jean-Pierre L.', 2, 'Commande à emporter prête avec 20 minutes de retard, nems un peu tièdes.', 14],
     ['Laura T.', 5, '', 21],
-    ['Mathieu D.', 4, 'Bon rapport qualité-prix, terrasse agréable.', 33, 'Merci Mathieu, à bientôt en terrasse !'],
-    ['Agnès P.', 5, 'Le tiramisu gagné à la roulette était délicieux 😄', 44],
+    ['Mathieu D.', 4, 'Bon rapport qualité-prix, les sushis sont frais.', 33, 'Merci Mathieu, à bientôt !'],
+    ['Agnès P.', 5, 'Le mochi gagné à la roulette était délicieux 😄', 44],
   ],
   'c-atelier-camille': [
     ['Manon G.', 5, 'Camille a parfaitement compris ce que je voulais. Je ressors ravie !', 1],
@@ -157,23 +189,41 @@ for (const commerce of commerces) {
       auteur,
       note,
       texte,
-      date: ilYa(jours, 10, 22),
+      date: ilYa(jours, [[10, 22]]),
       ...(reponse ? { reponse } : {}),
     })
   })
 }
 
+/** Lot tiré selon les mêmes probabilités que l'app. */
+function lotPondere(lots) {
+  let seuil = alea() * lots.reduce((s, l) => s + l.probabilite, 0)
+  for (const l of lots) if ((seuil -= l.probabilite) < 0) return l.libelle
+  return lots[lots.length - 1].libelle
+}
+
+// Un tirage a lieu pendant une visite (le client scanne le QR sur place), 1 max par client et par jour,
+// quelques minutes après la visite validée.
 const tirages = []
 for (const commerce of commerces) {
-  const sesClients = clients.filter((c) => c.commerceId === commerce.id)
-  const nb = entre(4, 7)
-  for (let i = 0; i < nb; i++) {
+  const visitesRecentes = clients
+    .filter((c) => c.commerceId === commerce.id)
+    .flatMap((c) => c.visites.map((v) => ({ clientId: c.id, date: v })))
+    .filter((v) => REF - new Date(v.date).getTime() <= 25 * JOUR)
+  const nb = Math.min(entre(4, 7), visitesRecentes.length)
+  const deja = new Set()
+  while (tirages.filter((t) => t.commerceId === commerce.id).length < nb) {
+    const v = choisir(visitesRecentes)
+    const cle = `${v.clientId}|${v.date.slice(0, 10)}`
+    if (deja.has(cle)) continue
+    deja.add(cle)
+    const date = Math.min(new Date(v.date).getTime() + entre(2, 40) * 60 * 1000, REF - 60 * 1000)
     tirages.push({
-      id: `${commerce.id}-ti-${i + 1}`,
+      id: `${commerce.id}-ti-${deja.size}`,
       commerceId: commerce.id,
-      clientId: choisir(sesClients).id,
-      lot: choisir(commerce.lots).libelle,
-      date: ilYa(entre(0, 25), 11, 21),
+      clientId: v.clientId,
+      lot: lotPondere(commerce.lots),
+      date: new Date(date).toISOString(),
     })
   }
 }

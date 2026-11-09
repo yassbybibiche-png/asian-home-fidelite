@@ -1,12 +1,16 @@
 {
-  "name": "fideliz",
+  "name": "asian-home-fidelite",
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=23.6"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -p . && vite build",
     "preview": "vite preview",
+    "test": "node --test \"tests/*.test.ts\"",
     "seed": "node scripts/generer-seed.mjs"
   },
   "dependencies": {

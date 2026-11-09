@@ -21,6 +21,7 @@ export default function CartePublique() {
       <a href={`#/jouer/${commerce.id}`} className="bouton-secondaire w-full">
         🎡 Tourner la roue du jour
       </a>
+      {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}
       <p className="text-center text-xs text-gray-500">
         <BadgeDemo>Démo</BadgeDemo> Données stockées dans ce navigateur uniquement.
       </p>

@@ -1,12 +1,13 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-marque-50: #fff4ed;
-  --color-marque-100: #ffe4d1;
-  --color-marque-200: #ffc49e;
-  --color-marque-500: #ff5a00;
-  --color-marque-600: #e64f00;
-  --color-marque-700: #bf4100;
+  /* Rouge laque sobre (Asian Home Paris) ; blanc sur 500 : contraste ≈ 6,8:1. */
+  --color-marque-50: #fdf3f2;
+  --color-marque-100: #fbe3e1;
+  --color-marque-200: #f5c2be;
+  --color-marque-500: #b3262d;
+  --color-marque-600: #9c1f26;
+  --color-marque-700: #7f1a1f;
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -17,6 +18,8 @@ html {
 
 body {
   @apply bg-gray-100 text-gray-900 antialiased;
+  /* Un e-mail ou une URL très longs passent à la ligne au lieu d'élargir la page sur téléphone. */
+  overflow-wrap: anywhere;
 }
 
 /* Champs de formulaire lisibles et faciles à toucher (≥ 48 px de haut). */

@@ -1,7 +1,8 @@
 // Couche de persistance. L'UI ne parle qu'à l'interface `Depot` : pour brancher
 // une vraie base plus tard, il suffit d'écrire une autre implémentation.
 import type { Donnees, Etat, Lot } from '../types'
-import seed from './seed.json'
+// `with { type: 'json' }` : compris par Vite ET par Node (tests `npm test` sans bundler).
+import seed from './seed.json' with { type: 'json' }
 
 export interface Depot {
   charger(): Etat
@@ -9,13 +10,14 @@ export interface Depot {
   reinitialiser(): Etat
 }
 
-const CLE = 'fideliz:etat:v1'
+// v2 : seed Asian Home Paris (phase 3). Les données de la v1 (ancien seed) ne sont pas reprises.
+const CLE = 'fidelite:etat:v2'
 
 /**
  * Les dates du seed sont figées autour de `dateReference`. On les décale pour que
  * la démo paraisse toujours récente (« visites ce mois », clients actifs…).
  */
-function seedRecale(maintenant = Date.now()): Etat {
+export function seedRecale(maintenant = Date.now()): Etat {
   const decalage = maintenant - new Date(seed.dateReference).getTime()
   const recale = (iso: string) => new Date(new Date(iso).getTime() + decalage).toISOString()
   const d = seed as unknown as Donnees
@@ -26,6 +28,7 @@ function seedRecale(maintenant = Date.now()): Etat {
       visites: c.visites.map(recale),
       derniereVisite: recale(c.derniereVisite),
       creeLe: recale(c.creeLe),
+      ...(c.recompensesOffertes ? { recompensesOffertes: c.recompensesOffertes.map((r) => ({ ...r, date: recale(r.date) })) } : {}),
     })),
     tirages: d.tirages.map((t) => ({ ...t, date: recale(t.date) })),
     avis: d.avis.map((a) => ({ ...a, date: recale(a.date) })),

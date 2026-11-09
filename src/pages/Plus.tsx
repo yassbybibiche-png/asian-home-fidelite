@@ -1,10 +1,11 @@
 import { useStore } from '../store'
 import type { Page } from '../router'
 import { EnTete, Icone, LogoCommerce } from '../components/ui'
+import { NOM_APP } from '../data/defaults'
 
 const LIENS: { page: Page; titre: string; aide: string }[] = [
   { page: 'reglages', titre: 'Réglages', aide: 'Nom, logo, lien Google, récompense, lots, réponses auto' },
-  { page: 'offre', titre: 'L’offre Fideliz', aide: '90 € TTC / mois · mise en place 500 € TTC' },
+  { page: 'offre', titre: `L’offre ${NOM_APP}`, aide: 'Gratuit · kit de lancement (flyers, étiquettes QR, vitrine)' },
   { page: 'admin', titre: 'Admin', aide: 'Tous les commerces, ajout, activation, réinitialisation de la démo' },
 ]
 
@@ -13,6 +14,7 @@ const SIMULE = [
   'Les avis Google sont des exemples ; aucune réponse n’est publiée sur Google.',
   'Aucun SMS ni e-mail n’est envoyé ; Apple Wallet / Google Wallet sont simulés.',
   'Aucun paiement ni souscription réelle.',
+  'Asian Home Paris : vraies coordonnées publiques, mais clients, avis et tirages fictifs.',
 ]
 
 export default function Plus() {
@@ -57,7 +59,7 @@ export default function Plus() {
 
       <section className="carte">
         <h2 className="font-bold">À propos de cette démo</h2>
-        <p className="mt-1 text-sm text-gray-600">Fideliz — fidélité, roulette et avis Google pour tous les commerces. Ce qui est simulé :</p>
+        <p className="mt-1 text-sm text-gray-600">{NOM_APP} — fidélité, roulette et avis Google pour tous les commerces. Ce qui est simulé :</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
           {SIMULE.map((s) => (
             <li key={s}>{s}</li>

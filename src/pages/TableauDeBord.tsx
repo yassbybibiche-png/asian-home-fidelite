@@ -47,7 +47,7 @@ export default function TableauDeBord() {
         <section>
           <div className="mb-2 flex items-baseline justify-between">
             <h2 className="text-lg font-bold">Derniers avis</h2>
-            <a href="#/avis" className="font-semibold text-marque-600">
+            <a href="#/avis" className="inline-flex min-h-11 items-center font-semibold text-marque-600">
               Tout voir
             </a>
           </div>

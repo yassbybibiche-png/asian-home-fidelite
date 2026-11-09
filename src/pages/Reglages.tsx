@@ -36,7 +36,14 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   function enregistrer(e: FormEvent) {
     e.preventDefault()
     if (!valide) return
-    majCommerce({ ...brouillon, nom: brouillon.nom.trim(), lienGoogle: brouillon.lienGoogle.trim(), logo: brouillon.logo?.trim(), lots })
+    majCommerce({
+      ...brouillon,
+      nom: brouillon.nom.trim(),
+      lienGoogle: brouillon.lienGoogle.trim(),
+      logo: brouillon.logo?.trim(),
+      coordonnees: brouillon.coordonnees?.trim() || undefined,
+      lots,
+    })
     setEnregistre(true)
   }
 
@@ -95,6 +102,19 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
             onChange={(e) => maj('lienGoogle', e.target.value)}
           />
         </div>
+        <div>
+          <label className="etiquette" htmlFor="coordonnees">
+            Adresse, téléphone, horaires (optionnel)
+          </label>
+          <textarea
+            id="coordonnees"
+            className="champ min-h-24"
+            placeholder="ex : 12 rue de la Paix, 75002 Paris · 01 23 45 67 89 · du mardi au samedi 9h-19h"
+            value={brouillon.coordonnees ?? ''}
+            onChange={(e) => maj('coordonnees', e.target.value)}
+          />
+          <p className="mt-1 text-sm text-gray-500">Affiché aux clients sur la page de jeu et sur leur carte.</p>
+        </div>
       </fieldset>
 
       <fieldset className="carte space-y-4">
@@ -136,13 +156,14 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
         <p className="text-sm text-gray-500">Texte libre + chance de sortir (en %). Un lot « Pas de chance » est possible.</p>
         <ul className="space-y-2">
           {lotsEdites.map((lot, i) => (
-            <li key={i} className="flex items-center gap-2">
+            // Téléphone : libellé sur toute la largeur, chance et suppression en dessous.
+            <li key={i} className="flex flex-wrap items-center gap-2 border-b border-gray-100 pb-2 last:border-0 sm:flex-nowrap sm:border-0 sm:pb-0">
               <label className="sr-only" htmlFor={`lot-${i}`}>
                 Lot {i + 1}
               </label>
               <input
                 id={`lot-${i}`}
-                className="champ min-w-0 flex-1"
+                className="champ w-full min-w-0 sm:w-auto sm:flex-1"
                 placeholder="ex : Café offert"
                 value={lot.libelle}
                 onChange={(e) => majLot(i, { ...lot, libelle: e.target.value })}
@@ -150,7 +171,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
               <label className="sr-only" htmlFor={`proba-${i}`}>
                 Chance du lot {i + 1} en %
               </label>
-              <div className="relative w-24 shrink-0">
+              <div className="relative min-w-0 flex-1 sm:w-24 sm:flex-none">
                 <input
                   id={`proba-${i}`}
                   className="champ pr-8 text-right"
@@ -221,7 +242,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
         </p>
       </fieldset>
 
-      <div className="sticky bottom-20 z-10 md:bottom-4">
+      {/* Au-dessus de la barre d'onglets (64 px + zone de sécurité de l'iPhone). */}
+      <div className="sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-10 md:bottom-4">
         <button type="submit" className="bouton w-full shadow-lg" disabled={!valide}>
           {enregistre ? '✓ Enregistré' : 'Enregistrer'}
         </button>

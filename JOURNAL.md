@@ -92,3 +92,67 @@
   copie du seed (un commerce créé dans la démo y est « inconnu ») et ses tirages ne remontent pas chez le
   commerçant. Il faudra un backend. Pour la démo, tester sur le même appareil.
 - Wallet, avis Google, réponses publiées, envois de relance : simulés / manuels (copier-coller).
+
+## 09/11/2026 — Phase 3 terminée (finition, tests, README, vérification)
+### Décision principale : application du BRIEF mis à jour
+Le BRIEF avait été modifié pendant la phase 2 (marque Asian Home Paris, version GRATUITE, pas de marque
+Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/mois + 500 €. Corrigé :
+- Nom du produit : **Asian Home Fidélité** (constante `NOM_APP`, `src/data/defaults.ts`) dans l'en-tête,
+  le titre de la page, l'offre, Plus et le QR vitrine. Plus aucune occurrence de « Fideliz », « 90 € »
+  ou « 500 € » dans `src/`, `dist/` ni `index.html` (vérifié par grep). Le nom du dossier et du dépôt
+  reste `fideliz-claude` (interne, pas visible).
+- Couleurs : orange → rouge laque sobre (#b3262d, contraste blanc ≈ 6,8:1), aussi dans la roue.
+- Offre : « Gratuit, sans engagement, sans frais de mise en place » + kit de lancement (2 500 flyers,
+  étiquettes QR, adhésif 100 × 70) sans prix, en précisant que l'impression n'est pas incluse.
+- Seed : « Le Bistrot des Halles » remplacé par **Asian Home Paris** (commerce affiché par défaut) avec
+  ses vraies coordonnées publiques du BRIEF, des lots adaptés (nems, thé glacé, mochi, -10 %) et des visites
+  pendant ses services (midi/soir). Clients, avis et tirages restent FICTIFS, et c'est écrit dans l'UI
+  (Plus) et le README. Salon et boutique fictifs conservés.
+- Nouveau champ optionnel générique `coordonnees` (texte libre, dans Réglages) affiché sur la page de jeu,
+  la carte client et le QR vitrine. Aucune logique propre à un secteur.
+- Lien Google d'Asian Home : lien public de recherche Google Maps (je ne connais pas le vrai lien
+  « laisser un avis » ; il s'obtient depuis la fiche Google Business Profile).
+- Clé localStorage `fideliz:etat:v1` → `fidelite:etat:v2` : un téléphone qui avait l'ancienne démo charge
+  le nouveau seed (les anciennes données de démo ne sont pas reprises : choix assumé).
+
+### Cohérence des données (seed régénéré, `npm run seed`)
+- Avant : `tampons = visites % seuil` sans trace de récompense (ex. 16 visites, seuil 8 → 0 tampon et
+  aucune récompense), des dates « aujourd'hui » pouvaient être dans le futur, et les tirages tombaient
+  sur des jours sans visite.
+- Maintenant : mêmes règles que l'app (récompense offerte à la visite qui suit la carte pleine, trace dans
+  `recompensesOffertes`), tampons toujours dans [1, seuil], 1 client par commerce avec carte pleine
+  (récompense à offrir), dates jamais dans le futur, tirages quelques minutes après une vraie visite du
+  client (≤ 25 j), 1 par client et par jour, lot tiré selon les probabilités.
+- Bug corrigé dans `depot.ts` : les dates de `recompensesOffertes` n'étaient pas recalées au chargement.
+- Reset démo : `depotLocal.reinitialiser()` restaure le seed recalé — couvert par un test.
+
+### Relecture mobile-first (dans le code, pas à l'écran)
+- Aucun navigateur disponible dans cette session (pas de chromium/firefox) : relecture du code de chaque
+  écran à 320-375 px de large. Corrigé :
+  - Barre du bas + zone de sécurité de l'iPhone : le contenu (`pb-24`) et le bouton « Enregistrer »
+    collant de Réglages (`bottom-20`) pouvaient passer sous la barre → marges calculées avec
+    `env(safe-area-inset-bottom)`.
+  - Réglages, lignes de lots : sur téléphone, champ du lot réduit à ~95 px → libellé sur toute la largeur,
+    chance + suppression en dessous.
+  - Long e-mail ou URL saisi par l'utilisateur : `overflow-wrap: anywhere` sur `body` pour éviter tout
+    débordement horizontal.
+  - Cibles tactiles < 44 px : liens « Tout voir », « Modifier », « modifier » (Avis) et bouton « Gérer »
+    (bandeau commerce désactivé) passés à 44 px min.
+  - Déjà conformes : boutons `.bouton` 48 px, onglets du bas 64 px, puces de filtre 44 px, champs 48 px,
+    police de base 17 px.
+- Reste non vérifié visuellement : rendu réel sur un vrai téléphone.
+
+### Tests
+- `npm test` = `node --test "tests/*.test.ts"` (Node 24 exécute le TypeScript, pas de Vitest ajouté :
+  aucune nouvelle dépendance, build intact). 19 tests : création commerce, inscription client, +1 tampon /
+  progression / récompense, roulette (pondération, secteur, 1 tirage/jour), réponses aux avis, cohérence du
+  seed, reset démo. Interface React non testée.
+- `depot.ts` importe désormais le JSON avec `with { type: 'json' }` (compris par Vite, tsc et Node).
+
+### Vérification finale (09/11/2026)
+- `npm install` : OK. `npm run build` : OK (tsc + vite, JS 330 kB / 99 kB gzip, CSS 32 kB).
+- `npm test` : 19/19 OK.
+- `npm run preview` (port 4173) + curl : `/` → HTTP 200 `text/html`, HTML de base servi (titre
+  « Asian Home Fidélité… », `<div id="root">`, script du bundle) ; `/assets/index-*.js` → HTTP 200
+  `text/javascript` (330 kB). Serveur arrêté ensuite.
+- Rien publié, rien poussé, aucune clé, aucun envoi, aucune dépense.

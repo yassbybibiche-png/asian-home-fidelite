@@ -1,8 +1,8 @@
 import type { Lot } from '../types'
 import { secteurs } from '../lib/roulette'
 
-const COULEURS = ['#ff5a00', '#ffc49e', '#1f2937', '#fff4ed', '#e64f00', '#fde68a']
-const TEXTE_CLAIR = new Set(['#ff5a00', '#1f2937', '#e64f00'])
+const COULEURS = ['#b3262d', '#f5c2be', '#1f2937', '#fdf3f2', '#9c1f26', '#e9c46a']
+const TEXTE_CLAIR = new Set(['#b3262d', '#1f2937', '#9c1f26'])
 export const DUREE_ROTATION_MS = 4500
 
 /** Point sur le cercle ; angle en degrés, 0 = en haut, sens horaire. */
@@ -59,7 +59,7 @@ export function Roue({ lots, rotation }: { lots: Lot[]; rotation: number }) {
             )
           })}
           <circle r={13} fill="#fff" stroke="#e5e7eb" strokeWidth={2} />
-          <circle r={5} fill="#ff5a00" />
+          <circle r={5} fill="#b3262d" />
         </svg>
       </div>
     </div>

@@ -1,5 +1,8 @@
 import type { Commerce, TypeCommerce } from '../types'
 
+/** Nom du produit (marque de l'utilisateur), affiché dans l'en-tête et sur le QR vitrine. */
+export const NOM_APP = 'Asian Home Fidélité'
+
 export const TYPES_COMMERCE: { valeur: TypeCommerce; libelle: string }[] = [
   { valeur: 'restaurant', libelle: 'Restaurant' },
   { valeur: 'salon', libelle: 'Salon (coiffure, beauté…)' },

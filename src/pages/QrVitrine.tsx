@@ -1,6 +1,7 @@
 import { useStore } from '../store'
 import { urlAbsolue } from '../router'
 import { LogoCommerce, QrCode } from '../components/ui'
+import { NOM_APP } from '../data/defaults'
 
 /** QR grand format, affichable en caisse ou imprimable (étiquettes de table, adhésif vitrine). */
 export default function QrVitrine() {
@@ -19,7 +20,8 @@ export default function QrVitrine() {
         <p className="mt-2 text-xl font-semibold text-marque-600">Scannez, tournez la roue, gagnez !</p>
         <QrCode texte={url} className="mt-5 aspect-square w-full max-w-80" titre={`QR code de la roulette de ${commerce.nom}`} />
         <p className="mt-4 text-gray-700">1 tirage par personne et par jour · sans obligation d’achat ni d’avis</p>
-        <p className="mt-2 text-sm font-bold text-marque-500">Fideliz</p>
+        {commerce.coordonnees && <p className="mt-3 text-sm text-gray-600">{commerce.coordonnees}</p>}
+        <p className="mt-2 text-sm font-bold text-marque-500">{NOM_APP}</p>
       </section>
 
       <div className="mx-auto grid max-w-lg gap-2 print:hidden">

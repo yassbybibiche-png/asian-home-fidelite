@@ -60,7 +60,7 @@ export default function AvisPage() {
           .filter(Boolean)
           .join(' · ') || 'aucune'}{' '}
         —{' '}
-        <a href="#/reglages" className="font-semibold text-marque-600 underline">
+        <a href="#/reglages" className="inline-flex min-h-11 items-center font-semibold text-marque-600 underline">
           modifier
         </a>
         {nbConcernes > 0 && (

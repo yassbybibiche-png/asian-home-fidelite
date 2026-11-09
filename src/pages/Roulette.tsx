@@ -35,7 +35,7 @@ export default function Roulette() {
       <section>
         <div className="mb-2 flex items-baseline justify-between">
           <h2 className="text-lg font-bold">Lots configurés</h2>
-          <a href="#/reglages" className="font-semibold text-marque-600">
+          <a href="#/reglages" className="inline-flex min-h-11 items-center font-semibold text-marque-600">
             Modifier
           </a>
         </div>

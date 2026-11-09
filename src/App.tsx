@@ -2,7 +2,7 @@ import type { ComponentType } from 'react'
 import { useStore } from './store'
 import { aller, useRoute, PAGES_PUBLIQUES, type Page } from './router'
 import { Icone, LogoCommerce } from './components/ui'
-import { libelleType } from './data/defaults'
+import { NOM_APP, libelleType } from './data/defaults'
 import TableauDeBord from './pages/TableauDeBord'
 import Clients from './pages/Clients'
 import Roulette from './pages/Roulette'
@@ -99,11 +99,11 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-dvh pb-24 md:pb-8">
+    <div className="min-h-dvh pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8">
       <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 backdrop-blur print:hidden">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2">
           <SelecteurCommerce />
-          <span className="hidden shrink-0 text-lg font-extrabold text-marque-500 sm:block">Fideliz</span>
+          <span className="hidden shrink-0 text-lg font-extrabold text-marque-500 sm:block">{NOM_APP}</span>
         </div>
         <nav className="mx-auto hidden max-w-5xl gap-1 overflow-x-auto px-3 md:flex" aria-label="Navigation principale">
           {ONGLETS.map((o) => (
@@ -124,7 +124,7 @@ export default function App() {
         <div className="mx-auto max-w-5xl px-4 pt-3 print:hidden">
           <div className="flex items-center justify-between gap-3 rounded-xl bg-gray-800 px-4 py-3 text-sm text-white">
             <span>Ce commerce est désactivé : son QR code et sa carte de fidélité ne sont plus accessibles aux clients.</span>
-            <button className="shrink-0 font-semibold text-marque-200 underline" onClick={() => aller('admin')}>
+            <button className="min-h-11 shrink-0 px-1 font-semibold text-marque-200 underline" onClick={() => aller('admin')}>
               Gérer
             </button>
           </div>

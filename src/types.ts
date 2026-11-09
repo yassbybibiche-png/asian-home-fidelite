@@ -1,4 +1,4 @@
-// Modèle de données Fideliz. Volontairement générique : aucun champ propre à un
+// Modèle de données de l'app. Volontairement générique : aucun champ propre à un
 // secteur (restaurant, salon, boutique… utilisent exactement la même structure).
 
 export type TypeCommerce = 'restaurant' | 'salon' | 'boutique' | 'boulangerie' | 'garage' | 'autre'
@@ -25,6 +25,8 @@ export interface Commerce {
   /** URL d'image (http…) ou initiales (2-3 lettres). Vide = initiales du nom. */
   logo?: string
   lienGoogle: string
+  /** Adresse, téléphone, horaires… en texte libre, affiché sur les pages client (optionnel). */
+  coordonnees?: string
   recompense: string
   seuilTampons: number
   /** Lots de la roulette : texte libre + probabilité simple. */

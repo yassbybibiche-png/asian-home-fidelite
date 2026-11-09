@@ -17,7 +17,7 @@ export function MessagePublic({ titre, children }: { titre: string; children: Re
 }
 
 // Ce téléphone se souvient du dernier profil utilisé (comme le ferait un cookie en production).
-const cleJoueur = (commerceId: string) => `fideliz:joueur:${commerceId}`
+const cleJoueur = (commerceId: string) => `fidelite:joueur:${commerceId}`
 function lireJoueurMemorise(commerceId: string): string | null {
   try {
     return localStorage.getItem(cleJoueur(commerceId))
@@ -96,6 +96,8 @@ function Partie({ commerce }: { commerce: Commerce }) {
           <p className="text-sm text-gray-600">Tournez la roue et gagnez un cadeau !</p>
         </div>
       </header>
+
+      {commerce.coordonnees && <p className="-mt-2 text-sm text-gray-500">{commerce.coordonnees}</p>}
 
       <Roue lots={commerce.lots} rotation={rotation} />
 

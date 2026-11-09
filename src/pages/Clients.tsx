@@ -76,7 +76,7 @@ export default function Clients() {
 
       {filtre === 'relancer' && (
         <p className="mb-3 text-sm text-gray-600">
-          Clients sans visite depuis plus de 30 jours. Copiez le message et envoyez-le vous-même (SMS, WhatsApp, e-mail) : Fideliz n’envoie rien.
+          Clients sans visite depuis plus de 30 jours. Copiez le message et envoyez-le vous-même (SMS, WhatsApp, e-mail) : l’app n’envoie rien.
         </p>
       )}
 
