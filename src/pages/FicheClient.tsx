@@ -50,7 +50,11 @@ export default function FicheClient() {
           className="bouton w-full"
           onClick={() => {
             validerVisite(client.id)
-            annoncer(debloquee ? 'Visite enregistrée — la carte est pleine : offrez la récompense.' : '✓ Visite validée : +1 tampon')
+            annoncer(
+              debloquee
+                ? 'Visite enregistrée (+1 tampon, reporté sur la carte suivante) — offrez la récompense.'
+                : '✓ Visite validée : +1 tampon',
+            )
           }}
         >
           Valider une visite (+1 tampon)
@@ -60,7 +64,12 @@ export default function FicheClient() {
             className="bouton w-full bg-green-600 hover:bg-green-700 active:bg-green-800"
             onClick={() => {
               offrirRecompense(client.id)
-              annoncer(`🎁 Récompense offerte : ${commerce.recompense}. Carte remise à zéro.`)
+              const reportes = client.tampons - commerce.seuilTampons
+              annoncer(
+                `🎁 Récompense offerte : ${commerce.recompense}. ${
+                  reportes > 0 ? `${reportes} tampon${reportes > 1 ? 's' : ''} reporté${reportes > 1 ? 's' : ''} sur la nouvelle carte.` : 'Carte remise à zéro.'
+                }`,
+              )
             }}
           >
             🎁 Offrir la récompense

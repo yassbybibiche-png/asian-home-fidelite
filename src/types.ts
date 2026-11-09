@@ -42,7 +42,7 @@ export interface Client {
   prenom: string
   telephone?: string
   email?: string
-  /** Tampons en cours (remis à zéro quand la récompense est atteinte). */
+  /** Visites depuis la dernière récompense offerte (peut dépasser le seuil ; offrir la récompense en retire seuil). */
   tampons: number
   /** Historique des passages (dates ISO, ordre chronologique). */
   visites: string[]

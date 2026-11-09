@@ -156,3 +156,36 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   « Asian Home Fidélité… », `<div id="root">`, script du bundle) ; `/assets/index-*.js` → HTTP 200
   `text/javascript` (330 kB). Serveur arrêté ensuite.
 - Rien publié, rien poussé, aucune clé, aucun envoi, aucune dépense.
+
+## 09/11/2026 — Vérification coordinateur (fin de mission)
+- Re-vérifié moi-même après la phase 3 : `npm install` OK, `npm test` 19/19 OK,
+  `npm run build` OK (tsc + vite, JS 330 kB / 99 kB gzip), `npm run preview` + curl → HTTP 200.
+- `git log` : 3 commits (phases 1-2-3), aucun remote → rien poussé, rien publié.
+- BRIEF mis à jour par le parent pendant la phase 2 (clarification utilisateur
+  ~03h10-03h13) : pas de marque Fideliz, version GRATUITE, brandée Asian Home Paris.
+  L'app livrée suit ce BRIEF mis à jour.
+- Non vérifié : rendu réel dans un navigateur / sur téléphone (aucun navigateur
+  dans cette session ; relecture mobile dans le code seulement). Aucune capture d'écran.
+- Point ouvert pour le test téléphone de l'utilisateur : `dist/` est prêt à héberger
+  en statique, mais aucun hébergement n'a été fait.
+
+## 09/11/2026 — Phase FIX-A : majeurs 1 et 2 de l'audit Codex
+- **MAJEUR 1 (tampons perdus sur carte pleine) — corrigé.** `validerVisite` ne plafonne plus
+  `tampons` (= visites depuis la dernière récompense) ; `tamponsAffiches` plafonne toujours l'affichage.
+  `offrirRecompense` retire `seuil` tampons au lieu de remettre à 0 : l'excédent passe sur la nouvelle
+  carte (encore débloquée s'il reste ≥ seuil). Message caisse adapté (« N tampon(s) reporté(s) sur la
+  nouvelle carte »). Invariant : `tampons = visites − seuil × récompenses offertes`.
+  Seed : déjà conforme (récompense remise à la visite suivant la carte pleine) ; `npm run seed` régénère
+  un fichier identique. Seuls les commentaires du générateur / du test seed ont changé.
+- **MAJEUR 2 (doublon par préfixe international) — corrigé.** `cleContact` ramène tout numéro français
+  à `0XXXXXXXXX` : `06…`, `+33 6…`, `0033 6…`, `+33 (0)6…`, avec espaces / points / tirets / parenthèses.
+  Numéros étrangers : chiffres conservés. E-mail inchangé. La déduplication de `inscrireClient`
+  (`store.tsx`) passe déjà par `trouverClientParContact` → corrigée par le même changement.
+  Grep `telephone` dans `src/` : aucune autre comparaison d'identité ; seule la recherche texte de
+  `Clients.tsx` compare la saisie brute (filtre d'affichage, pas de dédup — laissée en l'état).
+- Fichiers : `src/lib/fidelite.ts`, `src/pages/FicheClient.tsx`, `src/types.ts` (commentaire),
+  `tests/logique.test.ts`, `tests/seed.test.ts` (commentaire), `scripts/generer-seed.mjs` (commentaire), `README.md`.
+- Tests : test « carte pleine » réécrit (tampons 4, affichés 2) ; ajoutés « 11 visites, seuil 10 »,
+  « 21 visites, seuil 10 », « tous les formats français… même client », « réinscription avec un autre
+  format → pas de doublon ». `npm test` : 23/23 OK (avant : 19). `npm run build` : OK.
+- Hors périmètre, toujours ouverts : MAJEUR 3 (roulette sans visite) et les mineurs (phases FIX-B/C).

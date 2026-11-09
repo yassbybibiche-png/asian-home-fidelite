@@ -38,7 +38,8 @@ describe('Seed : 3 commerces cohérents', () => {
         assert.ok(t.every((x) => x <= MAINTENANT && x > MAINTENANT - 365 * JOUR), `${c.id} : dates récentes, jamais dans le futur`)
         assert.equal(c.derniereVisite, c.visites.at(-1))
         assert.equal(c.creeLe, c.visites[0])
-        // Mêmes règles que l'app : tampons = visites − récompenses déjà offertes × seuil, carte jamais au-delà du seuil.
+        // Mêmes règles que l'app : 1 visite = 1 tampon, chaque récompense offerte consomme seuil tampons
+        // (excédent reporté). Dans le seed, les récompenses dues sont remises : au plus 1 carte pleine en attente.
         const offertes = c.recompensesOffertes?.length ?? 0
         assert.equal(c.tampons, c.visites.length - offertes * commerce.seuilTampons, `${c.id} : tampons`)
         assert.ok(c.tampons >= 0 && c.tampons <= commerce.seuilTampons, `${c.id} : tampons dans [0, seuil]`)

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import {
   analyserContact,
+  cleContact,
   messageRelance,
   nouveauClient,
   offrirRecompense,
@@ -16,7 +17,7 @@ import {
 } from '../src/lib/fidelite.ts'
 import { lotsJouables, rotationCible, secteurs, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles, modeleSuggere, statutAvis, texteModele } from '../src/lib/avis.ts'
-import type { Avis, Commerce, Tirage } from '../src/types.ts'
+import type { Avis, Client, Commerce, Tirage } from '../src/types.ts'
 
 const MAINTENANT = new Date(2026, 10, 9, 12, 0) // 9 novembre 2026, midi (heure locale)
 
@@ -65,6 +66,46 @@ describe('Inscription d’un client', () => {
     assert.equal(trouverClientParContact([client], 'c-test', contact)?.id, client.id)
     assert.equal(trouverClientParContact([client], 'c-autre', contact), undefined)
   })
+
+  test('non-régression : tous les formats français du même numéro retrouvent le même client', () => {
+    const formats = [
+      '06 12 34 56 78',
+      '0612345678',
+      '+33 6 12 34 56 78',
+      '+33612345678',
+      '0033 6 12 34 56 78',
+      '0033612345678',
+      '06.12.34.56.78',
+      '06-12-34-56-78',
+      '+33 (0)6 12 34 56 78',
+    ]
+    for (const inscrit of formats) {
+      const client = nouveauClient('c-test', 'Linh', analyserContact(inscrit)!, MAINTENANT)
+      for (const saisie of formats) {
+        const contact = analyserContact(saisie)
+        assert.ok(contact, `« ${saisie} » accepté`)
+        assert.equal(cleContact(contact), '0612345678', `clé de « ${saisie} »`)
+        assert.equal(trouverClientParContact([client], 'c-test', contact)?.id, client.id, `« ${inscrit} » retrouvé par « ${saisie} »`)
+      }
+    }
+    // Numéro étranger : chiffres conservés tels quels, pas confondu avec un numéro français.
+    assert.equal(cleContact({ telephone: '+44 7911 123456' }), '447911123456')
+    assert.equal(cleContact({ telephone: '+32 470 12 34 56' }), '32470123456')
+    assert.equal(cleContact({ email: ' Marie@Exemple.FR ' }), 'marie@exemple.fr')
+  })
+
+  test('non-régression : réinscription avec un autre format de numéro → pas de doublon', () => {
+    // Même enchaînement que inscrireClient (store.tsx) : chercher l’existant avant de créer.
+    const inscrire = (clients: Client[], saisie: string) => {
+      const contact = analyserContact(saisie)!
+      const existant = trouverClientParContact(clients, 'c-test', contact)
+      return existant ? clients : [...clients, nouveauClient('c-test', 'Linh', contact, MAINTENANT)]
+    }
+    let clients = inscrire([], '06 12 34 56 78')
+    clients = inscrire(clients, '0033612345678')
+    clients = inscrire(clients, '+33 6 12 34 56 78')
+    assert.equal(clients.length, 1)
+  })
 })
 
 describe('Tampons et progression', () => {
@@ -83,15 +124,44 @@ describe('Tampons et progression', () => {
     assert.equal(recompenseDebloquee(client, commerce), true)
   })
 
-  test('carte pleine : la visite est comptée mais les tampons restent plafonnés', () => {
+  test('carte pleine : chaque visite compte un tampon, seul l’affichage est plafonné', () => {
     const commerce = commerceTest(2)
     let client = nouveauClient(commerce.id, 'Inès', { telephone: '0700000000' })
     for (let i = 0; i < 4; i++) client = validerVisite(client, commerce)
-    assert.equal(client.tampons, 2)
+    assert.equal(client.tampons, 4)
+    assert.equal(tamponsAffiches(client, commerce), 2)
     assert.equal(client.visites.length, 4)
   })
 
-  test('offrir la récompense remet la carte à zéro et garde la trace', () => {
+  test('non-régression : 11 visites, seuil 10 → le 11e tampon est reporté sur la nouvelle carte', () => {
+    const commerce = commerceTest(10)
+    let client = nouveauClient(commerce.id, 'Mehdi', { telephone: '06 12 34 56 78' })
+    for (let i = 0; i < 11; i++) client = validerVisite(client, commerce)
+    assert.equal(client.tampons, 11)
+    assert.equal(tamponsAffiches(client, commerce), 10)
+    assert.equal(recompenseDebloquee(client, commerce), true)
+    client = offrirRecompense(client, commerce, MAINTENANT)
+    assert.equal(client.tampons, 1)
+    assert.equal(tamponsAffiches(client, commerce), 1)
+    assert.equal(recompenseDebloquee(client, commerce), false)
+    assert.equal(client.recompensesOffertes?.length, 1)
+  })
+
+  test('non-régression : 21 visites, seuil 10 → après 1 récompense, 11 tampons et récompense encore débloquée', () => {
+    const commerce = commerceTest(10)
+    let client = nouveauClient(commerce.id, 'Mehdi', { telephone: '06 12 34 56 78' })
+    for (let i = 0; i < 21; i++) client = validerVisite(client, commerce)
+    client = offrirRecompense(client, commerce, MAINTENANT)
+    assert.equal(client.tampons, 11)
+    assert.equal(recompenseDebloquee(client, commerce), true)
+    client = offrirRecompense(client, commerce, MAINTENANT)
+    assert.equal(client.tampons, 1)
+    assert.equal(client.recompensesOffertes?.length, 2)
+    // Invariant : tampons = visites − seuil × récompenses offertes.
+    assert.equal(client.tampons, client.visites.length - 10 * client.recompensesOffertes!.length)
+  })
+
+  test('offrir la récompense à carte juste pleine la remet à zéro et garde la trace', () => {
     const commerce = commerceTest(2)
     let client = nouveauClient(commerce.id, 'Inès', { telephone: '0700000000' })
     assert.equal(offrirRecompense(client, commerce), client, 'pas de récompense avant le seuil')

@@ -11,11 +11,15 @@ export function analyserContact(saisie: string): Contact | null {
   return chiffres.length >= 10 && chiffres.length <= 13 && /^[+\d][\d\s.\-()]*$/.test(s) ? { telephone: s } : null
 }
 
-/** Clé de comparaison : chiffres seuls, +33 6… → 06…, e-mail en minuscules. */
+/**
+ * Clé de comparaison : chiffres seuls, tout numéro français ramené à « 06… »
+ * (+33 6…, 0033 6…, +33 (0)6…) ; autres numéros inchangés ; e-mail en minuscules.
+ */
 export function cleContact(c: { telephone?: string; email?: string }): string {
   if (c.email) return c.email.trim().toLowerCase()
   const chiffres = (c.telephone ?? '').replace(/\D/g, '')
-  return chiffres.startsWith('33') && chiffres.length === 11 ? `0${chiffres.slice(2)}` : chiffres
+  const francais = /^(?:00)?330?(\d{9})$/.exec(chiffres)
+  return francais ? `0${francais[1]}` : chiffres
 }
 
 export function trouverClientParContact(clients: Client[], commerceId: string, contact: Contact): Client | undefined {
@@ -50,23 +54,29 @@ export function recompenseDebloquee(client: Client, commerce: Commerce): boolean
   return client.tampons >= commerce.seuilTampons
 }
 
-/** +1 tampon (plafonné au seuil tant que la récompense n'est pas offerte) et la visite est enregistrée. */
-export function validerVisite(client: Client, commerce: Commerce, maintenant = new Date()): Client {
+/**
+ * 1 visite = 1 tampon, jamais plafonné : au-delà du seuil, l'excédent sera reporté sur la carte
+ * suivante quand la récompense sera offerte (seul l'affichage est plafonné, cf. tamponsAffiches).
+ */
+export function validerVisite(client: Client, _commerce: Commerce, maintenant = new Date()): Client {
   const iso = maintenant.toISOString()
   return {
     ...client,
-    tampons: Math.min(client.tampons + 1, commerce.seuilTampons),
+    tampons: client.tampons + 1,
     visites: [...client.visites, iso],
     derniereVisite: iso,
   }
 }
 
-/** Remet la carte à zéro et garde la trace de la récompense remise. */
+/**
+ * Consomme une carte (seuil tampons) et garde la trace de la récompense remise. Les tampons
+ * excédentaires restent sur la nouvelle carte (encore débloquée s'il en reste au moins seuil).
+ */
 export function offrirRecompense(client: Client, commerce: Commerce, maintenant = new Date()): Client {
   if (!recompenseDebloquee(client, commerce)) return client
   return {
     ...client,
-    tampons: 0,
+    tampons: client.tampons - commerce.seuilTampons,
     recompensesOffertes: [...(client.recompensesOffertes ?? []), { date: maintenant.toISOString(), libelle: commerce.recompense }],
   }
 }

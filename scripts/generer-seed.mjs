@@ -131,8 +131,8 @@ for (const commerce of commerces) {
     while (jours.size < nbVisites) jours.add(entre(derniere, premiere))
     // Ordre chronologique (du plus ancien au plus récent), comme dans l'app.
     const visites = [...jours].sort((a, b) => b - a).map((j) => ilYa(j, HORAIRES[commerce.id]))
-    // Mêmes règles que l'app : la carte se remplit, la récompense est offerte, la carte repart à zéro.
-    // Récompense remise à la visite suivante celle qui a rempli la carte (ou laissée en attente).
+    // Mêmes règles que l'app : 1 visite = 1 tampon ; offrir la récompense retire seuil tampons (excédent reporté).
+    // Récompense remise à la visite suivante celle qui a rempli la carte (ce tampon-là passe sur la nouvelle carte).
     const cyclesOfferts = cartePleine ? 0 : Math.floor((visites.length - 1) / seuil)
     const recompensesOffertes = Array.from({ length: cyclesOfferts }, (_, k) => ({ date: visites[(k + 1) * seuil], libelle: commerce.recompense }))
     const tampons = visites.length - cyclesOfferts * seuil

@@ -70,14 +70,14 @@ une démo cohérente, faites tout sur le même téléphone.
 
 ## Tests
 
-`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (19 tests).
+`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (23 tests).
 Pas de Vitest : Node exécute le TypeScript directement, ça évite une dépendance et ne touche pas au build.
 
 Les tests portent sur la **logique pure** (hors React) :
 
 - création d'un commerce (formulaire court, mêmes réglages par défaut pour tous les secteurs) ;
-- inscription d'un client (téléphone ou e-mail, pas de doublon) ;
-- +1 tampon, progression, carte plafonnée, récompense offerte puis remise à zéro ;
+- inscription d'un client (téléphone ou e-mail, pas de doublon quel que soit le format : 06…, +33…, 0033…) ;
+- 1 visite = 1 tampon, progression, affichage plafonné au seuil, récompense offerte avec report des tampons excédentaires ;
 - roulette : tirage pondéré, roue qui s'arrête dans le bon secteur, 1 tirage par client et par jour ;
 - avis : choix du modèle, réponse auto aux 5★, brouillons, réponse existante jamais écrasée ;
 - cohérence du seed (dates récentes et jamais futures, tampons = visites − récompenses, tirages un jour
