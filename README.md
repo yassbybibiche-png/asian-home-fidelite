@@ -33,7 +33,7 @@ npm run serveur    # backend partagé (API /api/v1, SQLite) → http://localhost
 npm run build:api  # build du front en MODE API, servi par le serveur lui-même (VITE_API_URL=/, cf. .env.api)
 ```
 
-**Backend partagé** : `server/` (Node 24, zéro dépendance, `node:sqlite`). Variables, API, PIN,
+**Backend partagé** : `server/` (Node 24, `node:sqlite` en local, Supabase en production). Variables, API, PIN,
 déploiement et limites : voir [`server/README.md`](server/README.md).
 
 ### Mode API (données partagées) en local
@@ -105,7 +105,8 @@ problème n'existe plus.
 
 | Élément | Mode API (serveur) | Démo locale |
 |---|---|---|
-| Données (clients, tampons, tirages, avis) | **Réelles et partagées** (SQLite sur le serveur) ; le comptoir et le téléphone du client voient la même chose | Fictives, dans ce navigateur (localStorage) |
+| Données (clients, tampons, tirages, avis) | **Réelles et partagées** sur le serveur ; le comptoir et le téléphone du client voient la même chose. Base : SQLite en local ; en production **Supabase** (prêt, voir ligne suivante) | Fictives, dans ce navigateur (localStorage) |
+| Base de production Supabase | **Prête, projet PAS créé** : schéma + RLS + adaptateur ; migration **exécutée sur un vrai Postgres local** (PGlite, PostgreSQL 18.6) mais **jamais sur Supabase** ; procédure pas à pas dans `server/README.md` | — |
 | Carte de fidélité (inscription, tampons, récompense, historique) | **Réel**, décidé par le serveur | Réel dans l'app, local |
 | Anti-doublon client (06…, +33…, 0033…, e-mail) | **Réel**, côté serveur (+ contrainte SQL) | Réel, local |
 | Roulette (1 participation par visite validée le jour même, 1 tirage par jour, lot tiré) | **Réel côté serveur** (`POST /tirages`), code gagnant à 6 caractères vérifiable au comptoir | Tirage dans le navigateur, ne vaut que pour ce navigateur |
@@ -121,8 +122,35 @@ problème n'existe plus.
 | Google Wallet | **À brancher** : bouton « Ajouter à Wallet — à brancher » + lien vers la carte publique (QR) ; `pass.json` répond 501 (pas de compte émetteur) | idem, étiqueté démo |
 | SMS / e-mail | **À brancher** : adaptateurs Twilio / Brevo prêts côté serveur, mais aucune clé → 501, **rien n'est envoyé** | Rien n'est envoyé |
 | Paiements | **Absents** | idem |
-| Hébergement | **Pas fait** : rien n'est déployé (voir `server/README.md`, l'offre gratuite de Render ne convient pas au vrai restaurant) | — |
+| Hébergement | **Pas fait**, rien n'est déployé. Retenu : serveur Node sur **Render Free** (Frankfurt) + base **Supabase Free** (Central EU Frankfurt) = 0 € ; la veille Render ne perd plus de données (elles sont chez Supabase) | — |
+| Limites du gratuit (vérifiées le 09/11/2026) | Supabase : 500 Mo de base, 5 Go d'egress/mois, 2 projets, **pause après 7 jours d'inactivité**, **aucune sauvegarde** ; Render : veille après 15 min, ~1 min de réveil, 750 h/mois. Détails et sources ci-dessous | — |
 | Kit de lancement (flyers, étiquettes, adhésif) | Décrit dans l'offre ; QR généré, **impression non faite** | idem |
+
+### Mise en ligne gratuite : Supabase + Render (résumé — procédure exacte dans `server/README.md`)
+
+Rien n'a été créé ni déployé. Ce que vous aurez à cliquer :
+1. **Supabase** : compte → *New project* « asian-home-fidelite », mot de passe de base noté à part (≠ clés API), région
+   **Central EU (Frankfurt)**, plan **Free**.
+2. **SQL Editor** : exécuter `supabase/migrations/0001_schema_initial.sql` puis `0002_rls.sql` ; vérifier 5 tables avec RLS.
+3. Récupérer `SUPABASE_URL` (bouton *Connect*) et la clé secrète `sb_secret_…` (*Settings → API Keys*) — libellés d'après la
+   doc du 09/11/2026, à confirmer à l'écran.
+4. **GitHub** : dépôt privé, pousser le code. **Render** : *New Web Service*, Frankfurt, Free, build `npm ci && npm run build:api`,
+   start `npm run serveur`, variables `NODE_VERSION=24`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PIN`, `PIN_ASIAN_HOME`.
+5. Vérifier `https://<nom>.onrender.com/api/v1/sante` → `"stockage":"supabase"`, puis refaire le parcours sur un commerce
+   de test (inscription → visite → tirage → 2e tirage refusé → export CSV) et le supprimer.
+
+**Limites du gratuit, lues sur les pages officielles le 09/11/2026** ([supabase.com/pricing](https://supabase.com/pricing),
+[Project Pausing](https://supabase.com/docs/guides/platform/free-project-pausing),
+[Backups](https://supabase.com/docs/guides/platform/backups), [render.com/docs/free](https://render.com/docs/free)) :
+- Supabase Free : 2 projets actifs, **500 Mo** de base, **5 Go** d'egress (+ 5 Go en cache) par mois, **pause après 7 jours de
+  faible activité** (e-mail d'avertissement avant ; réactivation manuelle « Resume project » dans le dashboard, durée non
+  indiquée ; réactivable jusqu'à 1 an — un ancien changelog disait 90 jours), **aucune sauvegarde** (export CSV régulier).
+- Supabase Pro (à partir de 25 $/mois) : plus de pause, sauvegardes quotidiennes gardées 7 jours, 8 Go, 250 Go d'egress.
+- Render Free : veille après **15 min** sans visite, réveil **~1 min** (le premier client attend), 750 h/mois.
+- ⚠️ Egress à surveiller : l'écran commerçant recharge tout toutes les 10 s ; estimation ~8 Go/mois (non compressé) avec
+  100 clients et une tablette ouverte 12 h/jour. Négligeable au lancement ; à contrôler dans *Usage* après 1-2 semaines.
+- S1 n'avait noté aucun chiffre du gratuit ; les emplacements des clés notés en S1 (« Project Settings → API ») étaient périmés.
+- Données à migrer : **aucune** pour Asian Home (production vide) ; aucun outil d'import automatique n'existe.
 
 ### Identifiants et comptes encore nécessaires (aucun n'a été créé)
 
@@ -133,7 +161,8 @@ problème n'existe plus.
 | Compte **Apple Developer** (99 $/an), Pass Type ID, certificat + clé de signature | Apple Wallet — **en suspens**, à activer sur décision explicite | **Utilisateur** |
 | Compte **émetteur Google Wallet** + API Google Wallet activée + clé de compte de service | Google Wallet | **Utilisateur** |
 | Compte **prestataire SMS** (Twilio) et/ou **e-mail** (Brevo) + clés API + expéditeur validé | Relances automatiques | **Utilisateur** (le client donne son accord pour l'envoi en son nom) |
-| **Hébergement du backend** (avec disque persistant, région UE de préférence) | Mise en ligne réelle | **Utilisateur** (dépense à valider) |
+| Compte **Supabase** (plan Free) + projet en région Central EU (Frankfurt) | Base de production | **Utilisateur** (0 € ; Pro 25 $/mois seulement si décidé) |
+| Dépôt **GitHub privé** + compte **Render** (Free Web Service, Frankfurt) | Hébergement du serveur Node | **Utilisateur** (0 €) |
 | **Nom de domaine** (+ HTTPS) | Adresse définitive des QR imprimés | **Utilisateur**, ou le **client** s'il veut son propre domaine |
 | Consentement des clients finaux aux relances (case à cocher à ajouter) | RGPD, avant tout envoi | Recueilli par le **client** au comptoir / dans l'app |
 
@@ -165,9 +194,10 @@ Badge « Démo » : en mode API, il n'apparaît **que** sur les commerces venant
 
 ## Tests
 
-`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (109 tests : 36 de logique,
+`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (118 tests : 36 de logique,
 21 du serveur dans `tests/serveur.test.ts`, 24 du front V2 dans `tests/front-v2.test.ts`, 13 des intégrations V3 dans
-`tests/integrations-v3.test.ts`, 15 du stockage Supabase dans `tests/supabase.test.ts`).
+`tests/integrations-v3.test.ts`, 15 du stockage Supabase dans `tests/supabase.test.ts`, 9 de la migration SQL exécutée
+sur Postgres dans `tests/migration-pglite.test.ts`).
 Pas de Vitest : Node exécute le TypeScript directement, ça évite une dépendance et ne touche pas au build.
 
 Les tests portent sur la **logique pure** (hors React) :
@@ -202,7 +232,11 @@ Les tests portent sur la **logique pure** (hors React) :
   requêtes envoyées (tables, colonnes, filtres, tri), déduplication par `cleContact` refusée par la contrainte unique,
   2e tirage du jour refusé par l'index unique (jour à Paris), double tirage / double visite / double inscription
   simultanés, choix SQLite / Supabase selon les variables d'environnement, parcours complet du serveur sur Supabase avec
-  les mêmes fonctions métier, migration SQL (contraintes, RLS sans policy), `.env.example` sans vraie clé.
+  les mêmes fonctions métier, migration SQL (contraintes, RLS sans policy), `.env.example` sans vraie clé ;
+- migration SQL (S2) **exécutée par un vrai Postgres** (PGlite = PostgreSQL 18.6 en WebAssembly, en mémoire, sans réseau) :
+  0001 + 0002 passent et sont rejouables, 5 tables avec RLS et aucune policy, anon / authenticated refusés, index
+  « 1 tirage par jour à Paris » accepté et vérifié autour de minuit (heure d'hiver et d'été), anti-doublon, contraintes,
+  cascade, trigger `version`. Ce n'est **pas** Supabase : à rejouer dans le SQL Editor du vrai projet.
 
 Preuve HTTP manuelle (V2 + V3) : `npm run serveur` puis `node scripts/preuve-http-v3.mjs` — sortie dans `PREUVE-HTTP-V3.txt`.
 
@@ -213,9 +247,9 @@ téléphone (390 px) n'a jamais été vu à l'écran — y compris les blocs ajo
 
 ## Limites pour une vraie mise en production
 
-- **Hébergement du serveur** : fait en local seulement. Rien n'est déployé. Base de production choisie : **Supabase
-  gratuit** — schéma, RLS et adaptateur prêts (phase S1), **projet pas encore créé** et jamais testé contre un vrai Supabase
-  (voir `server/README.md`, « Supabase »).
+- **Hébergement du serveur** : fait en local seulement. Rien n'est déployé. Choix : **Supabase Free** (base) + **Render Free**
+  (serveur) — schéma, RLS, adaptateur et procédure prêts (S1 + S2), migration exécutée sur un Postgres local (PGlite),
+  **projet pas encore créé** et jamais testé contre un vrai Supabase (voir `server/README.md`, « Supabase »).
 - **Authentification** : un PIN par commerce (partagé par l'équipe) + un PIN admin ; pas de vrais comptes ni de
   journal « qui a fait quoi ». La validation d'une visite reste un bouton (pas de scan du QR client par le commerçant).
 - **Anti-abus** : vérifié côté serveur (1 tirage par client et par jour, visite du jour obligatoire), mais le

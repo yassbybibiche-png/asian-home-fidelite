@@ -18,6 +18,7 @@ voient enfin **les mêmes données**. Une seule instance Node pour tous les comm
 | `supabase/migrations/` | **S1** : schéma Postgres (`0001_schema_initial.sql`) et RLS (`0002_rls.sql`). |
 | `server/wallet.ts`, `server/notifications/` | **V3** : intégrations préparées, inactives (voir « Intégrations préparées »). |
 | `tests/serveur.test.ts` | Tests HTTP réels (port éphémère, base temporaire, `fetch`), lancés par `npm test`. |
+| `tests/migration-pglite.test.ts` | **S2** : la migration Supabase exécutée par un vrai Postgres local (PGlite, WebAssembly). |
 
 ## Choix de la base : `node:sqlite` (retenu)
 
@@ -67,10 +68,13 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | — | **V3, non configuré.** SMS via Twilio (`TWILIO_FROM` = numéro expéditeur `+33…` ou identifiant de Messaging Service `MG…`). Les trois sont nécessaires, sinon 501. |
 | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | — | **V3, non configuré.** E-mail via Brevo (adresse expéditrice à valider chez Brevo ; nom optionnel). Clé + adresse nécessaires, sinon 501. |
 
-## Supabase (phase S1) — prêt, projet PAS encore créé
+## Supabase (phases S1 + S2) — prêt, projet PAS encore créé
 
-Backend de production retenu : **Supabase gratuit** (au lieu de Render Starter payant). Aucun compte, aucun projet, aucune
-clé n'existe encore : rien n'a été testé contre un vrai Supabase (uniquement contre un faux PostgREST, `tests/supabase.test.ts`).
+Base de production retenue : **Supabase gratuit** ; le serveur Node, lui, tourne sur **Render Free** (Supabase n'héberge pas
+`server/`) — procédure complète dans « Mise en production : Supabase + Render » plus bas. Aucun compte, aucun projet, aucune
+clé n'existe encore : rien n'a été testé contre un vrai Supabase. Ce qui a été vérifié : l'adaptateur contre un faux PostgREST
+(`tests/supabase.test.ts`) et, depuis S2, **la migration SQL exécutée par un vrai moteur Postgres local** (PGlite, voir
+« Validation de la migration »).
 
 **Choix du stockage** (au démarrage) : `SUPABASE_URL` **et** `SUPABASE_SERVICE_ROLE_KEY` définies → Supabase ; aucune des deux →
 SQLite (`DB_FILE`), exactement comme avant ; une seule des deux → refus de démarrer (pour ne jamais écrire par erreur dans un
@@ -81,11 +85,16 @@ SQLite éphémère). `GET /api/v1/sante` indique `"stockage": "sqlite"` ou `"sup
 
 | Variable | Où la trouver (dashboard Supabase) | Règle |
 |---|---|---|
-| `SUPABASE_URL` | Project Settings → API (Data API) → *Project URL* | Pas secrète, mais à mettre dans l'environnement du serveur. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API → *service_role* (clés « legacy ») **ou** Project Settings → API Keys → clé secrète `sb_secret_…` | **Serveur uniquement.** Contourne la RLS : jamais dans le navigateur, jamais dans une variable `VITE_…`, jamais commitée, jamais affichée dans un log (le serveur n'affiche que l'hôte du projet). |
+| `SUPABASE_URL` | Bouton **Connect** du projet → *Project URL* (`https://<ref>.supabase.co`) | Pas secrète, mais à mettre dans l'environnement du serveur. |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Settings → API Keys** → clé secrète `sb_secret_…` (recommandée) ; à défaut, sur la même page, l'ancienne clé *service_role* (« legacy ») | **Serveur uniquement.** Contourne la RLS : jamais dans le navigateur, jamais dans une variable `VITE_…`, jamais commitée, jamais affichée dans un log (le serveur n'affiche que l'hôte du projet). |
 | ~~`SUPABASE_ANON_KEY`~~ | — | **Pas utilisée** : le navigateur ne parle jamais à Supabase (tout passe par `/api/v1`), et la RLS ne lui ouvre rien. |
 
-(Emplacements dans le dashboard notés d'après la doc Supabase connue, à vérifier à la création du projet.)
+Emplacements **corrigés en S2** d'après la page officielle [« API keys »](https://supabase.com/docs/guides/api/api-keys), lue
+le 09/11/2026 : toutes les clés sont dans *Settings → API Keys* (« il n'y a plus de page Settings → API séparée ») et l'URL
+du projet est dans la fenêtre *Connect*. S1 indiquait « Project Settings → API » : **c'était l'ancien emplacement**. La même
+page annonce l'abandon des clés legacy `anon` / `service_role` « d'ici fin 2026 » → prendre la clé `sb_secret_…` (la variable
+garde son nom `SUPABASE_SERVICE_ROLE_KEY` ; la doc montre `createClient(url, cléSecrète)` côté serveur, comme ici, et la clé
+secrète correspond au rôle `service_role`, qui contourne la RLS). Libellés exacts **à confirmer à l'écran** à la création.
 
 **Schéma** (`supabase/migrations/0001_schema_initial.sql`, rejouable) : tables `meta`, `commerces`, `clients`, `tirages`, `avis` ;
 objets métier en JSONB `donnees` (forme de `src/types.ts`, inchangée) ; colonnes `commerce_id`, `client_id`, `cle_contact`, `date`
@@ -110,9 +119,67 @@ protégés par la base :
 
 Sous SQLite, rien ne change : vraies transactions (`BEGIN IMMEDIATE`), passées une par une.
 
-**Reste à faire (S2)** : créer le projet (région UE), exécuter `0001` puis `0002` dans le SQL Editor, renseigner les deux
-variables chez l'hébergeur du serveur, vérifier `/sante` → `supabase`, refaire le parcours HTTP contre le vrai projet, et
-(si besoin) importer les données d'un `fidelite.db` existant.
+### Limites de l'offre gratuite Supabase (vérifiées le 09/11/2026)
+
+Lues sur les pages officielles (aucun chiffre de mémoire) : [supabase.com/pricing](https://supabase.com/pricing),
+[Project Pausing](https://supabase.com/docs/guides/platform/free-project-pausing),
+[Backups](https://supabase.com/docs/guides/platform/backups). À relire avant de créer le projet : elles peuvent changer.
+
+| Point | Free (0 $) | Pro (à partir de 25 $/mois) |
+|---|---|---|
+| Projets actifs | **2** par organisation (il n'en faut qu'un : tous les commerces partagent la même base) | pas de plafond affiché |
+| Taille de base | **500 Mo** | 8 Go de disque par projet |
+| Egress (données sortant de Supabase) | **5 Go** + 5 Go « cached egress » / mois | 250 Go + 250 Go |
+| Stockage de fichiers | 1 Go (non utilisé ici) | 100 Go |
+| Mise en pause | **après 1 semaine d'inactivité** (« faible activité sur 7 jours ») | **jamais** (« Projects on paid plans aren't paused for inactivity ») |
+| Sauvegardes | **aucune** (la doc conseille aux projets gratuits d'exporter eux-mêmes leurs données) | quotidiennes, **7 jours** gardés ; PITR en option payante |
+| Journaux | 1 jour | 7 jours |
+| Support | communauté | e-mail |
+| Inclus | — | 10 $/mois de crédits de calcul (= une instance Micro) |
+
+**Mise en pause (page « Project Pausing »)** : Supabase met en pause un projet gratuit qui montre une faible activité sur
+7 jours ; « quelques requêtes par jour à la base sur la semaine écoulée suffisent en général ». Les requêtes du serveur (chaque
+client qui scanne, chaque écran commerçant ouvert) comptent comme activité : un restaurant ouvert tous les jours ne devrait pas
+être mis en pause ; **le risque, c'est une fermeture d'une semaine ou plus (congés)**. Un e-mail d'avertissement arrive
+~1 semaine avant, un autre à la mise en pause. Pendant la pause, la base ne répond plus : le serveur renvoie des erreurs et
+l'app affiche « Serveur injoignable ». Réactivation : dashboard → organisation → projet → **Resume project** → confirmer ; le
+projet « revient à son état précédent, données et configuration comprises ». Durée de la réactivation : **non indiquée par la
+doc** (compter quelques minutes, non garanti). Délai pour réactiver : **1 an** après la pause d'après la page actuelle —
+⚠️ un changelog Supabase de 2024 parlait de **90 jours** ; la page actuelle fait foi, mais ne pas laisser traîner.
+
+**Écarts avec S1** : S1 n'avait écrit **aucun chiffre** sur le gratuit (rien à contredire) ; en revanche les emplacements des
+clés notés en S1 étaient périmés (voir « Variables » ci-dessus), et le délai de restauration trouvé (1 an) diffère de l'ancien
+chiffre de 90 jours qu'on trouve encore en ligne.
+
+**Egress — point à surveiller (estimation, pas une mesure).** Le front en mode API recharge **tout l'état** du commerce
+toutes les 10 s tant qu'un écran commerçant est visible (`INTERVALLE_RECHARGEMENT_MS`, `src/store.tsx`), et le serveur relit
+alors clients, tirages et avis dans Supabase. Tailles mesurées sur le seed : ~430 octets par client, ~210 par tirage, ~265 par
+avis. Avec 100 clients et 100 tirages, ~65 Ko par rechargement ; une tablette ouverte 12 h/jour = ~4 300 rechargements/jour
+≈ 280 Mo/jour ≈ **8 Go/mois avant compression** — au-dessus des 5 Go. Le `fetch` de Node demande des réponses compressées
+(gzip) ; si l'API Supabase compresse et facture les octets compressés, le volume serait plusieurs fois plus faible —
+**non vérifié** (les pages lues ne le disent pas). Au lancement (0 client) c'est négligeable. **À faire** : regarder l'usage d'egress dans
+le dashboard Supabase (page Usage) après 1 à 2 semaines ; s'il approche 5 Go, passer l'intervalle à 30 ou 60 s (une
+constante) ou fermer l'écran commerçant quand il ne sert pas.
+
+**Taille de base** : quelques centaines d'octets par client, tirage ou avis → 500 Mo représentent des centaines de milliers
+d'enregistrements ; pas un sujet pour un restaurant.
+
+### Validation de la migration (S2) — exécutée sur Postgres local, PAS sur Supabase
+
+Pas de Postgres installé dans l'environnement de développement (ni `psql`, ni `postgres`, ni `pg_ctl`). Solution trouvée :
+**PGlite** (`@electric-sql/pglite` 0.5.15, dépendance de **dev** uniquement), le vrai moteur Postgres (**PostgreSQL 18.6**)
+compilé en WebAssembly, lancé en mémoire par `npm test` (`tests/migration-pglite.test.ts`, 9 tests). Vérifié :
+- `0001` puis `0002` s'exécutent sans erreur, et **une 2e fois** sans erreur (rejouables) ;
+- les 5 tables existent, RLS activée sur chacune, aucune policy ; `anon` / `authenticated` n'ont aucun droit (requête →
+  « permission denied ») ; `service_role` lit ;
+- l'**index « 1 tirage par jour à Paris »** est accepté par Postgres (l'hypothèse ouverte en S1 est levée) et fonctionne :
+  2e tirage à 23 h 30 heure de Paris refusé (23505), tirage à 0 h 30 le lendemain accepté, heure d'été comprise ;
+- anti-doublon `(commerce, contact)`, contraintes `id = donnees.id`, clés étrangères, cascade à la suppression d'un
+  commerce, trigger `version` (+1) et UPDATE conditionné à une version périmée → 0 ligne, upsert de `meta`.
+
+**Pas vérifié** : l'exécution sur le vrai projet Supabase (version de Postgres du projet possiblement différente — pas de
+fonction propre à la v18 dans la migration —, rôles et droits par défaut créés par Supabase et non par le test, passage par
+PostgREST). À confirmer à l'étape b de la procédure ci-dessous.
 
 ## Données au premier démarrage (migration)
 
@@ -167,56 +234,146 @@ curl -s -X POST localhost:3001/api/v1/commerces/c-asian-home-paris/tirages -H 'C
   comparaison à temps constant.
 - **Anti-bruteforce** (en mémoire) : 10 PIN faux en 10 minutes depuis la même IP → 429 pendant 10 minutes,
   même avec le bon PIN. Remis à zéro à chaque redémarrage du serveur. Les routes publiques ne sont pas bloquées.
-- Limite honnête : un PIN de 4 à 6 chiffres haché en SHA-256 se retrouve en quelques secondes **si le fichier de base fuit**.
-  La protection repose sur le fait que le fichier n'est accessible qu'au serveur, et en ligne sur l'anti-bruteforce.
+- Limite honnête : un PIN de 4 à 6 chiffres haché en SHA-256 se retrouve en quelques secondes **si la base fuit** (fichier
+  SQLite, ou table `commerces` / clé secrète Supabase). La protection repose sur le fait que la base n'est accessible qu'au
+  serveur (RLS + clé secrète uniquement chez Render), et en ligne sur l'anti-bruteforce.
 - Le tirage est entièrement décidé par le serveur : le navigateur n'envoie qu'un contact, jamais un lot.
 - HTTPS : fourni par l'hébergeur (Render le fait d'office). Ne pas exposer le serveur en HTTP simple sur Internet (les PIN passent dans les en-têtes).
 
-## Déployer (aucun déploiement n'a été fait)
+## Mise en production : Supabase (base) + Render Free (serveur) — aucun déploiement n'a été fait
 
-### Render « Free Web Service » — 0 €, **pour tester seulement**
+**Pourquoi deux services.** Supabase héberge la **base** (Postgres), pas le serveur Node `server/` (routes, PIN, tirage).
+Il faut donc aussi un hébergeur pour `server/`. Retenu : **Render « Free Web Service »** (0 €). Depuis que les données sont
+chez Supabase, le gros défaut de Render Free (disque effacé à chaque mise en veille) **ne fait plus rien perdre** : le serveur
+ne garde rien sur son disque. Il reste un effet visible : la mise en veille.
 
-Prérequis : le code sur un dépôt GitHub (privé possible) — **à faire par vous**, rien n'a été poussé.
+**Render Free** (doc officielle [render.com/docs/free](https://render.com/docs/free), lue le 09/11/2026) :
+- mise en **veille après 15 min sans trafic entrant** ; réveil « about one minute » à la requête suivante (le navigateur
+  affiche une page d'attente) → le **premier client du service peut attendre ~1 min** ; les suivants, non ;
+- **750 h** d'instance gratuites par mois et par espace de travail (un service allumé en permanence = 744 h max : ça
+  tient pour UN service) ; au-delà, les services gratuits sont suspendus jusqu'au mois suivant ;
+- disque éphémère (sans importance ici), une seule instance, ports SMTP sortants bloqués (sans importance : Brevo passe par
+  HTTPS) ; Render peut suspendre un service gratuit au trafic sortant anormalement élevé.
+- Régions Render ([render.com/docs/regions](https://render.com/docs/regions)) : Oregon, Ohio, Virginia, **Frankfurt**,
+  Singapore ; **la région ne peut pas être changée après création**. La page ne dit pas si l'offre Free existe dans toutes
+  les régions → à constater au moment de créer le service.
 
-1. render.com → **Sign up** (connexion avec GitHub).
-2. **New +** → **Web Service** → choisir le dépôt.
+**Région** : **Frankfurt** pour Render (seule région UE) et **Central EU (Frankfurt) — `eu-central-1`** pour Supabase.
+Chaque requête de l'app fait plusieurs allers-retours serveur → base les uns après les autres : les mettre dans la **même
+ville** compte plus que la distance au client. Paris (`eu-west-3`) serait aussi dans l'UE, mais ajouterait un trajet
+Frankfurt ↔ Paris à chaque aller-retour. Éviter le choix générique « Europe » (il peut tomber à Londres ou Zurich, hors UE,
+dit la doc [Regions](https://supabase.com/docs/guides/platform/regions)) : choisir la région précise.
+
+**Autres options, en une phrase** : Render Starter (7 $/mois) supprime la veille de 15 min si le délai du matin gêne ;
+Render Starter + disque 1 Go (≈ 7,25 $/mois, `DB_FILE=/var/data/fidelite.db`, sans les variables Supabase) reste possible
+si Supabase ne convenait pas ; les hébergeurs « serverless » (Vercel, Netlify…) obligeraient à réécrire le serveur en
+fonctions — écartés.
+
+### Procédure pas à pas (à faire par vous ; tout est faisable depuis un ordinateur, la plupart depuis un téléphone)
+
+**a. Créer le projet Supabase**
+1. supabase.com → **Start your project** / **Sign up** : adresse e-mail + mot de passe (ou connexion GitHub). Une
+   organisation est créée (plan **Free**).
+2. **New project** :
+   - *Name* : `asian-home-fidelite` ;
+   - *Database Password* : bouton « Generate a password », **à noter dans un gestionnaire de mots de passe**. C'est le mot
+     de passe de la base Postgres, **différent des clés API** ; l'app ne s'en sert pas (utile seulement pour un `pg_dump`) ;
+   - *Region* : **Central EU (Frankfurt)** (voir « Région » ci-dessus) ;
+   - plan / instance : **Free** — ne rien activer de payant.
+   → **Create new project**.
+
+**b. Créer les tables** (attendre que le projet soit prêt, quelques minutes)
+1. Menu de gauche → **SQL Editor** → **New query**.
+2. Copier **tout** le contenu de `supabase/migrations/0001_schema_initial.sql` → **Run** → « Success. No rows returned ».
+3. Nouvelle requête, même chose avec `supabase/migrations/0002_rls.sql` → **Run**. **Dans cet ordre** (0002 modifie les
+   tables créées par 0001). Les deux fichiers sont rejouables : une erreur → corriger et relancer sans risque.
+4. Vérifier, dans une nouvelle requête :
+   ```sql
+   select relname as table_, relrowsecurity as rls
+   from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' order by 1;
+   ```
+   Attendu : **5 lignes** `avis`, `clients`, `commerces`, `meta`, `tirages`, toutes avec `rls = true`. Le **Table Editor**
+   doit aussi afficher les 5 tables (sans badge d'avertissement « RLS disabled »). Si Supabase propose d'ajouter des
+   policies : **ne pas en ajouter** (c'est voulu, voir `0002_rls.sql`).
+
+**c. Récupérer les 2 variables** (libellés d'après la doc du 09/11/2026 — **à confirmer à l'écran**)
+- `SUPABASE_URL` : bouton **Connect** en haut du projet → *Project URL* (`https://<ref>.supabase.co`).
+- `SUPABASE_SERVICE_ROLE_KEY` : **Settings → API Keys** → section des clés **secrètes** → clé `sb_secret_…` (créer une clé
+  secrète si aucune n'existe ; « Reveal » / copier). Si seule l'ancienne clé `service_role` est proposée, elle marche aussi.
+- **Ne jamais** prendre la clé *publishable* / `anon` (elle n'ouvre rien ici), ne jamais coller la clé secrète ailleurs que
+  dans Render (ni e-mail, ni message, ni fichier du dépôt).
+
+**d. Mettre le serveur en ligne sur Render**
+1. Mettre le code sur un **dépôt GitHub privé** : github.com → **New repository** → *Private* → puis, depuis le dossier du
+   projet, `git remote add origin …` et `git push -u origin master` (à faire par vous ; rien n'a été poussé).
+   Vérifier que `.env` n'est **pas** dans le dépôt (il est dans `.gitignore`).
+2. render.com → **Sign up** (connexion avec GitHub) → **New +** → **Web Service** → autoriser l'accès au dépôt privé → le choisir.
 3. Réglages :
    - **Language / Runtime** : Node
+   - **Branch** : `master`
+   - **Region** : **Frankfurt (EU Central)**
    - **Build Command** : `npm ci && npm run build:api` (front en mode API, servi à la même adresse que l'API)
    - **Start Command** : `npm run serveur`
    - **Instance Type** : **Free**
-   - **Region** : de préférence une région de l'Union européenne (Render propose Frankfurt — à vérifier à la création) — RGPD.
-4. **Environment Variables** (bouton « Add Environment Variable ») :
+4. **Environment Variables** (« Add Environment Variable ») :
    - `NODE_VERSION` = `24`
+   - `SUPABASE_URL` = l'URL de l'étape c
+   - `SUPABASE_SERVICE_ROLE_KEY` = la clé secrète de l'étape c
    - `ADMIN_PIN` = un PIN de 8 à 12 chiffres choisi par vous (gardez-le pour vous)
-   - `PIN_ASIAN_HOME` = le PIN 4-6 chiffres que vous donnerez au restaurant
-   - (`PORT` est fourni par Render ; `TZ`, `TRUST_PROXY` et le mode production sont réglés automatiquement.)
-5. **Create Web Service** → attendre « Live » → ouvrir `https://<nom>.onrender.com/api/v1/sante`.
-   Le front compilé est servi à la même adresse (`https://<nom>.onrender.com/`).
+   - `PIN_ASIAN_HOME` = le PIN 4-6 chiffres que vous donnerez au restaurant (lu au **premier** démarrage seulement)
+   - (`PORT` est fourni par Render ; `TZ`, `TRUST_PROXY` et le mode production sont réglés automatiquement.
+     **Ne pas** mettre `DEMO=1` ni `DB_FILE`.)
+5. **Create Web Service** → attendre « Live » (journaux : « base Supabase <ref>.supabase.co » — l'hôte seulement, jamais la clé).
+6. Ouvrir `https://<nom>.onrender.com/api/v1/sante` → attendu : `"stockage":"supabase"`, `"mode":"production"`,
+   `"demo":false`. Si `"sqlite"` : une variable manque ou est mal nommée. Si le service refuse de démarrer : lire les
+   journaux (variable Supabase seule, PIN admin trop court…).
+7. Dans Supabase → Table Editor → `commerces` : **1 ligne** `c-asian-home-paris` ; `clients`, `tirages`, `avis` vides.
+   (Si les variables sont changées plus tard : **Manual Deploy → Restart** / redéploiement.)
 
-**Coût : 0 €.** Limites de l'offre gratuite (doc Render, vérifiée le 09/11/2026 — à revérifier sur
-render.com/pricing avant de déployer) :
-- mise en **veille après 15 min sans visite**, environ **1 minute** pour se réveiller à la requête suivante ;
-- 750 h d'instance gratuites par mois et par espace de travail ;
-- **disque éphémère, pas de disque persistant possible** : le fichier SQLite est **effacé à chaque mise en veille,
-  redémarrage ou redéploiement**. Concrètement, sur l'offre gratuite, les cartes de fidélité disparaissent
-  après chaque période calme de 15 minutes.
+**e. Refaire le parcours de base contre le vrai projet** (sur un commerce de test, pour ne pas salir Asian Home)
+1. `https://<nom>.onrender.com/` → **Admin (tous)** + PIN admin → Plus → Admin → **+ Ajouter un commerce** « Test S2 » (PIN `4321`).
+2. Clients → **Inscrire** un client (votre prénom + votre numéro) ; réinscrire le même numéro au format `+33 6…` →
+   le même client est retrouvé (pas de doublon).
+3. Roulette → ouvrir la page de jeu **sur votre téléphone**, entrer le même numéro → « validez d'abord votre visite ».
+4. Sur l'écran commerçant : **Valider une visite (+1)** → la roue du téléphone se débloque (≤ 10 s) → tourner → un lot et
+   un **code** ; le même code apparaît côté commerçant (Tableau de bord / Roulette).
+5. Retourner sur la page de jeu → **2e tirage refusé** (« déjà tourné la roue »).
+6. Clients → **Exporter (CSV)** → le fichier s'ouvre dans Excel avec les accents corrects.
+7. Contrôle côté base : Supabase → Table Editor → `clients` et `tirages` contiennent bien les lignes du commerce test.
+8. Nettoyage : SQL Editor → `delete from public.commerces where donnees ->> 'nom' = 'Test S2';` (clients, tirages et avis
+   du commerce test partent avec, par cascade — vérifié sur Postgres local). **Ne jamais** lancer cette commande avec un
+   autre nom.
 
-⚠️ **Conséquence honnête : l'offre gratuite ne convient PAS au vrai restaurant.** Un export CSV régulier ne suffit pas
-à la rendre utilisable : il permet de garder une trace, mais il n'existe pas (encore) de réimport, et les pertes
-arriveraient plusieurs fois par jour. Utilisez-la uniquement pour essayer le parcours.
+**f. Mise en pause du projet gratuit, et quand passer au Pro**
+- Pause après **7 jours de faible activité** (voir « Limites de l'offre gratuite ») : e-mail d'avertissement ~1 semaine avant.
+  Avant une fermeture d'une semaine ou plus, ouvrir l'app (ou le dashboard Supabase) tous les 2-3 jours suffit.
+- Si le projet est en pause : l'app affiche « Serveur injoignable ». Dashboard Supabase → organisation → projet →
+  **Resume project** → confirmer ; attendre la fin (durée non précisée par la doc) ; l'app refonctionne sans rien changer
+  chez Render (même URL, mêmes clés). Délai maximal pour réactiver : 1 an (page actuelle).
+- **Passer au Pro (à partir de 25 $/mois, page pricing du 09/11/2026)** quand : le restaurant ne doit **jamais** tomber pour
+  inactivité, on veut des **sauvegardes quotidiennes** (7 jours gardés — le gratuit n'en a **aucune**), ou l'usage approche
+  500 Mo de base / 5 Go d'egress (page Usage du dashboard). Le Pro enlève la mise en pause, ajoute les sauvegardes,
+  8 Go de disque, 250 Go d'egress, support e-mail, 10 $ de crédits de calcul inclus. **Dépense à valider par vous.**
+- Sans Pro, sauvegarde = **export CSV régulier** (Clients → Exporter), et pour une sauvegarde complète
+  `pg_dump` ou `supabase db dump` (CLI Supabase) avec le mot de passe de base de l'étape a.
 
-### Pour Asian Home Paris en vrai (payant — à valider par vous avant toute dépense)
-
-Même procédure, avec **Instance Type : Starter** (à partir de 7 $/mois) + **Disks → Add Disk** :
-Mount Path `/var/data`, taille 1 Go (0,25 $/Go/mois), et la variable `DB_FILE` = `/var/data/fidelite.db`.
-Total indicatif ≈ 7,25 $/mois : pas de veille, données conservées entre les redémarrages.
+**g. Données SQLite existantes**
+- **Rien à migrer pour le vrai restaurant** : Asian Home Paris n'a jamais été en production ; sa base réelle est vide
+  (0 client, 0 avis, 0 tirage) et le serveur la recrée tout seul sur Supabase au premier démarrage (étape d.7).
+- La base de dev locale `data/fidelite.db` ne contient que des essais (commerces « Preuve V2 / V3 », données fictives) :
+  **ne pas la reprendre**.
+- S'il fallait un jour reprendre une vraie base SQLite : **il n'existe pas d'outil d'import automatique** dans ce projet.
+  Deux voies : (1) exporter le CSV des clients de chaque commerce et réinscrire les clients (perd l'historique : tampons,
+  visites, tirages) ; (2) écrire un petit script qui ouvre `fidelite.db` avec `ouvrirStockage` (SQLite) et réécrit chaque
+  commerce / client / tirage / avis avec `ouvrirStockageSupabase` — même contrat `Stockage`, mêmes objets ; les PIN se
+  recopient tels quels (hash + sel). Script **non écrit** : à faire et à tester sur un projet Supabase vide avant usage.
 
 ### Sauvegarde / export
 
 - `GET /api/v1/commerces/:id/export.csv` (PIN) : liste des clients, à télécharger régulièrement (ouvrable dans Excel).
-- Sauvegarde complète : copier le fichier `data/fidelite.db` serveur arrêté (ou `sqlite3 fidelite.db ".backup copie.db"`).
-  Sur Render avec disque : la plateforme annonce des instantanés quotidiens du disque (à vérifier dans le tableau de bord).
+- Supabase Free : **aucune sauvegarde automatique** → CSV régulier + `pg_dump` / `supabase db dump` si besoin (voir f).
+- SQLite (dev / Render Starter + disque) : copier le fichier `data/fidelite.db` serveur arrêté (ou
+  `sqlite3 fidelite.db ".backup copie.db"`).
 - Pas encore de route de sauvegarde complète ni d'import (tirages, avis, historique) : voir « Limites ».
 
 ## Limites honnêtes
@@ -280,7 +437,7 @@ Variables : voir le tableau ci-dessus. Garde-fous déjà codés : 501 sans prest
 `consentementRelance: true` ; mention de désinscription ajoutée à chaque message (« STOP » en SMS, réponse « désinscription »
 en e-mail — un vrai lien de désinscription géré par le prestataire reste à prévoir).
 
-## Migration future (écrite avant S1 — Supabase est désormais préparé, voir plus haut)
+## Migration future (écrite avant S1 — Supabase est désormais préparé et la procédure écrite, voir plus haut)
 
 Supabase ou Firebase seraient la voie suivante quand :
 - un commerce dépasse **quelques centaines de clients actifs** ou qu'il y a **beaucoup de commerces** (plusieurs instances, sauvegardes gérées) ;

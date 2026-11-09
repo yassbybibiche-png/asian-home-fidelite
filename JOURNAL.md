@@ -416,3 +416,44 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   `SUPABASE_SERVICE_ROLE_KEY` chez l'hébergeur du serveur ; `/sante` → `supabase` ; refaire le parcours HTTP
   (`scripts/preuve-http-v3.mjs`) contre le vrai projet, dont le double tirage simultané ; décider de l'hébergement du serveur
   Node lui-même ; import éventuel d'un `fidelite.db`. Apple : toujours en suspens, rien touché.
+
+## 09/11/2026 — Phase Supabase S2 : procédure exacte, hébergement du serveur, vérification
+- **Toujours aucun compte, aucun projet, aucune clé, rien poussé, rien dépensé.** Rien n'a été exécuté contre Supabase.
+- **Limites du gratuit vérifiées sur les pages officielles (09/11/2026)** — supabase.com/pricing, docs « Project Pausing »
+  (`/docs/guides/platform/free-project-pausing`), « Backups », « API keys », « Regions » ; render.com/docs/free et /docs/regions.
+  Toutes ouvertes avec succès (sauf `/docs/guides/platform/billing-on-free` → 404, non utilisée). Chiffres : Supabase Free =
+  2 projets actifs, 500 Mo de base, 5 Go egress + 5 Go cached, 1 Go fichiers, pause après 7 jours de faible activité (e-mail
+  ~1 semaine avant, « Resume project » dans le dashboard, durée non indiquée, restaurable 1 an), aucune sauvegarde, journaux
+  1 jour ; Pro à partir de 25 $/mois = pas de pause, sauvegardes quotidiennes 7 jours, 8 Go, 250 Go egress, 10 $ de crédits.
+  Render Free = veille après 15 min, réveil ~1 min, 750 h/mois, disque éphémère, Frankfurt seule région UE (région non
+  modifiable ensuite ; la page ne dit pas si Free existe partout).
+- **Écarts trouvés** : S1 n'avait noté aucun chiffre du gratuit. En revanche les emplacements des clés de S1 (et du brief :
+  « Project Settings → API ») sont **périmés** : la doc actuelle dit *Settings → API Keys* (plus de page « API » séparée) et
+  URL dans la fenêtre *Connect* ; clés legacy `anon` / `service_role` abandonnées « d'ici fin 2026 » → procédure basée sur la
+  clé `sb_secret_…` (nom de variable inchangé). Restauration d'un projet en pause : 1 an selon la page actuelle, 90 jours selon
+  un changelog de 2024 — la page actuelle est retenue, l'écart est signalé. Libellés à confirmer à l'écran.
+- **Migration SQL validée sur un vrai Postgres local.** Pas de `psql` / `postgres` dans la VM. Choix : **PGlite 0.5.15**
+  (`@electric-sql/pglite`, épinglé, **devDependency** — aucun impact sur le serveur ni le bundle front) = PostgreSQL **18.6** en
+  WebAssembly. `tests/migration-pglite.test.ts` (9 tests) : 0001 + 0002 passent et sont rejouables, 5 tables + RLS sans
+  policy, anon / authenticated → 42501, **index « 1 tirage par jour à Paris » accepté par Postgres** (hypothèse ouverte en S1
+  levée) et vérifié autour de minuit en heure d'hiver et d'été, anti-doublon, CHECK, FK, cascade, trigger `version`, upsert
+  meta. Les rôles Supabase sont recréés dans le test (pas leurs droits par défaut). **Non vérifié** : la version de Postgres
+  du vrai projet, PostgREST, les droits par défaut Supabase → à confirmer à l'étape b.
+- **Hébergement du serveur : Render Free Web Service** (Frankfurt) + Supabase **Central EU (Frankfurt)** `eu-central-1`.
+  Choix de Frankfurt plutôt que Paris pour Supabase : Render n'a que Frankfurt en UE et chaque requête de l'app enchaîne
+  plusieurs allers-retours serveur ↔ base → même ville. La veille Render ne perd plus de données. Alternatives en une phrase
+  (Render Starter 7 $ sans veille ; Starter + disque si Supabase ne convient pas ; serverless écarté = réécriture).
+- **Procédure a → g écrite** dans `server/README.md` (« Mise en production : Supabase + Render ») et résumée dans le README :
+  compte + projet, SQL Editor + requête de vérification RLS, clés, dépôt GitHub privé + Render (build / start / variables),
+  `/sante` → `supabase`, parcours sur un commerce « Test S2 » puis suppression par SQL (cascade), pause / Pro, migration.
+- **Migration des données** : rien à migrer (Asian Home vide en production ; `data/fidelite.db` = essais V2/V3). Aucun outil
+  d'import n'existe ; deux voies décrites (CSV + réinscription, ou script SQLite → Supabase via le contrat `Stockage`, non écrit).
+- **Risque trouvé : egress.** Le front recharge tout l'état toutes les 10 s ; tailles mesurées sur le seed (~430 o/client,
+  ~210 o/tirage, ~265 o/avis) → ~8 Go/mois non compressés avec 100 clients et une tablette ouverte 12 h/jour, au-dessus des
+  5 Go. Effet de la compression gzip sur le décompte Supabase **non vérifié**. Rien changé dans le code (hors périmètre) :
+  documenté avec le remède (intervalle à 30-60 s, `INTERVALLE_RECHARGEMENT_MS`) et le contrôle à faire (page Usage).
+- **Autres fichiers** : `.env.example` (libellés corrigés, toujours 2 variables placeholder), `server/README.md` (sections
+  Supabase, Limites, Validation, Mise en production, Sauvegarde ; l'ancienne section « Render Free SQLite » est remplacée),
+  `README.md` (tableau réel / à brancher, résumé de mise en ligne, comptes nécessaires, tests).
+- **Tests** : `npm test` **118/118** (avant : 109 ; +9). `npm run build` : OK (JS 366,6 kB / 110,6 kB gzip, inchangé).
+- Apple : en suspens, rien touché.
