@@ -1,0 +1,39 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-marque-50: #fff4ed;
+  --color-marque-100: #ffe4d1;
+  --color-marque-200: #ffc49e;
+  --color-marque-500: #ff5a00;
+  --color-marque-600: #e64f00;
+  --color-marque-700: #bf4100;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
+  font-size: 17px;
+}
+
+body {
+  @apply bg-gray-100 text-gray-900 antialiased;
+}
+
+/* Champs de formulaire lisibles et faciles à toucher (≥ 48 px de haut). */
+@layer components {
+  .champ {
+    @apply block w-full min-h-12 rounded-xl border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-marque-500 focus:ring-2 focus:ring-marque-200 focus:outline-none;
+  }
+  .etiquette {
+    @apply mb-1.5 block text-sm font-semibold text-gray-700;
+  }
+  .bouton {
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-marque-500 px-5 py-3 text-base font-semibold text-white shadow-sm active:bg-marque-700 hover:bg-marque-600 disabled:opacity-50;
+  }
+  .bouton-secondaire {
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-5 py-3 text-base font-semibold text-gray-800 active:bg-gray-100 hover:bg-gray-50;
+  }
+  .carte {
+    @apply rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-200;
+  }
+}

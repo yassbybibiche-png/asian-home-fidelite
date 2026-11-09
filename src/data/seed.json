@@ -1,0 +1,860 @@
+{
+  "dateReference": "2026-11-09T12:00:00.000Z",
+  "commerces": [
+    {
+      "id": "c-bistrot-halles",
+      "nom": "Le Bistrot des Halles",
+      "type": "restaurant",
+      "logo": "",
+      "lienGoogle": "https://g.page/r/demo-bistrot-des-halles/review",
+      "recompense": "Dessert offert au 10e repas",
+      "seuilTampons": 10,
+      "lots": [
+        "Dessert offert",
+        "Café offert",
+        "-10 % sur l’addition",
+        "Boisson offerte",
+        "Pas de chance, à la prochaine !"
+      ],
+      "reglesReponseAuto": {
+        "auto5Etoiles": true,
+        "auto4Etoiles": false,
+        "brouillonAutres": true
+      },
+      "actif": true,
+      "creeLe": "2026-04-13T14:13:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille",
+      "nom": "Atelier Coiff’ Camille",
+      "type": "salon",
+      "logo": "",
+      "lienGoogle": "https://g.page/r/demo-atelier-coiff-camille/review",
+      "recompense": "-20 % sur la 8e prestation",
+      "seuilTampons": 8,
+      "lots": [
+        "Soin profond offert",
+        "-10 % sur la prochaine coupe",
+        "Shampoing format voyage offert",
+        "Pas de chance, à la prochaine !"
+      ],
+      "reglesReponseAuto": {
+        "auto5Etoiles": true,
+        "auto4Etoiles": true,
+        "brouillonAutres": true
+      },
+      "actif": true,
+      "creeLe": "2026-06-12T15:17:00.000Z"
+    },
+    {
+      "id": "c-maison-lila",
+      "nom": "Maison Lila",
+      "type": "boutique",
+      "logo": "",
+      "lienGoogle": "https://g.page/r/demo-maison-lila/review",
+      "recompense": "Bon d’achat de 15 € après 6 achats",
+      "seuilTampons": 6,
+      "lots": [
+        "-15 % sur un article",
+        "Tote bag offert",
+        "Emballage cadeau offert",
+        "-5 % sur le prochain achat"
+      ],
+      "reglesReponseAuto": {
+        "auto5Etoiles": false,
+        "auto4Etoiles": false,
+        "brouillonAutres": true
+      },
+      "actif": true,
+      "creeLe": "2026-08-06T12:45:00.000Z"
+    }
+  ],
+  "clients": [
+    {
+      "id": "c-bistrot-halles-cl-1",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Julien",
+      "telephone": "06 73 48 63 50",
+      "tampons": 7,
+      "visites": [
+        "2026-08-15T08:14:00.000Z",
+        "2026-09-02T18:45:00.000Z",
+        "2026-09-26T10:11:00.000Z",
+        "2026-10-02T10:19:00.000Z",
+        "2026-10-15T15:54:00.000Z",
+        "2026-10-21T14:29:00.000Z",
+        "2026-10-26T16:18:00.000Z"
+      ],
+      "derniereVisite": "2026-10-26T16:18:00.000Z",
+      "creeLe": "2026-08-15T08:14:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-cl-2",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Sophie",
+      "email": "sophie.58@laposte.net",
+      "tampons": 4,
+      "visites": [
+        "2026-10-02T09:34:00.000Z",
+        "2026-10-05T12:02:00.000Z",
+        "2026-10-10T17:33:00.000Z",
+        "2026-10-27T09:49:00.000Z"
+      ],
+      "derniereVisite": "2026-10-27T09:49:00.000Z",
+      "creeLe": "2026-10-02T09:34:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-cl-3",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Karim",
+      "telephone": "06 59 42 15 65",
+      "tampons": 3,
+      "visites": [
+        "2026-10-03T10:02:00.000Z",
+        "2026-10-11T11:17:00.000Z",
+        "2026-10-23T09:58:00.000Z"
+      ],
+      "derniereVisite": "2026-10-23T09:58:00.000Z",
+      "creeLe": "2026-10-03T10:02:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-cl-4",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Nathalie",
+      "email": "nathalie.77@hotmail.fr",
+      "tampons": 3,
+      "visites": [
+        "2026-08-01T09:08:00.000Z",
+        "2026-08-04T17:55:00.000Z",
+        "2026-08-16T15:16:00.000Z"
+      ],
+      "derniereVisite": "2026-08-16T15:16:00.000Z",
+      "creeLe": "2026-08-01T09:08:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-cl-5",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Thomas",
+      "telephone": "06 11 14 54 66",
+      "tampons": 3,
+      "visites": [
+        "2026-10-17T16:10:00.000Z",
+        "2026-10-27T08:56:00.000Z",
+        "2026-11-06T14:31:00.000Z"
+      ],
+      "derniereVisite": "2026-11-06T14:31:00.000Z",
+      "creeLe": "2026-10-17T16:10:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-cl-6",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Léa",
+      "email": "lea.38@gmail.com",
+      "tampons": 4,
+      "visites": [
+        "2026-09-20T14:02:00.000Z",
+        "2026-10-15T16:46:00.000Z",
+        "2026-10-20T13:28:00.000Z",
+        "2026-10-21T08:33:00.000Z"
+      ],
+      "derniereVisite": "2026-10-21T08:33:00.000Z",
+      "creeLe": "2026-09-20T14:02:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-cl-7",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Mehdi",
+      "telephone": "06 22 51 15 62",
+      "tampons": 2,
+      "visites": [
+        "2026-08-01T16:20:00.000Z",
+        "2026-08-02T12:50:00.000Z",
+        "2026-08-08T15:53:00.000Z",
+        "2026-08-09T14:22:00.000Z",
+        "2026-08-19T10:18:00.000Z",
+        "2026-08-21T16:58:00.000Z",
+        "2026-08-24T15:44:00.000Z",
+        "2026-08-29T17:20:00.000Z",
+        "2026-09-15T11:43:00.000Z",
+        "2026-10-09T09:35:00.000Z",
+        "2026-10-15T18:06:00.000Z",
+        "2026-10-22T13:47:00.000Z"
+      ],
+      "derniereVisite": "2026-10-22T13:47:00.000Z",
+      "creeLe": "2026-08-01T16:20:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-cl-8",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Isabelle",
+      "email": "isabelle.54@free.fr",
+      "tampons": 2,
+      "visites": [
+        "2026-08-18T11:52:00.000Z",
+        "2026-09-08T16:40:00.000Z"
+      ],
+      "derniereVisite": "2026-09-08T16:40:00.000Z",
+      "creeLe": "2026-08-18T11:52:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-cl-9",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Antoine",
+      "telephone": "06 34 28 81 70",
+      "tampons": 6,
+      "visites": [
+        "2026-09-06T15:04:00.000Z",
+        "2026-09-07T11:39:00.000Z",
+        "2026-09-22T16:15:00.000Z",
+        "2026-10-09T15:14:00.000Z",
+        "2026-10-11T10:57:00.000Z",
+        "2026-11-05T11:47:00.000Z"
+      ],
+      "derniereVisite": "2026-11-05T11:47:00.000Z",
+      "creeLe": "2026-09-06T15:04:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-cl-10",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Chloé",
+      "email": "chloe.93@laposte.net",
+      "tampons": 2,
+      "visites": [
+        "2026-08-30T12:12:00.000Z",
+        "2026-09-03T17:45:00.000Z",
+        "2026-09-10T11:43:00.000Z",
+        "2026-10-02T11:43:00.000Z",
+        "2026-10-04T13:48:00.000Z",
+        "2026-10-05T15:37:00.000Z",
+        "2026-10-08T08:42:00.000Z",
+        "2026-10-13T10:55:00.000Z",
+        "2026-10-15T12:02:00.000Z",
+        "2026-10-17T13:47:00.000Z",
+        "2026-10-30T18:59:00.000Z",
+        "2026-11-01T11:05:00.000Z"
+      ],
+      "derniereVisite": "2026-11-01T11:05:00.000Z",
+      "creeLe": "2026-08-30T12:12:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-cl-11",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Patrick",
+      "telephone": "06 36 95 76 73",
+      "tampons": 5,
+      "visites": [
+        "2026-10-06T18:31:00.000Z",
+        "2026-10-10T09:29:00.000Z",
+        "2026-10-26T15:55:00.000Z",
+        "2026-10-30T09:35:00.000Z",
+        "2026-11-01T13:05:00.000Z"
+      ],
+      "derniereVisite": "2026-11-01T13:05:00.000Z",
+      "creeLe": "2026-10-06T18:31:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-cl-12",
+      "commerceId": "c-bistrot-halles",
+      "prenom": "Inès",
+      "email": "ines.86@gmail.com",
+      "tampons": 1,
+      "visites": [
+        "2026-08-18T17:39:00.000Z"
+      ],
+      "derniereVisite": "2026-08-18T17:39:00.000Z",
+      "creeLe": "2026-08-18T17:39:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-cl-1",
+      "commerceId": "c-atelier-camille",
+      "prenom": "Manon",
+      "telephone": "06 16 31 58 45",
+      "tampons": 0,
+      "visites": [
+        "2026-05-26T17:47:00.000Z",
+        "2026-06-17T12:05:00.000Z",
+        "2026-07-02T14:35:00.000Z",
+        "2026-07-17T13:42:00.000Z",
+        "2026-07-24T12:10:00.000Z",
+        "2026-08-04T18:15:00.000Z",
+        "2026-08-20T11:10:00.000Z",
+        "2026-09-11T11:09:00.000Z",
+        "2026-09-22T15:50:00.000Z",
+        "2026-09-28T13:35:00.000Z",
+        "2026-09-30T13:36:00.000Z",
+        "2026-10-01T16:50:00.000Z",
+        "2026-10-10T17:55:00.000Z",
+        "2026-10-12T08:27:00.000Z",
+        "2026-10-19T11:02:00.000Z",
+        "2026-10-22T14:01:00.000Z"
+      ],
+      "derniereVisite": "2026-10-22T14:01:00.000Z",
+      "creeLe": "2026-05-26T17:47:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-cl-2",
+      "commerceId": "c-atelier-camille",
+      "prenom": "Sarah",
+      "email": "sarah.55@hotmail.fr",
+      "tampons": 2,
+      "visites": [
+        "2026-09-28T18:58:00.000Z",
+        "2026-10-21T13:41:00.000Z"
+      ],
+      "derniereVisite": "2026-10-21T13:41:00.000Z",
+      "creeLe": "2026-09-28T18:58:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-cl-3",
+      "commerceId": "c-atelier-camille",
+      "prenom": "Émilie",
+      "telephone": "06 33 92 67 52",
+      "tampons": 4,
+      "visites": [
+        "2026-09-12T13:12:00.000Z",
+        "2026-10-01T18:58:00.000Z",
+        "2026-10-20T14:48:00.000Z",
+        "2026-10-24T16:40:00.000Z"
+      ],
+      "derniereVisite": "2026-10-24T16:40:00.000Z",
+      "creeLe": "2026-09-12T13:12:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-cl-4",
+      "commerceId": "c-atelier-camille",
+      "prenom": "Yasmine",
+      "email": "yasmine.70@hotmail.fr",
+      "tampons": 3,
+      "visites": [
+        "2026-09-17T11:28:00.000Z",
+        "2026-10-01T12:46:00.000Z",
+        "2026-10-04T17:31:00.000Z"
+      ],
+      "derniereVisite": "2026-10-04T17:31:00.000Z",
+      "creeLe": "2026-09-17T11:28:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-cl-5",
+      "commerceId": "c-atelier-camille",
+      "prenom": "Lucas",
+      "telephone": "06 74 62 17 58",
+      "tampons": 2,
+      "visites": [
+        "2026-10-07T13:28:00.000Z",
+        "2026-10-21T17:41:00.000Z"
+      ],
+      "derniereVisite": "2026-10-21T17:41:00.000Z",
+      "creeLe": "2026-10-07T13:28:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-cl-6",
+      "commerceId": "c-atelier-camille",
+      "prenom": "Camille",
+      "email": "camille.31@gmail.com",
+      "tampons": 2,
+      "visites": [
+        "2026-10-12T17:23:00.000Z",
+        "2026-10-27T16:59:00.000Z"
+      ],
+      "derniereVisite": "2026-10-27T16:59:00.000Z",
+      "creeLe": "2026-10-12T17:23:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-cl-7",
+      "commerceId": "c-atelier-camille",
+      "prenom": "Aurélie",
+      "telephone": "06 49 93 46 56",
+      "tampons": 7,
+      "visites": [
+        "2026-06-26T11:45:00.000Z",
+        "2026-07-16T16:30:00.000Z",
+        "2026-08-13T15:59:00.000Z",
+        "2026-08-15T12:06:00.000Z",
+        "2026-08-19T08:43:00.000Z",
+        "2026-09-01T18:53:00.000Z",
+        "2026-09-06T17:31:00.000Z",
+        "2026-09-10T16:04:00.000Z",
+        "2026-09-20T13:23:00.000Z",
+        "2026-09-22T18:40:00.000Z",
+        "2026-10-03T16:27:00.000Z",
+        "2026-10-04T17:10:00.000Z",
+        "2026-10-14T15:23:00.000Z",
+        "2026-11-05T18:30:00.000Z",
+        "2026-11-09T09:10:00.000Z"
+      ],
+      "derniereVisite": "2026-11-09T09:10:00.000Z",
+      "creeLe": "2026-06-26T11:45:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-cl-8",
+      "commerceId": "c-atelier-camille",
+      "prenom": "Nadia",
+      "email": "nadia.89@laposte.net",
+      "tampons": 2,
+      "visites": [
+        "2026-08-16T14:27:00.000Z",
+        "2026-09-13T13:11:00.000Z"
+      ],
+      "derniereVisite": "2026-09-13T13:11:00.000Z",
+      "creeLe": "2026-08-16T14:27:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-cl-9",
+      "commerceId": "c-atelier-camille",
+      "prenom": "Hugo",
+      "telephone": "06 54 12 75 85",
+      "tampons": 5,
+      "visites": [
+        "2026-09-25T13:14:00.000Z",
+        "2026-10-12T17:41:00.000Z",
+        "2026-10-23T16:32:00.000Z",
+        "2026-11-05T09:55:00.000Z",
+        "2026-11-06T18:33:00.000Z"
+      ],
+      "derniereVisite": "2026-11-06T18:33:00.000Z",
+      "creeLe": "2026-09-25T13:14:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-cl-10",
+      "commerceId": "c-atelier-camille",
+      "prenom": "Margaux",
+      "email": "margaux.35@hotmail.fr",
+      "tampons": 5,
+      "visites": [
+        "2026-06-18T08:44:00.000Z",
+        "2026-06-24T13:37:00.000Z",
+        "2026-06-30T10:20:00.000Z",
+        "2026-07-03T17:32:00.000Z",
+        "2026-07-09T13:54:00.000Z",
+        "2026-07-26T11:04:00.000Z",
+        "2026-08-08T16:28:00.000Z",
+        "2026-08-21T10:51:00.000Z",
+        "2026-08-30T10:08:00.000Z",
+        "2026-09-27T14:28:00.000Z",
+        "2026-09-28T10:47:00.000Z",
+        "2026-10-11T11:57:00.000Z",
+        "2026-10-22T12:55:00.000Z"
+      ],
+      "derniereVisite": "2026-10-22T12:55:00.000Z",
+      "creeLe": "2026-06-18T08:44:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-cl-1",
+      "commerceId": "c-maison-lila",
+      "prenom": "Claire",
+      "telephone": "06 85 51 97 45",
+      "tampons": 4,
+      "visites": [
+        "2026-08-10T12:37:00.000Z",
+        "2026-08-12T16:24:00.000Z",
+        "2026-08-14T14:00:00.000Z",
+        "2026-08-21T13:10:00.000Z",
+        "2026-08-24T08:54:00.000Z",
+        "2026-09-02T12:09:00.000Z",
+        "2026-09-07T10:53:00.000Z",
+        "2026-09-18T15:04:00.000Z",
+        "2026-09-21T11:55:00.000Z",
+        "2026-09-24T16:27:00.000Z",
+        "2026-09-26T09:18:00.000Z",
+        "2026-09-30T13:32:00.000Z",
+        "2026-10-03T14:34:00.000Z",
+        "2026-10-05T14:26:00.000Z",
+        "2026-10-15T13:01:00.000Z",
+        "2026-10-29T18:22:00.000Z"
+      ],
+      "derniereVisite": "2026-10-29T18:22:00.000Z",
+      "creeLe": "2026-08-10T12:37:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-cl-2",
+      "commerceId": "c-maison-lila",
+      "prenom": "Élodie",
+      "email": "elodie.64@gmail.com",
+      "tampons": 5,
+      "visites": [
+        "2026-09-15T09:39:00.000Z",
+        "2026-10-08T18:15:00.000Z",
+        "2026-10-19T08:36:00.000Z",
+        "2026-10-28T14:02:00.000Z",
+        "2026-11-03T13:44:00.000Z"
+      ],
+      "derniereVisite": "2026-11-03T13:44:00.000Z",
+      "creeLe": "2026-09-15T09:39:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-cl-3",
+      "commerceId": "c-maison-lila",
+      "prenom": "Fatima",
+      "telephone": "06 71 41 23 41",
+      "tampons": 2,
+      "visites": [
+        "2026-10-16T09:50:00.000Z",
+        "2026-10-30T09:02:00.000Z"
+      ],
+      "derniereVisite": "2026-10-30T09:02:00.000Z",
+      "creeLe": "2026-10-16T09:50:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-cl-4",
+      "commerceId": "c-maison-lila",
+      "prenom": "Pauline",
+      "email": "pauline.28@free.fr",
+      "tampons": 3,
+      "visites": [
+        "2026-08-30T08:49:00.000Z",
+        "2026-09-09T15:22:00.000Z",
+        "2026-09-15T09:04:00.000Z"
+      ],
+      "derniereVisite": "2026-09-15T09:04:00.000Z",
+      "creeLe": "2026-08-30T08:49:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-cl-5",
+      "commerceId": "c-maison-lila",
+      "prenom": "Marc",
+      "telephone": "06 18 10 43 27",
+      "tampons": 0,
+      "visites": [
+        "2026-09-04T16:41:00.000Z",
+        "2026-09-25T16:17:00.000Z",
+        "2026-09-29T17:34:00.000Z",
+        "2026-10-05T11:49:00.000Z",
+        "2026-10-11T17:37:00.000Z",
+        "2026-10-30T13:40:00.000Z"
+      ],
+      "derniereVisite": "2026-10-30T13:40:00.000Z",
+      "creeLe": "2026-09-04T16:41:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-cl-6",
+      "commerceId": "c-maison-lila",
+      "prenom": "Juliette",
+      "email": "juliette.29@orange.fr",
+      "tampons": 0,
+      "visites": [
+        "2026-09-28T17:27:00.000Z",
+        "2026-10-09T09:58:00.000Z",
+        "2026-10-14T09:18:00.000Z",
+        "2026-10-22T13:42:00.000Z",
+        "2026-10-30T16:07:00.000Z",
+        "2026-11-04T12:29:00.000Z"
+      ],
+      "derniereVisite": "2026-11-04T12:29:00.000Z",
+      "creeLe": "2026-09-28T17:27:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-cl-7",
+      "commerceId": "c-maison-lila",
+      "prenom": "Sandrine",
+      "telephone": "06 99 74 88 13",
+      "tampons": 1,
+      "visites": [
+        "2026-07-29T09:54:00.000Z",
+        "2026-07-30T12:49:00.000Z",
+        "2026-09-21T14:09:00.000Z",
+        "2026-09-23T10:36:00.000Z",
+        "2026-10-06T16:08:00.000Z",
+        "2026-10-08T11:42:00.000Z",
+        "2026-10-09T08:01:00.000Z",
+        "2026-10-10T16:20:00.000Z",
+        "2026-10-16T14:44:00.000Z",
+        "2026-10-22T18:32:00.000Z",
+        "2026-10-31T11:11:00.000Z",
+        "2026-11-02T15:30:00.000Z",
+        "2026-11-04T09:25:00.000Z"
+      ],
+      "derniereVisite": "2026-11-04T09:25:00.000Z",
+      "creeLe": "2026-07-29T09:54:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-cl-8",
+      "commerceId": "c-maison-lila",
+      "prenom": "Océane",
+      "email": "oceane.57@hotmail.fr",
+      "tampons": 3,
+      "visites": [
+        "2026-07-30T15:08:00.000Z",
+        "2026-08-07T09:29:00.000Z",
+        "2026-08-18T15:14:00.000Z"
+      ],
+      "derniereVisite": "2026-08-18T15:14:00.000Z",
+      "creeLe": "2026-07-30T15:08:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-cl-9",
+      "commerceId": "c-maison-lila",
+      "prenom": "Romain",
+      "telephone": "06 16 72 78 97",
+      "tampons": 0,
+      "visites": [
+        "2026-09-26T08:50:00.000Z",
+        "2026-10-03T09:48:00.000Z",
+        "2026-10-26T09:12:00.000Z",
+        "2026-10-30T09:36:00.000Z",
+        "2026-11-04T10:21:00.000Z",
+        "2026-11-07T14:42:00.000Z"
+      ],
+      "derniereVisite": "2026-11-07T14:42:00.000Z",
+      "creeLe": "2026-09-26T08:50:00.000Z"
+    }
+  ],
+  "tirages": [
+    {
+      "id": "c-maison-lila-ti-4",
+      "commerceId": "c-maison-lila",
+      "clientId": "c-maison-lila-cl-6",
+      "lot": "-5 % sur le prochain achat",
+      "date": "2026-11-08T19:47:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-ti-4",
+      "commerceId": "c-bistrot-halles",
+      "clientId": "c-bistrot-halles-cl-12",
+      "lot": "Boisson offerte",
+      "date": "2026-11-08T18:42:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-ti-1",
+      "commerceId": "c-atelier-camille",
+      "clientId": "c-atelier-camille-cl-5",
+      "lot": "-10 % sur la prochaine coupe",
+      "date": "2026-11-07T14:14:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-ti-4",
+      "commerceId": "c-atelier-camille",
+      "clientId": "c-atelier-camille-cl-4",
+      "lot": "Soin profond offert",
+      "date": "2026-11-06T19:45:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-ti-2",
+      "commerceId": "c-maison-lila",
+      "clientId": "c-maison-lila-cl-7",
+      "lot": "-5 % sur le prochain achat",
+      "date": "2026-11-05T20:42:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-ti-5",
+      "commerceId": "c-bistrot-halles",
+      "clientId": "c-bistrot-halles-cl-6",
+      "lot": "Dessert offert",
+      "date": "2026-11-05T18:36:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-ti-1",
+      "commerceId": "c-maison-lila",
+      "clientId": "c-maison-lila-cl-1",
+      "lot": "-5 % sur le prochain achat",
+      "date": "2026-11-04T15:42:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-ti-3",
+      "commerceId": "c-maison-lila",
+      "clientId": "c-maison-lila-cl-8",
+      "lot": "-5 % sur le prochain achat",
+      "date": "2026-11-03T13:36:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-ti-1",
+      "commerceId": "c-bistrot-halles",
+      "clientId": "c-bistrot-halles-cl-8",
+      "lot": "-10 % sur l’addition",
+      "date": "2026-11-02T10:11:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-ti-3",
+      "commerceId": "c-bistrot-halles",
+      "clientId": "c-bistrot-halles-cl-11",
+      "lot": "-10 % sur l’addition",
+      "date": "2026-10-30T13:36:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-ti-3",
+      "commerceId": "c-atelier-camille",
+      "clientId": "c-atelier-camille-cl-8",
+      "lot": "Soin profond offert",
+      "date": "2026-10-25T10:43:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-ti-2",
+      "commerceId": "c-bistrot-halles",
+      "clientId": "c-bistrot-halles-cl-12",
+      "lot": "Pas de chance, à la prochaine !",
+      "date": "2026-10-25T10:37:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-ti-5",
+      "commerceId": "c-atelier-camille",
+      "clientId": "c-atelier-camille-cl-3",
+      "lot": "Pas de chance, à la prochaine !",
+      "date": "2026-10-24T17:44:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-ti-2",
+      "commerceId": "c-atelier-camille",
+      "clientId": "c-atelier-camille-cl-4",
+      "lot": "Soin profond offert",
+      "date": "2026-10-23T11:32:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-ti-6",
+      "commerceId": "c-bistrot-halles",
+      "clientId": "c-bistrot-halles-cl-10",
+      "lot": "Pas de chance, à la prochaine !",
+      "date": "2026-10-22T18:53:00.000Z"
+    }
+  ],
+  "avis": [
+    {
+      "id": "c-bistrot-halles-av-1",
+      "commerceId": "c-bistrot-halles",
+      "auteur": "Sophie M.",
+      "note": 5,
+      "texte": "Cuisine maison excellente, le plat du jour était parfait. Service rapide et souriant.",
+      "date": "2026-11-07T16:11:00.000Z",
+      "reponse": "Merci beaucoup Sophie ! Toute l’équipe est ravie, à très bientôt aux Halles."
+    },
+    {
+      "id": "c-bistrot-halles-av-2",
+      "commerceId": "c-bistrot-halles",
+      "auteur": "Karim B.",
+      "note": 5,
+      "texte": "Mon QG du midi. La carte de fidélité sur le téléphone, c’est top.",
+      "date": "2026-11-03T12:12:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-av-3",
+      "commerceId": "c-bistrot-halles",
+      "auteur": "Nathalie R.",
+      "note": 4,
+      "texte": "Très bon repas, un peu d’attente pour le dessert mais ça valait le coup.",
+      "date": "2026-10-31T17:23:00.000Z",
+      "reponse": "Merci Nathalie, on travaille sur le rythme du service en salle. Au plaisir de vous revoir !"
+    },
+    {
+      "id": "c-bistrot-halles-av-4",
+      "commerceId": "c-bistrot-halles",
+      "auteur": "Jean-Pierre L.",
+      "note": 2,
+      "texte": "Plat arrivé tiède et serveur débordé ce samedi.",
+      "date": "2026-10-26T09:32:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-av-5",
+      "commerceId": "c-bistrot-halles",
+      "auteur": "Laura T.",
+      "note": 5,
+      "texte": "",
+      "date": "2026-10-19T09:45:00.000Z"
+    },
+    {
+      "id": "c-bistrot-halles-av-6",
+      "commerceId": "c-bistrot-halles",
+      "auteur": "Mathieu D.",
+      "note": 4,
+      "texte": "Bon rapport qualité-prix, terrasse agréable.",
+      "date": "2026-10-07T10:53:00.000Z",
+      "reponse": "Merci Mathieu, à bientôt en terrasse !"
+    },
+    {
+      "id": "c-bistrot-halles-av-7",
+      "commerceId": "c-bistrot-halles",
+      "auteur": "Agnès P.",
+      "note": 5,
+      "texte": "Le tiramisu gagné à la roulette était délicieux 😄",
+      "date": "2026-09-26T16:54:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-av-1",
+      "commerceId": "c-atelier-camille",
+      "auteur": "Manon G.",
+      "note": 5,
+      "texte": "Camille a parfaitement compris ce que je voulais. Je ressors ravie !",
+      "date": "2026-11-08T15:26:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-av-2",
+      "commerceId": "c-atelier-camille",
+      "auteur": "Yasmine K.",
+      "note": 5,
+      "texte": "Accueil chaleureux, balayage réussi, je recommande.",
+      "date": "2026-11-01T11:05:00.000Z",
+      "reponse": "Merci Yasmine, ce fut un plaisir !"
+    },
+    {
+      "id": "c-atelier-camille-av-3",
+      "commerceId": "c-atelier-camille",
+      "auteur": "Lucas F.",
+      "note": 3,
+      "texte": "Coupe correcte mais rendez-vous décalé de 20 minutes.",
+      "date": "2026-10-28T12:46:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-av-4",
+      "commerceId": "c-atelier-camille",
+      "auteur": "Delphine A.",
+      "note": 5,
+      "texte": "",
+      "date": "2026-10-21T12:39:00.000Z"
+    },
+    {
+      "id": "c-atelier-camille-av-5",
+      "commerceId": "c-atelier-camille",
+      "auteur": "Hélène V.",
+      "note": 4,
+      "texte": "Très professionnelle, prix un peu élevés mais qualité au rendez-vous.",
+      "date": "2026-10-13T12:01:00.000Z",
+      "reponse": "Merci Hélène pour votre retour et votre fidélité."
+    },
+    {
+      "id": "c-atelier-camille-av-6",
+      "commerceId": "c-atelier-camille",
+      "auteur": "Romane C.",
+      "note": 1,
+      "texte": "Couleur pas du tout conforme à ce que j’avais demandé.",
+      "date": "2026-09-30T19:32:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-av-1",
+      "commerceId": "c-maison-lila",
+      "auteur": "Claire B.",
+      "note": 5,
+      "texte": "Boutique adorable, plein d’idées cadeaux et conseils au top.",
+      "date": "2026-11-06T11:19:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-av-2",
+      "commerceId": "c-maison-lila",
+      "auteur": "Pauline S.",
+      "note": 4,
+      "texte": "Jolie sélection de vêtements, j’aurais aimé plus de tailles.",
+      "date": "2026-10-30T13:09:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-av-3",
+      "commerceId": "c-maison-lila",
+      "auteur": "Bertrand M.",
+      "note": 5,
+      "texte": "Emballage cadeau soigné, ma femme a adoré.",
+      "date": "2026-10-24T18:39:00.000Z",
+      "reponse": "Merci Bertrand, ravies que le cadeau ait plu !"
+    },
+    {
+      "id": "c-maison-lila-av-4",
+      "commerceId": "c-maison-lila",
+      "auteur": "Océane L.",
+      "note": 5,
+      "texte": "",
+      "date": "2026-10-17T13:28:00.000Z"
+    },
+    {
+      "id": "c-maison-lila-av-5",
+      "commerceId": "c-maison-lila",
+      "auteur": "Sylvie R.",
+      "note": 2,
+      "texte": "Article échangé difficilement, accueil un peu froid ce jour-là.",
+      "date": "2026-10-09T11:38:00.000Z"
+    }
+  ]
+}

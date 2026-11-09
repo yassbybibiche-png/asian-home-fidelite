@@ -1,0 +1,1 @@
+{"permissions":{"allow":["Edit","Write","Read","Glob","Grep","Bash(npm *)","Bash(npm:*)","Bash(npx *)","Bash(npx:*)","Bash(node *)","Bash(node:*)","Bash(git *)","Bash(git:*)","Bash(ls *)","Bash(cat *)","Bash(mkdir *)","Bash(curl *)","Bash(tail *)","Bash(head *)","Bash(find *)"]}}
