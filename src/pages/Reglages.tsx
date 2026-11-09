@@ -237,7 +237,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, brouillonAutres: v })}
         />
         <p className="pt-2 text-sm text-gray-500">
-          Les règles s’appliquent aux nouveaux avis et, à l’enregistrement, aux avis encore sans réponse. Démo : aucune réponse n’est réellement
+          Les règles s’appliquent aux nouveaux avis et, à l’enregistrement, aux avis encore sans réponse ni brouillon (un brouillon existant n’est jamais remplacé). Démo : aucune réponse n’est réellement
           publiée sur Google.
         </p>
       </fieldset>

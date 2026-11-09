@@ -61,7 +61,7 @@ export default function TableauDeBord() {
                     <span className="font-semibold">{a.auteur}</span>
                     <Etoiles note={a.note} />
                   </div>
-                  <p className="mt-1 line-clamp-2 text-gray-700">{a.texte || <em className="text-gray-400">Note sans commentaire</em>}</p>
+                  <p className="mt-1 line-clamp-2 text-gray-700">{a.texte || <em className="text-gray-500">Note sans commentaire</em>}</p>
                   <p className="mt-1 text-xs text-gray-500">
                     {dateRelative(a.date)} · {a.reponse ? (a.reponseAuto ? 'Répondu (auto)' : 'Répondu') : a.brouillon ? 'Brouillon' : 'Sans réponse'}
                   </p>

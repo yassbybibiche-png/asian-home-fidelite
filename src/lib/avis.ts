@@ -23,7 +23,7 @@ export function texteModele(cle: CleModele, avis: Pick<Avis, 'auteur'>, commerce
     case 'quatre':
       return `Merci ${p} pour votre retour ! Nous sommes heureux que l’expérience vous ait plu, et nous prenons note de vos remarques pour faire encore mieux. Au plaisir de vous revoir chez ${commerce.nom}.`
     case 'negatif':
-      return `Bonjour ${p}, merci d’avoir pris le temps de nous écrire. Nous sommes sincèrement désolés que votre expérience n’ait pas été à la hauteur. Votre retour a été transmis à toute l’équipe ; n’hésitez pas à nous contacter directement pour que nous puissions en parler et arranger les choses.`
+      return `Bonjour ${p}, merci d’avoir pris le temps de nous écrire. Nous sommes sincèrement désolés que votre expérience n’ait pas été à la hauteur. Nous prenons votre retour très au sérieux et nous allons en parler en équipe. N’hésitez pas à nous contacter directement pour que nous puissions en parler et arranger les choses.`
     case 'sansTexte':
       return `Merci ${p} pour votre note ! Toute l’équipe de ${commerce.nom} vous remercie et espère vous revoir très vite.`
   }
@@ -43,16 +43,17 @@ export function statutAvis(avis: Avis): StatutAvis {
 }
 
 /**
- * Applique les interrupteurs de Réglages à un avis sans réponse :
+ * Applique les interrupteurs de Réglages à un avis sans réponse ni brouillon :
  * réponse auto (5★ / 4★) ou brouillon proposé pour les autres.
+ * Une réponse ou un brouillon existant (humain ou non) n'est jamais écrasé.
  */
 export function appliquerRegles(avis: Avis, commerce: Commerce): Avis {
-  if (avis.reponse) return avis
+  if (avis.reponse || avis.brouillon) return avis
   const r = commerce.reglesReponseAuto
   const texte = texteModele(modeleSuggere(avis), avis, commerce)
   if ((avis.note === 5 && r.auto5Etoiles) || (avis.note === 4 && r.auto4Etoiles)) {
-    return { ...avis, reponse: texte, reponseAuto: true, brouillon: undefined }
+    return { ...avis, reponse: texte, reponseAuto: true }
   }
-  if (r.brouillonAutres && !avis.brouillon) return { ...avis, brouillon: texte }
+  if (r.brouillonAutres) return { ...avis, brouillon: texte }
   return avis
 }

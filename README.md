@@ -68,9 +68,9 @@ une démo cohérente, faites tout sur le même téléphone.
 | QR code personnel du client et QR code unique du commerce | **Réel** : générés localement (lib `qrcode-generator`), scannables |
 | Roulette (tirage pondéré, roue animée, 1 participation par visite validée le jour même, 1 tirage par client et par jour) | **Réel** dans l'app ; l'anti-abus repose sur le téléphone/e-mail saisi et ne vaut que dans ce navigateur |
 | Relance des clients inactifs (30 jours) | Liste et message **réels** ; l'**envoi** est à faire soi-même (copier-coller) |
-| Lien « Laisser un avis Google » | **Réel** (ouvre le lien configuré) ; pour Asian Home Paris c'est une recherche Google Maps, pas encore le lien direct « laisser un avis » |
+| Lien « Laisser un avis Google » | **Réel** (ouvre le lien configuré). Pour Asian Home Paris : lien direct vers le formulaire d'avis (`search.google.com/local/writereview?placeid=ChIJAV70Kqxt5kcRnhPY0L6yaf0`), repris du bouton « Laissez nous un avis » du linktr.ee officiel du restaurant |
 | Avis Google affichés | **Simulés** : données de démo, aucune connexion à Google |
-| Réponses aux avis (modèles, réponse auto, brouillons) | Logique **réelle**, mais **rien n'est publié** sur Google (simulé) |
+| Réponses aux avis (modèles, réponse auto, brouillons) | Logique **réelle**, mais **rien n'est publié** sur Google (simulé) : une réponse auto est affichée « Réponse automatique préparée (démo — rien n'est publié sur Google) ». Un brouillon existant n'est jamais remplacé par la réponse auto |
 | Apple Wallet / Google Wallet | **Simulé** : le bouton explique qu'aucun pass n'est créé |
 | SMS / e-mail | **Simulés / absents** : rien n'est envoyé |
 | Paiements | **Absents** (l'offre affichée est gratuite, aucune souscription) |
@@ -79,7 +79,7 @@ une démo cohérente, faites tout sur le même téléphone.
 
 ## Tests
 
-`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (33 tests).
+`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (36 tests).
 Pas de Vitest : Node exécute le TypeScript directement, ça évite une dépendance et ne touche pas au build.
 
 Les tests portent sur la **logique pure** (hors React) :
@@ -90,7 +90,8 @@ Les tests portent sur la **logique pure** (hors React) :
 - roulette : tirage pondéré, roue qui s'arrête dans le bon secteur, 1 tirage par client et par jour,
   jeu refusé sans visite validée le jour même (ni la veille, ni dans un autre commerce) ;
 - clients actifs / à relancer : un inscrit sans visite n'est ni l'un ni l'autre, actif = visite dans les 30 derniers jours ;
-- avis : choix du modèle, réponse auto aux 5★, brouillons, réponse existante jamais écrasée ;
+- avis : choix du modèle, réponse auto aux 5★, brouillons, réponse ou brouillon existant jamais écrasé,
+  modèle négatif sans affirmation d'envoi ; lien direct d'avis Google d'Asian Home Paris (et migration de l'ancien lien Maps) ;
 - cohérence du seed (dates récentes et jamais futures, tampons = visites − récompenses, tirages un jour
   de visite) et « Réinitialiser la démo » (avec un localStorage simulé).
 
@@ -109,7 +110,7 @@ pas vérifié à l'écran.
   navigateur. Il faut vérifier côté serveur (et idéalement le téléphone, par SMS).
 - **Vraie API Google** : lire les avis et publier les réponses passe par l'API Google Business Profile
   (compte Google du commerce, OAuth, accès à demander à Google). Récupérer aussi le vrai lien « laisser
-  un avis » de chaque fiche.
+  un avis » de chaque fiche (fait pour Asian Home Paris ; les 2 autres commerces de démo ont des liens fictifs).
 - **Vrais passes Wallet** : Apple Wallet exige un compte Apple Developer payant et des passes signés ;
   Google Wallet exige un compte émetteur et une API. Il faut aussi les mettre à jour à chaque tampon.
 - **Envois SMS / e-mail** : prestataire d'envoi, consentement marketing explicite, lien de désinscription.

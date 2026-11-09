@@ -75,7 +75,7 @@ export interface Avis {
   date: string
   /** Réponse publiée (simulée : rien n'est envoyé à Google). */
   reponse?: string
-  /** Réponse publiée automatiquement par une règle de Réglages. */
+  /** Réponse préparée automatiquement par une règle de Réglages (rien n'est publié). */
   reponseAuto?: boolean
   /** Brouillon à relire avant publication. */
   brouillon?: string

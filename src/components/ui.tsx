@@ -26,13 +26,13 @@ export function Etoiles({ note }: { note: number }) {
 }
 
 export function BadgeDemo({ children = 'Démo' }: { children?: ReactNode }) {
-  return <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">{children}</span>
+  return <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">{children}</span>
 }
 
 export function EnTete({ titre, sousTitre, action }: { titre: string; sousTitre?: ReactNode; action?: ReactNode }) {
   return (
     <div className="mb-4 flex items-start justify-between gap-3">
-      <div>
+      <div className="min-w-0">
         <h1 className="text-2xl font-bold tracking-tight">{titre}</h1>
         {sousTitre && <p className="mt-1 text-gray-600">{sousTitre}</p>}
       </div>

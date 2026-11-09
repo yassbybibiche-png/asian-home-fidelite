@@ -26,6 +26,7 @@ interface Store {
 
 const Contexte = createContext<Store | null>(null)
 
+/** Réapplique les règles : seuls les avis sans réponse NI brouillon changent (cf. `appliquerRegles`). */
 function avecReglesAppliquees(e: Etat, commerceId: string): Etat {
   const commerce = e.commerces.find((c) => c.id === commerceId)
   if (!commerce) return e

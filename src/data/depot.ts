@@ -36,9 +36,15 @@ export function seedRecale(maintenant = Date.now()): Etat {
   }
 }
 
+// Lien du seed avant FIX-C : une recherche Google Maps, remplacée par le lien direct « laisser un avis ».
+const ANCIEN_LIEN_ASIAN_HOME =
+  'https://www.google.com/maps/search/?api=1&query=Asian+Home+Paris+11+rue+Andr%C3%A9+Joineau+Le+Pr%C3%A9-Saint-Gervais'
+const LIEN_AVIS_ASIAN_HOME = seed.commerces[0].lienGoogle
+
 /**
  * Anciennes données enregistrées : lots en simple texte (phase 1) → chances égales ;
- * client sans visite dont `derniereVisite` valait la date d'inscription (avant FIX-B) → null.
+ * client sans visite dont `derniereVisite` valait la date d'inscription (avant FIX-B) → null ;
+ * ancien lien Maps d'Asian Home Paris (avant FIX-C) → lien direct d'avis.
  */
 export function migrer(etat: Etat): Etat {
   return {
@@ -47,7 +53,8 @@ export function migrer(etat: Etat): Etat {
       const derniereVisite = c.visites.at(-1) ?? null
       return c.derniereVisite === derniereVisite ? c : { ...c, derniereVisite }
     }),
-    commerces: etat.commerces.map((c) => {
+    commerces: etat.commerces.map((commerce) => {
+      const c = commerce.lienGoogle === ANCIEN_LIEN_ASIAN_HOME ? { ...commerce, lienGoogle: LIEN_AVIS_ASIAN_HOME } : commerce
       const lots = c.lots as unknown[]
       if (!lots.some((l) => typeof l === 'string')) return c
       const part = Math.round(100 / lots.length)

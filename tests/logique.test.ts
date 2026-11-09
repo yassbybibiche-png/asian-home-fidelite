@@ -17,7 +17,7 @@ import {
 } from '../src/lib/fidelite.ts'
 import { lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { calculerChiffres, estActif, estARelancer } from '../src/lib/stats.ts'
-import { migrer } from '../src/data/depot.ts'
+import { migrer, seedRecale } from '../src/data/depot.ts'
 import { appliquerRegles, modeleSuggere, statutAvis, texteModele } from '../src/lib/avis.ts'
 import type { Avis, Client, Commerce, Tirage } from '../src/types.ts'
 
@@ -338,5 +338,40 @@ describe('Réponse à un avis', () => {
     const a = avis(5)
     assert.equal(appliquerRegles(a, sansRegle), a)
     assert.equal(statutAvis(a), 'sansReponse')
+  })
+
+  test('non-régression : avis 5★ avec brouillon humain + auto5 activé → brouillon conservé, aucune réponse auto', () => {
+    assert.equal(commerce.reglesReponseAuto.auto5Etoiles, true)
+    const brouillonHumain = avis(5, 'Super soirée', { brouillon: 'Merci Sophie, à samedi pour le karaoké !' })
+    const resultat = appliquerRegles(brouillonHumain, commerce)
+    assert.equal(resultat, brouillonHumain)
+    assert.equal(resultat.brouillon, 'Merci Sophie, à samedi pour le karaoké !')
+    assert.equal(resultat.reponse, undefined)
+    assert.equal(resultat.reponseAuto, undefined)
+    // Même chose avec auto4 activé sur un 4★ (réapplication au réenregistrement des réglages).
+    const avecAuto4 = { ...commerce, reglesReponseAuto: { ...commerce.reglesReponseAuto, auto4Etoiles: true } }
+    const quatre = avis(4, 'Bien', { brouillon: 'Brouillon de l’équipe' })
+    assert.equal(appliquerRegles(quatre, avecAuto4), quatre)
+  })
+
+  test('non-régression : le modèle d’avis négatif n’affirme aucun envoi', () => {
+    const t = texteModele('negatif', avis(1, 'Décevant'), commerce)
+    assert.doesNotMatch(t, /transmis/i)
+    assert.doesNotMatch(t, /envoy/i)
+    assert.match(t, /en parler en équipe/)
+  })
+})
+
+describe('Lien Google d’Asian Home Paris', () => {
+  test('lien direct « laisser un avis » ; les anciennes données Maps sont migrées', () => {
+    const lien = 'https://search.google.com/local/writereview?placeid=ChIJAV70Kqxt5kcRnhPY0L6yaf0'
+    const etat = seedRecale()
+    assert.equal(etat.commerces[0].nom, 'Asian Home Paris')
+    assert.equal(etat.commerces[0].lienGoogle, lien)
+    const ancien = { ...etat, commerces: [{ ...etat.commerces[0], lienGoogle: 'https://www.google.com/maps/search/?api=1&query=Asian+Home+Paris+11+rue+Andr%C3%A9+Joineau+Le+Pr%C3%A9-Saint-Gervais' }] }
+    assert.equal(migrer(ancien).commerces[0].lienGoogle, lien)
+    // Un lien saisi par le commerçant n’est jamais touché.
+    const perso = { ...etat, commerces: [{ ...etat.commerces[0], lienGoogle: 'https://g.page/r/x/review' }] }
+    assert.equal(migrer(perso).commerces[0].lienGoogle, 'https://g.page/r/x/review')
   })
 })

@@ -123,7 +123,7 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
         <span className={`rounded-full px-2 py-0.5 font-semibold ring-1 ${STATUTS[statut].classe}`}>{STATUTS[statut].libelle}</span>
         {a.reponseAuto && <span className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold text-gray-600">auto</span>}
       </div>
-      <p className="mt-2 text-gray-800">{a.texte || <em className="text-gray-400">Note sans commentaire</em>}</p>
+      <p className="mt-2 text-gray-800">{a.texte || <em className="text-gray-500">Note sans commentaire</em>}</p>
 
       {edition ? (
         <div className="mt-3 space-y-2">
@@ -179,7 +179,7 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
         <>
           {(a.reponse || a.brouillon) && (
             <div className={`mt-3 rounded-xl p-3 text-sm ${a.reponse ? 'bg-gray-50' : 'bg-amber-50'}`}>
-              <span className="font-semibold text-gray-700">{a.reponse ? (a.reponseAuto ? 'Réponse publiée automatiquement' : 'Votre réponse') : 'Brouillon proposé'}</span>
+              <span className="font-semibold text-gray-700">{a.reponse ? (a.reponseAuto ? 'Réponse automatique préparée (démo — rien n’est publié sur Google)' : 'Votre réponse') : 'Brouillon proposé'}</span>
               <p className="mt-1 text-gray-700">{a.reponse ?? a.brouillon}</p>
             </div>
           )}
