@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
+import qrcode from 'qrcode-generator'
 import type { Commerce } from '../types'
 import { initiales } from '../lib/format'
 
@@ -73,6 +74,7 @@ const CHEMINS: Record<string, string> = {
   offre: 'M20 12v8H4v-8M2 7h20v5H2zM12 20V7M12 7a3 3 0 10-3-3c0 1.7 3 3 3 3zm0 0a3 3 0 113-3c0 1.7-3 3-3 3z',
   admin: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1M14 9h1M9 13h1M14 13h1M10 21v-4h4v4',
   plus: 'M5 12h.01M12 12h.01M19 12h.01',
+  qr: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM14 18h2M18 14h2',
 }
 
 export function Icone({ nom, className = 'h-6 w-6' }: { nom: string; className?: string }) {
@@ -80,5 +82,77 @@ export function Icone({ nom, className = 'h-6 w-6' }: { nom: string; className?:
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={nom === 'plus' ? 3.5 : 1.9} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
       <path d={CHEMINS[nom]} />
     </svg>
+  )
+}
+
+/** QR code dessiné en SVG, généré localement (aucun appel réseau). */
+export function QrCode({ texte, className = 'h-48 w-48', titre }: { texte: string; className?: string; titre?: string }) {
+  const { d, taille } = useMemo(() => {
+    const qr = qrcode(0, 'M')
+    qr.addData(texte)
+    qr.make()
+    const n = qr.getModuleCount()
+    let chemin = ''
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) chemin += `M${x + 4} ${y + 4}h1v1h-1z`
+    // Marge blanche de 4 modules autour (zone de silence exigée par la norme QR).
+    return { d: chemin, taille: n + 8 }
+  }, [texte])
+  return (
+    <svg viewBox={`0 0 ${taille} ${taille}`} className={`${className} bg-white`} role="img" aria-label={titre ?? 'QR code'} shapeRendering="crispEdges">
+      <path d={d} fill="#111827" />
+    </svg>
+  )
+}
+
+/** Copie dans le presse-papiers, avec repli pour les navigateurs sans API Clipboard (http local). */
+export async function copier(texte: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(texte)
+    return true
+  } catch {
+    const zone = document.createElement('textarea')
+    zone.value = texte
+    zone.setAttribute('readonly', '')
+    zone.style.position = 'fixed'
+    zone.style.opacity = '0'
+    document.body.appendChild(zone)
+    zone.select()
+    const ok = document.execCommand('copy')
+    zone.remove()
+    return ok
+  }
+}
+
+export function BoutonCopier({ texte, libelle = 'Copier le message', className = 'bouton-secondaire' }: { texte: string; libelle?: string; className?: string }) {
+  const [resultat, setResultat] = useState<'' | 'ok' | 'echec'>('')
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={async () => {
+        setResultat((await copier(texte)) ? 'ok' : 'echec')
+        setTimeout(() => setResultat(''), 2000)
+      }}
+    >
+      {resultat === 'ok' ? '✓ Copié' : resultat === 'echec' ? 'Copie impossible : sélectionnez le texte' : libelle}
+    </button>
+  )
+}
+
+/** Wallet simulé : on le dit clairement, aucune fausse promesse. */
+export function BoutonWallet() {
+  const [ouvert, setOuvert] = useState(false)
+  return (
+    <div>
+      <button type="button" className="bouton-secondaire w-full" onClick={() => setOuvert((o) => !o)} aria-expanded={ouvert}>
+        Ajouter à Wallet (Apple / Google)
+      </button>
+      {ouvert && (
+        <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="status">
+          <BadgeDemo>Démo</BadgeDemo> Démo — génération de vrai pass non incluse. Aucun pass Apple Wallet ou Google Wallet n’est créé ; gardez cette page en
+          favori pour retrouver votre carte.
+        </p>
+      )}
+    </div>
   )
 }

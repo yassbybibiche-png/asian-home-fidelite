@@ -31,11 +31,10 @@ export default function Plus() {
           </div>
         </div>
         <p className="mt-3 text-sm text-gray-600">
-          Le QR code à imprimer (étiquettes de table, adhésif vitrine) mène vers la roulette de ce commerce. Sa génération arrive avec le module
-          roulette.
+          Le QR code à imprimer (étiquettes de table, adhésif vitrine) mène vers la roulette de ce commerce.
         </p>
-        <a href="#/roulette" className="bouton-secondaire mt-3 w-full">
-          Voir la roulette
+        <a href="#/qr" className="bouton mt-3 w-full">
+          Afficher le QR vitrine
         </a>
       </section>
 

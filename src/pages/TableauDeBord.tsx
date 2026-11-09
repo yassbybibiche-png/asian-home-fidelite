@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useDonneesCommerce } from '../store'
 import { calculerChiffres, noteMoyenne } from '../lib/stats'
 import { dateRelative } from '../lib/format'
@@ -18,6 +19,7 @@ export default function TableauDeBord() {
   const chiffres = calculerChiffres(clients, avis)
   const moyenne = noteMoyenne(avis)
   const prenom = (id: string) => clients.find((c) => c.id === id)?.prenom ?? 'Client'
+  const [toutLesGains, setToutLesGains] = useState(false)
 
   return (
     <div className="space-y-6">
@@ -61,7 +63,7 @@ export default function TableauDeBord() {
                   </div>
                   <p className="mt-1 line-clamp-2 text-gray-700">{a.texte || <em className="text-gray-400">Note sans commentaire</em>}</p>
                   <p className="mt-1 text-xs text-gray-500">
-                    {dateRelative(a.date)} · {a.reponse ? 'Répondu' : 'Sans réponse'}
+                    {dateRelative(a.date)} · {a.reponse ? (a.reponseAuto ? 'Répondu (auto)' : 'Répondu') : a.brouillon ? 'Brouillon' : 'Sans réponse'}
                   </p>
                 </li>
               ))}
@@ -71,16 +73,18 @@ export default function TableauDeBord() {
 
         <section>
           <div className="mb-2 flex items-baseline justify-between">
-            <h2 className="text-lg font-bold">Derniers gains roulette</h2>
-            <a href="#/roulette" className="font-semibold text-marque-600">
-              Roulette
-            </a>
+            <h2 className="text-lg font-bold">{toutLesGains ? `Historique des gains (${tirages.length})` : 'Derniers gains roulette'}</h2>
+            {tirages.length > 5 && (
+              <button className="min-h-11 font-semibold text-marque-600" onClick={() => setToutLesGains((t) => !t)}>
+                {toutLesGains ? 'Réduire' : 'Tout voir'}
+              </button>
+            )}
           </div>
           {tirages.length === 0 ? (
             <Vide>Aucun tirage pour l’instant.</Vide>
           ) : (
             <ul className="carte divide-y divide-gray-100 py-1">
-              {tirages.slice(0, 5).map((t) => (
+              {(toutLesGains ? tirages : tirages.slice(0, 5)).map((t) => (
                 <li key={t.id} className="flex items-center justify-between gap-3 py-2.5">
                   <span>
                     <span className="font-semibold">{prenom(t.clientId)}</span>

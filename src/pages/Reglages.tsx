@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useStore } from '../store'
-import type { Commerce, TypeCommerce } from '../types'
+import type { Commerce, Lot, TypeCommerce } from '../types'
 import { TYPES_COMMERCE } from '../data/defaults'
 import { EnTete, Interrupteur, LogoCommerce } from '../components/ui'
 
@@ -13,19 +13,23 @@ export default function Reglages() {
 function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   const { majCommerce } = useStore()
   const [brouillon, setBrouillon] = useState<Commerce>(commerce)
-  const [lotsTexte, setLotsTexte] = useState(commerce.lots.join('\n'))
+  const [lotsEdites, setLotsEdites] = useState<Lot[]>(commerce.lots)
   const [enregistre, setEnregistre] = useState(false)
 
-  const lots = lotsTexte
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
+  const lots = lotsEdites.map((l) => ({ ...l, libelle: l.libelle.trim() })).filter((l) => l.libelle)
+  const probasValides = lots.every((l) => Number.isFinite(l.probabilite) && l.probabilite >= 0 && l.probabilite <= 100)
+  const total = lots.reduce((s, l) => s + (Number.isFinite(l.probabilite) ? l.probabilite : 0), 0)
   const nomValide = brouillon.nom.trim().length > 0
   const seuilValide = Number.isInteger(brouillon.seuilTampons) && brouillon.seuilTampons >= 2 && brouillon.seuilTampons <= 50
-  const valide = nomValide && seuilValide && lots.length >= 2
+  const valide = nomValide && seuilValide && lots.length >= 2 && probasValides && total > 0
 
   function maj<K extends keyof Commerce>(champ: K, valeur: Commerce[K]) {
     setBrouillon((b) => ({ ...b, [champ]: valeur }))
+    setEnregistre(false)
+  }
+
+  function majLot(i: number, lot: Lot | null) {
+    setLotsEdites((ls) => (lot ? ls.map((l, j) => (j === i ? lot : l)) : ls.filter((_, j) => j !== i)))
     setEnregistre(false)
   }
 
@@ -129,12 +133,65 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
       <fieldset className="carte space-y-2">
         <legend className="sr-only">Roulette</legend>
         <h2 className="text-lg font-bold">Lots de la roulette</h2>
-        <label className="etiquette" htmlFor="lots">
-          Un lot par ligne (chaque lot a la même chance de sortir)
-        </label>
-        <textarea id="lots" className="champ min-h-36" value={lotsTexte} onChange={(e) => (setLotsTexte(e.target.value), setEnregistre(false))} />
-        <p className={`text-sm ${lots.length >= 2 ? 'text-gray-500' : 'text-red-600'}`}>
-          {lots.length} lot{lots.length > 1 ? 's' : ''} {lots.length < 2 && '— il en faut au moins 2'}
+        <p className="text-sm text-gray-500">Texte libre + chance de sortir (en %). Un lot « Pas de chance » est possible.</p>
+        <ul className="space-y-2">
+          {lotsEdites.map((lot, i) => (
+            <li key={i} className="flex items-center gap-2">
+              <label className="sr-only" htmlFor={`lot-${i}`}>
+                Lot {i + 1}
+              </label>
+              <input
+                id={`lot-${i}`}
+                className="champ min-w-0 flex-1"
+                placeholder="ex : Café offert"
+                value={lot.libelle}
+                onChange={(e) => majLot(i, { ...lot, libelle: e.target.value })}
+              />
+              <label className="sr-only" htmlFor={`proba-${i}`}>
+                Chance du lot {i + 1} en %
+              </label>
+              <div className="relative w-24 shrink-0">
+                <input
+                  id={`proba-${i}`}
+                  className="champ pr-8 text-right"
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={100}
+                  value={Number.isNaN(lot.probabilite) ? '' : lot.probabilite}
+                  onChange={(e) => majLot(i, { ...lot, probabilite: e.target.valueAsNumber })}
+                />
+                <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-gray-500">%</span>
+              </div>
+              <button
+                type="button"
+                className="h-12 w-12 shrink-0 rounded-xl text-xl text-gray-500 ring-1 ring-gray-300 active:bg-gray-100"
+                aria-label={`Supprimer le lot ${i + 1}`}
+                onClick={() => majLot(i, null)}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+        <button
+          type="button"
+          className="bouton-secondaire w-full"
+          onClick={() => (setLotsEdites((ls) => [...ls, { libelle: '', probabilite: 10 }]), setEnregistre(false))}
+        >
+          + Ajouter un lot
+        </button>
+        <p className={`text-sm ${lots.length >= 2 && probasValides && total > 0 ? 'text-gray-500' : 'text-red-600'}`}>
+          {lots.length} lot{lots.length > 1 ? 's' : ''} · total {total} %
+          {lots.length < 2
+            ? ' — il en faut au moins 2'
+            : !probasValides
+              ? ' — chaque chance doit être entre 0 et 100 %'
+              : total <= 0
+                ? ' — au moins un lot doit avoir une chance > 0'
+                : total !== 100
+                  ? ' — le total ne fait pas 100 % : les chances seront recalculées au prorata'
+                  : ''}
         </p>
       </fieldset>
 
@@ -142,8 +199,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
         <legend className="sr-only">Réponses aux avis</legend>
         <h2 className="pb-2 text-lg font-bold">Réponses automatiques aux avis</h2>
         <Interrupteur
-          libelle="Répondre automatiquement aux avis 5★"
-          aide="La réponse type est publiée sans validation."
+          libelle="Répondre automatiquement aux 5★"
+          aide="La réponse modèle est appliquée aussitôt, marquée « auto »."
           actif={brouillon.reglesReponseAuto.auto5Etoiles}
           onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, auto5Etoiles: v })}
         />
@@ -153,12 +210,15 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, auto4Etoiles: v })}
         />
         <Interrupteur
-          libelle="Préparer un brouillon pour les autres avis"
-          aide="Vous relisez et validez avant publication."
+          libelle="Proposer un brouillon pour les autres"
+          aide="Vous relisez et validez avant de marquer comme répondu."
           actif={brouillon.reglesReponseAuto.brouillonAutres}
           onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, brouillonAutres: v })}
         />
-        <p className="pt-2 text-sm text-gray-500">Démo : aucune réponse n’est réellement publiée sur Google.</p>
+        <p className="pt-2 text-sm text-gray-500">
+          Les règles s’appliquent aux nouveaux avis et, à l’enregistrement, aux avis encore sans réponse. Démo : aucune réponse n’est réellement
+          publiée sur Google.
+        </p>
       </fieldset>
 
       <div className="sticky bottom-20 z-10 md:bottom-4">

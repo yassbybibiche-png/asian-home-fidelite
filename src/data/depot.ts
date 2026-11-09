@@ -1,6 +1,6 @@
 // Couche de persistance. L'UI ne parle qu'à l'interface `Depot` : pour brancher
 // une vraie base plus tard, il suffit d'écrire une autre implémentation.
-import type { Donnees, Etat } from '../types'
+import type { Donnees, Etat, Lot } from '../types'
 import seed from './seed.json'
 
 export interface Depot {
@@ -33,6 +33,19 @@ function seedRecale(maintenant = Date.now()): Etat {
   }
 }
 
+/** Données enregistrées par la phase 1 : lots en simple texte → chances égales. */
+function migrer(etat: Etat): Etat {
+  return {
+    ...etat,
+    commerces: etat.commerces.map((c) => {
+      const lots = c.lots as unknown[]
+      if (!lots.some((l) => typeof l === 'string')) return c
+      const part = Math.round(100 / lots.length)
+      return { ...c, lots: lots.map((l) => (typeof l === 'string' ? { libelle: l, probabilite: part } : (l as Lot))) }
+    }),
+  }
+}
+
 function estEtatValide(x: unknown): x is Etat {
   const e = x as Etat
   return !!e && Array.isArray(e.commerces) && Array.isArray(e.clients) && Array.isArray(e.tirages) && Array.isArray(e.avis) && typeof e.commerceActifId === 'string'
@@ -44,7 +57,7 @@ export const depotLocal: Depot = {
       const brut = localStorage.getItem(CLE)
       if (brut) {
         const etat: unknown = JSON.parse(brut)
-        if (estEtatValide(etat)) return etat
+        if (estEtatValide(etat)) return migrer(etat)
       }
     } catch {
       // Données illisibles : on repart du seed.

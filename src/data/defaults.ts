@@ -23,7 +23,12 @@ export function nouveauCommerce(nom: string, type: TypeCommerce, lienGoogle: str
     lienGoogle: lienGoogle.trim(),
     recompense: 'Une récompense offerte au 10e passage',
     seuilTampons: 10,
-    lots: ['-10 % sur le prochain passage', 'Un petit cadeau offert', '-5 % sur le prochain passage', 'Pas de chance, à la prochaine !'],
+    lots: [
+      { libelle: '-10 % sur le prochain passage', probabilite: 20 },
+      { libelle: 'Un petit cadeau offert', probabilite: 20 },
+      { libelle: '-5 % sur le prochain passage', probabilite: 30 },
+      { libelle: 'Pas de chance, à la prochaine !', probabilite: 30 },
+    ],
     reglesReponseAuto: { auto5Etoiles: true, auto4Etoiles: false, brouillonAutres: true },
     actif: true,
     creeLe: new Date().toISOString(),

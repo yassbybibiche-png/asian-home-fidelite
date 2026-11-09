@@ -1,23 +1,35 @@
 import { useDonneesCommerce } from '../store'
+import { urlAbsolue } from '../router'
 import { dateRelative } from '../lib/format'
-import { EnTete, Icone } from '../components/ui'
+import { lotsJouables, totalProbabilites } from '../lib/roulette'
+import { EnTete, QrCode, Vide } from '../components/ui'
 
 export default function Roulette() {
   const { commerce, tirages, clients } = useDonneesCommerce()
   const prenom = (id: string) => clients.find((c) => c.id === id)?.prenom ?? 'Client'
+  const total = totalProbabilites(commerce.lots)
+  const url = urlAbsolue('jouer', commerce.id)
 
   return (
     <div className="space-y-5">
-      <EnTete titre="Roulette" sousTitre="Le client scanne le QR code, tourne la roue et gagne un lot." />
+      <EnTete titre="Roulette" sousTitre="Le client scanne le QR code, tourne la roue et gagne un lot. 1 tirage par client et par jour." />
 
-      <section className="carte flex flex-col items-center px-6 py-10 text-center">
-        <span className="flex h-20 w-20 items-center justify-center rounded-full bg-marque-50 text-marque-500">
-          <Icone nom="roulette" className="h-12 w-12" />
-        </span>
-        <h2 className="mt-4 text-xl font-bold">Bientôt disponible</h2>
-        <p className="mt-2 max-w-sm text-gray-600">
-          La roulette animée, le QR code imprimable et la page publique client arrivent dans la prochaine version. Vos lots sont déjà prêts.
-        </p>
+      <section className="carte flex flex-col items-center gap-3 text-center sm:flex-row sm:text-left">
+        <a href="#/qr" aria-label="Agrandir le QR vitrine">
+          <QrCode texte={url} className="h-36 w-36" titre={`QR code de la roulette de ${commerce.nom}`} />
+        </a>
+        <div className="w-full min-w-0 space-y-2">
+          <p className="text-sm text-gray-600">Ce QR code est unique à votre commerce. Il ouvre la page de jeu :</p>
+          <p className="truncate rounded-lg bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700">{url}</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <a href="#/qr" className="bouton">
+              QR vitrine à imprimer
+            </a>
+            <a href={`#/jouer/${commerce.id}`} className="bouton-secondaire">
+              Ouvrir la page client
+            </a>
+          </div>
+        </div>
       </section>
 
       <section>
@@ -28,17 +40,20 @@ export default function Roulette() {
           </a>
         </div>
         <ul className="carte divide-y divide-gray-100 py-1">
-          {commerce.lots.map((lot, i) => (
-            <li key={i} className="py-2.5">
-              🎁 {lot}
+          {lotsJouables(commerce.lots).map((lot, i) => (
+            <li key={i} className="flex justify-between gap-3 py-2.5">
+              <span>🎁 {lot.libelle}</span>
+              <span className="shrink-0 font-semibold text-gray-600">{Math.round((lot.probabilite / total) * 100)} %</span>
             </li>
           ))}
         </ul>
       </section>
 
-      {tirages.length > 0 && (
-        <section>
-          <h2 className="mb-2 text-lg font-bold">Gains récents</h2>
+      <section>
+        <h2 className="mb-2 text-lg font-bold">Gains récents</h2>
+        {tirages.length === 0 ? (
+          <Vide>Aucun tirage pour l’instant.</Vide>
+        ) : (
           <ul className="carte divide-y divide-gray-100 py-1">
             {tirages.slice(0, 8).map((t) => (
               <li key={t.id} className="flex justify-between gap-3 py-2.5">
@@ -49,8 +64,8 @@ export default function Roulette() {
               </li>
             ))}
           </ul>
-        </section>
-      )}
+        )}
+      </section>
     </div>
   )
 }

@@ -1,8 +1,12 @@
-# BRIEF — Fideliz : app de fidélité pour TOUS les commerces
-
-## Source
+# BRIEF — Version propre de l'utilisateur : app de fidélité pour TOUS les commerces
+## Clarification utilisateur (09/11 ~03h10) : il n'est PAS Fideliz. Il veut SA propre version, GRATUITE, qui reprend les fonctionnalités à l'identique — mais sous sa propre marque, pas sous le nom / logo Fideliz. Ne pas utiliser la marque Fideliz dans le produit (nom, logo, textes).
+## Marque choisie par l'utilisateur (09/11 ~03h13) : « Prend la marque du resto » = ASIAN HOME PARIS.
+- Marque / commerce principal de l'app : **Asian Home Paris**.
+- Détails vérifiés le 09/11 : restaurant asiatique (Chine, Vietnam, Thaïlande, Japon), halal, ouvert en 2023 — **11 rue André Joineau, 93310 Le Pré-Saint-Gervais**, tél **+33 7 82 97 48 01**, Insta **@asianhomeparis**, horaires tous les jours 11h30-14h30 et 18h30-23h30.
+- L'app de fidélité est donc brandée Asian Home Paris (nom, identité, couleurs asiatiques sobres, pas de Fideliz). Le commerce démo principal = Asian Home Paris, avec ses vraies infos ci-dessus. Garder aussi 2 autres commerces démo génériques pour montrer que ça scale, mais Asian Home est la vitrine principale.
+## Source d'inspiration (fonctionnalités à reproduire à l'identique)
 Fiche commerciale Fideliz (photo IMG_5363.png, fournie par l'utilisateur le 09/11/2026).
-Offre : **90 € TTC / mois, 12 mois d'engagement, 500 € TTC de mise en place**.
+Offre Fideliz d'origine (à titre de référence, pas à reprendre comme prix de vente — la version de l'utilisateur est gratuite) : 90 € TTC / mois, 12 mois d'engagement, 500 € TTC de mise en place.
 Mise en place comprend : 2 500 flyers (sacs à emporter et livraison), étiquettes de table avec QR code, adhésif vitrine 100 × 70 cm.
 
 ## Principe directeur (décision utilisateur 09/11 ~02h53)
@@ -39,7 +43,7 @@ Mise en place comprend : 2 500 flyers (sacs à emporter et livraison), étiquett
 ## Autres écrans (simples)
 - **Dashboard commerçant** : 4 chiffres (clients actifs, visites ce mois, avis ce mois, taux de retour), liste clients, derniers avis, derniers gains roulette.
 - **Réglages commerce** : nom, type, logo, lien Google, récompense, seuil de tampons, lots de la roulette, règles de réponse auto. Un seul formulaire.
-- **Page Offre** : reprend la fiche — 90 € TTC/mois, 12 mois, 500 € mise en place et son contenu (flyers, étiquettes, adhésif).
+- **Page Offre** : version de l'utilisateur = GRATUITE. Ne pas afficher 90 €/mois ni 500 € comme prix de vente ; afficher « Gratuit » et reprendre le contenu de la mise en place comme kit de lancement (flyers, étiquettes QR, adhésif vitrine) sans prix Fideliz.
 - **Admin multi-commerces** : liste des commerces, ajout d'un commerce en 1 formulaire court, statut.
 - **Démo** : 3 commerces types pré-remplis (ex : restaurant, salon de coiffure, boutique) avec clients, visites et avis réalistes, pour montrer que ça scale sans changer le produit.
 

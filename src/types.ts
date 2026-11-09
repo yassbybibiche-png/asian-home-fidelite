@@ -12,6 +12,12 @@ export interface ReglesReponseAuto {
   brouillonAutres: boolean
 }
 
+export interface Lot {
+  libelle: string
+  /** En %, ex. 30. Si le total ≠ 100, les chances sont recalculées au prorata. */
+  probabilite: number
+}
+
 export interface Commerce {
   id: string
   nom: string
@@ -21,8 +27,8 @@ export interface Commerce {
   lienGoogle: string
   recompense: string
   seuilTampons: number
-  /** Lots de la roulette, en texte libre (probabilités égales pour l'instant). */
-  lots: string[]
+  /** Lots de la roulette : texte libre + probabilité simple. */
+  lots: Lot[]
   reglesReponseAuto: ReglesReponseAuto
   actif: boolean
   creeLe: string
@@ -40,6 +46,13 @@ export interface Client {
   visites: string[]
   derniereVisite: string
   creeLe: string
+  /** Récompenses fidélité déjà remises au client. */
+  recompensesOffertes?: RecompenseOfferte[]
+}
+
+export interface RecompenseOfferte {
+  date: string
+  libelle: string
 }
 
 export interface Tirage {
@@ -57,8 +70,15 @@ export interface Avis {
   note: number
   texte: string
   date: string
+  /** Réponse publiée (simulée : rien n'est envoyé à Google). */
   reponse?: string
+  /** Réponse publiée automatiquement par une règle de Réglages. */
+  reponseAuto?: boolean
+  /** Brouillon à relire avant publication. */
+  brouillon?: string
 }
+
+export type StatutAvis = 'sansReponse' | 'brouillon' | 'repondu'
 
 export interface Donnees {
   commerces: Commerce[]

@@ -39,3 +39,56 @@
   invitation avis Google non conditionnée.
 - Avis : modèles de réponse (5★, 4★, négatif, sans texte), application des règles auto.
 - Phase 3 : tests de base, README, preuves de fonctionnement.
+
+## 09/11/2026 — Phase 2 terminée (fidélité + roulette + avis)
+### Ajouté
+- Dépendance : `qrcode-generator` (MIT, 0 dépendance, génération locale en SVG, aucun appel réseau).
+- Logique pure (sans React, testable en phase 3) : `src/lib/fidelite.ts`, `src/lib/roulette.ts`, `src/lib/avis.ts`.
+- Routes hash avec paramètre : `#/client/<id>` (fiche commerçant), `#/carte/<id>` (carte publique du client),
+  `#/qr` (QR vitrine), `#/jouer/<commerceId>` (roulette publique). Les pages publiques s'affichent sans
+  en-tête ni navigation commerçant.
+- **Fidélité** : bouton « + Inscrire un client » (prénom + téléphone OU e-mail), fiche client (carte avec
+  QR personnel, tampons x/y, barre + pastilles, objectif, dernière visite), « Valider une visite » dans la
+  liste et la fiche, « Offrir la récompense » quand le seuil est atteint, historique (visites, récompenses,
+  gains roulette), bouton Wallet simulé, onglet « À relancer » avec message prêt à copier.
+- **Roulette** : QR unique par commerce (page Roulette + page `#/qr` grand format imprimable, aussi
+  depuis Plus), page publique avec roue SVG animée, tirage pondéré, 1 tirage/client/jour, invitation avis
+  Google après le jeu avec la mention « Le lot n'est pas conditionné à l'avis… », historique complet
+  dépliable dans le Tableau de bord.
+- **Avis** : statut (sans réponse / brouillon / répondu + badge « auto »), 4 modèles en 1 tap, texte
+  éditable, « Garder en brouillon », « Marquer comme répondu », « Simuler un nouvel avis », badge
+  « Démo — avis simulés, aucune connexion à Google ».
+
+### Décisions tranchées
+- Lots : `string[]` → `{ libelle, probabilite }[]`. Si le total ≠ 100 %, chances recalculées au prorata
+  (affiché dans Réglages). Les secteurs de la roue sont proportionnels aux chances (pas de roue « truquée »
+  visuellement). Les anciennes données localStorage sont migrées (chances égales). Seed régénéré : seuls
+  les lots changent.
+- Inscription = 0 tampon, aucune visite ; la date d'inscription sert de « dernier passage » pour les relances.
+  Contact déjà connu dans ce commerce → on retrouve le client existant (pas de doublon).
+- Carte pleine : une nouvelle visite est enregistrée mais les tampons restent plafonnés au seuil jusqu'à
+  « Offrir la récompense » (remise à zéro + trace de la récompense).
+- QR personnel : encode l'URL de la carte publique `#/carte/<clientId>`.
+- « Choisir son profil » sur la page publique : pas de liste des clients (vie privée). Le client est
+  reconnu par son téléphone/e-mail, et le téléphone mémorise le dernier profil (« Continuer en tant que… »).
+- Tirage enregistré dès le lancement de la roue (recharger pendant l'animation ne permet pas de rejouer).
+  « Aujourd'hui » = jour calendaire local.
+- Lots perdants (« Pas de chance… ») détectés par mots-clés pour afficher « Pas cette fois ».
+- Règles d'avis : appliquées à chaque nouvel avis, et à l'enregistrement des Réglages aux avis encore sans
+  réponse (« appliquée aussitôt »). Le seed n'est pas modifié au chargement : les 5★ sans réponse
+  représentent l'historique d'avant Fideliz ; un bouton « Appliquer les règles à N avis en attente » est
+  proposé sur la page Avis. L'interrupteur 4★ de la phase 1 est conservé.
+- Commerce désactivé : pages publiques (jeu et carte) bloquées avec un message.
+
+### Vérifications
+- `npm run build` : OK (tsc + vite, JS 329 kB / 99 kB gzip). `npm run preview` + curl → HTTP 200.
+- Script node ponctuel (hors dépôt) sur la logique pure : contact, dédoublonnage, tampons plafonnés,
+  récompense, message de relance, tirage pondéré, roue qui s'arrête dans le bon secteur, 1 tirage/jour,
+  réponse auto 5★ et brouillon → tout OK. À transformer en vrais tests `npm test` en phase 3.
+- Non vérifié : rendu dans un vrai navigateur (aucun navigateur accessible depuis cette session).
+
+### Limites honnêtes
+- Tout est dans le localStorage d'UN navigateur : un QR scanné depuis un autre téléphone voit sa propre
+  copie du seed (un commerce créé dans la démo y est « inconnu ») et ses tirages ne remontent pas chez le
+  commerçant. Il faudra un backend. Pour la démo, tester sur le même appareil.
+- Wallet, avis Google, réponses publiées, envois de relance : simulés / manuels (copier-coller).
