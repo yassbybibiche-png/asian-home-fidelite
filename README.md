@@ -118,8 +118,14 @@ problème n'existe plus.
 | Lien « Laisser un avis Google » | **Réel** (lien direct pour Asian Home Paris, repris du linktr.ee officiel du restaurant) | idem |
 | Avis Google | **À brancher** : aucune connexion à Google, aucun import. Asian Home démarre avec **0 avis** et le message « Connectez Google Business Profile pour importer vos avis » + section « Connecter Google » (étapes). Saisie manuelle possible (« + Saisir un avis reçu ») | Avis fictifs, étiquetés « Démo — avis simulés, aucune connexion à Google » |
 | Réponses aux avis (modèles, réponse auto, brouillons) | Logique réelle, **rien n'est publié sur Google** (à copier soi-même ; « Répondu » = marqué par le commerçant) | idem, étiqueté démo |
-| Apple Wallet | **En suspens** (décision du 09/11/2026) : aucun code, aucun pass | idem |
-| Google Wallet | **À brancher** : bouton « Ajouter à Wallet — à brancher » + lien vers la carte publique (QR) ; `pass.json` répond 501 (pas de compte émetteur) | idem, étiqueté démo |
+| Caisse (`#/caisse/<commerceId>`) | **Réel** : code équipe à 4 chiffres, scan du QR client (caméra ; `BarcodeDetector` ou `jsqr` chargé à la demande) + recherche manuelle, « Ajouter un passage » (1 tampon / jour + points selon le montant), « Valider une récompense », échange de points. **File hors ligne** (localStorage) envoyée au retour du réseau, sans double comptage (identifiant d'action) | Non disponible (message) |
+| Points + catalogue | **Réel**, calculé et stocké par le serveur (1 point / € par défaut, réglable) ; échanges tracés (solde avant / après, auteur) | Réglages seulement |
+| Équipe + journal d'audit | **Réel** : membres + codes hachés, chaque passage / récompense / échange tracé (qui, quel client, quand), visible dans le tableau de bord | Non disponible |
+| Messages automatiques + messagerie | **Réel dans l'app** : bienvenue, plus que 2 tampons, récompense, relance 30 j, anniversaire, demande d'avis (5★ pré-remplies) → boîte de réception sur la carte du client + texte à copier ; message ciblé (tous / inactifs / proches / nouveaux). **Aucun SMS / e-mail envoyé** | Non disponible |
+| Menu digital (`#/menu/<commerceId>`) | **Réel** : catégories, produits, prix, photo (URL ou image compressée), allergènes ; QR du menu ; lien depuis la carte | Non disponible |
+| Apparence de la carte | **Réel** : couleurs (contraste ≥ 4,5:1 vérifié), bannière, logo, aperçu en direct ; charte par défaut inchangée | idem |
+| Apple Wallet | **En suspens** (décision du 09/11/2026) : code `.pkpass` prêt (`server/wallet-apple.ts`) mais branché nulle part, refuse sans certificat ; aucun pass | idem |
+| Google Wallet | **À brancher** : génération réelle (JWT signé) derrière la configuration ; `pass.json` répond 501 (pas de compte émetteur). Côté client : encart « Carte Wallet : bientôt », aucun bouton d'ajout | idem, étiqueté démo |
 | SMS / e-mail | **À brancher** : adaptateurs Twilio / Brevo prêts côté serveur, mais aucune clé → 501, **rien n'est envoyé** | Rien n'est envoyé |
 | Paiements | **Absents** | idem |
 | Hébergement | **Pas fait**, rien n'est déployé. Retenu : serveur Node sur **Render Free** (Frankfurt) + base **Supabase Free** (Central EU Frankfurt) = 0 € ; la veille Render ne perd plus de données (elles sont chez Supabase) | — |

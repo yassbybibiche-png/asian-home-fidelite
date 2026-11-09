@@ -215,10 +215,36 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `POST /commerces/:id/avis` | commerçant | `{ auteur, note 1-5, texte?, date? }` (saisie manuelle / simulation) + `appliquerRegles`. |
 | `PATCH /commerces/:id/avis/:avisId` | commerçant | `{ reponse?: texte \| null, brouillon?: texte \| null }` puis `appliquerRegles` (un brouillon supprimé peut donc être reproposé si la règle « brouillon » est active). |
 | `GET /commerces/:id/export.csv` | commerçant | Clients en CSV (UTF-8 avec BOM, séparateur `;` pour Excel FR) : `prenom;telephone;email;tampons;visites;derniereVisite;creeLe`. |
-| `GET /commerces/:id/clients/:clientId/pass.json` | commerçant | **V3, à brancher.** **501** tant que `GOOGLE_WALLET_ISSUER_ID` + `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` sont absents (cas actuel). Configuré : `{ avertissement, payload }`, charge utile **non signée** d'un Generic pass (prénom, tampons x/seuil, récompense, QR vers `#/carte/:clientId`) — pas un pass utilisable. |
+| `GET /commerces/:id/clients/:clientId/pass.json` | commerçant | **Google Wallet, à brancher.** **501** tant que `GOOGLE_WALLET_ISSUER_ID` + `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` sont absents (cas actuel, aucun pass généré). Clé illisible : 503. Configuré : `{ signe: true, urlEnregistrement }` (JWT signé, voir plus bas). |
+| `GET /cartes/:clientId` (complément) | public | Génère à l'ouverture les messages dus (relance 30 j, anniversaire) si ces règles sont actives ; renvoie aussi `menuDisponible`. Jamais `actionsTraitees` ni `clesMessages`. |
+| `POST /cartes/:clientId/lus` | public | Marque les messages de la carte comme lus. |
+| `PATCH /commerces/:id` (complément) | commerçant | Aussi : `eurosParPoint` (0,10 à 1 000), `catalogue` (`[{ id?, nom, cout, description? }]`, 30 max), `messagesAuto` (`{ bienvenue, recompense, presque, inactif, anniversaire, avis }`), `apparence` (`{ couleur?, fond?, banniere? }`, refus si contraste < 4,5:1 ou bannière non https). |
+| `GET /commerces/:id/caisse` | code équipe ou commerçant | `X-Equipe-Code: <4 chiffres>` → `{ auteur, commerce, clients }` (401 si code faux, compte dans l'anti-bruteforce). |
+| `POST /commerces/:id/caisse/passage` | code équipe ou commerçant | `{ clientId, actionId, faitLe?, montantCentimes? }` → 1 tampon + points ; **409 si déjà un passage ce jour-là** ; `actionId` déjà reçu → `dejaTraite: true`, rien n'est recompté ; `faitLe` accepté s'il date de < 72 h (file hors ligne). Journalisé. |
+| `POST /commerces/:id/caisse/recompense` | idem | `{ clientId, actionId, faitLe? }` → récompense tampons (409 avant le seuil). Journalisé. |
+| `POST /commerces/:id/caisse/echange` | idem | `{ clientId, recompenseId, actionId, faitLe? }` → échange de points (409 solde insuffisant), tracé `{ soldeAvant, soldeApres, auteur }`, idempotent. Journalisé. |
+| `POST /commerces/:id/clients/:clientId/visite` / `recompense` (complément) | commerçant **ou code équipe** | Inchangés côté règles ; désormais journalisés (auteur « Gérant » ou membre). La règle « 1 tampon par jour » n'est appliquée que par la route caisse (comportement historique conservé ici). |
+| `PATCH /commerces/:id/clients/:clientId` | commerçant | `{ anniversaire: "MM-JJ" \| "" }`. |
+| `GET` / `POST /commerces/:id/equipe`, `PATCH` / `DELETE /commerces/:id/equipe/:membreId` | commerçant | Membres `{ nom, code }` ; code de 4 chiffres, unique dans l'équipe (409), stocké haché + salé, **jamais renvoyé ni journalisé**. |
+| `GET /commerces/:id/messages` | commerçant | 100 derniers messages (auto + ciblés) avec prénom et contact, pour copier le texte. |
+| `POST /commerces/:id/messages` | commerçant | `{ cible: 'tous' \| 'inactifs' \| 'proches' \| 'nouveaux', texte }` → déposé dans l'espace client des clients ciblés. **Aucun SMS / e-mail.** |
+| `GET /commerces/:id/menu` | public | `{ menu, commerce }` (menu vide si jamais enregistré ; 409 si commerce inactif). |
+| `PUT /commerces/:id/menu` | commerçant | `{ categories: [{ nom, produits: [{ nom, prix (centimes), description?, photo? (https ou JPEG/PNG/WebP ≤ 60 Ko), allergenes[] }] }] }` (20 catégories / 60 produits max, corps ≤ 3 Mo). |
+| `GET /commerces/:id/etat` (complément) | commerçant | Aussi `membres` (sans code) et `journal` (200 dernières actions). Les clients n'y ont plus leur boîte de réception (egress). |
 | `POST /commerces/:id/clients/:clientId/relance` | commerçant | **V3, à brancher.** `{ canal: 'sms' \| 'email', message? }`. **501** sans prestataire (cas actuel), rien n'est envoyé. Configuré : 409 si le client n'a pas `consentementRelance: true` (aucun écran ne le recueille encore) ou n'a pas le contact demandé ; sinon envoi du message de relance + mention de désinscription. |
 
 Accès « commerçant » = en-tête `X-Commerce-PIN` du commerce, **ou** `X-Admin-PIN` (l'admin ouvre tous les commerces).
+Accès « code équipe » = en-tête `X-Equipe-Code` (4 chiffres d'un membre de l'équipe de ce commerce).
+
+### Migration 0003 (modules caisse / points / équipe / messages / menu) — à appliquer en production
+
+La base Supabase en ligne ne se met pas à jour toute seule. Tant que `0003_cartiz.sql` n'est pas exécutée, les nouvelles
+routes qui touchent `equipe`, `journal` ou `menus` répondent 500 (table absente) — **et les routes historiques qui écrivent
+désormais dans le journal (visite, récompense, caisse) aussi**. À faire une fois, dans l'ordre :
+1. supabase.com → projet **asian-home-fidelite** → **SQL Editor** → *New query* ;
+2. coller tout le contenu de `supabase/migrations/0003_cartiz.sql` → **Run** (rejouable : sans risque si exécuté deux fois) ;
+3. vérifier : `select relname, relrowsecurity from pg_class where relname in ('equipe','journal','menus');` → 3 lignes, `true` ;
+4. aucune redéploiement Render nécessaire (le code est déjà en ligne) ; tester `#/equipe` puis la caisse.
 
 Exemple :
 
@@ -418,7 +444,8 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
 
 | Fichier | Rôle |
 |---|---|
-| `server/wallet.ts` | Charge utile Google Wallet « Generic pass » (non signée). |
+| `server/wallet.ts` | Google Wallet « Generic pass » : JWT signé RS256, OAuth compte de service, création de classe (inactif sans configuration). |
+| `server/wallet-apple.ts` | Apple Wallet `.pkpass` (manifeste, signature CMS, zip) — en suspens, branché sur aucune route. |
 | `server/notifications/index.ts` | Interface d'envoi (`creerNotifications`) : 501 « à brancher » sans clé. |
 | `server/notifications/twilio.ts` | Adaptateur SMS Twilio (API REST Messages). |
 | `server/notifications/brevo.ts` | Adaptateur e-mail Brevo (API `v3/smtp/email`). |
@@ -426,25 +453,44 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
 Le code des adaptateurs n'a **jamais** été exécuté contre Twilio, Brevo ou Google : il n'est testé qu'avec un `fetch`
 simulé (`tests/integrations-v3.test.ts`). Avant la mise en service, un essai réel sera nécessaire.
 
-### Apple Wallet — EN SUSPENS (décision du 09/11/2026), à activer sur décision explicite
+### Apple Wallet — EN SUSPENS (décision du 09/11/2026), code prêt mais NON branché
 
-Aucun endpoint, aucune signature, aucun code de pass Apple (un test le vérifie). Ce qu'il faudrait le jour où c'est décidé :
-- un compte **Apple Developer Program** (99 $/an, au nom de l'éditeur de l'app) ;
-- un **Pass Type ID** (`pass.<domaine>.fidelite`) créé dans ce compte ;
-- le **certificat de signature** de ce Pass Type ID + sa **clé privée**, et le certificat intermédiaire Apple (WWDR) ;
-- un endpoint qui génère et **signe** le pass, et le **service web de mise à jour des passes** (enregistrement des appareils,
-  notifications push APNs à chaque tampon) — sans lui, le pass ne se met pas à jour.
+Depuis le 09/11/2026 (mission « Cartiz »), `server/wallet-apple.ts` contient le **vrai code** de fabrication d'un `.pkpass`
+(pass.json « storeCard », `manifest.json` = SHA-1 de chaque fichier, signature PKCS #7 / CMS détachée SHA-256/RSA avec le
+certificat signataire + WWDR, archive zip), sans dépendance. **Il n'est importé par aucune route** : `…/pass.pkpass` → 404,
+`/sante` → `appleWallet: "en_suspens"`. Sans certificat, `construirePkpass` lève `ErreurAppleNonConfigure` : rien n'est signé.
+La signature CMS a été vérifiée par `openssl cms -verify` sur des octets quelconques avec un certificat **auto-signé de test**
+(test automatique) — jamais avec un certificat Apple, et aucun pass n'a été produit ni installé sur un iPhone.
 
-### Google Wallet — architecture prête, sans compte
+Pour activer (sur décision explicite de l'utilisateur seulement) :
+1. un compte **Apple Developer Program** (99 $/an) au nom de l'éditeur → **Team ID** (10 caractères) ;
+2. un **Pass Type ID** (`pass.<domaine>.fidelite`) créé dans *Certificates, Identifiers & Profiles* ;
+3. le **certificat** de ce Pass Type ID (fichier `.cer` converti en PEM) + sa **clé privée** (PEM, mot de passe éventuel) ;
+4. le **certificat intermédiaire Apple WWDR** (PEM) ;
+5. des images `icon.png` / `logo.png` (+ @2x) ;
+6. côté code : une route qui appelle `passJsonApple` + `construirePkpass` avec ces fichiers (lus depuis des « secret files »
+   Render), servie en `application/vnd.apple.pkpass` ; puis le **service web de mise à jour** (enregistrement des appareils,
+   push APNs à chaque tampon) — sans lui le pass ne se met pas à jour. Ces deux parties ne sont pas écrites.
+7. Le test « code de pass Apple confiné à server/wallet-apple.ts » devra être adapté à ce moment-là.
 
-Prérequis exacts (aucun n'existe aujourd'hui) :
+### Google Wallet — génération réelle derrière la configuration, sans compte
+
+`server/wallet.ts` : classe + objet « Generic pass », **JWT « Save to Google Wallet » signé RS256** avec la clé du compte de
+service (`aud: google`, `typ: savetowallet`, `origins`) → lien `https://pay.google.com/gp/v/save/<jwt>` ; jeton OAuth du compte
+de service (flux JWT-bearer, scope `wallet_object.issuer`) et création de la classe via `walletobjects/v1/genericClass`.
+Route `GET …/clients/:clientId/pass.json` : **501** sans configuration (cas actuel : aucun pass généré), **503** si la clé
+est illisible, sinon `{ signe: true, urlEnregistrement }`. Testé uniquement avec une clé RSA **générée par le test** (aucun
+compte Google) et un `fetch` simulé : le JWT est vérifié avec la clé publique, l'acceptation par Google ne l'est pas.
+
+Pour activer :
 1. un **compte émetteur** Google Wallet (console Google Pay & Wallet) → `GOOGLE_WALLET_ISSUER_ID` ;
-2. un projet Google Cloud avec l'**API Google Wallet activée** ;
-3. un **compte de service** avec sa **clé JSON** (scope `https://www.googleapis.com/auth/wallet_object.issuer` — de mémoire, à vérifier dans la doc Google Wallet), autorisé
-   sur le compte émetteur → `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` ;
-4. Google exige l'approbation du compte émetteur avant la publication des passes (mode démo / production — à vérifier dans la console) ;
-5. **reste à développer** : signer le JWT « Save to Google Wallet » (`aud: google`, `typ: savetowallet`) avec la clé, créer la
-   classe, et mettre l'objet à jour à chaque tampon via l'API.
+2. un projet Google Cloud avec l'**API Google Wallet** activée ;
+3. un **compte de service** + sa **clé JSON**, ajouté comme utilisateur du compte émetteur dans la console →
+   fichier déposé comme *Secret File* Render, chemin dans `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` ;
+4. l'approbation du compte émetteur par Google pour la publication (mode démo / production, dans la console) ;
+5. puis : bouton « Ajouter à Google Wallet » côté client (aujourd'hui volontairement absent : encart « Carte Wallet :
+   bientôt ») et mise à jour de l'objet à chaque tampon (non écrite). Noms de champs à revérifier dans la doc au moment
+   de l'activation.
 
 ### Google Business Profile (avis) — à brancher
 
