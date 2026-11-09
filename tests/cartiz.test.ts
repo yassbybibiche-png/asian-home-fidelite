@@ -227,7 +227,7 @@ describe('Équipe, caisse, points, audit (serveur)', () => {
     const r = await srv.api('POST', `/commerces/${AH}/caisse/passage`, { clientId: lina.id, montantCentimes: 2350, actionId: 'act-passage-1' }, CODE)
     assert.equal(r.statut, 200)
     assert.equal(r.contenu.client.tampons, 1)
-    assert.equal(r.contenu.client.points, 23)
+    assert.equal(r.contenu.client.points, 73, '50 points de bienvenue + 23 points du passage')
     const deux = await srv.api('POST', `/commerces/${AH}/caisse/passage`, { clientId: lina.id, montantCentimes: 1000, actionId: 'act-passage-2' }, CODE)
     assert.equal(deux.statut, 409)
     assert.match(deux.contenu.erreur, /1 tampon par jour/)
@@ -235,7 +235,7 @@ describe('Équipe, caisse, points, audit (serveur)', () => {
     assert.equal((await srv.api('PATCH', `/commerces/${AH}`, { eurosParPoint: 2 }, PIN)).statut, 200)
     horloge = new Date(2026, 10, 10, 12, 0)
     const r2 = await srv.api('POST', `/commerces/${AH}/caisse/passage`, { clientId: lina.id, montantCentimes: 2350, actionId: 'act-passage-3' }, CODE)
-    assert.equal(r2.contenu.client.points, 23 + 11)
+    assert.equal(r2.contenu.client.points, 73 + 11)
     assert.equal((await srv.api('PATCH', `/commerces/${AH}`, { eurosParPoint: 0 }, PIN)).statut, 400)
   })
 
@@ -316,10 +316,12 @@ describe('Messages, menu, apparence (serveur)', () => {
     assert.equal((await srv.api('GET', `/cartes/${c.id}`)).contenu.client.messages[0].lu, true)
   })
 
-  test('ouverture de la carte après 30 jours sans visite → relance dans la boîte de réception (une seule fois)', async () => {
+  test('ouverture de la carte après 45 jours sans visite → rappel doux win-back (une seule fois) ; rien à 30 jours', async () => {
     const c: Client = (await srv.api('POST', `/commerces/${AH}/clients`, { prenom: 'Paul', contact: '0699999999' }, PIN)).contenu.client
     await srv.api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)
-    horloge = new Date(2026, 11, 20, 12, 0)
+    horloge = new Date(2026, 11, 9, 12, 0) // 30 jours : trop tôt pour le win-back recalibré (rappel à 45 j)
+    assert.ok(!(await srv.api('GET', `/cartes/${c.id}`)).contenu.client.messages.some((m: { type: string }) => m.type === 'inactif'))
+    horloge = new Date(2026, 11, 25, 12, 0) // 46 jours : rappel doux, sans remise
     const types = (await srv.api('GET', `/cartes/${c.id}`)).contenu.client.messages.map((m: { type: string }) => m.type)
     assert.ok(types.includes('inactif'))
     const encore = (await srv.api('GET', `/cartes/${c.id}`)).contenu.client.messages.filter((m: { type: string }) => m.type === 'inactif')

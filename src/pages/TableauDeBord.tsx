@@ -12,6 +12,11 @@ const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
   message: 'Message',
   equipe: 'Équipe',
   menu: 'Menu',
+  parrainage: 'Parrainage',
+  rattrapage: 'Rattrapage',
+  palier: 'Palier',
+  reserve: 'Plat en réserve',
+  defi: 'Défi',
 }
 
 function Chiffre({ valeur, libelle, aide }: { valeur: string | number; libelle: string; aide: string }) {
@@ -74,6 +79,29 @@ export default function TableauDeBord() {
         <Chiffre valeur={cartes.passagesTotal} libelle="Passages" aide={`dont ${cartes.passages30j} sur 30 jours`} />
         <Chiffre valeur={cartes.recompensesDonnees} libelle="Récompenses données" aide="cartes complètes + échanges de points" />
         <Chiffre valeur={cartes.pointsEnCirculation} libelle="Points en cours" aide="soldes des clients" />
+      </section>
+
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-4" aria-label="Programme de fidélité">
+        <Chiffre
+          valeur={clients.reduce((n, c) => n + (c.parrainagesGagnes?.length ?? 0), 0)}
+          libelle="Parrainages réussis"
+          aide="filleuls venus une 1re fois"
+        />
+        <Chiffre
+          valeur={clients.filter((c) => c.visites.length >= 25).length}
+          libelle="Clients VIP"
+          aide="25 visites ou + (niveau rare)"
+        />
+        <Chiffre
+          valeur={clients.reduce((n, c) => n + (c.demandesRattrapage ?? []).filter((d) => d.statut === 'en_attente').length, 0)}
+          libelle="Rattrapages en attente"
+          aide="visites oubliées à valider"
+        />
+        <Chiffre
+          valeur={clients.reduce((n, c) => n + (c.defisReussis?.length ?? 0), 0)}
+          libelle="Défis réussis"
+          aide="3 visites en 14 jours"
+        />
       </section>
 
       <nav className="grid grid-cols-3 gap-2" aria-label="Actions rapides">

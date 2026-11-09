@@ -1,11 +1,15 @@
 import type { Client, Commerce } from '../types'
 import { recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { eurosParPoint, soldePoints } from '../lib/points'
+import { configDefi, configOffreHebdo, configParrainage, niveauClient, offreHebdoDuJour, prochainPalier, recompensesEnAttenteValables, reserveUtilisable, JOURS_SEMAINE } from '../lib/programme'
 import { assombrir, estCouleur } from '../lib/apparence'
 import { banniereCommerce, VISUELS } from '../lib/visuels'
 import { dateRelative } from '../lib/format'
 import { urlAbsolue } from '../router'
 import { LogoCommerce, QrCode } from './ui'
+import { useState } from 'react'
+
+const dateCourte = (iso: string) => new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
 
 /** Colonnes de la grille de tampons : rangées régulières (5 pour 10 tampons, 4 pour 8…). */
 function colonnes(seuil: number): string {
@@ -32,6 +36,28 @@ export function CarteFidelite({ client, commerce, sansQr = false }: { client: Cl
   // Couleurs personnalisées (Réglages → Apparence, contraste vérifié) ; sinon la charte par défaut (classes ci-dessous).
   const styleBandeau = estCouleur(couleur) ? { background: `linear-gradient(135deg, ${couleur}, ${assombrir(couleur)})` } : undefined
   const points = soldePoints(client)
+  // ---- Programme de fidélité (benchmark 09/11/2026) : tout est calculé côté serveur, affiché ici. ----
+  const maintenant = new Date()
+  const niveau = niveauClient(client, commerce)
+  const palier = prochainPalier(client, commerce)
+  const enAttente = recompensesEnAttenteValables(client, maintenant)
+  const defi = client.defi && configDefi(commerce).actif ? client.defi : undefined
+  const defiProgression = defi ? client.visites.filter((v) => new Date(v).getTime() >= new Date(defi.debut).getTime()).length : 0
+  const reserve = reserveUtilisable(client, maintenant)
+  const offreHebdo = configOffreHebdo(commerce)
+  const offreAujourdhui = offreHebdoDuJour(commerce, maintenant)
+  const parrainage = configParrainage(commerce)
+  const lienParrainage = client.codeParrainage ? `${urlAbsolue('jouer', commerce.id)}?parrain=${client.codeParrainage}` : ''
+  const [copie, setCopie] = useState(false)
+  async function copierLien() {
+    try {
+      await navigator.clipboard.writeText(lienParrainage)
+      setCopie(true)
+      setTimeout(() => setCopie(false), 2000)
+    } catch {
+      // Presse-papiers indisponible : le lien reste sélectionnable ci-dessous.
+    }
+  }
 
   return (
     <section className="overflow-hidden rounded-3xl bg-white shadow-relief ring-1 ring-gray-900/5" style={estCouleur(fond) ? { backgroundColor: fond } : undefined}>
@@ -123,6 +149,79 @@ export function CarteFidelite({ client, commerce, sansQr = false }: { client: Cl
           <p className="mt-4 rounded-xl bg-gray-50 p-3 text-sm text-gray-700 ring-1 ring-gray-900/5">
             <span className="font-semibold">Objectif :</span> {commerce.recompense}
           </p>
+        )}
+
+        {/* Programme : niveau, prochain palier, défi, récompenses en attente, réserve, offre hebdo, parrainage. */}
+        {niveau.nom !== 'Membre' && (
+          <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+            <span className="font-bold">{niveau.nom === 'VIP' ? '👑 VIP — nos clients les plus fidèles' : `⭐ ${niveau.nom}`}</span>
+            <span className="block text-xs">{niveau.avantages}</span>
+          </p>
+        )}
+        {palier && (
+          <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-900 ring-1 ring-red-200">
+            <span className="font-semibold">Plus que {palier.restantes} visite{palier.restantes > 1 ? 's' : ''} avant : </span>
+            {palier.palier.libelle}
+          </p>
+        )}
+        {defi && (
+          <div className="mt-4 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-900/5">
+            <p className="text-sm font-semibold text-gray-900">
+              🎯 Défi : {defiProgression}/{defi.objectif} visites en {defi.jours} jours
+            </p>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-200" role="progressbar" aria-valuemin={0} aria-valuemax={defi.objectif} aria-valuenow={defiProgression} aria-label="Progression du défi">
+              <div className="h-full rounded-full bg-marque-500" style={{ width: `${Math.round((defiProgression / defi.objectif) * 100)}%` }} />
+            </div>
+            <p className="mt-1 text-sm text-gray-700">
+              {defi.objectif - defiProgression > 0 ? `Plus que ${defi.objectif - defiProgression} visite${defi.objectif - defiProgression > 1 ? 's' : ''} → ${defi.recompense}` : `${defi.recompense} gagné !`}
+            </p>
+          </div>
+        )}
+        {enAttente.length > 0 && (
+          <div className="mt-4 rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100 p-4 text-amber-900 ring-2 ring-or-500" role="status">
+            <p className="surtitre text-amber-800">À retirer au comptoir</p>
+            <ul className="mt-1 space-y-1">
+              {enAttente.map((r) => (
+                <li key={r.id} className="text-sm">
+                  <span className="font-bold">🎁 {r.libelle}</span>
+                  {r.expireLe && <span className="block text-xs">Valable jusqu’au {dateCourte(r.expireLe)}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {reserve && (
+          <p className="mt-4 rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">
+            <span className="font-semibold">🍜 Plat en réserve</span> — un plat offert à utiliser avant le {dateCourte(reserve.expireLe)}.
+          </p>
+        )}
+        {offreHebdo.actif && (
+          <p className="mt-4 rounded-xl bg-gray-50 p-3 text-sm text-gray-700 ring-1 ring-gray-900/5">
+            {offreAujourdhui ? (
+              <>
+                <span className="font-semibold">Aujourd’hui, membres : </span>
+                {offreAujourdhui.libelle}
+                {offreAujourdhui.condition ? ` ${offreAujourdhui.condition}` : ''}
+              </>
+            ) : (
+              <>
+                <span className="font-semibold">Tous les {JOURS_SEMAINE[offreHebdo.jour]}s, membres : </span>
+                {offreHebdo.libelle}
+                {offreHebdo.condition ? ` ${offreHebdo.condition}` : ''}
+              </>
+            )}
+          </p>
+        )}
+        {parrainage.actif && client.codeParrainage && (
+          <div className="mt-4 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-900/5">
+            <p className="text-sm font-semibold text-gray-900">👥 Parrainez un ami, vous gagnez chacun {parrainage.pointsFilleul} points</p>
+            <p className="mt-1 text-sm text-gray-700">
+              Votre code : <span className="font-mono font-bold text-marque-700">{client.codeParrainage}</span> — votre ami le saisit à son inscription, vous gagnez vos points à sa 1re visite.
+            </p>
+            <button type="button" className="bouton-secondaire mt-2 w-full" onClick={() => void copierLien()}>
+              {copie ? '✓ Lien copié !' : 'Copier mon lien de parrainage'}
+            </button>
+          </div>
         )}
 
         {!!commerce.catalogue?.length && (

@@ -12,6 +12,31 @@ export interface ReglesReponseAuto {
   brouillonAutres: boolean
 }
 
+/** Un palier intermédiaire : petite récompense avant la récompense principale. */
+export interface Palier {
+  /** Nombre de visites (tampons) pour débloquer ce palier. */
+  seuil: number
+  libelle: string
+}
+
+/**
+ * Configuration du programme de fidélité (benchmark 09/11/2026 : Domino's, Starbucks, KFC, McDonald's…).
+ * Tout est optionnel : absent = valeurs par défaut (voir `src/lib/programme.ts`), un commerce existant
+ * sans configuration voit donc les défauts s'appliquer sans rien casser. Chaque bloc a son `actif`.
+ */
+export interface ConfigProgramme {
+  paliers?: { actif?: boolean; liste?: Palier[] }
+  parrainage?: { actif?: boolean; pointsParrain?: number; pointsFilleul?: number; plafondAn?: number }
+  bienvenue?: { actif?: boolean; points?: number }
+  defi?: { actif?: boolean; visites?: number; jours?: number; recompense?: string }
+  niveaux?: { actif?: boolean; habitueSeuil?: number; habitueMultiplicateur?: number; vipSeuil?: number; vipMultiplicateur?: number }
+  winback?: { actif?: boolean; rappelJours?: number; offreJours?: number; derniereJours?: number; offre?: string }
+  anniversaire?: { actif?: boolean; validiteJours?: number; demiAnniversaire?: boolean; adhesion?: boolean }
+  offreHebdo?: { actif?: boolean; jour?: number; libelle?: string; condition?: string }
+  reserve?: { actif?: boolean; montantMinCentimes?: number; validiteJours?: number; parTrimestre?: number }
+  rattrapage?: { actif?: boolean; delaiJours?: number }
+}
+
 export interface Lot {
   libelle: string
   /** En %, ex. 30. Si le total ≠ 100, les chances sont recalculées au prorata. */
@@ -44,6 +69,8 @@ export interface Commerce {
   messagesAuto?: ReglesMessages
   /** Couleurs / bannière de la carte (absent = charte par défaut : rouge laque, fond ivoire). */
   apparence?: Apparence
+  /** Programme de fidélité (paliers, parrainage, niveaux, défis…) : absent = défauts (voir `src/lib/programme.ts`). */
+  programme?: ConfigProgramme
 }
 
 export interface RecompensePoints {
@@ -92,7 +119,59 @@ export interface MembreEquipe {
   creeLe: string
 }
 
-export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu'
+export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi'
+
+/** Parrainage réussi (trace d'audit ; les points sont sur les cartes des deux clients). */
+export interface Parrainage {
+  id: string
+  commerceId: string
+  parrainId: string
+  filleulId: string
+  date: string
+  pointsParrain: number
+  pointsFilleul: number
+}
+
+/** Demande de rattrapage d'une visite oubliée (Domino's FR : réclamation sous 30 jours). */
+export interface DemandeRattrapage {
+  id: string
+  /** Date de la visite oubliée (ISO). */
+  date: string
+  montantCentimes: number
+  /** Numéro de ticket / justificatif saisi par le client (optionnel). */
+  ticket?: string
+  statut: 'en_attente' | 'validee' | 'refusee'
+  creeLe: string
+  decideLe?: string
+}
+
+/** Récompense gagnée, à retirer au comptoir (palier, défi, anniversaire…). */
+export interface RecompenseEnAttente {
+  id: string
+  libelle: string
+  origine: 'palier' | 'defi' | 'anniversaire' | 'demi-anniversaire' | 'adhesion'
+  creeLe: string
+  /** Au-delà : la récompense n'est plus retirable (anniversaire). Absent = sans expiration. */
+  expireLe?: string
+  /** Seuil du palier (origine « palier » uniquement). */
+  seuil?: number
+}
+
+/** Défi en cours (un seul à la fois) : objectif de visites sur une durée courte. */
+export interface DefiEnCours {
+  id: string
+  debut: string
+  objectif: number
+  jours: number
+  recompense: string
+}
+
+/** Plat offert « en réserve » (Domino's Emergency Pizza) : gagné d'avance, à utiliser sous 30 jours. */
+export interface Reserve {
+  gagneLe: string
+  expireLe: string
+  utiliseLe?: string
+}
 
 /** Journal d'audit : qui a fait quoi, pour quel client, quand. Jamais de code équipe ni de PIN. */
 export interface EntreeJournal {
@@ -162,6 +241,31 @@ export interface Client {
   anniversaire?: string
   /** Identifiants des dernières actions de caisse traitées (idempotence de la file hors ligne). */
   actionsTraitees?: string[]
+  // ---- Programme de fidélité (benchmark 09/11/2026) : champs ajoutés, jamais exigés ----
+  /** Code de parrainage unique du client (ex. « AH-K7Q2P9 »), partageable en lien / QR. */
+  codeParrainage?: string
+  /** Client qui l'a parrainé (un seul parrain par filleul, fixé à l'inscription). */
+  parrainId?: string
+  /** Récompense de parrainage déjà versée (après la 1re visite du filleul). */
+  parrainagePaye?: boolean
+  /** Dates (ISO) des parrainages réussis de ce client (plafond annuel). */
+  parrainagesGagnes?: string[]
+  /** Paliers déjà remis au comptoir (seuils). */
+  paliersOfferts?: number[]
+  /** Récompenses gagnées, à retirer au comptoir. */
+  recompensesEnAttente?: RecompenseEnAttente[]
+  /** Défi en cours (un seul à la fois). */
+  defi?: DefiEnCours
+  /** Défis réussis (date + récompense). */
+  defisReussis?: { date: string; recompense: string }[]
+  /** Plat offert en réserve (gagné après une commande ≥ seuil, à utiliser sous 30 jours). */
+  reserve?: Reserve
+  /** Dates (ISO) des plats en réserve gagnés (plafond : 1 par trimestre). */
+  reservesGagnees?: string[]
+  /** Demandes de rattrapage de visites oubliées. */
+  demandesRattrapage?: DemandeRattrapage[]
+  /** Plat préféré, collecté après la 2e visite (profiling progressif, jamais à l'inscription). */
+  platPrefere?: string
 }
 
 export interface RecompenseOfferte {

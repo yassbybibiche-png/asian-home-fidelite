@@ -10,11 +10,12 @@ import { dateCourte, dateRelative } from '../lib/format'
 import { CarteFidelite } from '../components/CarteFidelite'
 import { EncartWallet, EnTete, MessageErreur, Vide } from '../components/ui'
 
-/** Mode serveur : points (échange contre le catalogue), historique des échanges, anniversaire. */
+/** Mode serveur : points (échange contre le catalogue), historique des échanges, anniversaire, plat préféré. */
 function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: Commerce }) {
   const { avecPin } = useStore()
   const { executer, enCours, erreur } = useAction()
   const [anniv, setAnniv] = useState(anniversaireAffiche(client.anniversaire))
+  const [plat, setPlat] = useState(client.platPrefere ?? '')
   const [annonce, setAnnonce] = useState('')
   const valeur = analyserAnniversaire(anniv)
   const solde = soldePoints(client)
@@ -22,8 +23,8 @@ function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: 
   async function enregistrerAnniv(e: FormEvent) {
     e.preventDefault()
     if (valeur === null) return
-    const r = await executer(() => avecPin((a, api) => api.majClient(commerce.id, a, client.id, { anniversaire: valeur })))
-    if (r.ok) setAnnonce('✓ Anniversaire enregistré')
+    const r = await executer(() => avecPin((a, api) => api.majClient(commerce.id, a, client.id, { anniversaire: valeur, platPrefere: plat.trim() })))
+    if (r.ok) setAnnonce('✓ Anniversaire et plat préféré enregistrés')
   }
 
   return (
@@ -64,18 +65,81 @@ function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: 
           ))}
         </ul>
       )}
-      <form onSubmit={enregistrerAnniv} className="flex items-end gap-2 border-t border-gray-100 pt-3">
-        <div className="min-w-0 flex-1">
-          <label className="etiquette" htmlFor="anniv">
-            Anniversaire (JJ/MM, optionnel)
-          </label>
-          <input id="anniv" className="champ" inputMode="numeric" placeholder="21/03" value={anniv} onChange={(e) => (setAnniv(e.target.value), setAnnonce(''))} />
+      <form onSubmit={enregistrerAnniv} className="space-y-3 border-t border-gray-100 pt-3">
+        <div className="flex items-end gap-2">
+          <div className="min-w-0 flex-1">
+            <label className="etiquette" htmlFor="anniv">
+              Anniversaire (JJ/MM, optionnel)
+            </label>
+            <input id="anniv" className="champ" inputMode="numeric" placeholder="21/03" value={anniv} onChange={(e) => (setAnniv(e.target.value), setAnnonce(''))} />
+          </div>
+          <button className="bouton-secondaire h-12 shrink-0" disabled={enCours || valeur === null}>
+            Enregistrer
+          </button>
         </div>
-        <button className="bouton-secondaire h-12 shrink-0" disabled={enCours || valeur === null}>
-          Enregistrer
-        </button>
+        <div>
+          <label className="etiquette" htmlFor="plat-prefere">
+            Plat préféré (optionnel)
+          </label>
+          <input id="plat-prefere" className="champ" maxLength={80} placeholder="ex : poulet satay" value={plat} onChange={(e) => (setPlat(e.target.value), setAnnonce(''))} />
+        </div>
       </form>
       {valeur === null && <p className="text-sm text-red-700">Format attendu : JJ/MM (ex : 21/03).</p>}
+      <MessageErreur>{erreur}</MessageErreur>
+      {annonce && (
+        <p className="alerte-succes" role="status">
+          {annonce}
+        </p>
+      )}
+    </section>
+  )
+}
+
+/** Visites oubliées signalées par le client : le commerçant valide (+1 visite + points) ou refuse. */
+function Rattrapages({ client, commerce }: { client: Client; commerce: Commerce }) {
+  const { avecPin } = useStore()
+  const { executer, enCours, erreur } = useAction()
+  const [annonce, setAnnonce] = useState('')
+  const enAttente = (client.demandesRattrapage ?? []).filter((d) => d.statut === 'en_attente')
+  if (!enAttente.length) return null
+  return (
+    <section className="carte space-y-3">
+      <h2 className="titre-carte">Visites oubliées à valider</h2>
+      <p className="text-sm text-gray-600">Le client a signalé avoir oublié de scanner. Valider crédite 1 tampon + les points du montant ; refuser classe la demande.</p>
+      <ul className="space-y-3">
+        {enAttente.map((d) => (
+          <li key={d.id} className="rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
+            <p className="font-semibold">
+              {new Date(d.date).toLocaleDateString('fr-FR')} · {formaterPrix(d.montantCentimes)}
+              {d.ticket ? ` · ticket ${d.ticket}` : ''}
+            </p>
+            <p className="text-xs text-gray-600">Signalée {dateRelative(d.creeLe)}</p>
+            <div className="mt-2 flex gap-2">
+              <button
+                className="bouton min-h-11 flex-1"
+                disabled={enCours}
+                onClick={async () => {
+                  const r = await executer(() => avecPin((a, api) => api.deciderRattrapage(commerce.id, a, client.id, d.id, 'valider')))
+                  if (r.ok) setAnnonce('✓ Visite validée : +1 tampon et points crédités.')
+                }}
+              >
+                Valider
+              </button>
+              <button
+                className="bouton-secondaire min-h-11 flex-1"
+                disabled={enCours}
+                onClick={async () => {
+                  if (!window.confirm('Refuser cette visite oubliée ?')) return
+                  const r = await executer(() => avecPin((a, api) => api.deciderRattrapage(commerce.id, a, client.id, d.id, 'refuser')))
+                  if (r.ok) setAnnonce('Demande refusée.')
+                }}
+              >
+                Refuser
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
       <MessageErreur>{erreur}</MessageErreur>
       {annonce && (
         <p className="alerte-succes" role="status">
@@ -174,6 +238,7 @@ export default function FicheClient() {
       </section>
 
       {mode === 'api' && <PointsEtAnniversaire client={client} commerce={commerce} />}
+      {mode === 'api' && <Rattrapages client={client} commerce={commerce} />}
 
       <EncartWallet demo={estDemo} lienCarte={`#/carte/${client.id}`} />
 

@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, MessageClient } from '../types'
 import { ErreurApi, type ClientApi } from '../data/api'
 import { CarteFidelite } from '../components/CarteFidelite'
 import { InvitationAvis } from '../components/InvitationAvis'
-import { BadgeDemo, EncartWallet } from '../components/ui'
+import { BadgeDemo, EncartWallet, MessageErreur } from '../components/ui'
 import { dateRelative } from '../lib/format'
 import { estAsianHome, VISUELS } from '../lib/visuels'
+import { configRattrapage, peutCompleterProfil } from '../lib/programme'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 
 /** Page publique #/carte/<clientId> : la carte de fidélité sur le téléphone du client. */
@@ -45,7 +46,7 @@ function BoiteReception({ messages, commerce }: { messages: MessageClient[]; com
   )
 }
 
-function Carte({ client, commerce, demo, pied, menu }: { client: Client; commerce: Commerce; demo: boolean; pied: ReactNode; menu?: boolean }) {
+function Carte({ client, commerce, demo, pied, menu, actions }: { client: Client; commerce: Commerce; demo: boolean; pied: ReactNode; menu?: boolean; actions?: ReactNode }) {
   if (!commerce.actif) return <MessagePublic titre={commerce.nom}>La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
   return (
     <div className="mx-auto max-w-md space-y-4 px-4 pt-6 pb-10">
@@ -57,6 +58,7 @@ function Carte({ client, commerce, demo, pied, menu }: { client: Client; commerc
         />
       )}
       <CarteFidelite client={client} commerce={commerce} />
+      {actions}
       <BoiteReception messages={client.messages ?? []} commerce={commerce} />
       <a href={`#/jouer/${commerce.id}`} className="bouton w-full">
         🎡 Tourner la roue du jour
@@ -147,6 +149,7 @@ function CarteApi({ api }: { api: ClientApi }) {
       commerce={donnees.commerce}
       demo={!!donnees.commerce.demo}
       menu={donnees.menu}
+      actions={<FormulairesProgramme api={api} client={donnees.client} commerce={donnees.commerce} onMaj={charger} />}
       pied={
         <>
           {donnees.commerce.demo && <BadgeDemo>Démo</BadgeDemo>}
@@ -154,5 +157,122 @@ function CarteApi({ api }: { api: ClientApi }) {
         </>
       }
     />
+  )
+}
+
+/** Rattrapage d'une visite oubliée + profil progressif (après la 2e visite). */
+function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi; client: Client; commerce: Commerce; onMaj(): void }) {
+  const [anniversaire, setAnniversaire] = useState('')
+  const [plat, setPlat] = useState('')
+  const [date, setDate] = useState('')
+  const [montant, setMontant] = useState('')
+  const [ticket, setTicket] = useState('')
+  const [message, setMessage] = useState('')
+  const [erreur, setErreur] = useState('')
+  const [enCours, setEnCours] = useState(false)
+  const rattrapage = configRattrapage(commerce)
+  const enAttente = (client.demandesRattrapage ?? []).filter((d) => d.statut === 'en_attente')
+
+  async function envoyerProfil(e: FormEvent) {
+    e.preventDefault()
+    if (enCours) return
+    setErreur('')
+    setMessage('')
+    setEnCours(true)
+    try {
+      await api.profil(commerce.id, client.id, { ...(anniversaire.trim() ? { anniversaire: anniversaire.trim() } : {}), ...(plat.trim() ? { platPrefere: plat.trim() } : {}) })
+      setMessage('Merci, votre profil est à jour !')
+      setAnniversaire('')
+      setPlat('')
+      onMaj()
+    } catch (err) {
+      setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
+    } finally {
+      setEnCours(false)
+    }
+  }
+
+  async function envoyerRattrapage(e: FormEvent) {
+    e.preventDefault()
+    if (enCours) return
+    setErreur('')
+    setMessage('')
+    const centimes = Math.round(Number(montant.replace(',', '.')) * 100)
+    if (!date || !Number.isFinite(centimes) || centimes < 0) return setErreur('Indiquez la date de la visite et le montant payé.')
+    setEnCours(true)
+    try {
+      await api.declarerRattrapage(commerce.id, client.id, { date: new Date(`${date}T12:00:00`).toISOString(), montantCentimes: centimes, ...(ticket.trim() ? { ticket: ticket.trim() } : {}) })
+      setMessage('Demande envoyée : le restaurant la validera et votre visite sera créditée.')
+      setDate('')
+      setMontant('')
+      setTicket('')
+      onMaj()
+    } catch (err) {
+      setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
+    } finally {
+      setEnCours(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {peutCompleterProfil(client) && (
+        <form onSubmit={envoyerProfil} className="carte space-y-3">
+          <h2 className="titre-carte">Votre profil</h2>
+          <p className="text-sm text-gray-600">Pour recevoir votre récompense d’anniversaire et des offres sur vos plats préférés.</p>
+          <div>
+            <label className="etiquette" htmlFor="cp-anniversaire">
+              Anniversaire (JJ/MM){client.anniversaire ? ` — enregistré : ${client.anniversaire.slice(3)}/${client.anniversaire.slice(0, 2)}` : ''}
+            </label>
+            <input id="cp-anniversaire" className="champ" inputMode="numeric" placeholder="21/03" value={anniversaire} onChange={(e) => setAnniversaire(e.target.value)} />
+          </div>
+          <div>
+            <label className="etiquette" htmlFor="cp-plat">
+              Plat préféré{client.platPrefere ? ` — enregistré : ${client.platPrefere}` : ''}
+            </label>
+            <input id="cp-plat" className="champ" maxLength={80} placeholder="ex : poulet satay" value={plat} onChange={(e) => setPlat(e.target.value)} />
+          </div>
+          <button type="submit" className="bouton-secondaire w-full" disabled={enCours || (!anniversaire.trim() && !plat.trim())}>
+            Enregistrer mon profil
+          </button>
+        </form>
+      )}
+      {rattrapage.actif && (
+        <form onSubmit={envoyerRattrapage} className="carte space-y-3">
+          <h2 className="titre-carte">J’ai oublié de scanner</h2>
+          <p className="text-sm text-gray-600">Signalez une visite oubliée (sous {rattrapage.delaiJours} jours) : le restaurant la validera et votre tampon + vos points seront crédités.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="etiquette" htmlFor="cp-date">
+                Date de la visite
+              </label>
+              <input id="cp-date" className="champ" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+            </div>
+            <div>
+              <label className="etiquette" htmlFor="cp-montant">
+                Montant payé (€)
+              </label>
+              <input id="cp-montant" className="champ" inputMode="decimal" placeholder="24,50" value={montant} onChange={(e) => setMontant(e.target.value)} required />
+            </div>
+          </div>
+          <div>
+            <label className="etiquette" htmlFor="cp-ticket">
+              N° de ticket (optionnel)
+            </label>
+            <input id="cp-ticket" className="champ" maxLength={80} placeholder="ex : T-1234" value={ticket} onChange={(e) => setTicket(e.target.value)} />
+          </div>
+          <button type="submit" className="bouton-secondaire w-full" disabled={enCours}>
+            Envoyer ma demande
+          </button>
+          {enAttente.length > 0 && (
+            <p className="text-sm text-gray-700">
+              {enAttente.length} demande{enAttente.length > 1 ? 's' : ''} en attente de validation par le restaurant.
+            </p>
+          )}
+        </form>
+      )}
+      {message && <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">{message}</p>}
+      {erreur && <MessageErreur>{erreur}</MessageErreur>}
+    </div>
   )
 }

@@ -5,16 +5,31 @@ import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, EntreeJournal, Lot, MembreEquipe, RecompensePoints, ReglesMessages, Tirage, TypeCommerce } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, DemandeRattrapage, EntreeJournal, Lot, MembreEquipe, Parrainage, RecompensePoints, ReglesMessages, Tirage, TypeCommerce } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
-import { analyserContact, cleContact, messageRelance, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches, validerVisite } from '../src/lib/fidelite.ts'
+import { analyserContact, cleContact, messageRelance, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
 import { estPerdant, lotsJouables, statutJeu, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles } from '../src/lib/avis.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
-import { actionDejaTraitee, avecAction, echangerPoints, enregistrerPassage, formaterPrix } from '../src/lib/points.ts'
-import { clientsCibles, deposerMessage, genererMessages, marquerLus, TYPES_MESSAGES, type Cible, type Evenement } from '../src/lib/messages.ts'
+import { actionDejaTraitee, avecAction, echangerPoints, formaterPrix, soldePoints } from '../src/lib/points.ts'
+import { analyserAnniversaire, clientsCibles, deposerMessage, genererMessages, marquerLus, TYPES_MESSAGES, type Cible, type Evenement } from '../src/lib/messages.ts'
+import {
+  appliquerInscription,
+  appliquerRattrapageValide,
+  appliquerVisiteProgramme,
+  consommerRecompenseEnAttente,
+  genererCodeParrainage,
+  niveauClient,
+  parrainageDu,
+  passageAvecProgramme,
+  peutCompleterProfil,
+  rattrapageRecevable,
+  utiliserReserve,
+  validerProgramme,
+  type EvenementPassage,
+} from '../src/lib/programme.ts'
 import { problemesApparence } from '../src/lib/apparence.ts'
 import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type Pin, type Stockage } from './stockage.ts'
@@ -192,7 +207,17 @@ function apparence(v: unknown): Apparence {
   return a
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence']
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme']
+
+/** Fusion d'une configuration de programme partielle (PATCH) : chaque bloc est fusionné, pas remplacé. */
+function fusionnerProgramme(existant: Commerce['programme'], patch: NonNullable<Commerce['programme']>): NonNullable<Commerce['programme']> {
+  const r: Record<string, unknown> = { ...(existant ?? {}) }
+  for (const [k, v] of Object.entries(patch)) {
+    const ancien = r[k]
+    r[k] = ancien && typeof ancien === 'object' && v && typeof v === 'object' ? { ...ancien, ...v } : v
+  }
+  return r as NonNullable<Commerce['programme']>
+}
 
 /** Réglages modifiables d'un commerce : tout autre champ est refusé (400). */
 function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGES): Commerce {
@@ -230,6 +255,15 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
   if ('catalogue' in corps) r.catalogue = catalogue(corps.catalogue)
   if ('messagesAuto' in corps) r.messagesAuto = reglesMessages(corps.messagesAuto)
   if ('apparence' in corps) r.apparence = apparence(corps.apparence)
+  if ('programme' in corps) {
+    let programme
+    try {
+      programme = validerProgramme(corps.programme)
+    } catch (e) {
+      throw err(400, (e as Error).message)
+    }
+    r.programme = fusionnerProgramme(c.programme, programme)
+  }
   return r
 }
 
@@ -250,8 +284,8 @@ function contactOuErreur(v: unknown) {
 
 /** Fiche publique d'un commerce (le PIN est stocké à part et n'en fait jamais partie). */
 function commercePublic(c: Commerce) {
-  const { id, nom, type, logo, actif, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, demo, eurosParPoint, catalogue, apparence } = c
-  return { id, nom, type, logo, actif, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, demo: !!demo, eurosParPoint, catalogue, apparence }
+  const { id, nom, type, logo, actif, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, demo, eurosParPoint, catalogue, apparence, programme } = c
+  return { id, nom, type, logo, actif, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, demo: !!demo, eurosParPoint, catalogue, apparence, programme }
 }
 
 /** Carte vue par le client lui-même (page publique) : sans téléphone, e-mail ni données techniques. */
@@ -467,6 +501,20 @@ export async function creerServeur(o: OptionsServeur) {
     return cartizPresent
   }
 
+  // Même principe pour la migration 0004 (parrainages, demandes de rattrapage — traces d'audit).
+  let programmePresent = false
+  let programmeVerifieLe = 0
+  async function schemaProgramme(): Promise<boolean> {
+    if (programmePresent || Date.now() - programmeVerifieLe < 60_000) return programmePresent
+    programmeVerifieLe = Date.now()
+    try {
+      programmePresent = await st.schemaProgramme()
+    } catch {
+      programmePresent = false
+    }
+    return programmePresent
+  }
+
   /** Messages automatiques dus pour cet événement (règles du commerce). */
   const avecMessages = (client: Client, commerce: Commerce, evenement: Evenement, t = maintenant()) =>
     genererMessages(client, commerce, evenement, t, nouvelIdMessage).client
@@ -508,13 +556,56 @@ export async function creerServeur(o: OptionsServeur) {
     if (!c.actif) throw err(409, 'Ce commerce n’est pas actif pour le moment.')
   }
 
+  /**
+   * Récompense de parrainage après la 1re visite du filleul (jamais à l'inscription).
+   * À appeler dans la transaction du passage, une fois le filleul mis à jour : met à jour le parrain,
+   * journalise des deux côtés et écrit la trace d'audit (0004, ignorée si la migration manque).
+   * Retourne le filleul avec ses points de parrainage, et le texte à ajouter au journal du passage.
+   */
+  async function reglerParrainage(commerce: Commerce, filleulApres: Client, quand: Date): Promise<{ filleul: Client; texte: string }> {
+    if (!filleulApres.parrainId || filleulApres.parrainagePaye) return { filleul: filleulApres, texte: '' }
+    const parrain = await st.client(commerce.id, filleulApres.parrainId)
+    if (!parrain) return { filleul: filleulApres, texte: '' }
+    const r = parrainageDu(filleulApres, parrain, commerce, quand)
+    if (!r) return { filleul: filleulApres, texte: '' }
+    const pointsFilleul = soldePoints(r.filleul) - soldePoints(filleulApres)
+    const pointsParrain = r.parrain ? soldePoints(r.parrain) - soldePoints(parrain) : 0
+    const texte = r.parrain
+      ? `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) et +${pointsParrain} points pour ${parrain.prenom} (parrain)`
+      : `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) — parrain au plafond annuel, rien pour ${parrain.prenom}`
+    if (r.parrain) {
+      await st.majClient(r.parrain)
+      await journaliser(commerce.id, { type: 'gerant', nom: 'Gérant' }, 'parrainage', texte, r.parrain, quand)
+    }
+    const trace: Parrainage = {
+      id: `pr-${randomUUID()}`,
+      commerceId: commerce.id,
+      parrainId: parrain.id,
+      filleulId: filleulApres.id,
+      date: quand.toISOString(),
+      pointsParrain,
+      pointsFilleul,
+    }
+    await st.ajouterParrainage(trace)
+    return { filleul: r.filleul, texte }
+  }
+
   /** Inscrit le client, ou retrouve celui qui a déjà ce téléphone / e-mail dans ce commerce. */
-  async function inscrireOuRetrouver(commerce: Commerce, prenom: string, contactSaisi: unknown) {
+  async function inscrireOuRetrouver(commerce: Commerce, prenom: string, contactSaisi: unknown, parrainCode?: string) {
     const commerceId = commerce.id
     const contact = contactOuErreur(contactSaisi)
     const existant = await st.clientParContact(commerceId, contact)
     if (existant) return { client: existant, existant: true }
-    const client = avecMessages(nouveauClient(commerceId, prenom, contact, maintenant()), commerce, 'inscription')
+    // Parrainage : le code est résolu ici (un seul parrain par filleul, fixé à l'inscription).
+    let parrainId: string | undefined
+    const code = typeof parrainCode === 'string' ? parrainCode.trim().toUpperCase() : ''
+    const clientsConnus = code ? await st.clients(commerceId) : []
+    if (code) parrainId = clientsConnus.find((c) => (c.codeParrainage ?? '').toUpperCase() === code)?.id
+    let client = appliquerInscription(nouveauClient(commerceId, prenom, contact, maintenant()), commerce, parrainId)
+    // Code unique dans le commerce (collision quasi impossible, mais vérifiée).
+    const codesPris = new Set(clientsConnus.map((c) => c.codeParrainage).filter(Boolean))
+    for (let i = 0; i < 10 && codesPris.has(client.codeParrainage); i++) client = { ...client, codeParrainage: genererCodeParrainage() }
+    client = avecMessages(client, commerce, 'inscription')
     try {
       await st.ajouterClient(client)
     } catch (e) {
@@ -530,7 +621,7 @@ export async function creerServeur(o: OptionsServeur) {
 
   async function router(req: IncomingMessage, chemin: string[]): Promise<Reponse> {
     const m = req.method
-    const [ressource, id, sous, sousId, action] = chemin
+    const [ressource, id, sous, sousId, action, extra] = chemin
 
     if (ressource === 'sante' && !id && m === 'GET') {
       return {
@@ -542,7 +633,8 @@ export async function creerServeur(o: OptionsServeur) {
           demo: !!o.demo,
           integrations: integrations(),
           // Migration 0003 (équipe, journal, menu) appliquée sur la base ?
-          migrations: { cartiz: await schemaCartiz() },
+          // Migration 0004 (parrainages, demandes de rattrapage) appliquée sur la base ?
+          migrations: { cartiz: await schemaCartiz(), programme: await schemaProgramme() },
         },
       }
     }
@@ -662,12 +754,13 @@ export async function creerServeur(o: OptionsServeur) {
 
     if (sous === 'clients' && !sousId && m === 'POST') {
       // Public (auto-inscription depuis la page de jeu) ou commerçant (PIN) : un PIN fourni est toujours vérifié.
+      // Inscription simplifiée (recherche CX §1) : téléphone seul obligatoire, prénom optionnel, aucun mot de passe.
       const commercant = aUnPin(req)
       if (commercant) await exigerCommercant(req, id)
       else exigerActif(commerce)
       const corps = await lireCorps(req)
-      const prenom = texte(corps.prenom ?? '', 'prenom', 40, { requis: true })
-      const { client, existant } = await st.transaction(() => inscrireOuRetrouver(commerce, prenom, corps.contact))
+      const prenom = texte(corps.prenom ?? '', 'prenom', 40)
+      const { client, existant } = await st.transaction(() => inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain))
       return { statut: existant ? 200 : 201, json: { client: commercant ? client : cartePublique(client), existant } }
     }
 
@@ -678,14 +771,30 @@ export async function creerServeur(o: OptionsServeur) {
         if (action === 'recompense' && !recompenseDebloquee(avant, commerce)) {
           throw err(409, `Récompense pas encore débloquée : ${avant.tampons}/${commerce.seuilTampons} tampons.`)
         }
-        const apres =
-          action === 'visite' ? avecMessages(validerVisite(avant, commerce, maintenant()), commerce, 'passage') : offrirRecompense(avant, commerce, maintenant())
+        let apres: Client
+        let texteJournal: string
+        if (action === 'visite') {
+          // Passage sans montant : paliers, défi, niveau et parrainage s'appliquent comme en caisse.
+          // Sans la garde « 1 tampon par jour » de la caisse : cette route historique (« Valider une visite »
+          // depuis la fiche client) l'a toujours autorisé, et le front affiche déjà l'avertissement.
+          let evenements: EvenementPassage[] = []
+          ;({ client: apres, evenements } = appliquerVisiteProgramme(avant, commerce, 0, maintenant()))
+          apres = avecMessages(apres, commerce, 'passage')
+          const regle = await reglerParrainage(commerce, apres, maintenant())
+          apres = regle.filleul
+          await st.majClient(apres)
+          texteJournal = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`
+          await journaliser(id, auteur, 'passage', texteJournal, apres)
+          if (regle.texte) await journaliser(id, auteur, 'parrainage', regle.texte, apres)
+          return apres
+        }
+        apres = offrirRecompense(avant, commerce, maintenant())
         await st.majClient(apres)
         await journaliser(
           id,
           auteur,
-          action === 'visite' ? 'passage' : 'recompense',
-          action === 'visite' ? `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})` : `Récompense offerte : ${commerce.recompense}`,
+          'recompense',
+          `Récompense offerte : ${commerce.recompense}`,
           apres,
         )
         return apres
@@ -701,7 +810,7 @@ export async function creerServeur(o: OptionsServeur) {
       return { json: { auteur, commerce, clients: (await st.clients(id)).map(clientCaisse) } }
     }
 
-    if (sous === 'caisse' && (sousId === 'passage' || sousId === 'recompense' || sousId === 'echange') && !action && m === 'POST') {
+    if (sous === 'caisse' && (sousId === 'passage' || sousId === 'recompense' || sousId === 'echange' || sousId === 'attente' || sousId === 'reserve') && !action && m === 'POST') {
       const { auteur } = await exigerAuteur(req, id)
       exigerActif(commerce)
       const corps = await lireCorps(req)
@@ -720,20 +829,44 @@ export async function creerServeur(o: OptionsServeur) {
         if (actionDejaTraitee(avant, actionId)) return { client: avant, dejaTraite: true }
         let apres: Client
         let details: string
-        let journalAction: EntreeJournal['action'] = sousId
+        let journalAction: EntreeJournal['action'] = sousId === 'attente' ? 'recompense' : sousId === 'reserve' ? 'reserve' : sousId
         if (sousId === 'passage') {
+          // Paliers, défi, niveaux (multiplicateur), réserve et parrainage : décidés côté serveur.
+          let evenements: EvenementPassage[] = []
           try {
-            apres = enregistrerPassage(avant, commerce, centimes, quand, actionId)
+            ;({ client: apres, evenements } = passageAvecProgramme(avant, commerce, centimes, quand, actionId))
           } catch (e) {
             throw err(409, (e as Error).message)
           }
           apres = avecMessages(apres, commerce, 'passage', quand)
-          const gagnes = (apres.points ?? 0) - (avant.points ?? 0)
-          details = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${centimes ? ` · ${formaterPrix(centimes)} → +${gagnes} point${gagnes > 1 ? 's' : ''} (solde ${apres.points})` : ''}`
+          const regle = await reglerParrainage(commerce, apres, quand)
+          apres = regle.filleul
+          const gagnes = soldePoints(apres) - soldePoints(avant)
+          const niveau = niveauClient(apres, commerce)
+          details = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${centimes ? ` · ${formaterPrix(centimes)} → +${gagnes} point${gagnes > 1 ? 's' : ''} (solde ${soldePoints(apres)}, ${niveau.nom} ×${niveau.multiplicateur})` : ''}${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`
+          if (regle.texte) await journaliser(id, auteur, 'parrainage', regle.texte, apres, quand)
         } else if (sousId === 'recompense') {
           if (!recompenseDebloquee(avant, commerce)) throw err(409, `Récompense pas encore débloquée : ${avant.tampons}/${commerce.seuilTampons} tampons.`)
           apres = avecAction(offrirRecompense(avant, commerce, quand), actionId)
           details = `Récompense offerte : ${commerce.recompense}`
+        } else if (sousId === 'attente') {
+          // Récompense gagnée (palier, défi, anniversaire…) remise au comptoir.
+          const recompenseId = texte(corps.recompenseId, 'recompenseId', 80, { requis: true })
+          const attendue = (avant.recompensesEnAttente ?? []).find((r) => r.id === recompenseId)
+          if (!attendue) throw err(404, 'Récompense en attente introuvable pour ce client.')
+          try {
+            apres = avecAction(consommerRecompenseEnAttente(avant, recompenseId, quand), actionId)
+          } catch (e) {
+            throw err(409, (e as Error).message)
+          }
+          details = `Récompense remise : ${attendue.libelle} (${attendue.origine})`
+        } else if (sousId === 'reserve') {
+          try {
+            apres = avecAction(utiliserReserve(avant, quand), actionId)
+          } catch (e) {
+            throw err(409, (e as Error).message)
+          }
+          details = 'Plat en réserve utilisé'
         } else {
           const recompenseId = texte(corps.recompenseId, 'recompenseId', 80, { requis: true })
           const r = (commerce.catalogue ?? []).find((x) => x.id === recompenseId)
@@ -754,20 +887,122 @@ export async function creerServeur(o: OptionsServeur) {
       return { json: { client: clientCaisse(resultat.client), dejaTraite: resultat.dejaTraite } }
     }
 
-    // ---------- Fiche client (gérant) : anniversaire ----------
+    // ---------- Fiche client (gérant) : anniversaire, plat préféré ----------
 
     if (sous === 'clients' && sousId && !action && m === 'PATCH') {
       await exigerCommercant(req, id)
       const corps = await lireCorps(req)
-      const inconnus = Object.keys(corps).filter((k) => k !== 'anniversaire')
+      const inconnus = Object.keys(corps).filter((k) => k !== 'anniversaire' && k !== 'platPrefere')
       if (inconnus.length) throw err(400, `Champ non modifiable : ${inconnus.join(', ')}.`)
       const a = corps.anniversaire == null ? '' : texte(corps.anniversaire, 'anniversaire', 5)
       if (a && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(a)) throw err(400, '« anniversaire » : format MM-JJ attendu (ex. 03-21).')
+      const plat = corps.platPrefere == null ? '' : texte(corps.platPrefere, 'platPrefere', 80)
       const client = await st.transaction(async () => {
         const avant = await clientOu404(id, sousId)
         const apres: Client = { ...avant }
-        if (a) apres.anniversaire = a
-        else delete apres.anniversaire
+        if ('anniversaire' in corps) {
+          if (a) apres.anniversaire = a
+          else delete apres.anniversaire
+        }
+        if ('platPrefere' in corps) {
+          if (plat) apres.platPrefere = plat
+          else delete apres.platPrefere
+        }
+        await st.majClient(apres)
+        return apres
+      })
+      return { json: { client: clientCaisse(client) } }
+    }
+
+    // ---------- Profil progressif (client) : anniversaire + plat préféré, après la 2e visite ----------
+    // Jamais exigés à l'inscription (recherche CX §1 : chaque champ coûte ~10 % de conversion).
+
+    if (sous === 'clients' && sousId && action === 'profil' && m === 'POST') {
+      exigerActif(commerce)
+      const corps = await lireCorps(req)
+      const inconnus = Object.keys(corps).filter((k) => k !== 'anniversaire' && k !== 'platPrefere')
+      if (inconnus.length) throw err(400, `Champ non modifiable : ${inconnus.join(', ')}.`)
+      const anniversaire = corps.anniversaire == null ? '' : analyserAnniversaire(texte(corps.anniversaire, 'anniversaire', 10))
+      if (anniversaire === null) throw err(400, '« anniversaire » : format JJ/MM attendu (ex. 21/03).')
+      const plat = corps.platPrefere == null ? '' : texte(corps.platPrefere, 'platPrefere', 80)
+      if (!anniversaire && !plat) throw err(400, 'Indiquez au moins votre anniversaire ou votre plat préféré.')
+      const client = await st.transaction(async () => {
+        const avant = await clientOu404(id, sousId)
+        if (!peutCompleterProfil(avant)) throw err(409, 'Votre profil se complète après votre 2e visite : revenez nous voir !')
+        const apres: Client = { ...avant }
+        if (anniversaire) apres.anniversaire = anniversaire
+        if (plat) apres.platPrefere = plat
+        await st.majClient(apres)
+        return apres
+      })
+      return { json: { client: cartePublique(client) } }
+    }
+
+    // ---------- Rattrapage d'une visite oubliée (Domino's FR : réclamation sous 30 jours) ----------
+
+    if (sous === 'clients' && sousId && action === 'rattrapage' && !extra && m === 'POST') {
+      // Public (depuis la carte du client) : le commerçant valide ou refuse ensuite.
+      exigerActif(commerce)
+      const corps = await lireCorps(req)
+      const dateVisite = new Date(typeof corps.date === 'string' ? corps.date : '')
+      const montant = typeof corps.montantCentimes === 'number' ? corps.montantCentimes : NaN
+      const ticket = corps.ticket == null ? '' : texte(corps.ticket, 'ticket', 80)
+      const client = await st.transaction(async () => {
+        const avant = await clientOu404(id, sousId)
+        const raison = rattrapageRecevable(avant, commerce, dateVisite, montant, maintenant())
+        if (raison) throw err(409, raison)
+        if ((avant.demandesRattrapage ?? []).some((d) => d.statut === 'en_attente' && new Date(d.date).toDateString() === dateVisite.toDateString())) {
+          throw err(409, 'Une demande est déjà en attente pour cette date.')
+        }
+        const demande: DemandeRattrapage = {
+          id: `rt-${randomUUID()}`,
+          date: dateVisite.toISOString(),
+          montantCentimes: montant,
+          ...(ticket ? { ticket } : {}),
+          statut: 'en_attente',
+          creeLe: maintenant().toISOString(),
+        }
+        const apres: Client = { ...avant, demandesRattrapage: [...(avant.demandesRattrapage ?? []), demande] }
+        await st.majClient(apres)
+        return { client: apres, demande }
+      })
+      await st.ajouterDemandeRattrapage({ ...client.demande, commerceId: id, clientId: client.client.id })
+      return { statut: 201, json: { demande: client.demande, client: cartePublique(client.client) } }
+    }
+
+    if (sous === 'clients' && sousId && action === 'rattrapage' && extra && m === 'POST') {
+      // Décision du commerçant : validation = 1 visite + points crédités ; refus = demande classée.
+      await exigerCommercant(req, id)
+      const corps = await lireCorps(req)
+      if (corps.decision !== 'valider' && corps.decision !== 'refuser') throw err(400, '« decision » doit valoir "valider" ou "refuser".')
+      const t = maintenant()
+      const client = await st.transaction(async () => {
+        const avant = await clientOu404(id, sousId)
+        const demande = (avant.demandesRattrapage ?? []).find((d) => d.id === extra)
+        if (!demande) throw err(404, 'Demande de rattrapage introuvable.')
+        if (demande.statut !== 'en_attente') throw err(409, 'Cette demande a déjà été traitée.')
+        let apres: Client = {
+          ...avant,
+          demandesRattrapage: (avant.demandesRattrapage ?? []).map((d) => (d.id === extra ? { ...d, statut: corps.decision === 'valider' ? 'validee' : 'refusee', decideLe: t.toISOString() } : d)),
+        }
+        if (corps.decision === 'valider') {
+          const raison = rattrapageRecevable(avant, commerce, new Date(demande.date), demande.montantCentimes, t)
+          if (raison) throw err(409, raison)
+          const { client: avecVisite, evenements } = appliquerRattrapageValide(apres, commerce, demande.montantCentimes, new Date(demande.date))
+          apres = avecMessages(avecVisite, commerce, 'passage', t)
+          const regle = await reglerParrainage(commerce, apres, t)
+          apres = regle.filleul
+          await journaliser(
+            id,
+            { type: 'gerant', nom: 'Gérant' },
+            'rattrapage',
+            `Visite oubliée validée (${new Date(demande.date).toLocaleDateString('fr-FR')}${demande.montantCentimes ? `, ${formaterPrix(demande.montantCentimes)}` : ''}) : +1 tampon${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`,
+            apres,
+            t,
+          )
+        } else {
+          await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'rattrapage', `Visite oubliée refusée (${new Date(demande.date).toLocaleDateString('fr-FR')})`, apres, t)
+        }
         await st.majClient(apres)
         return apres
       })
@@ -916,7 +1151,7 @@ export async function creerServeur(o: OptionsServeur) {
       const prenom = corps.prenom == null ? '' : texte(corps.prenom, 'prenom', 40)
       const dejaJoue = 'Vous avez déjà tourné la roue aujourd’hui. Revenez lors de votre prochaine visite !'
       const resultat = await st.transaction(async () => {
-        const { client } = await inscrireOuRetrouver(commerce, prenom, corps.contact)
+        const { client } = await inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain)
         const t = maintenant()
         const statut = statutJeu(client, await st.tiragesClient(id, client.id), id, t)
         if (statut === 'dejaJoue') return { refus: dejaJoue }

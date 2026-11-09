@@ -263,6 +263,8 @@ function JouerApi({ api }: { api: ClientApi }) {
 
 function PartieApi({ api, commerce }: { api: ClientApi; commerce: Commerce }) {
   const memoire = useMemo(() => memoireJoueur(stockageLocal(), commerce.id), [commerce.id])
+  // Code de parrainage dans le lien partagé (#/jouer/<id>?parrain=AH-XXXXXX) : attaché à l'inscription.
+  const parrain = useMemo(() => /[?&]parrain=([A-Za-z0-9-]+)/.exec(window.location.hash)?.[1], [])
   const [joueur, setJoueur] = useState<JoueurMemorise | null>(null)
   const [memorise, setMemorise] = useState(() => memoire.joueur())
   const [jeu, setJeu] = useState<{ statut: StatutJeu; lotDuJour: string | null } | null>(null)
@@ -354,8 +356,9 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: Commerce }) {
           <Continuer prenom={memorise.prenom} onContinuer={() => choisirJoueur(memorise)} onOublier={() => (memoire.memoriser(null), setMemorise(null))} />
         ) : (
           <Identification
+            parrain={parrain}
             onEnvoyer={async (prenom, contactSaisi) => {
-              const { client } = await api.inscrirePublic(commerce.id, prenom, contactSaisi)
+              const { client } = await api.inscrirePublic(commerce.id, prenom, contactSaisi, parrain)
               choisirJoueur({ clientId: client.id, prenom: client.prenom, contact: contactSaisi.trim() })
             }}
           />
@@ -400,7 +403,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: Commerce }) {
 
 // ---------------------------------------------------------------------------------------------
 
-function Identification({ onEnvoyer }: { onEnvoyer(prenom: string, contactSaisi: string): Promise<void> }) {
+function Identification({ onEnvoyer, parrain }: { onEnvoyer(prenom: string, contactSaisi: string): Promise<void>; parrain?: string }) {
   const [prenom, setPrenom] = useState('')
   const [contactSaisi, setContactSaisi] = useState('')
   const [essaye, setEssaye] = useState(false)
@@ -411,7 +414,7 @@ function Identification({ onEnvoyer }: { onEnvoyer(prenom: string, contactSaisi:
   async function envoyer(e: FormEvent) {
     e.preventDefault()
     setEssaye(true)
-    if (!prenom.trim() || !contact || enCours) return
+    if (!contact || enCours) return
     setEnCours(true)
     setErreur(null)
     try {
@@ -426,9 +429,14 @@ function Identification({ onEnvoyer }: { onEnvoyer(prenom: string, contactSaisi:
   return (
     <form onSubmit={envoyer} className="carte space-y-3">
       <p className="titre-carte">Pour jouer, dites-nous qui vous êtes</p>
+      {parrain && (
+        <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">
+          👥 Vous êtes parrainé(e) ! Inscrivez-vous : vous gagnerez 50 points à votre 1re visite, et votre ami aussi.
+        </p>
+      )}
       <div>
         <label className="etiquette" htmlFor="j-prenom">
-          Prénom
+          Prénom (optionnel)
         </label>
         <input id="j-prenom" className="champ" autoComplete="given-name" value={prenom} onChange={(e) => setPrenom(e.target.value)} />
       </div>
@@ -448,7 +456,7 @@ function Identification({ onEnvoyer }: { onEnvoyer(prenom: string, contactSaisi:
         <p className="mt-1 text-xs text-gray-600">Déjà client ? Le même numéro ou e-mail retrouve votre carte de fidélité.</p>
       </div>
       <MessageErreur>{erreur}</MessageErreur>
-      <button type="submit" className="bouton w-full" disabled={!prenom.trim() || !contactSaisi.trim() || enCours}>
+      <button type="submit" className="bouton w-full" disabled={!contactSaisi.trim() || enCours}>
         {enCours ? 'Un instant…' : 'C’est parti'}
       </button>
     </form>

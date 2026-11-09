@@ -1,8 +1,9 @@
 // Messages automatiques et ciblage (logique pure, partagée serveur / front).
 // Les messages vont dans la boîte de réception du client (visible à l'ouverture de sa carte) et le texte est proposé
 // au commerçant prêt à copier. Aucun envoi SMS / e-mail ici : l'envoi reste « à brancher » (server/notifications).
-import type { Client, Commerce, MessageClient, ReglesMessages, TypeMessageAuto } from '../types'
+import type { Client, Commerce, MessageClient, RecompenseEnAttente, ReglesMessages, TypeMessageAuto } from '../types'
 import { recompenseDebloquee, tamponsAffiches } from './fidelite.ts'
+import { configBienvenue, configWinback, etapeWinback, fenetreAnniversaire } from './programme.ts'
 
 const JOUR = 24 * 60 * 60 * 1000
 export const JOURS_INACTIF = 30
@@ -14,18 +15,21 @@ export const TYPES_MESSAGES: { type: TypeMessageAuto; libelle: string; aide: str
   { type: 'bienvenue', libelle: 'Bienvenue', aide: 'À l’inscription d’un nouveau client.' },
   { type: 'presque', libelle: 'Plus que 2 tampons', aide: 'Quand il ne manque plus que 2 tampons.' },
   { type: 'recompense', libelle: 'Récompense atteinte', aide: 'Quand la carte est complète.' },
-  { type: 'inactif', libelle: 'Relance des inactifs (30 jours)', aide: 'Affiché quand le client rouvre sa carte après 30 jours sans visite.' },
+  { type: 'inactif', libelle: 'Relance des inactifs (45 / 60 / 90 jours)', aide: 'Séquence en 3 temps : rappel doux à 45 j (sans remise), offre à 60 j, dernière chance à 90 j puis arrêt.' },
   { type: 'anniversaire', libelle: 'Anniversaire', aide: 'Le jour de l’anniversaire du client (s’il est renseigné).' },
   { type: 'avis', libelle: 'Demande d’avis Google', aide: 'Après le 2e passage, une seule fois. Jamais liée à une récompense.' },
 ]
 
 export const reglesVides = (): ReglesMessages => ({ bienvenue: false, recompense: false, presque: false, inactif: false, anniversaire: false, avis: false })
 
-export function texteMessage(type: TypeMessageAuto, client: Pick<Client, 'prenom'>, commerce: Pick<Commerce, 'nom' | 'recompense'>): string {
+export function texteMessage(type: TypeMessageAuto, client: Pick<Client, 'prenom'>, commerce: Pick<Commerce, 'nom' | 'recompense' | 'programme'>): string {
   const p = client.prenom
   switch (type) {
-    case 'bienvenue':
-      return `Bienvenue ${p} ! Votre carte de fidélité ${commerce.nom} est prête : 1 tampon à chaque passage, et ${commerce.recompense.toLowerCase()} à la clé.`
+    case 'bienvenue': {
+      const points = configBienvenue(commerce).actif ? configBienvenue(commerce).points : 0
+      const amorce = points > 0 ? `${points} points de bienvenue déjà crédités, 1 tampon à chaque passage, et` : '1 tampon à chaque passage, et'
+      return `Bienvenue ${p} ! Votre carte de fidélité ${commerce.nom} est prête : ${amorce} ${commerce.recompense.toLowerCase()} à la clé.`
+    }
     case 'presque':
       return `${p}, plus que 2 tampons avant votre récompense chez ${commerce.nom} : ${commerce.recompense}.`
     case 'recompense':
@@ -41,16 +45,16 @@ export function texteMessage(type: TypeMessageAuto, client: Pick<Client, 'prenom
 
 export type Evenement = 'inscription' | 'passage' | 'ouverture'
 
-const jourMois = (d: Date) => `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-
 /** Messages dus pour cet événement (règles activées, sans doublon) : renvoie le client mis à jour et les nouveaux messages. */
 export function genererMessages(client: Client, commerce: Commerce, evenement: Evenement, maintenant: Date, nouvelId: () => string): { client: Client; nouveaux: MessageClient[] } {
   const regles = commerce.messagesAuto
   if (!regles) return { client, nouveaux: [] }
   const deja = new Set(client.clesMessages ?? [])
-  const dus: { type: TypeMessageAuto; cle: string }[] = []
+  const dus: { type: TypeMessageAuto; cle: string; texte?: string; recompense?: RecompenseEnAttente }[] = []
   const cycle = client.recompensesOffertes?.length ?? 0
   const ajouter = (type: TypeMessageAuto, cle: string) => regles[type] && !deja.has(cle) && dus.push({ type, cle })
+  const ajouterTexte = (type: TypeMessageAuto, cle: string, texte: string, recompense?: RecompenseEnAttente) =>
+    regles[type] && !deja.has(cle) && dus.push({ type, cle, texte, recompense })
 
   if (evenement === 'inscription') ajouter('bienvenue', 'bienvenue')
   if (evenement === 'passage') {
@@ -59,20 +63,54 @@ export function genererMessages(client: Client, commerce: Commerce, evenement: E
     else if (restants === 2) ajouter('presque', `presque:${cycle}`)
     if (client.visites.length >= 2) ajouter('avis', 'avis')
   }
-  if (evenement === 'ouverture') {
-    if (client.derniereVisite && maintenant.getTime() - new Date(client.derniereVisite).getTime() > JOURS_INACTIF * JOUR) {
-      ajouter('inactif', `inactif:${client.derniereVisite}`)
+  if (evenement === 'passage' || evenement === 'ouverture') {
+    // Win-back recalibré (recherche CX §5) : 45 j rappel doux, 60 j offre, 90 j dernière chance, puis arrêt.
+    // Le 30 j unique d'avant était trop précoce pour des réguliers qui viennent toutes les 2-3 semaines.
+    if (evenement === 'ouverture') {
+      const wb = etapeWinback(client, commerce, maintenant)
+      if (wb && client.derniereVisite) {
+        const offre = configWinback(commerce).offre
+        const texte =
+          wb.etape === 'rappel'
+            ? `${client.prenom}, cela fait un moment qu’on ne vous a pas vu chez ${commerce.nom} ! Toute l’équipe serait ravie de vous revoir — votre carte vous attend.`
+            : wb.etape === 'offre'
+              ? `${client.prenom}, on vous a gardé une attention : ${offre} lors de votre prochaine visite chez ${commerce.nom}. À très vite !`
+              : `${client.prenom}, dernière chance : ${offre} vous attend chez ${commerce.nom} — après quoi nous ne vous relancerons plus. À très vite !`
+        ajouterTexte('inactif', `winback:${wb.etape}:${client.derniereVisite}`, texte)
+      }
     }
-    if (client.anniversaire && client.anniversaire === jourMois(maintenant)) ajouter('anniversaire', `anniversaire:${maintenant.getFullYear()}`)
+    // Anniversaire : J-7 + jour J (même clé qu'avant pour le jour J), demi-anniversaire, anniversaire d'adhésion.
+    // La récompense (dessert, plat signature pour les VIP) est mise en attente, valable 7 à 30 jours selon le niveau.
+    const fen = fenetreAnniversaire(client, commerce, maintenant)
+    if (fen) {
+      const cle = `${fen.type}:${fen.date.getFullYear()}`
+      const texte =
+        fen.type === 'anniversaire'
+          ? `Joyeux anniversaire ${client.prenom} ! Toute l’équipe de ${commerce.nom} vous souhaite une très belle journée — ${fen.libelle.toLowerCase()} à retirer au comptoir.`
+          : fen.type === 'demi-anniversaire'
+            ? `${client.prenom}, c’est votre demi-anniversaire chez ${commerce.nom} ! Une boisson vous attend au comptoir.`
+            : `${client.prenom}, cela fait déjà 1 an que vous êtes membre chez ${commerce.nom} ! Une boisson vous attend au comptoir pour fêter ça.`
+      ajouterTexte('anniversaire', cle, texte, {
+        id: `anniv-${fen.type}-${fen.date.getFullYear()}`,
+        libelle: fen.libelle,
+        origine: fen.type,
+        creeLe: maintenant.toISOString(),
+        expireLe: fen.expireLe.toISOString(),
+      })
+    }
   }
   if (!dus.length) return { client, nouveaux: [] }
   const date = maintenant.toISOString()
-  const nouveaux: MessageClient[] = dus.map((d) => ({ id: nouvelId(), type: d.type, texte: texteMessage(d.type, client, commerce), date }))
+  const nouveaux: MessageClient[] = dus.map((d) => ({ id: nouvelId(), type: d.type, texte: d.texte ?? texteMessage(d.type, client, commerce), date }))
+  const recompenses = dus.flatMap((d) => (d.recompense ? [d.recompense] : []))
+  const enAttente = [...(client.recompensesEnAttente ?? [])]
+  for (const r of recompenses) if (!enAttente.some((x) => x.id === r.id)) enAttente.push(r)
   return {
     client: {
       ...client,
       messages: [...(client.messages ?? []), ...nouveaux].slice(-MESSAGES_GARDES),
       clesMessages: [...(client.clesMessages ?? []), ...dus.map((d) => d.cle)].slice(-CLES_GARDEES),
+      ...(recompenses.length ? { recompensesEnAttente: enAttente } : {}),
     },
     nouveaux,
   }

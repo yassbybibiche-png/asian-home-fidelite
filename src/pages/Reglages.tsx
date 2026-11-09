@@ -1,15 +1,42 @@
 import { useState, type FormEvent } from 'react'
 import { useAction, useStore } from '../store'
-import type { Client, Commerce, Lot, RecompensePoints, TypeCommerce } from '../types'
+import type { Client, Commerce, ConfigProgramme, Lot, Palier, RecompensePoints, TypeCommerce } from '../types'
 import { TYPES_COMMERCE } from '../data/defaults'
 import { EnTete, Interrupteur, LogoCommerce, MessageErreur } from '../components/ui'
 import { CarteFidelite, libelleTaux } from '../components/CarteFidelite'
 import { EUROS_PAR_POINT_DEFAUT } from '../lib/points'
 import { reglesVides, TYPES_MESSAGES } from '../lib/messages'
 import { COULEUR_DEFAUT, FOND_DEFAUT, problemesApparence } from '../lib/apparence'
+import { JOURS_SEMAINE, PALIERS_DEFAUT } from '../lib/programme'
 
 /** Client fictif de l'aperçu (jamais enregistré). */
 const APERCU_CLIENT: Client = { id: 'apercu', commerceId: '', prenom: 'Aperçu', tampons: 3, points: 42, visites: [], derniereVisite: null, creeLe: '2026-01-01T00:00:00.000Z' }
+
+/** Champ nombre du formulaire programme (vide = valeur par défaut du serveur). */
+function Nombre({ id, libelle, valeur, defaut, min, max, step = 1, aide, onChange }: { id: string; libelle: string; valeur?: number; defaut: number; min: number; max: number; step?: number; aide?: string; onChange(v: number): void }) {
+  return (
+    <div>
+      <label className="etiquette" htmlFor={id}>
+        {libelle}
+      </label>
+      <input
+        id={id}
+        className="champ"
+        type="number"
+        inputMode="decimal"
+        min={min}
+        max={max}
+        step={step}
+        value={valeur ?? defaut}
+        onChange={(e) => {
+          const v = e.target.valueAsNumber
+          if (!Number.isNaN(v)) onChange(v)
+        }}
+      />
+      {aide && <p className="mt-1 text-sm text-gray-500">{aide}</p>}
+    </div>
+  )
+}
 
 export default function Reglages() {
   const { commerce } = useStore()
@@ -33,6 +60,12 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   const taux = brouillon.eurosParPoint ?? EUROS_PAR_POINT_DEFAUT
   const tauxValide = Number.isFinite(taux) && taux >= 0.1 && taux <= 1000
   const catalogueValide = catalogue.every((r) => r.nom.trim() && Number.isInteger(r.cout) && r.cout >= 1)
+  // Programme de fidélité (benchmark 09/11/2026) : chaque bloc est optionnel, les défauts s'appliquent sinon.
+  const [programme, setProgramme] = useState<ConfigProgramme>(commerce.programme ?? {})
+  function majBloc(bloc: keyof ConfigProgramme, patch: Record<string, unknown>) {
+    setProgramme((p) => ({ ...p, [bloc]: { ...((p[bloc] as Record<string, unknown> | undefined) ?? {}), ...patch } }))
+    setEnregistre(false)
+  }
   const apparence = brouillon.apparence ?? {}
   const problemes = problemesApparence(apparence)
   const valide = nomValide && seuilValide && lots.length >= 2 && probasValides && total > 0 && tauxValide && catalogueValide && !problemes.length
@@ -62,6 +95,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
       catalogue: catalogue.map((r) => ({ ...r, nom: r.nom.trim(), description: r.description?.trim() || undefined })),
       messagesAuto: brouillon.messagesAuto ?? reglesVides(),
       apparence: Object.fromEntries(Object.entries(apparence).filter(([, v]) => v)),
+      programme,
       }),
     )
     // « ✓ Enregistré » seulement si le serveur (ou la démo locale) a bien pris les réglages.
@@ -168,6 +202,178 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
             onChange={(e) => maj('seuilTampons', e.target.valueAsNumber)}
           />
           {!seuilValide && <p className="mt-1 text-sm text-red-700">Entre 2 et 50 tampons.</p>}
+        </div>
+      </fieldset>
+
+      <fieldset className="carte space-y-4">
+        <legend className="sr-only">Programme de fidélité</legend>
+        <h2 className="titre-carte">Programme de fidélité</h2>
+        <p className="text-sm text-gray-600">Chaque nouveauté s’active ou se règle ici. Rien n’est coché = les valeurs par défaut s’appliquent (paliers 3 / 6 / 10 visites, parrainage 50 points chacun, 50 points de bienvenue, défi 3 visites en 14 jours, Habitué 10 visites ×1,5, VIP 25 visites ×2).</p>
+
+        <div className="space-y-3 border-t border-gray-100 pt-3">
+          <Interrupteur libelle="Paliers intermédiaires" aide="Petites récompenses avant la récompense principale (par défaut : 3 visites, 6 visites)." actif={programme.paliers?.actif ?? true} onChange={(v) => majBloc('paliers', { actif: v })} />
+          {(programme.paliers?.liste ?? PALIERS_DEFAUT).map((palier, i) => (
+            <div key={i} className="flex gap-2">
+              <div className="w-24 shrink-0">
+                <label className="etiquette" htmlFor={`palier-seuil-${i}`}>
+                  Visites
+                </label>
+                <input
+                  id={`palier-seuil-${i}`}
+                  className="champ text-right"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={49}
+                  value={palier.seuil}
+                  onChange={(e) => {
+                    const liste = [...(programme.paliers?.liste ?? PALIERS_DEFAUT)]
+                    const v = e.target.valueAsNumber
+                    if (!Number.isNaN(v)) liste[i] = { ...liste[i], seuil: v }
+                    majBloc('paliers', { liste })
+                  }}
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <label className="etiquette" htmlFor={`palier-libelle-${i}`}>
+                  Récompense du palier
+                </label>
+                <input
+                  id={`palier-libelle-${i}`}
+                  className="champ"
+                  maxLength={80}
+                  value={palier.libelle}
+                  onChange={(e) => {
+                    const liste = [...(programme.paliers?.liste ?? PALIERS_DEFAUT)]
+                    liste[i] = { ...liste[i], libelle: e.target.value }
+                    majBloc('paliers', { liste })
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                className="mt-6 h-12 w-12 shrink-0 rounded-xl bg-white text-xl text-gray-600 ring-1 ring-gray-300 hover:text-red-700"
+                aria-label={`Supprimer le palier ${i + 1}`}
+                onClick={() => majBloc('paliers', { liste: (programme.paliers?.liste ?? PALIERS_DEFAUT).filter((_, j) => j !== i) })}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {(programme.paliers?.liste ?? PALIERS_DEFAUT).length < 5 && (
+            <button
+              type="button"
+              className="bouton-secondaire w-full"
+              onClick={() => majBloc('paliers', { liste: [...(programme.paliers?.liste ?? PALIERS_DEFAUT), { seuil: 8, libelle: 'Dessert offert' } as Palier] })}
+            >
+              + Ajouter un palier
+            </button>
+          )}
+          <p className="text-sm text-gray-500">Un palier égal au seuil de la carte principale n’est pas ajouté : la récompense principale le couvre déjà.</p>
+        </div>
+
+        <div className="space-y-3 border-t border-gray-100 pt-3">
+          <Interrupteur libelle="Parrainage (les deux gagnent)" aide="Code unique par client, partageable. Les points sont versés après la 1re visite du filleul — jamais à l’inscription." actif={programme.parrainage?.actif ?? true} onChange={(v) => majBloc('parrainage', { actif: v })} />
+          <div className="grid grid-cols-3 gap-3">
+            <Nombre id="pr-parrain" libelle="Points du parrain" valeur={programme.parrainage?.pointsParrain} defaut={50} min={0} max={500} onChange={(v) => majBloc('parrainage', { pointsParrain: v })} />
+            <Nombre id="pr-filleul" libelle="Points du filleul" valeur={programme.parrainage?.pointsFilleul} defaut={50} min={0} max={500} onChange={(v) => majBloc('parrainage', { pointsFilleul: v })} />
+            <Nombre id="pr-plafond" libelle="Plafond / an" valeur={programme.parrainage?.plafondAn} defaut={12} min={1} max={100} aide="Anti-abus." onChange={(v) => majBloc('parrainage', { plafondAn: v })} />
+          </div>
+        </div>
+
+        <div className="space-y-3 border-t border-gray-100 pt-3">
+          <Interrupteur libelle="Points de bienvenue" aide="Crédités à l’inscription, pour amorcer le compteur." actif={programme.bienvenue?.actif ?? true} onChange={(v) => majBloc('bienvenue', { actif: v })} />
+          <Nombre id="bw-points" libelle="Points offerts à l’inscription" valeur={programme.bienvenue?.points} defaut={50} min={0} max={500} onChange={(v) => majBloc('bienvenue', { points: v })} />
+        </div>
+
+        <div className="space-y-3 border-t border-gray-100 pt-3">
+          <Interrupteur libelle="Défi court (un seul à la fois)" aide="Objectif visible avec date limite : la progression s’affiche sur la carte du client." actif={programme.defi?.actif ?? true} onChange={(v) => majBloc('defi', { actif: v })} />
+          <div className="grid grid-cols-2 gap-3">
+            <Nombre id="defi-visites" libelle="Visites à faire" valeur={programme.defi?.visites} defaut={3} min={2} max={10} onChange={(v) => majBloc('defi', { visites: v })} />
+            <Nombre id="defi-jours" libelle="En combien de jours" valeur={programme.defi?.jours} defaut={14} min={3} max={60} onChange={(v) => majBloc('defi', { jours: v })} />
+          </div>
+          <div>
+            <label className="etiquette" htmlFor="defi-recompense">
+              Récompense du défi
+            </label>
+            <input id="defi-recompense" className="champ" maxLength={80} value={programme.defi?.recompense ?? 'Plat offert'} onChange={(e) => majBloc('defi', { recompense: e.target.value })} />
+          </div>
+        </div>
+
+        <div className="space-y-3 border-t border-gray-100 pt-3">
+          <Interrupteur libelle="Niveaux (2 maximum)" aide="Habitué puis VIP. Le VIP doit rester rare : seuil haut, affiché comme tel sur la carte." actif={programme.niveaux?.actif ?? true} onChange={(v) => majBloc('niveaux', { actif: v })} />
+          <div className="grid grid-cols-2 gap-3">
+            <Nombre id="niv-hab-seuil" libelle="Habitué : visites" valeur={programme.niveaux?.habitueSeuil} defaut={10} min={2} max={100} onChange={(v) => majBloc('niveaux', { habitueSeuil: v })} />
+            <Nombre id="niv-hab-mult" libelle="Habitué : points ×" valeur={programme.niveaux?.habitueMultiplicateur} defaut={1.5} min={1} max={3} step={0.5} onChange={(v) => majBloc('niveaux', { habitueMultiplicateur: v })} />
+            <Nombre id="niv-vip-seuil" libelle="VIP : visites" valeur={programme.niveaux?.vipSeuil} defaut={25} min={3} max={200} onChange={(v) => majBloc('niveaux', { vipSeuil: v })} />
+            <Nombre id="niv-vip-mult" libelle="VIP : points ×" valeur={programme.niveaux?.vipMultiplicateur} defaut={2} min={1} max={3} step={0.5} onChange={(v) => majBloc('niveaux', { vipMultiplicateur: v })} />
+          </div>
+        </div>
+
+        <div className="space-y-3 border-t border-gray-100 pt-3">
+          <Interrupteur libelle="Relance win-back en 3 temps" aide="Rappel doux à 45 j (sans remise), offre à 60 j (produit offert), dernière chance à 90 j puis arrêt. La séquence s’arrête dès le retour du client." actif={programme.winback?.actif ?? true} onChange={(v) => majBloc('winback', { actif: v })} />
+          <div className="grid grid-cols-3 gap-3">
+            <Nombre id="wb-rappel" libelle="Rappel doux (jours)" valeur={programme.winback?.rappelJours} defaut={45} min={7} max={180} onChange={(v) => majBloc('winback', { rappelJours: v })} />
+            <Nombre id="wb-offre" libelle="Offre (jours)" valeur={programme.winback?.offreJours} defaut={60} min={8} max={240} onChange={(v) => majBloc('winback', { offreJours: v })} />
+            <Nombre id="wb-derniere" libelle="Dernière chance (jours)" valeur={programme.winback?.derniereJours} defaut={90} min={9} max={300} onChange={(v) => majBloc('winback', { derniereJours: v })} />
+          </div>
+          <div>
+            <label className="etiquette" htmlFor="wb-offre-texte">
+              Offre win-back (produit offert, pas un %)
+            </label>
+            <input id="wb-offre-texte" className="champ" maxLength={80} value={programme.winback?.offre ?? 'Produit offert'} onChange={(e) => majBloc('winback', { offre: e.target.value })} />
+          </div>
+        </div>
+
+        <div className="space-y-3 border-t border-gray-100 pt-3">
+          <Interrupteur libelle="Anniversaire amélioré" aide="Envoi à J-7 + jour J, récompense valable 7 à 30 jours (14 par défaut, 30 pour les VIP, dessert offert — plat signature pour les VIP). Date collectée après la 2e visite, jamais à l’inscription." actif={programme.anniversaire?.actif ?? true} onChange={(v) => majBloc('anniversaire', { actif: v })} />
+          <Nombre id="ann-validite" libelle="Validité de la récompense (jours)" valeur={programme.anniversaire?.validiteJours} defaut={14} min={7} max={30} onChange={(v) => majBloc('anniversaire', { validiteJours: v })} />
+          <Interrupteur libelle="Demi-anniversaire (boisson offerte, 6 mois après)" actif={programme.anniversaire?.demiAnniversaire ?? true} onChange={(v) => majBloc('anniversaire', { demiAnniversaire: v })} />
+          <Interrupteur libelle="Anniversaire d’adhésion (1 an après l’inscription)" actif={programme.anniversaire?.adhesion ?? true} onChange={(v) => majBloc('anniversaire', { adhesion: v })} />
+        </div>
+
+        <div className="space-y-3 border-t border-gray-100 pt-3">
+          <Interrupteur libelle="Offre hebdomadaire récurrente" aide="1 offre membres, 1 jour fixe par semaine : affichée sur la carte client." actif={programme.offreHebdo?.actif ?? true} onChange={(v) => majBloc('offreHebdo', { actif: v })} />
+          <div>
+            <label className="etiquette" htmlFor="oh-jour">
+              Jour de la semaine
+            </label>
+            <select id="oh-jour" className="champ" value={programme.offreHebdo?.jour ?? 2} onChange={(e) => majBloc('offreHebdo', { jour: Number(e.target.value) })}>
+              {JOURS_SEMAINE.map((j, i) => (
+                <option key={j} value={i}>
+                  {j}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="etiquette" htmlFor="oh-libelle">
+                Offre
+              </label>
+              <input id="oh-libelle" className="champ" maxLength={80} value={programme.offreHebdo?.libelle ?? 'Boisson offerte'} onChange={(e) => majBloc('offreHebdo', { libelle: e.target.value })} />
+            </div>
+            <div>
+              <label className="etiquette" htmlFor="oh-condition">
+                Condition
+              </label>
+              <input id="oh-condition" className="champ" maxLength={80} value={programme.offreHebdo?.condition ?? 'dès 15 €'} onChange={(e) => majBloc('offreHebdo', { condition: e.target.value })} />
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-3 border-t border-gray-100 pt-3">
+          <Interrupteur libelle="Plat en réserve" aide="Après une commande au-dessus du seuil, le client gagne un plat offert à utiliser sous 30 jours — 1 fois par trimestre maximum. Opération limitée : désactivez-la quand vous voulez." actif={programme.reserve?.actif ?? true} onChange={(v) => majBloc('reserve', { actif: v })} />
+          <div className="grid grid-cols-3 gap-3">
+            <Nombre id="res-montant" libelle="Commande minimum (€)" valeur={programme.reserve?.montantMinCentimes != null ? programme.reserve.montantMinCentimes / 100 : undefined} defaut={25} min={5} max={1000} step={5} onChange={(v) => majBloc('reserve', { montantMinCentimes: Math.round(v * 100) })} />
+            <Nombre id="res-validite" libelle="Validité (jours)" valeur={programme.reserve?.validiteJours} defaut={30} min={7} max={90} onChange={(v) => majBloc('reserve', { validiteJours: v })} />
+            <Nombre id="res-trimestre" libelle="Max / trimestre" valeur={programme.reserve?.parTrimestre} defaut={1} min={1} max={4} onChange={(v) => majBloc('reserve', { parTrimestre: v })} />
+          </div>
+        </div>
+
+        <div className="space-y-3 border-t border-gray-100 pt-3">
+          <Interrupteur libelle="Rattrapage des visites oubliées" aide="Le client signale « j’ai oublié de scanner » depuis sa carte ; vous validez ou refusez depuis la caisse ou la fiche client." actif={programme.rattrapage?.actif ?? true} onChange={(v) => majBloc('rattrapage', { actif: v })} />
+          <Nombre id="rt-delai" libelle="Délai de signalement (jours)" valeur={programme.rattrapage?.delaiJours} defaut={30} min={7} max={90} onChange={(v) => majBloc('rattrapage', { delaiJours: v })} />
         </div>
       </fieldset>
 

@@ -150,6 +150,29 @@ describe('Migration Supabase exécutée sur Postgres (PGlite)', () => {
     assert.equal(Number(rows[0].n), 0, 'suppression en cascade')
   })
 
+  test('0004_programme : passe après 0001/0002/0003, rejouable ; parrainages / demandes_rattrapage avec RLS, sans policy, fermées à anon', async () => {
+    await db.exec(sql('0004_programme.sql'))
+    await db.exec(sql('0004_programme.sql'))
+    const t = await db.query<{ relname: string; relrowsecurity: boolean }>(
+      `select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname in ('parrainages', 'demandes_rattrapage') order by 1`)
+    assert.deepEqual(t.rows.map((r) => [r.relname, r.relrowsecurity]), [['demandes_rattrapage', true], ['parrainages', true]])
+    assert.equal((await db.query<{ n: number }>(`select count(*)::int as n from pg_policies where schemaname = 'public'`)).rows[0].n, 0)
+    for (const role of ['anon', 'authenticated']) {
+      for (const table of ['parrainages', 'demandes_rattrapage']) {
+        const { rows } = await db.query<{ ok: boolean }>(`select has_table_privilege($1, $2, 'select') or has_table_privilege($1, $2, 'insert') as ok`, [role, `public.${table}`])
+        assert.equal(rows[0].ok, false, `${role} sur ${table}`)
+      }
+    }
+    // Un parrain ne peut pas se parrainer lui-même ; demande de rattrapage : une seule par client et par jour.
+    await db.query(`insert into public.commerces (id, donnees, pin_hash, pin_sel) values ('c3', '{"id":"c3"}', 'h', 's')`)
+    assert.equal(await codeErreur(db.query(`insert into public.parrainages (id, commerce_id, parrain_id, filleul_id, date, donnees) values ('p0', 'c3', 'cl1', 'cl1', now(), '{}')`)), '23514')
+    await db.query(`insert into public.parrainages (id, commerce_id, parrain_id, filleul_id, date, donnees) values ('p1', 'c3', 'cl1', 'cl2', now(), '{"id":"p1","commerceId":"c3","pointsParrain":50,"pointsFilleul":50}')`)
+    await db.query(`insert into public.demandes_rattrapage (id, commerce_id, client_id, date, donnees) values ('r1', 'c3', 'cl2', now(), '{"id":"r1","statut":"en_attente"}')`)
+    await db.query(`delete from public.commerces where id = 'c3'`)
+    const { rows } = await db.query<{ n: number }>(`select (select count(*) from public.parrainages) + (select count(*) from public.demandes_rattrapage) as n`)
+    assert.equal(Number(rows[0].n), 0, 'suppression en cascade')
+  })
+
   test('suppression d’un commerce : clients et tirages supprimés en cascade', async () => {
     await db.query(`delete from public.commerces where id = 'c1'`)
     const { rows } = await db.query<{ n: number }>(

@@ -46,12 +46,13 @@ export const passageCeJour = (c: Client, jour: Date) => c.visites.some((v) => me
 
 /**
  * Passage en caisse : 1 tampon (règle existante `validerVisite`) + points pour le montant.
+ * `multiplicateur` : niveau de fidélité (Habitué ×1,5, VIP ×2 — voir `src/lib/programme.ts`).
  * Lève une erreur si le client a déjà un passage ce jour-là (1 visite = 1 tampon par jour).
  */
-export function enregistrerPassage(client: Client, commerce: Commerce, centimes: number, quand: Date, actionId?: string): Client {
+export function enregistrerPassage(client: Client, commerce: Commerce, centimes: number, quand: Date, actionId?: string, multiplicateur = 1): Client {
   if (passageCeJour(client, quand)) throw new Error(`${client.prenom} a déjà un passage enregistré ce jour-là : 1 tampon par jour maximum.`)
   const apresVisite = validerVisite(client, commerce, quand)
-  const gagnes = pointsPourMontant(centimes, commerce)
+  const gagnes = Math.round(pointsPourMontant(centimes, commerce) * multiplicateur)
   return {
     ...apresVisite,
     points: soldePoints(client) + gagnes,

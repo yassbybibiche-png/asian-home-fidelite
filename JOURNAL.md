@@ -1,5 +1,68 @@
 # JOURNAL — Fideliz
 
+## 09/11/2026 — Programme de fidélité (benchmark concurrents, 11 nouveautés)
+- Benchmark lu avant de coder : `~/workspace/benchmark-fidelite-restaurant-2026-11-09.md`,
+  `~/workspace/benchmark-fidelite-restaurant/benchmark-fidelite-chaines-2026-11-09.md`,
+  `~/workspace/benchmark-cx-fidelite-restaurant-asian-home.md`.
+- Nouvelle logique pure `src/lib/programme.ts` (défauts + règles), état en JSONB existant
+  (`commerces.donnees.programme`, `clients.donnees`) : aucune nouvelle colonne. Toutes les
+  règles métier sont décidées côté serveur (`server/app.ts`), jamais seulement côté front.
+- **1. Paliers bas** : défaut 3 visites (« Boisson, nems ou dessert offert ») et 6 visites
+  (« Accompagnement offert ») en plus du seuil 10 existant ; configurables (max 5) ; progression
+  « plus que N visite(s) » sur la carte client ; récompense en attente à remettre au comptoir
+  (action caisse `attente`).
+- **2. Parrainage bilatéral** : code `AH-XXXXXX` par client (lien/QR partageable, bouton copier),
+  50 points chacun à la 1re visite du filleul (configurable), un seul parrain par filleul, un
+  seul gain par nouveau client, plafond 12/an (configurable) ; tracé dans le journal (`parrainage`)
+  et la table d'audit `parrainages` (migration 0004).
+- **3. Points de bienvenue** : 50 points à l'inscription (défaut, configurable), affichés dès la
+  création de la carte. Les tests existants ont été recalés (passage 23 → 73 points, etc.).
+- **4. Défis courts** : un seul actif à la fois, défaut « 3 visites en 14 jours = Plat offert »,
+  progression visible, récompense automatique, historique des défis réussis.
+- **5. Niveaux (2 max)** : Habitué à 10 visites (points ×1,5, anniversaire +7 jours), VIP à 25
+  visites (points ×2, plat signature à l'anniversaire, avant-première plat du mois) ; seuils et
+  multiplicateurs configurables ; multiplicateurs appliqués côté serveur ; VIP affiché comme rare.
+- **6. Win-back recalibré** : remplace « inactif 30 j » par 45 j (rappel doux, sans remise),
+  60 j (produit offert), 90 j (dernière chance), puis ARRÊT (sunset, rien après 120 j) ; la
+  séquence s'arrête au retour du client ; délais et offre configurables ; messages dans la boîte
+  de réception in-app + texte à copier (SMS/e-mail toujours 501, rien envoyé).
+- **7. Anniversaire amélioré** : valable 14 jours par défaut (configurable 7–30), envoi à J-7 +
+  jour J, dessert offert (plat signature pour les VIP, valable 30 jours), demi-anniversaire
+  (boisson offerte), anniversaire d'adhésion (1 an) ; date de naissance collectée APRÈS la 2e
+  visite seulement (profil progressif, 1 question à la fois), jamais à l'inscription.
+- **8. Offre hebdomadaire** : 1 offre membres sur 1 jour fixe, défaut mardi « Boisson offerte
+  dès 15 € » ; affichée sur la carte client et dans les messages.
+- **9. Rattrapage visite oubliée** : le client signale (date + montant/ticket) depuis sa carte,
+  le commerçant valide ou refuse depuis la fiche client (PIN) ; validation = 1 visite + points,
+  journalisé ; recevable 30 jours, pas de doublon le même jour ; la dernière visite ne régresse
+  pas sur une visite antidatée.
+- **10. Inscription simplifiée** : téléphone seul obligatoire, prénom optionnel, aucun mot de
+  passe ; normalisation des numéros français et déduplication (`cleContact`) inchangées.
+- **11. Plat en réserve** : après une commande ≥ 25 € (configurable), plat offert « en réserve »
+  valable 30 jours, 1 par trimestre maximum ; activable/désactivable ; remise au comptoir
+  (action caisse `reserve`).
+- Réglages : nouveau fieldset « Programme de fidélité » (chaque bloc activable/désactivable et
+  configurable) ; un commerce sans configuration voit les défauts s'appliquer sans rien casser.
+  Tableau de bord : section programme (parrainages réussis, VIP, rattrapages en attente, défis).
+- **Migration 0004** (`supabase/migrations/0004_programme.sql`, rejouable, testée via PGlite) :
+  2 tables d'audit seulement (`parrainages`, `demandes_rattrapage`, RLS, sans policy,
+  `service_role` seul, cascade à la suppression du commerce, check `parrain_id <> filleul_id`).
+  **À APPLIQUER EN PRODUCTION** (SQL Editor Supabase, comme la 0003) : tant qu'elle n'est pas
+  appliquée, le serveur fonctionne mais ignore les traces d'audit (`/sante` → `migrations.programme`).
+- **Écarts volontaires du benchmark (documentés)** : aucune récompense de points contre un avis
+  Google (Google interdit les avis incités) — la demande d'avis reste sans récompense ; pas de
+  géolocalisation/push de proximité, pas de commande en ligne avec paiement, pas d'abonnement
+  payant, pas de 3e niveau, pas d'expiration des points à 6 mois (12 mois d'inactivité gardés).
+- **Limites connues** : mode local (démo) : le passage local n'applique pas le programme
+  (paliers/défi/réserve non appliqués en démo, serveur seul) ; rattrapage décidable seulement
+  depuis la fiche client (PIN gérant), pas depuis la caisse (code équipe) ; rendu 390 px réel
+  sur téléphone jamais vérifié.
+- Tests : `tests/programme.test.ts` (logique pure + serveur HTTP : parrainage anti-abus,
+  paliers, défi, niveaux, win-back, anniversaire, réserve, rattrapage, profil, réglages) ;
+  test PGlite 0004 ; faux PostgREST : tables 0004 + option `sans0004` ; tests existants recalés
+  (points de bienvenue, win-back 45 j, `defi`/`depenseCentimes` dans le `deepEqual` parcours).
+  **npm test : 215/215. npm run build et build:api : OK.**
+
 ## 09/11/2026 ~02h54 — Lancement
 - Brief reçu (~/workspace/fideliz-claude/BRIEF.md). Principe utilisateur : le plus
   simple possible pour scaler sur TOUS les commerces, onboarding ~2 min.

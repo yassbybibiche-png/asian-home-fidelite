@@ -16,11 +16,12 @@
 // d'un commerce peut enregistrer les réglages puis échouer sur un des avis réévalués.
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createClient, type PostgrestError } from '@supabase/supabase-js'
-import type { Avis, Client, Commerce, EntreeJournal, MembreEquipe, Menu, Tirage } from '../src/types.ts'
+import type { Avis, Client, Commerce, EntreeJournal, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
 import { cleContact } from '../src/lib/fidelite.ts'
-import { ErreurConflit, ErreurMigrationManquante, type Pin, type Stockage } from './stockage.ts'
+import { ErreurConflit, ErreurMigrationManquante, type DemandeRattrapageTrace, type Pin, type Stockage } from './stockage.ts'
 
 const TABLES_0003 = ['equipe', 'journal', 'menus']
+const TABLES_0004 = ['parrainages', 'demandes_rattrapage']
 
 /** Lecture d'une table de la migration 0003 : vide tant que la migration n'est pas appliquée (l'existant continue de marcher). */
 async function ouVide<T>(lecture: Promise<T>, vide: T): Promise<T> {
@@ -71,8 +72,8 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     const { data, error } = await requete
     if (error) {
       if (error.code === '23505') throw new ErreurConflit(`Doublon refusé par la base (${table}) : ${error.message}`)
-      // Table inconnue (PostgREST : PGRST205 ; Postgres : 42P01) → migration 0003 pas encore appliquée.
-      if (TABLES_0003.includes(table) && (error.code === 'PGRST205' || error.code === '42P01')) throw new ErreurMigrationManquante(table)
+      // Table inconnue (PostgREST : PGRST205 ; Postgres : 42P01) → migration 0003 / 0004 pas encore appliquée.
+      if ((TABLES_0003.includes(table) || TABLES_0004.includes(table)) && (error.code === 'PGRST205' || error.code === '42P01')) throw new ErreurMigrationManquante(table)
       throw new Error(`Supabase (${table}) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
     }
     return data as T
@@ -183,6 +184,33 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       }
     },
     majMenu: async (m) => void (await ok('menus', sb.from('menus').upsert({ commerce_id: m.commerceId, donnees: m }, { onConflict: 'commerce_id' }))),
+
+    // ---- Programme (0004_programme.sql) : traces d'audit, ignorées tant que la migration manque ----
+    ajouterParrainage: async (p: Parrainage) => {
+      try {
+        await ok('parrainages', sb.from('parrainages').insert({ id: p.id, commerce_id: p.commerceId, parrain_id: p.parrainId, filleul_id: p.filleulId, date: p.date, donnees: p }))
+      } catch (err) {
+        if (!(err instanceof ErreurMigrationManquante)) throw err
+        console.warn(`[stockage] parrainage non tracé : ${err.message}`)
+      }
+    },
+    ajouterDemandeRattrapage: async (d: DemandeRattrapageTrace) => {
+      try {
+        await ok('demandes_rattrapage', sb.from('demandes_rattrapage').insert({ id: d.id, commerce_id: d.commerceId, client_id: d.clientId, date: d.date, donnees: d }))
+      } catch (err) {
+        if (!(err instanceof ErreurMigrationManquante)) throw err
+        console.warn(`[stockage] demande de rattrapage non tracée : ${err.message}`)
+      }
+    },
+    schemaProgramme: async () => {
+      try {
+        for (const t of TABLES_0004) await ok(t, sb.from(t).select('*').limit(0))
+        return true
+      } catch (e) {
+        if (e instanceof ErreurMigrationManquante) return false
+        throw e
+      }
+    },
 
     /** PAS de « tout ou rien » (voir l'en-tête du fichier) : verrou optimiste sur les lignes lues pendant `fn`. */
     transaction: (fn) => versions.run(new Map(), async () => fn()),

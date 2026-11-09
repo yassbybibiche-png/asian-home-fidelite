@@ -66,7 +66,7 @@ export interface ReponseCarte {
 export type ChampsReglages = Partial<
   Pick<
     Commerce,
-    'nom' | 'type' | 'logo' | 'lienGoogle' | 'coordonnees' | 'recompense' | 'seuilTampons' | 'lots' | 'reglesReponseAuto' | 'actif' | 'eurosParPoint' | 'catalogue' | 'messagesAuto' | 'apparence'
+    'nom' | 'type' | 'logo' | 'lienGoogle' | 'coordonnees' | 'recompense' | 'seuilTampons' | 'lots' | 'reglesReponseAuto' | 'actif' | 'eurosParPoint' | 'catalogue' | 'messagesAuto' | 'apparence' | 'programme'
   >
 >
 
@@ -132,17 +132,23 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     commerces: async () => ((await requete('GET', '/commerces')) as { commerces: Commerce[] }).commerces,
     commerce: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}`)) as { commerce: Commerce }).commerce,
     carte: (clientId: string) => requete('GET', `/cartes/${enc(clientId)}`) as Promise<ReponseCarte>,
-    /** Auto-inscription depuis la page de jeu (sans PIN) : renvoie la carte sans téléphone ni e-mail. */
-    inscrirePublic: (commerceId: string, prenom: string, contact: string) =>
-      requete('POST', `/commerces/${enc(commerceId)}/clients`, { corps: { prenom, contact } }) as Promise<{ client: CartePublique; existant: boolean }>,
+    /** Auto-inscription depuis la page de jeu (sans PIN) : renvoie la carte sans téléphone ni e-mail. Prénom optionnel, parrainage en option. */
+    inscrirePublic: (commerceId: string, prenom: string, contact: string, parrain?: string) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients`, { corps: { prenom, contact, ...(parrain ? { parrain } : {}) } }) as Promise<{ client: CartePublique; existant: boolean }>,
     /** Le navigateur n'envoie qu'un contact : la visite du jour, le tirage du jour et le lot sont décidés par le serveur. */
-    tirer: (commerceId: string, contact: string, prenom?: string) =>
-      requete('POST', `/commerces/${enc(commerceId)}/tirages`, { corps: { contact, ...(prenom ? { prenom } : {}) } }) as Promise<ResultatTirage>,
+    tirer: (commerceId: string, contact: string, prenom?: string, parrain?: string) =>
+      requete('POST', `/commerces/${enc(commerceId)}/tirages`, { corps: { contact, ...(prenom ? { prenom } : {}), ...(parrain ? { parrain } : {}) } }) as Promise<ResultatTirage>,
+    /** Profil progressif (client, après sa 2e visite) : anniversaire « JJ/MM » et/ou plat préféré. */
+    profil: (commerceId: string, clientId: string, champs: { anniversaire?: string; platPrefere?: string }) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/profil`, { corps: champs }) as Promise<{ client: CartePublique }>,
+    /** Visite oubliée signalée par le client (date ISO + montant en centimes + ticket éventuel). */
+    declarerRattrapage: (commerceId: string, clientId: string, champs: { date: string; montantCentimes: number; ticket?: string }) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/rattrapage`, { corps: champs }) as Promise<{ demande: import('../types').DemandeRattrapage; client: CartePublique }>,
 
     // ---- Commerçant (PIN du commerce ou PIN admin) ----
     etat: (commerceId: string, acces: Acces) => requete('GET', `/commerces/${enc(commerceId)}/etat`, { acces }) as Promise<EtatCommerce>,
-    inscrire: (commerceId: string, acces: Acces, prenom: string, contact: string) =>
-      requete('POST', `/commerces/${enc(commerceId)}/clients`, { acces, corps: { prenom, contact } }) as Promise<{ client: Client; existant: boolean }>,
+    inscrire: (commerceId: string, acces: Acces, prenom: string, contact: string, parrain?: string) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients`, { acces, corps: { prenom, contact, ...(parrain ? { parrain } : {}) } }) as Promise<{ client: Client; existant: boolean }>,
     visite: async (commerceId: string, acces: Acces, clientId: string) =>
       ((await requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/visite`, { acces })) as { client: Client }).client,
     recompense: async (commerceId: string, acces: Acces, clientId: string) =>
@@ -155,15 +161,18 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     majAvis: async (commerceId: string, acces: Acces, avisId: string, maj: { reponse?: string | null; brouillon?: string | null }) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}/avis/${enc(avisId)}`, { acces, corps: maj })) as { avis: Avis }).avis,
     exportCsv: (commerceId: string, acces: Acces) => requete('GET', `/commerces/${enc(commerceId)}/export.csv`, { acces, texte: true }) as Promise<string>,
-    majClient: async (commerceId: string, acces: Acces, clientId: string, champs: { anniversaire: string }) =>
+    majClient: async (commerceId: string, acces: Acces, clientId: string, champs: { anniversaire: string; platPrefere?: string }) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}`, { acces, corps: champs })) as { client: Client }).client,
+    /** Décision du commerçant sur une visite oubliée : validation = 1 visite + points ; refus = demande classée. */
+    deciderRattrapage: async (commerceId: string, acces: Acces, clientId: string, demandeId: string, decision: 'valider' | 'refuser') =>
+      ((await requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/rattrapage/${enc(demandeId)}`, { acces, corps: { decision } })) as { client: Client }).client,
 
     // ---- Caisse (code équipe ou PIN) ----
     caisse: (commerceId: string, acces: AccesCaisse) => requete('GET', `/commerces/${enc(commerceId)}/caisse`, { acces }) as Promise<ReponseCaisse>,
     actionCaisse: (
       commerceId: string,
       acces: AccesCaisse,
-      type: 'passage' | 'recompense' | 'echange',
+      type: 'passage' | 'recompense' | 'echange' | 'attente' | 'reserve',
       corps: { clientId: string; actionId: string; faitLe?: string; montantCentimes?: number; recompenseId?: string },
     ) => requete('POST', `/commerces/${enc(commerceId)}/caisse/${type}`, { acces, corps }) as Promise<{ client: Client; dejaTraite: boolean }>,
 

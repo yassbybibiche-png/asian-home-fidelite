@@ -6,6 +6,7 @@ import { ErreurApi, type ClientApi } from '../data/api'
 import { creerCoffrePin, rangementIndexedDb } from '../data/coffrePin'
 import { recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { analyserMontant, formaterPrix, passageCeJour, pointsPourMontant, soldePoints } from '../lib/points'
+import { niveauClient, reserveUtilisable } from '../lib/programme'
 import { correspondRecherche } from '../lib/recherche'
 import { clientIdDepuisQr, creerFileCaisse, libelleFile, nouvelIdAction, type ActionCaisse, type EtatFile, type Envoi, type TypeActionCaisse } from '../lib/fileCaisse'
 import { LogoCommerce, MessageErreur } from '../components/ui'
@@ -36,7 +37,7 @@ interface Cache {
   synchroLe: string
 }
 
-const LIBELLES: Record<TypeActionCaisse, string> = { passage: 'Passage', recompense: 'Récompense', echange: 'Échange de points' }
+const LIBELLES: Record<TypeActionCaisse, string> = { passage: 'Passage', recompense: 'Récompense', echange: 'Échange de points', attente: 'Récompense en attente', reserve: 'Plat en réserve' }
 
 function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) {
   const coffre = useMemo(() => creerCoffrePin(stockage('sessionStorage'), rangementIndexedDb('caisse'), globalThis.crypto?.subtle, 'fidelite:caisse'), [])
@@ -325,7 +326,11 @@ function Comptoir({
           ? `✓ Passage enregistré pour ${c.prenom} : +1 tampon (${tamponsAffiches(c, commerce)}/${commerce.seuilTampons})${gagnes > 0 ? `, +${gagnes} point${gagnes > 1 ? 's' : ''}` : ''}.`
           : type === 'recompense'
             ? `🎁 Récompense remise à ${c.prenom} : ${commerce.recompense}.`
-            : `✓ Échange enregistré pour ${c.prenom} — nouveau solde : ${soldePoints(c)} points.`,
+            : type === 'attente'
+              ? `🎁 Récompense remise à ${c.prenom}.`
+              : type === 'reserve'
+                ? `🍜 Plat en réserve utilisé par ${c.prenom}.`
+                : `✓ Échange enregistré pour ${c.prenom} — nouveau solde : ${soldePoints(c)} points.`,
     })
     if (type === 'passage') setMontant('')
   }
@@ -437,6 +442,46 @@ function Comptoir({
           </div>
           {passageCeJour(choisi, new Date()) && <p className="rounded-xl bg-gray-50 p-2 text-sm text-gray-700">Déjà un passage aujourd’hui : 1 tampon par jour maximum.</p>}
           {enAttente(choisi) > 0 && <p className="text-sm text-amber-900">{enAttente(choisi)} action(s) en attente d’envoi pour ce client.</p>}
+          {(() => {
+            const niveau = niveauClient(choisi, commerce)
+            const reserve = reserveUtilisable(choisi, new Date())
+            const rattrapages = (choisi.demandesRattrapage ?? []).filter((d) => d.statut === 'en_attente')
+            return (
+              <>
+                {niveau.nom !== 'Membre' && (
+                  <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-900 ring-1 ring-amber-200">
+                    {niveau.nom === 'VIP' ? '👑 VIP' : `⭐ ${niveau.nom}`} — points ×{niveau.multiplicateur}
+                  </p>
+                )}
+                {(choisi.recompensesEnAttente ?? []).length > 0 && (
+                  <div>
+                    <p className="etiquette">Récompenses à remettre</p>
+                    <ul className="space-y-2">
+                      {(choisi.recompensesEnAttente ?? []).map((r) => (
+                        <li key={r.id}>
+                          <button className="bouton min-h-12 w-full justify-between bg-green-700 hover:bg-green-800 active:bg-green-900" disabled={enCours} onClick={() => void agir('attente', { recompenseId: r.id })}>
+                            <span>🎁 {r.libelle}</span>
+                            <span className="text-sm">{r.origine === 'palier' ? 'Palier' : r.origine === 'defi' ? 'Défi' : 'Anniversaire'}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {reserve && (
+                  <button className="bouton min-h-12 w-full justify-between bg-green-700 hover:bg-green-800 active:bg-green-900" disabled={enCours} onClick={() => void agir('reserve')}>
+                    <span>🍜 Plat en réserve</span>
+                    <span className="text-sm">avant le {new Date(reserve.expireLe).toLocaleDateString('fr-FR')}</span>
+                  </button>
+                )}
+                {rattrapages.length > 0 && (
+                  <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-900 ring-1 ring-amber-200">
+                    {rattrapages.length} visite{rattrapages.length > 1 ? 's' : ''} oubliée{rattrapages.length > 1 ? 's' : ''} signalée{rattrapages.length > 1 ? 's' : ''} — à valider depuis la fiche client (PIN gérant).
+                  </p>
+                )}
+              </>
+            )
+          })()}
 
           <div>
             <label className="etiquette" htmlFor="caisse-montant">
@@ -447,7 +492,11 @@ function Comptoir({
               <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-gray-600">€</span>
             </div>
             <p className="mt-1 text-sm text-gray-600">
-              {centimes === null ? 'Montant invalide (ex : 23,50).' : centimes > 0 ? `${formaterPrix(centimes)} → +${pointsPourMontant(centimes, commerce)} point(s)` : 'Sans montant : 1 tampon, pas de points.'}
+              {centimes === null
+                ? 'Montant invalide (ex : 23,50).'
+                : centimes > 0
+                  ? `${formaterPrix(centimes)} → +${Math.round(pointsPourMontant(centimes, commerce) * niveauClient(choisi, commerce).multiplicateur)} point(s)${niveauClient(choisi, commerce).multiplicateur > 1 ? ` (${niveauClient(choisi, commerce).nom} ×${niveauClient(choisi, commerce).multiplicateur})` : ''}`
+                  : 'Sans montant : 1 tampon, pas de points.'}
             </p>
           </div>
 

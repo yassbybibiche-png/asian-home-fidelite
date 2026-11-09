@@ -5,6 +5,7 @@ import { creerDepotApi, etatVide, type DepotApi } from './data/depotApi'
 import { baseApi, creerClientApi, ErreurApi, MESSAGE_HORS_LIGNE, type Acces, type ClientApi } from './data/api'
 import { creerCoffrePin, rangementIndexedDb, type CoffrePin } from './data/coffrePin'
 import { analyserContact, nouveauClient, offrirRecompense, trouverClientParContact, validerVisite } from './lib/fidelite'
+import { appliquerInscription } from './lib/programme'
 import { appliquerRegles } from './lib/avis'
 import { clientsEnCsv, nomFichierCsv } from './lib/csv'
 import { nouveauCommerce } from './data/defaults'
@@ -193,7 +194,8 @@ function StoreLocal({ children, depot }: { children: ReactNode; depot: Depot }) 
       if (!contact) throw new Error('Saisissez un numéro (10 chiffres) ou un e-mail valide.')
       const existant = trouverClientParContact(etat.clients, commerceId, contact)
       if (existant) return { client: existant, existant: true }
-      const client = nouveauClient(commerceId, prenom, contact)
+      const commerce = etat.commerces.find((c) => c.id === commerceId)
+      const client = commerce ? appliquerInscription(nouveauClient(commerceId, prenom, contact), commerce) : nouveauClient(commerceId, prenom, contact)
       setEtat((e) => ({ ...e, clients: [...e.clients, client] }))
       return { client, existant: false }
     },
@@ -396,6 +398,7 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
             ...(c.catalogue ? { catalogue: c.catalogue } : {}),
             ...(c.messagesAuto ? { messagesAuto: c.messagesAuto } : {}),
             ...(c.apparence ? { apparence: c.apparence } : {}),
+            ...(c.programme ? { programme: c.programme } : {}),
           })
         }),
       creerCommerce: (n: NouveauCommerce) =>

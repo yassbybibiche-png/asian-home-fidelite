@@ -51,6 +51,9 @@ const SCHEMA: Record<string, { pk: string; uniques: Unicite[]; fk?: [string, str
   equipe: { pk: 'id', uniques: [], fk: [['commerce_id', 'commerces']], ordre: true, version: true },
   journal: { pk: 'id', uniques: [], fk: [['commerce_id', 'commerces']] },
   menus: { pk: 'commerce_id', uniques: [], fk: [['commerce_id', 'commerces']], version: true },
+  // 0004_programme.sql
+  parrainages: { pk: 'id', uniques: [], fk: [['commerce_id', 'commerces']] },
+  demandes_rattrapage: { pk: 'id', uniques: [], fk: [['commerce_id', 'commerces']] },
 }
 
 interface Requete {
@@ -61,9 +64,9 @@ interface Requete {
   corps: unknown
 }
 
-/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). */
-function fauxPostgrest({ sans0003 = false } = {}) {
-  const absentes = new Set(sans0003 ? ['equipe', 'journal', 'menus'] : [])
+/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` : idem pour 0004. */
+function fauxPostgrest({ sans0003 = false, sans0004 = false } = {}) {
+  const absentes = new Set([...(sans0003 ? ['equipe', 'journal', 'menus'] : []), ...(sans0004 ? ['parrainages', 'demandes_rattrapage'] : [])])
   const tables: Record<string, Ligne[]> = Object.fromEntries(Object.keys(SCHEMA).map((t) => [t, []]))
   const requetes: Requete[] = []
   const rejets: string[] = []
@@ -494,10 +497,10 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.ok(!JSON.stringify(f.tables.equipe).includes('2468'), 'code jamais stocké en clair')
       const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
       const p = await api('POST', `/commerces/${AH}/caisse/passage`, { clientId: c.id, montantCentimes: 1200, actionId: 'act-sb-0001' }, { 'X-Equipe-Code': '2468' })
-      assert.deepEqual([p.statut, p.contenu.client.tampons, p.contenu.client.points], [200, 1, 12])
+      assert.deepEqual([p.statut, p.contenu.client.tampons, p.contenu.client.points], [200, 1, 62], '12 points du passage + 50 points de bienvenue')
       const bis = await api('POST', `/commerces/${AH}/caisse/passage`, { clientId: c.id, montantCentimes: 1200, actionId: 'act-sb-0001' }, { 'X-Equipe-Code': '2468' })
       assert.equal(bis.contenu.dejaTraite, true)
-      assert.equal((f.tables.clients[0].donnees as Client).points, 12)
+      assert.equal((f.tables.clients[0].donnees as Client).points, 62)
       assert.equal(f.tables.journal.length, 2, 'ajout du membre + 1 passage (le rejeu n’est pas journalisé)')
       assert.equal((await api('PUT', `/commerces/${AH}/menu`, { categories: [{ nom: 'Plats', produits: [{ nom: 'Pho', prix: 1290, allergenes: [] }] }] }, PIN)).statut, 200)
       assert.equal((await api('PUT', `/commerces/${AH}/menu`, { categories: [{ nom: 'Plats', produits: [{ nom: 'Pho', prix: 1390, allergenes: [] }] }] }, PIN)).statut, 200)
@@ -532,7 +535,11 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       const visite = await api('POST', `/commerces/${AH}/clients/${id}/visite`, undefined, PIN)
       assert.equal(visite.statut, 200)
       // Mêmes fonctions pures que le front et que SQLite : rien n'est réécrit dans la couche Supabase.
-      assert.deepEqual(visite.contenu.client, validerVisite(avant, (await etat()).commerce, horloge))
+      // (La route visite applique aussi le programme — défi démarré — que `validerVisite` ne connaît pas.)
+      const { defi, depenseCentimes, ...sansProgramme } = visite.contenu.client as Client & { defi?: unknown }
+      assert.deepEqual(sansProgramme, validerVisite(avant, (await etat()).commerce, horloge))
+      assert.equal((visite.contenu.client.defi as { objectif: number }).objectif, 3)
+      assert.equal(visite.contenu.client.depenseCentimes, 0, 'visite sans montant')
       assert.deepEqual(f.tables.clients[0].donnees, visite.contenu.client)
 
       const jeu = await api('POST', `/commerces/${AH}/tirages`, { contact: '0033612345678' })

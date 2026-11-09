@@ -6,7 +6,7 @@
 
 type Stockage = Pick<Storage, 'getItem' | 'setItem'>
 
-export type TypeActionCaisse = 'passage' | 'recompense' | 'echange'
+export type TypeActionCaisse = 'passage' | 'recompense' | 'echange' | 'attente' | 'reserve'
 
 export interface ActionCaisse {
   id: string

@@ -4,7 +4,7 @@
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Avis, Client, Commerce, EntreeJournal, MembreEquipe, Menu, Tirage } from '../src/types.ts'
+import type { Avis, Client, Commerce, DemandeRattrapage, EntreeJournal, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
 import { cleContact } from '../src/lib/fidelite.ts'
 
 export interface Pin {
@@ -15,6 +15,12 @@ export interface Pin {
 export interface MembreStocke {
   membre: MembreEquipe
   code: Pin
+}
+
+/** Trace d'audit d'une demande de rattrapage (migration 0004) : l'état de référence reste dans `clients.donnees`. */
+export interface DemandeRattrapageTrace extends DemandeRattrapage {
+  commerceId: string
+  clientId: string
 }
 
 type P<T> = T | Promise<T>
@@ -57,6 +63,11 @@ export interface Stockage {
   majMenu(m: Menu): P<void>
   /** Tables de la migration 0003 présentes (toujours vrai sous SQLite, le schéma est créé au démarrage). */
   schemaCartiz(): P<boolean>
+  /** Traces d'audit du programme (migration 0004 : parrainages, demandes de rattrapage). */
+  ajouterParrainage(p: Parrainage): P<void>
+  ajouterDemandeRattrapage(d: DemandeRattrapageTrace): P<void>
+  /** Tables de la migration 0004 présentes (toujours vrai sous SQLite). */
+  schemaProgramme(): P<boolean>
   /** Pas d'imbrication. SQLite : vraie transaction. Supabase : voir `stockage-supabase.ts` (pas de transaction multi-requêtes). */
   transaction<T>(fn: () => P<T>): Promise<T>
   fermer(): P<void>
@@ -114,6 +125,14 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS journal_commerce ON journal (commerce_id, date);
   CREATE TABLE IF NOT EXISTS menus (commerce_id TEXT PRIMARY KEY, donnees TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS parrainages (
+    id TEXT PRIMARY KEY, commerce_id TEXT NOT NULL, parrain_id TEXT NOT NULL, filleul_id TEXT NOT NULL, date TEXT NOT NULL, donnees TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS parrainages_commerce ON parrainages (commerce_id, date);
+  CREATE TABLE IF NOT EXISTS demandes_rattrapage (
+    id TEXT PRIMARY KEY, commerce_id TEXT NOT NULL, client_id TEXT NOT NULL, date TEXT NOT NULL, donnees TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS rattrapages_commerce ON demandes_rattrapage (commerce_id, date);
 `
 
 type Ligne = { donnees: string }
@@ -155,6 +174,8 @@ export function ouvrirStockage(fichier: string) {
     ajoutJournal: db.prepare('INSERT INTO journal (id, commerce_id, date, donnees) VALUES (?, ?, ?, ?)'),
     menu: db.prepare('SELECT donnees FROM menus WHERE commerce_id = ?'),
     majMenu: db.prepare('INSERT INTO menus (commerce_id, donnees) VALUES (?, ?) ON CONFLICT (commerce_id) DO UPDATE SET donnees = excluded.donnees'),
+    ajoutParrainage: db.prepare('INSERT INTO parrainages (id, commerce_id, parrain_id, filleul_id, date, donnees) VALUES (?, ?, ?, ?, ?, ?)'),
+    ajoutRattrapage: db.prepare('INSERT INTO demandes_rattrapage (id, commerce_id, client_id, date, donnees) VALUES (?, ?, ?, ?, ?)'),
   }
 
   // Les transactions peuvent contenir des `await` (contrat commun avec Supabase) : elles passent une par une
@@ -206,6 +227,9 @@ export function ouvrirStockage(fichier: string) {
     menu: (commerceId: string) => lire<Menu>(q.menu.all(commerceId))[0],
     majMenu: (m: Menu) => void q.majMenu.run(m.commerceId, JSON.stringify(m)),
     schemaCartiz: () => true,
+    ajouterParrainage: (p: Parrainage) => inserer(q.ajoutParrainage, p.id, p.commerceId, p.parrainId, p.filleulId, p.date, JSON.stringify(p)),
+    ajouterDemandeRattrapage: (d: DemandeRattrapageTrace) => inserer(q.ajoutRattrapage, d.id, d.commerceId, d.clientId, d.date, JSON.stringify(d)),
+    schemaProgramme: () => true,
 
     /** Exécute `fn` d'un bloc : tout est écrit, ou rien. */
     transaction<T>(fn: () => T | Promise<T>): Promise<T> {
