@@ -23,7 +23,11 @@ npm run build      # vérification TypeScript + build de production dans dist/
 npm run preview    # sert dist/ → http://localhost:4173
 npm test           # tests de la logique métier (voir plus bas)
 npm run seed       # régénère src/data/seed.json (déterministe)
+npm run serveur    # backend partagé (API /api/v1, SQLite) → http://localhost:3001/api/v1/sante
 ```
+
+**Backend partagé (V1)** : `server/` (Node 24, zéro dépendance, `node:sqlite`). Variables, API, PIN,
+déploiement et limites : voir [`server/README.md`](server/README.md). Le front ne l'utilise pas encore (bascule en V2).
 
 `dist/` est un site statique : il peut être déposé tel quel sur n'importe quel hébergement statique.
 (Aucun hébergement n'a été fait.)
@@ -79,7 +83,7 @@ une démo cohérente, faites tout sur le même téléphone.
 
 ## Tests
 
-`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (36 tests).
+`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (55 tests : 36 de logique + 19 du serveur, `tests/serveur.test.ts`).
 Pas de Vitest : Node exécute le TypeScript directement, ça évite une dépendance et ne touche pas au build.
 
 Les tests portent sur la **logique pure** (hors React) :
@@ -93,7 +97,10 @@ Les tests portent sur la **logique pure** (hors React) :
 - avis : choix du modèle, réponse auto aux 5★, brouillons, réponse ou brouillon existant jamais écrasé,
   modèle négatif sans affirmation d'envoi ; lien direct d'avis Google d'Asian Home Paris (et migration de l'ancien lien Maps) ;
 - cohérence du seed (dates récentes et jamais futures, tampons = visites − récompenses, tirages un jour
-  de visite) et « Réinitialiser la démo » (avec un localStorage simulé).
+  de visite) et « Réinitialiser la démo » (avec un localStorage simulé) ;
+- serveur (vrai HTTP sur port éphémère, base SQLite temporaire) : PIN admin / commerçant, déduplication,
+  visite, récompense, tirage refusé sans visite / 2e fois / avec un autre format du numéro, export CSV,
+  persistance après redémarrage, `DEMO=1`, anti-bruteforce (429).
 
 **Non testé automatiquement** : l'interface React (clics, rendu, animation de la roue). Aucun navigateur
 n'était disponible dans l'environnement de développement : le rendu sur téléphone a été relu dans le code,

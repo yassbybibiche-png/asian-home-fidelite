@@ -34,6 +34,8 @@ export interface Commerce {
   reglesReponseAuto: ReglesReponseAuto
   actif: boolean
   creeLe: string
+  /** Commerce de démonstration (données fictives) : à étiqueter « Démo » dans l'UI. */
+  demo?: boolean
 }
 
 export interface Client {
@@ -64,6 +66,8 @@ export interface Tirage {
   clientId: string
   lot: string
   date: string
+  /** Code gagnant à montrer au comptoir (tirages faits par le serveur). */
+  code?: string
 }
 
 export interface Avis {
