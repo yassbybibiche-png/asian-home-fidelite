@@ -7,6 +7,7 @@ import { CarteFidelite } from '../components/CarteFidelite'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { BadgeDemo, EncartWallet } from '../components/ui'
 import { dateRelative } from '../lib/format'
+import { estAsianHome, VISUELS } from '../lib/visuels'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 
 /** Page publique #/carte/<clientId> : la carte de fidélité sur le téléphone du client. */
@@ -48,6 +49,13 @@ function Carte({ client, commerce, demo, pied, menu }: { client: Client; commerc
   if (!commerce.actif) return <MessagePublic titre={commerce.nom}>La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
   return (
     <div className="mx-auto max-w-md space-y-4 px-4 pt-6 pb-10">
+      {estAsianHome(commerce) && (
+        <img
+          src={VISUELS.tableSushis}
+          alt="Table dressée chez Asian Home Paris : bao buns, plateau de sushis et cocktails"
+          className="h-80 w-full rounded-3xl object-cover shadow-relief ring-1 ring-gray-900/5"
+        />
+      )}
       <CarteFidelite client={client} commerce={commerce} />
       <BoiteReception messages={client.messages ?? []} commerce={commerce} />
       <a href={`#/jouer/${commerce.id}`} className="bouton w-full">
@@ -57,6 +65,18 @@ function Carte({ client, commerce, demo, pied, menu }: { client: Client; commerc
         <a href={`#/menu/${commerce.id}`} className="bouton-secondaire w-full">
           📖 Voir le menu
         </a>
+      )}
+      {estAsianHome(commerce) && (
+        <section className="carte space-y-3" aria-label="Le restaurant">
+          <h2 className="titre-carte">Le restaurant</h2>
+          <img
+            src={VISUELS.interieur}
+            alt="Salle d’Asian Home Paris : plafond d’ombrelles et tables dressées"
+            loading="lazy"
+            className="h-64 w-full rounded-2xl object-cover"
+          />
+          <p className="text-sm text-gray-700">Restaurant asiatique halal, au Pré-Saint-Gervais.</p>
+        </section>
       )}
       <EncartWallet demo={demo} />
       {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}

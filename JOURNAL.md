@@ -610,3 +610,30 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   Vérifications attendues : « Success. No rows returned », tables equipe / journal / menus présentes avec RLS = true,
   fonction `incrementer_version()` présente, triggers commerces/clients/avis/equipe/menus présents, puis `/sante` :
   `"migrations":{"cartiz":true}` (et redéploiement Render non nécessaire — aucun code serveur modifié, seule la migration SQL).
+
+## 09/11/2026 — Vraies photos d'Asian Home Paris intégrées (visuels locaux)
+- Photos déjà dans le repo (`public/visuels/`, provenance dans `SOURCES.md` — Facebook, Instagram @asianhomeparis,
+  desicorner.fr, lacarte.menu ; aucune banque d'images, aucun hotlink). Le dossier `public/` n'était pas versionné : ajouté.
+- Optimisation mobile (PIL, qualité 82, progressif) : table-sushis.jpg 2268×4032 / 753 Ko → 788×1400 / 196 Ko ;
+  hero-plats.jpg 1024×683 / 173 Ko ; interieur.jpg 675×900 / 131 Ko ; cocktails.jpg 640×1136 / 69 Ko ;
+  sushis-ardoise.jpg 614×408 / 30 Ko ; logo.png 600×600 / 74 Ko inchangé. Tous ≤ 250 Ko, intégrité vérifiée (PIL).
+- Nouveau `src/lib/visuels.ts` : chemins locaux, repli pour Asian Home uniquement (id stable `c-asian-home-paris`,
+  vérifié en production via GET /api/v1/commerces — logo et bannière vides côté base). Le logo / la bannière
+  renseignés par le commerçant priment toujours sur le repli ; aucune donnée ni backend touchés (ni server/,
+  ni migration, ni PIN). `photoCategorie()` n'associe une photo qu'à une catégorie qu'elle montre vraiment
+  (Sushis/Makis → sushis-ardoise, Boissons/Cocktails → cocktails) ; les autres catégories n'ont pas de photo.
+- Emplacements : `LogoCommerce` accepte désormais les chemins locaux `/…` et affiche le logo blanc-sur-noir sur
+  fond sombre (`bg-gray-950`) — en-tête commerçant, carte de fidélité, pages Jouer / QR vitrine / Menu ;
+  `CarteFidelite` : bannière = hero-plats.jpg ; page publique `#/carte` : couverture table-sushis.jpg (h-80)
+  + section « Le restaurant » avec interieur.jpg ; page `#/menu` : couverture table-sushis.jpg (h-56) +
+  illustration de catégorie (h-32) quand applicable. Alt descriptifs sur chaque photo ; images `w-full`
+  dans des conteneurs `max-w-md` (pas de débordement à 390 px). Seed : logo Asian Home → `/visuels/logo.png`.
+- Tests : `tests/visuels.test.ts` (+13) — existence + poids ≤ 250 Ko de chaque fichier référencé, pas de hotlink,
+  repli Asian Home / autre commerce / primauté du réglage commerçant, mapping catégories. `npm test` **186/186**
+  (173 avant). `npm run build` OK (dist/visuels/ : 6 fichiers). Aperçu local : page 200, 6/6 images 200.
+- Correctif en cours de route : le mot « Supabase » dans un commentaire de `visuels.ts` cassait
+  `tests/supabase.test.ts:629` (le front ne doit pas mentionner Supabase) — commentaires reformulés.
+- Déploiement : push master → Render auto-déploie ; vérifié en ligne : /sante, accueil 200, images /visuels/* 200.
+- **Non vérifié** : rendu réel à 390 px sur un vrai téléphone (aucun navigateur sur la VM) ; le menu de
+  production est vide (0 catégorie via GET /menu) donc les illustrations de catégories ne sont visibles que
+  quand le commerçant remplira le menu ; le tableau de bord commerçant n'a pas de visuel hero (outil interne).

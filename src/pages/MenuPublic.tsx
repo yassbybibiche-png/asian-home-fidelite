@@ -5,6 +5,7 @@ import type { Commerce, Menu } from '../types'
 import { ErreurApi } from '../data/api'
 import { formaterPrix } from '../lib/points'
 import { LogoCommerce } from '../components/ui'
+import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 
 /** Page publique #/menu/<commerceId> (QR du menu, lien depuis la carte de fidélité). */
@@ -33,6 +34,13 @@ export default function MenuPublic() {
   const categories = menu.categories.filter((c) => c.produits.length)
   return (
     <div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
+      {estAsianHome(commerce) && (
+        <img
+          src={VISUELS.tableSushis}
+          alt="Table dressée chez Asian Home Paris : bao buns, plateau de sushis et cocktails"
+          className="h-56 w-full rounded-3xl object-cover shadow-relief ring-1 ring-gray-900/5"
+        />
+      )}
       <header className="flex items-center gap-3">
         <LogoCommerce commerce={commerce} taille="lg" />
         <div className="min-w-0">
@@ -52,10 +60,13 @@ export default function MenuPublic() {
       {categories.length === 0 ? (
         <MessagePublic titre="Menu à venir">Le commerce n’a pas encore publié son menu.</MessagePublic>
       ) : (
-        categories.map((c) => (
-          <section key={c.id} id={`m-${c.id}`} className="space-y-2">
-            <h2 className="font-titre text-xl font-bold">{c.nom}</h2>
-            <ul className="space-y-2">
+        categories.map((c) => {
+          const photo = photoCategorie(c.nom)
+          return (
+            <section key={c.id} id={`m-${c.id}`} className="space-y-2">
+              <h2 className="font-titre text-xl font-bold">{c.nom}</h2>
+              {photo && <img src={photo.src} alt={photo.alt} loading="lazy" className="h-32 w-full rounded-2xl object-cover" />}
+              <ul className="space-y-2">
               {c.produits.map((p) => (
                 <li key={p.id} className="carte flex gap-3">
                   {p.photo && <img src={p.photo} alt="" loading="lazy" className="h-20 w-20 shrink-0 rounded-xl object-cover" />}
@@ -69,9 +80,10 @@ export default function MenuPublic() {
                   </div>
                 </li>
               ))}
-            </ul>
-          </section>
-        ))
+              </ul>
+            </section>
+          )
+        })
       )}
       {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}
       <p className="text-center text-xs text-gray-600">Allergènes : demandez conseil à l’équipe en cas de doute.</p>

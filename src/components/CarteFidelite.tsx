@@ -2,6 +2,7 @@ import type { Client, Commerce } from '../types'
 import { recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { eurosParPoint, soldePoints } from '../lib/points'
 import { assombrir, estCouleur } from '../lib/apparence'
+import { banniereCommerce, VISUELS } from '../lib/visuels'
 import { dateRelative } from '../lib/format'
 import { urlAbsolue } from '../router'
 import { LogoCommerce, QrCode } from './ui'
@@ -25,14 +26,22 @@ export function CarteFidelite({ client, commerce, sansQr = false }: { client: Cl
   const pct = Math.round((tampons / commerce.seuilTampons) * 100)
   const debloquee = recompenseDebloquee(client, commerce)
   const restants = Math.max(0, commerce.seuilTampons - tampons)
-  const { couleur, fond, banniere } = commerce.apparence ?? {}
+  const { couleur, fond } = commerce.apparence ?? {}
+  // Bannière configurée par le commerçant, sinon le vrai plateau de plats pour Asian Home.
+  const banniere = banniereCommerce(commerce)
   // Couleurs personnalisées (Réglages → Apparence, contraste vérifié) ; sinon la charte par défaut (classes ci-dessous).
   const styleBandeau = estCouleur(couleur) ? { background: `linear-gradient(135deg, ${couleur}, ${assombrir(couleur)})` } : undefined
   const points = soldePoints(client)
 
   return (
     <section className="overflow-hidden rounded-3xl bg-white shadow-relief ring-1 ring-gray-900/5" style={estCouleur(fond) ? { backgroundColor: fond } : undefined}>
-      {banniere && <img src={banniere} alt="" className="h-24 w-full object-cover" />}
+      {banniere && (
+        <img
+          src={banniere}
+          alt={banniere === VISUELS.heroPlats ? 'Plateau de plats d’Asian Home Paris vu de dessus : sushis, makis, saumon, nouilles, riz et dessert à la mangue' : ''}
+          className="h-24 w-full object-cover"
+        />
+      )}
       {/* Recto : bandeau laque façon carte physique. */}
       <div
         className={`relative overflow-hidden px-5 pt-5 pb-6 text-white ${styleBandeau ? '' : 'bg-gradient-to-br from-marque-500 via-marque-600 to-marque-800'}`}

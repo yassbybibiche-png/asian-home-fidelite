@@ -2,13 +2,15 @@ import { useMemo, useState, type ReactNode } from 'react'
 import qrcode from 'qrcode-generator'
 import type { Commerce } from '../types'
 import { initiales } from '../lib/format'
+import { estLogoLocal, logoCommerce } from '../lib/visuels'
 import { ETATS_WALLET, EXPLICATION_WALLET, LIBELLE_WALLET, MENTIONS_RGPD } from '../lib/integrations'
 
-export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Commerce, 'nom' | 'logo'>; taille?: 'sm' | 'md' | 'lg' }) {
+export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Commerce, 'id' | 'nom' | 'logo'>; taille?: 'sm' | 'md' | 'lg' }) {
   const dims = { sm: 'h-9 w-9 text-sm', md: 'h-11 w-11 text-base', lg: 'h-16 w-16 text-xl' }[taille]
-  const logo = commerce.logo?.trim() ?? ''
-  if (/^https?:\/\//i.test(logo)) {
-    return <img src={logo} alt="" className={`${dims} shrink-0 rounded-xl bg-white object-cover ring-1 ring-gray-200`} />
+  const logo = logoCommerce(commerce)
+  if (logo && (/^https?:\/\//i.test(logo) || logo.startsWith('/'))) {
+    // Logo local d'Asian Home (blanc sur noir) : fond sombre, jamais sur blanc.
+    return <img src={logo} alt={`Logo ${commerce.nom}`} className={`${dims} shrink-0 rounded-xl object-cover ring-1 ring-gray-200 ${estLogoLocal(logo) ? 'bg-gray-950' : 'bg-white'}`} />
   }
   return (
     <span
