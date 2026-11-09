@@ -53,6 +53,11 @@ export interface Client {
   creeLe: string
   /** Récompenses fidélité déjà remises au client. */
   recompensesOffertes?: RecompenseOfferte[]
+  /**
+   * Consentement explicite aux relances SMS / e-mail (RGPD). Aucun écran ne le recueille encore (V3) :
+   * tant qu'il n'est pas vrai, le serveur refuse tout envoi de relance, même avec un prestataire configuré.
+   */
+  consentementRelance?: boolean
 }
 
 export interface RecompenseOfferte {

@@ -1,6 +1,6 @@
 import { useStore } from '../store'
 import type { Page } from '../router'
-import { EnTete, Icone, LogoCommerce } from '../components/ui'
+import { BlocRgpd, EnTete, Icone, LogoCommerce } from '../components/ui'
 import { NOM_APP } from '../data/defaults'
 
 const LIENS: { page: Page; titre: string; aide: string }[] = [
@@ -12,15 +12,16 @@ const LIENS: { page: Page; titre: string; aide: string }[] = [
 const SIMULE_LOCAL = [
   'Les données sont stockées dans ce navigateur (localStorage) : aucun serveur.',
   'Les avis Google sont des exemples ; aucune réponse n’est publiée sur Google.',
-  'Aucun SMS ni e-mail n’est envoyé ; Apple Wallet / Google Wallet sont simulés.',
+  'Aucun SMS ni e-mail n’est envoyé ; Apple Wallet / Google Wallet : à brancher (aucun pass créé).',
   'Aucun paiement ni souscription réelle.',
   'Asian Home Paris : vraies coordonnées publiques, mais clients, avis et tirages fictifs.',
 ]
 
 const SIMULE_API = [
   'Données partagées sur le serveur : le comptoir et le téléphone du client voient les mêmes cartes et tirages.',
-  'Les avis Google sont saisis à la main ; aucune réponse n’est publiée sur Google.',
-  'Aucun SMS ni e-mail n’est envoyé ; Apple Wallet / Google Wallet ne sont pas encore disponibles.',
+  'Avis Google : pas de connexion à Google (à brancher) ; avis saisis à la main, aucune réponse n’est publiée sur Google.',
+  'Relances : à copier-coller, aucun SMS ni e-mail n’est envoyé (envoi à brancher).',
+  'Wallet : à brancher — Apple Wallet en suspens, Google Wallet sans compte émetteur ; aucun pass créé.',
   'Aucun paiement ni souscription réelle.',
 ]
 
@@ -74,6 +75,8 @@ export default function Plus() {
           ))}
         </ul>
       </section>
+
+      <BlocRgpd />
     </div>
   )
 }

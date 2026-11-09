@@ -4,6 +4,7 @@ import type { Avis, StatutAvis } from '../types'
 import { noteMoyenne } from '../lib/stats'
 import { dateRelative } from '../lib/format'
 import { MODELES, appliquerRegles, modeleSuggere, statutAvis, texteModele } from '../lib/avis'
+import { ETAPES_CONNEXION_GOOGLE, TEXTE_AVIS_DEMO, TEXTE_AVIS_VIDE_PRODUCTION } from '../lib/integrations'
 import { BadgeDemo, EnTete, Etoiles, MessageErreur, Vide } from '../components/ui'
 
 type Filtre = 'tous' | 'aTraiter' | 'negatifs'
@@ -36,18 +37,21 @@ export default function AvisPage() {
 
       <p className="mb-4">
         {estDemo ? (
-          <BadgeDemo>Démo — avis simulés, aucune connexion à Google</BadgeDemo>
+          <BadgeDemo>{TEXTE_AVIS_DEMO}</BadgeDemo>
         ) : (
           <span className="text-sm text-gray-600">
-            Pas encore de connexion à Google : les avis sont saisis ici à la main et aucune réponse n’est publiée sur Google (copiez-la vous-même).
+            Connexion à Google : à brancher. En attendant, aucun avis n’est importé : vous pouvez recopier un avis reçu à la main, et aucune réponse n’est
+            publiée sur Google (copiez-la vous-même).
           </span>
         )}
       </p>
 
+      {!estDemo && <ConnecterGoogle />}
+
       <div className="mb-4 grid gap-2 sm:grid-cols-2">
         {commerce.lienGoogle && (
           <a href={commerce.lienGoogle} target="_blank" rel="noopener noreferrer" className="bouton-secondaire">
-            Ouvrir la fiche Google ↗
+            Ouvrir le lien Google ↗
           </a>
         )}
         <button className="bouton-secondaire" onClick={() => setSimulation((s) => !s)} aria-expanded={simulation}>
@@ -104,7 +108,9 @@ export default function AvisPage() {
         ))}
       </div>
 
-      {liste.length === 0 ? (
+      {avis.length === 0 && !estDemo ? (
+        <Vide>{TEXTE_AVIS_VIDE_PRODUCTION}</Vide>
+      ) : liste.length === 0 ? (
         <Vide>Aucun avis dans cette catégorie.</Vide>
       ) : (
         <ul className="space-y-3">
@@ -114,6 +120,37 @@ export default function AvisPage() {
         </ul>
       )}
     </div>
+  )
+}
+
+/** Étapes exactes pour connecter Google Business Profile — rien n'est appelé chez Google sans identifiants. */
+function ConnecterGoogle() {
+  const { commerce } = useStore()
+  return (
+    <details className="carte mb-4">
+      <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 font-bold">
+        Connecter Google <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">à brancher</span>
+      </summary>
+      <p className="mt-2 text-sm text-gray-600">
+        Aucun identifiant Google n’est configuré : rien n’est importé et aucun appel n’est fait à Google. Pour importer vos avis et publier vos réponses, il
+        faudra :
+      </p>
+      <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-gray-600">
+        {ETAPES_CONNEXION_GOOGLE.map((e) => (
+          <li key={e} className="break-words">
+            {e}
+          </li>
+        ))}
+      </ol>
+      {commerce.lienGoogle && (
+        <p className="mt-3 text-sm text-gray-700">
+          En attendant, le moyen réel de recevoir des avis est le lien « laisser un avis » (QR de la roulette) :{' '}
+          <a href={commerce.lienGoogle} target="_blank" rel="noopener noreferrer" className="font-semibold text-marque-600 underline">
+            ouvrir le lien ↗
+          </a>
+        </p>
+      )}
+    </details>
   )
 }
 

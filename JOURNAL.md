@@ -328,3 +328,50 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   rechargement complet toutes les 10 s (1 requête `/etat` par commerce pour l'admin) ; le cache clients reste dans le navigateur
   tant qu'on ne verrouille pas (fermer l'onglet ne l'efface pas) ; contact du joueur gardé sur son propre téléphone pour rejouer ;
   `VITE_API_URL=http://localhost:3001 npm run dev` documenté mais non essayé ; hébergement toujours à décider (aucune dépense).
+
+## 09/11/2026 — Phase V3 : intégrations prêtes à brancher (sans tricher) + vérification finale
+- **Apple Wallet : EN SUSPENS** (décision utilisateur 09/11 13h27). Aucun endpoint, aucune signature, aucun compte, rien demandé
+  à personne. Prérequis documentés seulement (README + `server/README.md`, « à activer sur décision explicite »). Test : aucun code
+  de pass Apple dans `server/`, `src/`, `scripts/` (recherche `pkpass`, `vnd.apple`, `passTypeIdentifier`, `signpass`, `pkcs7`…),
+  et `…/pass.pkpass` → 404. (Le scan exclut `scripts/preuve-*`, qui appelle seulement cette URL pour montrer le 404 — trouvé
+  quand le test a échoué après l'ajout du script de preuve.)
+- **Google Wallet : architecture seule.** `server/wallet.ts` (charge utile Generic pass NON signée : `cardTitle` = commerce,
+  `header` = prénom, `textModulesData` tampons x/seuil plafonnés + récompense, `barcode` QR_CODE vers `<site>/#/carte/:id`,
+  émetteur `ISSUER_ID_A_FOURNIR` par défaut, jamais le téléphone / e-mail). Route `GET …/clients/:clientId/pass.json` (PIN) :
+  **501** sans `GOOGLE_WALLET_ISSUER_ID` + `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` ; configurée, renvoie la charge utile avec
+  « NON signée » (signature JWT non écrite). Champs vérifiés dans la référence REST GenericObject / Barcode (09/11) ; la valeur
+  `QR_CODE` et le scope `wallet_object.issuer` viennent de ma mémoire (non affichés sur les pages lues) → marqués « à vérifier ».
+- **Front Wallet** : bouton « Ajouter à Wallet — à brancher » (fiche client + carte publique), explication honnête et, dans la
+  fiche, lien « Ouvrir la carte publique (QR) ». Plus aucun libellé « Apple / Google » promettant un ajout.
+- **Avis Google** : en mode API hors démo, page Avis vide avec « Connectez Google Business Profile pour importer vos avis. »
+  + section dépliable « Connecter Google — à brancher » (6 étapes, scope `https://www.googleapis.com/auth/business.manage`
+  **vérifié** dans la doc Google « Basic setup » le 09/11 ; lecture des avis `GET mybusiness.googleapis.com/v4/{accounts/*/locations/*}/reviews`,
+  vérifiée ; accès aux API soumis à approbation par formulaire). Aucun appel à Google. Le lien direct (placeid
+  ChIJAV70Kqxt5kcRnhPY0L6yaf0) reste proposé. Démo : badge « Démo — avis simulés, aucune connexion à Google » (déjà présent, vérifié par test).
+- **SMS / e-mail** : `server/notifications/` (`index.ts` interface + `twilio.ts` + `brevo.ts`). Sans clé → 501 « à brancher… Rien
+  n’a été envoyé ». Route `POST …/clients/:clientId/relance` (PIN). Garde-fou ajouté : même configuré, **refus (409) sans
+  `consentementRelance: true`** (nouveau champ optionnel de `Client`, qu'aucun écran ne recueille encore) ; mention STOP /
+  désinscription ajoutée au message. Aucune clé configurée, aucun message envoyé ; adaptateurs testés uniquement avec un `fetch`
+  simulé. Front : relances toujours en copier-coller + « Envoi SMS/e-mail à brancher ». `/sante` expose `integrations` (tout à false).
+- **RGPD** : bloc « Données personnelles (RGPD) » dans Plus et Offre (`src/lib/integrations.ts`) + README.
+- **Formulations corrigées** : Offre (« Aide aux réponses… à copier sur Google ; connexion directe à brancher », relance = message
+  à copier), Plus (Wallet / avis / relances « à brancher »), bouton « Ouvrir le lien Google » (c'est le lien d'avis, pas la fiche),
+  README (tableau réel / à brancher, en-tête, limites, tests).
+- **Tests** : `tests/integrations-v3.test.ts` (13). `npm test` : **94/94 OK** (avant : 81). `npm run build` : OK (JS 366,6 kB /
+  110,6 kB gzip, CSS 32,9 kB). `npm run build:api` : OK ; les 5 nouveaux textes sont dans le bundle (grep).
+- **Parcours HTTP refait après V3** (`npm run serveur` + `node scripts/preuve-http-v3.mjs`, sortie dans `PREUVE-HTTP-V3.txt`) :
+  santé 200 → création 201 → inscription 201 → tirage sans visite 409 → visite 200 → tirage 201 (lot + code) → 2e tirage autre
+  format 409 → carte publique 200 → CSV 200 (BOM `efbbbf`) → CSV sans PIN 401 → pass.json 501 → pass.pkpass 404 → relance SMS 501
+  → relance e-mail 501 → Asian Home : 0 avis, 0 client, 0 tirage, `demo=false`. Le serveur sert le front API : `/` → 200.
+  `npm run preview` (après `npm run build`) + curl → 200 `text/html`. 2 commerces « Preuve V3 … » restent dans la base de dev
+  locale `data/fidelite.db` (non versionnée).
+- **Rendu 390 px : NON vérifié.** Tentative : aucun navigateur sur le PATH (chromium, chrome, firefox, wkhtmltoimage absents) ;
+  le téléchargement Playwright avait échoué en V2 (réseau) → pas de nouvel essai. Aucune capture. Pas de rendu SSR refait en V3.
+- **Restes ouverts / non vérifiés** : signature des passes Google et mise à jour à chaque tampon ; import des avis / publication
+  des réponses ; écran de consentement aux relances et vrai lien de désinscription ; bouton « Envoyer » côté front (le front
+  ignore `/sante.integrations`) ; bouton de suppression d'un client (RGPD) ; adaptateurs Twilio / Brevo jamais essayés en vrai ;
+  rendu téléphone ; hébergement et domaine.
+- **Identifiants encore nécessaires** (liste exacte + qui les fournit : README, « Identifiants et comptes encore nécessaires ») :
+  Google Business Profile (client + utilisateur), Apple Developer (utilisateur — en suspens), Google Wallet émetteur
+  (utilisateur), prestataire SMS / e-mail (utilisateur), hébergement backend (utilisateur), nom de domaine (utilisateur ou client).
+- Rien publié, rien poussé, aucune dépense, aucun compte créé, aucune clé configurée, aucun message envoyé.

@@ -5,6 +5,7 @@ import { estActif, estARelancer, joursDepuis } from '../lib/stats'
 import { dateRelative } from '../lib/format'
 import { analyserContact, messageRelance, recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { correspondRecherche } from '../lib/recherche'
+import { MENTION_ENVOI } from '../lib/integrations'
 import { BoutonCopier, EnTete, MessageErreur, telecharger, Vide } from '../components/ui'
 
 type Filtre = 'tous' | 'actifs' | 'relancer'
@@ -95,7 +96,8 @@ export default function Clients() {
 
       {filtre === 'relancer' && (
         <p className="mb-3 text-sm text-gray-600">
-          Clients déjà venus, mais sans visite depuis plus de 30 jours. Copiez le message et envoyez-le vous-même (SMS, WhatsApp, e-mail) : l’app n’envoie rien.
+          Clients déjà venus, mais sans visite depuis plus de 30 jours. Copiez le message et envoyez-le vous-même (SMS, WhatsApp, e-mail) : l’app n’envoie rien.{' '}
+          <span className="font-semibold">{MENTION_ENVOI}.</span>
         </p>
       )}
 

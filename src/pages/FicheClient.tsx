@@ -93,7 +93,7 @@ export default function FicheClient() {
         </p>
       </section>
 
-      <BoutonWallet demo={estDemo} />
+      <BoutonWallet demo={estDemo} lienCarte={`#/carte/${client.id}`} />
 
       <a href={`#/carte/${client.id}`} className="bouton-secondaire w-full">
         Voir la carte comme le client ↗

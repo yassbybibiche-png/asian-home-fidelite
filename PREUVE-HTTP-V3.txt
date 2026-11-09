@@ -1,0 +1,50 @@
+Preuve HTTP V3 — 09/11/2026 ~14h08 (heure de Paris), serveur local `npm run serveur` (dev, DEMO=0, aucune intégration configurée),
+front compilé en mode API (`npm run build:api`). Commande : `node scripts/preuve-http-v3.mjs`. Sortie (lignes longues tronquées par le script) :
+
+GET /sante — santé + état des intégrations
+  → HTTP 200 {"ok":true,"version":"0.1.0","mode":"developpement","stockage":"sqlite","demo":false,"integrations":{"googleWallet":false,"appleWallet":"en_suspens","googleBusinessProfile":false,"sms":false,"email":false}}
+
+POST /commerces — créer commerce + PIN (admin)
+  → HTTP 201 {"commerce":{"id":"c-mw9a0sqm-l4ai","nom":"Preuve V3 2026-11-09T13:07:53","type":"restaurant", … }
+
+POST /commerces/c-mw9a0sqm-l4ai/clients — inscrire un client
+  → HTTP 201 {"client":{"id":"cl-mw9a0sqq-cgxt","commerceId":"c-mw9a0sqm-l4ai","prenom":"Lina","telephone":"06 12 34 56 78","tampons":0,"visites":[],"derniereVisite":null,"creeLe":"2026-11-09T13:07:53.858Z"},"existant":false}
+
+POST /commerces/c-mw9a0sqm-l4ai/tirages — tirage SANS visite du jour → 409 attendu
+  → HTTP 409 {"erreur":"Pour jouer, faites d’abord valider votre visite du jour au comptoir."}
+
+POST /commerces/c-mw9a0sqm-l4ai/clients/cl-mw9a0sqq-cgxt/visite — valider la visite
+  → HTTP 200 {"client":{ … "tampons":1, … }}
+
+POST /commerces/c-mw9a0sqm-l4ai/tirages — tirage (lot tiré par le serveur)
+  → HTTP 201 {"lot":"Un petit cadeau offert","code":"X55RN5","date":"2026-11-09T13:07:53.866Z","perdant":false}
+
+POST /commerces/c-mw9a0sqm-l4ai/tirages — 2e tirage, autre format du numéro → 409 attendu
+  → HTTP 409 {"erreur":"Vous avez déjà tourné la roue aujourd’hui. Revenez lors de votre prochaine visite !"}
+
+GET /cartes/cl-mw9a0sqq-cgxt — carte publique (sans contact)
+  → HTTP 200 {"client":{"id":"cl-mw9a0sqq-cgxt", … "prenom":"Lina","tampons":1, … } (ni téléphone ni e-mail)
+
+GET /commerces/c-mw9a0sqm-l4ai/export.csv — export CSV (PIN)
+  → HTTP 200 [CSV 141 o, 3 premiers octets efbbbf] prenom;telephone;email;tampons;visites;derniereVisite;creeLe | Lina;06 12 34 56 …
+
+GET /commerces/c-mw9a0sqm-l4ai/export.csv — export CSV sans PIN → 401 attendu
+  → HTTP 401 {"erreur":"PIN commerçant manquant (en-tête X-Commerce-PIN)."}
+
+--- V3 ---
+
+GET /commerces/c-mw9a0sqm-l4ai/clients/cl-mw9a0sqq-cgxt/pass.json — pass Google Wallet sans configuration → 501 attendu
+  → HTTP 501 {"erreur":"Google Wallet à brancher : aucun compte émetteur ni clé de service configurés sur ce serveur. Aucun pass n’est généré."}
+
+GET /commerces/c-mw9a0sqm-l4ai/clients/cl-mw9a0sqq-cgxt/pass.pkpass — pass Apple → 404 attendu (en suspens, aucune route)
+  → HTTP 404 {"erreur":"Route inconnue."}
+
+POST /commerces/c-mw9a0sqm-l4ai/clients/cl-mw9a0sqq-cgxt/relance — relance SMS sans prestataire → 501 attendu
+  → HTTP 501 {"erreur":"Envoi SMS à brancher : aucun prestataire n’est configuré sur ce serveur. Rien n’a été envoyé."}
+
+POST /commerces/c-mw9a0sqm-l4ai/clients/cl-mw9a0sqq-cgxt/relance — relance e-mail sans prestataire → 501 attendu
+  → HTTP 501 {"erreur":"Envoi e-mail à brancher : aucun prestataire n’est configuré sur ce serveur. Rien n’a été envoyé."}
+
+GET /commerces/c-asian-home-paris/etat — Asian Home Paris (DEMO=0)
+  → HTTP 200 { … }
+  Asian Home Paris : 0 avis, 0 client(s), 0 tirage(s) ; demo=false

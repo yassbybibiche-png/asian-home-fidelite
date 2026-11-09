@@ -9,11 +9,13 @@ import type { Avis, Client, Commerce, Lot, Tirage, TypeCommerce } from '../src/t
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
-import { analyserContact, nouveauClient, offrirRecompense, recompenseDebloquee, validerVisite } from '../src/lib/fidelite.ts'
+import { analyserContact, cleContact, messageRelance, nouveauClient, offrirRecompense, recompenseDebloquee, validerVisite } from '../src/lib/fidelite.ts'
 import { estPerdant, lotsJouables, statutJeu, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles } from '../src/lib/avis.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
 import { ouvrirStockage, type Pin, type Stockage } from './stockage.ts'
+import { payloadGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
+import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications } from './notifications/index.ts'
 
 export interface OptionsServeur {
   /** Fichier SQLite (créé au besoin). */
@@ -32,6 +34,12 @@ export interface OptionsServeur {
   /** Dossier du front compilé à servir (ex. `dist/`) ; absent = API seule. */
   dossierStatique?: string
   version?: string
+  /** Adresse publique du site (QR des passes Wallet) ; à défaut, déduite de l'en-tête Host. */
+  urlPublique?: string
+  /** Google Wallet (V3) : absent = 501 « à brancher ». */
+  googleWallet?: ConfigGoogleWallet
+  /** Prestataires SMS / e-mail (V3) : absents = 501 « à brancher », rien n'est envoyé. */
+  notifications?: ConfigNotifications
   /** Horloge injectable (tests). */
   maintenant?: () => Date
 }
@@ -290,6 +298,13 @@ export function creerServeur(o: OptionsServeur) {
   const limiteur = creerLimiteur()
   const maintenant = o.maintenant ?? (() => new Date())
   const adminPin = hacherPin(o.adminPin)
+  const notifications = creerNotifications(o.notifications)
+  const integrations = () => ({
+    googleWallet: walletConfigure(o.googleWallet),
+    appleWallet: 'en_suspens',
+    googleBusinessProfile: false,
+    ...notifications.statut(),
+  })
 
   const ipDe = (req: IncomingMessage) =>
     (o.derriereProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()) || req.socket.remoteAddress || '?'
@@ -358,7 +373,7 @@ export function creerServeur(o: OptionsServeur) {
     const [ressource, id, sous, sousId, action] = chemin
 
     if (ressource === 'sante' && !id && m === 'GET') {
-      return { json: { ok: true, version: o.version ?? '0.0.0', mode: o.production ? 'production' : 'developpement', stockage: 'sqlite', demo: !!o.demo } }
+      return { json: { ok: true, version: o.version ?? '0.0.0', mode: o.production ? 'production' : 'developpement', stockage: 'sqlite', demo: !!o.demo, integrations: integrations() } }
     }
     if (ressource === 'cartes' && id && !sous && m === 'GET') {
       // PUBLIC (ajout V2) : la carte vue par le client (#/carte/<clientId>) et l'état de son jeu du jour.
@@ -457,6 +472,42 @@ export function creerServeur(o: OptionsServeur) {
         return apres
       })
       return { json: { client } }
+    }
+
+    if (sous === 'clients' && sousId && action === 'pass.json' && m === 'GET') {
+      // V3 — Google Wallet : architecture prête, NON branchée. Sans émetteur + clé de service → 501.
+      // Même configuré, la charge utile renvoyée n'est PAS signée (signature JWT non implémentée).
+      exigerCommercant(req, id)
+      const client = clientOu404(id, sousId)
+      if (!walletConfigure(o.googleWallet)) {
+        throw err(501, 'Google Wallet à brancher : aucun compte émetteur ni clé de service configurés sur ce serveur. Aucun pass n’est généré.')
+      }
+      const site = (o.urlPublique || `http://${enTete(req, 'host') ?? 'localhost'}`).replace(/\/+$/, '')
+      return {
+        json: {
+          avertissement: 'Charge utile NON signée : ce n’est pas un pass utilisable. La signature JWT « Save to Google Wallet » avec la clé de service n’est pas implémentée.',
+          payload: payloadGoogleWallet(commerce, client, `${site}/#/carte/${client.id}`, o.googleWallet!.issuerId),
+        },
+      }
+    }
+
+    if (sous === 'clients' && sousId && action === 'relance' && m === 'POST') {
+      // V3 — envoi SMS / e-mail préparé : 501 sans prestataire, et jamais sans consentement explicite du client.
+      exigerCommercant(req, id)
+      const client = clientOu404(id, sousId)
+      const corps = await lireCorps(req)
+      if (corps.canal !== 'sms' && corps.canal !== 'email') throw err(400, '« canal » doit valoir "sms" ou "email".')
+      const canal = corps.canal as Canal
+      if (!notifications.statut()[canal]) throw err(501, new ErreurNonBranche(canal).message)
+      if (client.consentementRelance !== true) throw err(409, 'Ce client n’a pas donné son consentement aux relances : rien n’a été envoyé.')
+      // SMS : format international (06… → +336…, autres numéros : chiffres précédés de +).
+      const cle = client.telephone ? cleContact({ telephone: client.telephone }) : ''
+      const destinataire = canal === 'sms' ? (cle && (/^0\d{9}$/.test(cle) ? `+33${cle.slice(1)}` : `+${cle}`)) : client.email
+      if (!destinataire) throw err(409, `Ce client n’a pas ${canal === 'sms' ? 'de téléphone' : 'd’e-mail'} : rien n’a été envoyé.`)
+      const texteMessage = corps.message == null ? messageRelance(client, commerce) : texte(corps.message, 'message', 600, { requis: true })
+      const desinscription = canal === 'sms' ? ' STOP pour ne plus recevoir de messages.' : '\n\nPour ne plus recevoir ces messages, répondez « désinscription ».'
+      const r = await notifications.envoyer(canal, { destinataire, texte: texteMessage + desinscription, sujet: commerce.nom })
+      return { json: { envoye: true, canal, id: r.id } }
     }
 
     if (sous === 'tirages' && !sousId && m === 'POST') {

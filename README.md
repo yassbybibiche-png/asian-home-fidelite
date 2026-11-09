@@ -15,7 +15,8 @@ pour tous les secteurs, sans aucun réglage propre à un secteur.
 >   téléphone du client voient la même carte, le tirage est fait par le serveur, accès commerçant par PIN.
 >   Avec `DEMO=0` (défaut du serveur), Asian Home Paris démarre **vide** (0 client, 0 avis, 0 tirage).
 >
-> Dans les deux modes : rien n'est publié sur Google, aucun SMS / e-mail n'est envoyé, aucun paiement.
+> Dans les deux modes : rien n'est publié ni importé depuis Google, aucun SMS / e-mail n'est envoyé, aucun pass Wallet
+> n'est créé, aucun paiement. Ces intégrations sont **préparées mais « à brancher »** (V3) : voir plus bas.
 
 ## Lancer
 
@@ -111,24 +112,62 @@ problème n'existe plus.
 | Accès commerçant | **PIN par commerce** + PIN admin (anti-bruteforce) — pas de vrais comptes | Aucun : tout le monde voit tout |
 | Recherche clients | Réelle : téléphone dans tous les formats, prénoms sans accents | idem |
 | Export CSV des clients | **Réel** : téléchargé depuis le serveur (`/export.csv`, PIN) | Généré dans le navigateur (même format) |
-| Relance des clients inactifs (30 jours) | Liste et message **réels** ; l'**envoi** est à faire soi-même (bouton Copier) | idem |
+| Relance des clients inactifs (30 jours) | Liste et message **réels** ; l'**envoi** est à faire soi-même (bouton Copier). UI : « Envoi SMS/e-mail à brancher » | idem |
 | QR codes (vitrine, carte personnelle) | **Réels**, générés localement ; à imprimer depuis l'adresse publique définitive | Réels, pointent vers ce navigateur |
 | Lien « Laisser un avis Google » | **Réel** (lien direct pour Asian Home Paris, repris du linktr.ee officiel du restaurant) | idem |
-| Avis Google | **Pas de connexion à Google** : avis saisis à la main (« + Saisir un avis reçu ») | Avis fictifs |
-| Réponses aux avis (modèles, réponse auto, brouillons) | Logique réelle, **rien n'est publié sur Google** (à copier soi-même) | idem, étiqueté démo |
-| Apple Wallet / Google Wallet | **Pas disponible** (le bouton le dit) | Simulé (le bouton le dit) |
-| SMS / e-mail | **Absents** : rien n'est envoyé | idem |
+| Avis Google | **À brancher** : aucune connexion à Google, aucun import. Asian Home démarre avec **0 avis** et le message « Connectez Google Business Profile pour importer vos avis » + section « Connecter Google » (étapes). Saisie manuelle possible (« + Saisir un avis reçu ») | Avis fictifs, étiquetés « Démo — avis simulés, aucune connexion à Google » |
+| Réponses aux avis (modèles, réponse auto, brouillons) | Logique réelle, **rien n'est publié sur Google** (à copier soi-même ; « Répondu » = marqué par le commerçant) | idem, étiqueté démo |
+| Apple Wallet | **En suspens** (décision du 09/11/2026) : aucun code, aucun pass | idem |
+| Google Wallet | **À brancher** : bouton « Ajouter à Wallet — à brancher » + lien vers la carte publique (QR) ; `pass.json` répond 501 (pas de compte émetteur) | idem, étiqueté démo |
+| SMS / e-mail | **À brancher** : adaptateurs Twilio / Brevo prêts côté serveur, mais aucune clé → 501, **rien n'est envoyé** | Rien n'est envoyé |
 | Paiements | **Absents** | idem |
 | Hébergement | **Pas fait** : rien n'est déployé (voir `server/README.md`, l'offre gratuite de Render ne convient pas au vrai restaurant) | — |
 | Kit de lancement (flyers, étiquettes, adhésif) | Décrit dans l'offre ; QR généré, **impression non faite** | idem |
+
+### Identifiants et comptes encore nécessaires (aucun n'a été créé)
+
+| Quoi | Pour | Qui le fournit |
+|---|---|---|
+| Accès à la fiche **Google Business Profile** (compte Google propriétaire ou gestionnaire) + consentement OAuth | Importer les avis, publier les réponses | **Client** (le restaurant) |
+| Projet Google Cloud approuvé pour les API Business Profile + identifiant OAuth (scope `business.manage`) | idem | **Utilisateur** (éditeur de l'app) |
+| Compte **Apple Developer** (99 $/an), Pass Type ID, certificat + clé de signature | Apple Wallet — **en suspens**, à activer sur décision explicite | **Utilisateur** |
+| Compte **émetteur Google Wallet** + API Google Wallet activée + clé de compte de service | Google Wallet | **Utilisateur** |
+| Compte **prestataire SMS** (Twilio) et/ou **e-mail** (Brevo) + clés API + expéditeur validé | Relances automatiques | **Utilisateur** (le client donne son accord pour l'envoi en son nom) |
+| **Hébergement du backend** (avec disque persistant, région UE de préférence) | Mise en ligne réelle | **Utilisateur** (dépense à valider) |
+| **Nom de domaine** (+ HTTPS) | Adresse définitive des QR imprimés | **Utilisateur**, ou le **client** s'il veut son propre domaine |
+| Consentement des clients finaux aux relances (case à cocher à ajouter) | RGPD, avant tout envoi | Recueilli par le **client** au comptoir / dans l'app |
+
+### Envoi SMS / e-mail : à brancher
+
+- **Prestataires recommandés** (les plus simples à brancher, adaptateurs déjà écrits) : **Twilio** pour les SMS, **Brevo**
+  (ex-Sendinblue, société française) pour les e-mails. SendGrid est une alternative pour l'e-mail (adaptateur non écrit).
+  **Prix : à vérifier sur le site du prestataire** (non vérifiés ici, aucun prix inventé).
+- **Variables d'environnement** : `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` (SMS) ; `BREVO_API_KEY`,
+  `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` (e-mail). Aucune n'est configurée : la route `relance` répond 501.
+- **RGPD** : consentement marketing explicite et préalable du client (champ `consentementRelance`, aucun écran ne le recueille
+  encore → le serveur refuse tout envoi), lien / mot-clé de désinscription dans chaque message (« STOP » en SMS déjà ajouté ;
+  un vrai lien géré par le prestataire reste à prévoir), pas d'envoi la nuit ni le dimanche (bonnes pratiques à respecter).
+- Le front reste en **copier-coller** : aucun bouton « Envoyer » n'existe tant qu'aucun prestataire n'est branché.
+
+### Données personnelles (RGPD) — affiché aussi dans Plus et Offre
+
+- **Données collectées** : prénom + téléphone ou e-mail du client, ses visites, tampons, récompenses et gains de la roulette.
+- **Finalité** : la carte de fidélité et la roulette du commerce. Aucune revente, aucune publicité tierce.
+- **Relances** : uniquement avec consentement explicite et moyen de désinscription (envoi pas encore branché).
+- **Conservation** : tant que le client utilise sa carte ; durée maximale à fixer par le commerce (par ex. 3 ans après la dernière visite).
+- **Export / suppression** sur simple demande au commerçant : export CSV disponible ; la suppression n'a pas encore de bouton
+  (l'administrateur la fait à la main dans la base).
+- **Hébergement** : à préciser selon le déploiement choisi — dans l'Union européenne de préférence.
+- Restent à rédiger : politique de confidentialité, registre des traitements, règlement de la roulette.
 
 Badge « Démo » : en mode API, il n'apparaît **que** sur les commerces venant du seed de démonstration (`DEMO=1`,
 `demo: true`) ; Asian Home Paris (réel) n'en a jamais. En démo locale, il est affiché partout.
 
 ## Tests
 
-`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (81 tests : 36 de logique,
-21 du serveur dans `tests/serveur.test.ts`, 24 du front V2 dans `tests/front-v2.test.ts`).
+`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (94 tests : 36 de logique,
+21 du serveur dans `tests/serveur.test.ts`, 24 du front V2 dans `tests/front-v2.test.ts`, 13 des intégrations V3 dans
+`tests/integrations-v3.test.ts`).
 Pas de Vitest : Node exécute le TypeScript directement, ça évite une dépendance et ne touche pas au build.
 
 Les tests portent sur la **logique pure** (hors React) :
@@ -153,11 +192,19 @@ Les tests portent sur la **logique pure** (hors React) :
   au téléchargement, bascule local / API (`VITE_API_URL`), dépôt API (PIN d'un commerce = ses données seulement,
   serveur qui fait foi sur le cache, hors ligne, « Verrouiller » efface), tirage via l'API simulée (refus sans visite,
   lot du serveur et secteur de la roue, 2e tirage refusé, serveur injoignable sans faux résultat, le navigateur
-  n'envoie jamais de lot), PIN mémorisé chiffré (jamais en clair, clé non exportable, effacé au verrouillage).
+  n'envoie jamais de lot), PIN mémorisé chiffré (jamais en clair, clé non exportable, effacé au verrouillage) ;
+- intégrations V3 : charge utile Google Wallet (champs, tampons x/seuil plafonnés, QR vers `#/carte/:id`, jamais le contact),
+  `pass.json` → 501 sans config et « NON signée » avec config ; aucun code de pass Apple dans `server/`, `src/`, `scripts/` et
+  aucune route Apple ; relances SMS / e-mail → 501 sans clé (aucun appel réseau), refus sans consentement, requêtes Twilio /
+  Brevo bien formées (avec un `fetch` simulé, **jamais contre les vrais services**) ; production : 0 avis, aucun avis du seed ;
+  textes « à brancher », démo « avis simulés », bloc RGPD.
+
+Preuve HTTP manuelle (V2 + V3) : `npm run serveur` puis `node scripts/preuve-http-v3.mjs` — sortie dans `PREUVE-HTTP-V3.txt`.
 
 **Non testé automatiquement** : l'interface React (clics, rendu, animation de la roue). Aucun navigateur n'a pu
-être lancé dans l'environnement de développement (téléchargement de Chromium refusé par le réseau) : chaque écran
-a été **rendu en HTML côté serveur** (mode local, sans erreur), mais le rendu sur téléphone n'a pas été vu à l'écran.
+être lancé dans l'environnement de développement (V2 : téléchargement de Chromium refusé par le réseau ; V3 : aucun
+navigateur installé) : en V2 chaque écran a été **rendu en HTML côté serveur** (mode local, sans erreur), mais le rendu sur
+téléphone (390 px) n'a jamais été vu à l'écran — y compris les blocs ajoutés en V3.
 
 ## Limites pour une vraie mise en production
 
@@ -169,15 +216,15 @@ a été **rendu en HTML côté serveur** (mode local, sans erreur), mais le rend
   téléphone n'est pas vérifié (pas de SMS) : quelqu'un qui connaît le numéro d'un client voit son prénom et ses tampons.
 - **Hors ligne** : pas de file d'attente ; une action faite sans réseau est refusée et doit être refaite.
 - **Vraie API Google** : lire les avis et publier les réponses passe par l'API Google Business Profile
-  (compte Google du commerce, OAuth, accès à demander à Google). Récupérer aussi le vrai lien « laisser
-  un avis » de chaque fiche (fait pour Asian Home Paris ; les 2 autres commerces de démo ont des liens fictifs).
-- **Vrais passes Wallet** : Apple Wallet exige un compte Apple Developer payant et des passes signés ;
-  Google Wallet exige un compte émetteur et une API. Il faut aussi les mettre à jour à chaque tampon.
-- **Envois SMS / e-mail** : prestataire d'envoi, consentement marketing explicite, lien de désinscription.
+  (étapes exactes dans l'app, page Avis → « Connecter Google », et `server/README.md`). Le lien direct « laisser un avis »
+  reste le moyen réel de collecter des avis (fait pour Asian Home Paris ; les 2 commerces de démo ont des liens fictifs).
+- **Vrais passes Wallet** : Apple Wallet **en suspens** (Apple Developer 99 $/an, Pass Type ID, certificat de signature,
+  clé privée, service web de mise à jour des passes — à activer sur décision explicite) ; Google Wallet : compte émetteur,
+  API activée, clé de service, puis signature JWT et mise à jour à chaque tampon (non développées).
+- **Envois SMS / e-mail** : adaptateurs prêts, sans clé ; écran de consentement et vrai lien de désinscription à faire.
 - **Hébergement** : site statique + API + base, nom de domaine, HTTPS, sauvegardes.
-- **RGPD** : on collecte prénom + téléphone/e-mail. Il faut une politique de confidentialité, une base légale
-  et un consentement pour les relances, des durées de conservation, l'export et la suppression sur demande,
-  un registre des traitements et un hébergement dans l'UE de préférence.
+- **RGPD** : bloc d'information ajouté (Plus, Offre, ci-dessus). Restent : politique de confidentialité, recueil du
+  consentement aux relances, bouton de suppression d'un client, registre des traitements, durée de conservation à fixer.
 - **Jeu-concours** : vérifier les règles applicables à une roulette promotionnelle (règlement, conditions,
   pas d'obligation d'achat).
 - **Images et marque** : le logo est aujourd'hui en initiales ; prévoir l'envoi d'un vrai logo.
@@ -185,12 +232,12 @@ a été **rendu en HTML côté serveur** (mode local, sans erreur), mais le rend
 ## Structure
 
 ```
-src/lib/        logique pure testée (fidelite, roulette, avis, stats, recherche, csv)
+src/lib/        logique pure testée (fidelite, roulette, avis, stats, recherche, csv) + textes « à brancher » / RGPD (integrations)
 src/data/       seed.json, valeurs par défaut, persistance locale (depot), mode API : client HTTP (api),
                 dépôt API + cache (depotApi), PIN chiffré (coffrePin), tirage serveur (jeuApi)
 src/store.tsx   état de l'app : StoreLocal (démo) ou StoreApi (serveur), choisi par VITE_API_URL
 src/pages/      écrans (tableau de bord, clients, roulette, avis, réglages, offre, admin, pages publiques)
 server/         backend partagé (API /api/v1, SQLite) — voir server/README.md
-scripts/        générateur du seed
+scripts/        générateur du seed, preuves HTTP (preuve-http-v3.mjs)
 tests/          tests node --test
 ```

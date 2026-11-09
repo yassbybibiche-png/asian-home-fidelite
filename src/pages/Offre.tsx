@@ -1,5 +1,5 @@
 import { useStore } from '../store'
-import { BadgeDemo, EnTete } from '../components/ui'
+import { BadgeDemo, BlocRgpd, EnTete } from '../components/ui'
 import { NOM_APP } from '../data/defaults'
 
 const KIT_LANCEMENT = [
@@ -9,9 +9,9 @@ const KIT_LANCEMENT = [
 ]
 
 const INCLUS = [
-  'Carte de fidélité digitale (tampons, récompense, relance des clients inactifs)',
+  'Carte de fidélité digitale (tampons, récompense, liste des clients inactifs et message de relance à copier)',
   'Roulette par QR code et invitation à laisser un avis Google',
-  'Réponses aux avis Google (modèles prêts, réponse auto réglable)',
+  'Aide aux réponses aux avis Google (modèles prêts, réponse auto réglable) — à copier sur Google ; connexion directe à Google à brancher',
   'Tableau de bord : clients actifs, visites, avis, taux de retour',
 ]
 
@@ -59,6 +59,8 @@ export default function Offre() {
           Le QR code à imprimer est généré par l’app (page « QR vitrine »). L’impression des supports n’est pas incluse dans l’app.
         </p>
       </section>
+
+      <BlocRgpd />
 
       <p className="rounded-xl bg-amber-50 px-4 py-3 text-center font-semibold text-amber-800 ring-1 ring-amber-200">
         {estDemo ? 'Démo — ' : ''}Aucune souscription ni aucun paiement dans l’app

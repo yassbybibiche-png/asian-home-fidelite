@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import qrcode from 'qrcode-generator'
 import type { Commerce } from '../types'
 import { initiales } from '../lib/format'
+import { EXPLICATION_WALLET, LIBELLE_WALLET, MENTIONS_RGPD } from '../lib/integrations'
 
 export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Commerce, 'nom' | 'logo'>; taille?: 'sm' | 'md' | 'lg' }) {
   const dims = { sm: 'h-9 w-9 text-sm', md: 'h-11 w-11 text-base', lg: 'h-16 w-16 text-xl' }[taille]
@@ -165,34 +166,38 @@ export function BoutonCopier({ texte, libelle = 'Copier le message', className =
   )
 }
 
-/** Wallet simulé : on le dit clairement, aucune fausse promesse. */
-export function BoutonWallet({ demo = true }: { demo?: boolean }) {
+/** Wallet à brancher : le bouton le dit, aucune fausse promesse ; renvoie vers la carte publique (QR) en attendant. */
+export function BoutonWallet({ demo = true, lienCarte }: { demo?: boolean; lienCarte?: string }) {
   const [ouvert, setOuvert] = useState(false)
-  if (!demo) {
-    return (
-      <div>
-        <button type="button" className="bouton-secondaire w-full" onClick={() => setOuvert((o) => !o)} aria-expanded={ouvert}>
-          Ajouter à Wallet (Apple / Google)
-        </button>
-        {ouvert && (
-          <p className="mt-2 rounded-xl bg-gray-50 p-3 text-sm text-gray-700 ring-1 ring-gray-200" role="status">
-            Pas encore disponible : aucun pass Apple Wallet ou Google Wallet n’est créé. Gardez cette page en favori pour retrouver votre carte.
-          </p>
-        )}
-      </div>
-    )
-  }
   return (
     <div>
       <button type="button" className="bouton-secondaire w-full" onClick={() => setOuvert((o) => !o)} aria-expanded={ouvert}>
-        Ajouter à Wallet (Apple / Google)
+        {LIBELLE_WALLET}
       </button>
       {ouvert && (
-        <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="status">
-          <BadgeDemo>Démo</BadgeDemo> Démo — génération de vrai pass non incluse. Aucun pass Apple Wallet ou Google Wallet n’est créé ; gardez cette page en
-          favori pour retrouver votre carte.
-        </p>
+        <div className={`mt-2 rounded-xl p-3 text-sm ring-1 ${demo ? 'bg-amber-50 text-amber-900 ring-amber-200' : 'bg-gray-50 text-gray-700 ring-gray-200'}`} role="status">
+          {demo && <BadgeDemo>Démo</BadgeDemo>} {EXPLICATION_WALLET}
+          {lienCarte && (
+            <a href={lienCarte} className="mt-2 flex min-h-11 items-center font-semibold text-marque-600 underline">
+              Ouvrir la carte publique (QR) ↗
+            </a>
+          )}
+        </div>
       )}
     </div>
+  )
+}
+
+/** Mentions RGPD courtes (Plus, Offre). */
+export function BlocRgpd() {
+  return (
+    <section className="carte">
+      <h2 className="font-bold">Données personnelles (RGPD)</h2>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
+        {MENTIONS_RGPD.map((m) => (
+          <li key={m}>{m}</li>
+        ))}
+      </ul>
+    </section>
   )
 }
