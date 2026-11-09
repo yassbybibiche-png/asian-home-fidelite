@@ -412,6 +412,33 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
     assert.equal(f.tables.commerces.length, 1)
   })
 
+  test('S3 : base Supabase neuve en production = Asian Home Paris réel et vide (0 client / avis / tirage), rien de démo', async () => {
+    const f = fauxPostgrest()
+    // Sans PIN_ASIAN_HOME en production, le serveur refuse d'initialiser (aucun PIN par défaut) et n'écrit rien.
+    await assert.rejects(demarrer(f, { production: true, pinInitial: undefined }), /PIN_ASIAN_HOME/)
+    assert.equal(f.tables.commerces.length, 0)
+    assert.equal(f.tables.meta.length, 0)
+
+    const { app, api } = await demarrer(f, { production: true, pinInitial: '4826' })
+    try {
+      const sante = (await api('GET', '/sante')).contenu
+      assert.deepEqual([sante.stockage, sante.mode, sante.demo], ['supabase', 'production', false])
+      assert.deepEqual(f.tables.commerces.map((c) => c.id), [AH])
+      const ah = f.tables.commerces[0].donnees as Commerce
+      assert.equal(ah.nom, 'Asian Home Paris')
+      assert.equal(ah.demo, false)
+      assert.equal(ah.actif, true)
+      assert.equal(ah.lienGoogle, 'https://search.google.com/local/writereview?placeid=ChIJAV70Kqxt5kcRnhPY0L6yaf0')
+      assert.match(ah.coordonnees ?? '', /André Joineau/)
+      for (const t of ['clients', 'tirages', 'avis'] as const) assert.equal(f.tables[t].length, 0, `${t} vide`)
+      assert.deepEqual(f.tables.meta.map((m) => m.cle), ['initialise'], 'pas de ligne meta « demo »')
+      const etat = (await api('GET', `/commerces/${AH}/etat`, undefined, { 'X-Commerce-PIN': '4826' })).contenu
+      assert.deepEqual([etat.clients.length, etat.tirages.length, etat.avis.length], [0, 0, 0])
+    } finally {
+      await app.fermer()
+    }
+  })
+
   test('parcours : inscription dédupliquée, roulette = visite du jour obligatoire, 1 visite = 1 tampon, récompense avec report', async () => {
     const f = fauxPostgrest()
     const { app, api } = await demarrer(f)

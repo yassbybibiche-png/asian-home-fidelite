@@ -1,0 +1,30 @@
+# Blueprint Render (phase Supabase S3) — serveur Asian Home Fidélité (API /api/v1 + front en mode API).
+# Mode d'emploi : server/README.md, « Mise en production », étape d (Render → New → Blueprint).
+# Champs vérifiés le 09/11/2026 sur https://render.com/docs/blueprint-spec.
+# AUCUN secret ici : les variables `sync: false` sont demandées par Render à la création du Blueprint
+# (et seulement à ce moment-là ; plus tard, elles se modifient dans Environment du service).
+services:
+  - type: web
+    name: asian-home-fidelite
+    runtime: node
+    plan: free
+    region: frankfurt
+    # Pas de `branch` : Render prend la branche choisie à la création du Blueprint.
+    buildCommand: npm ci && npm run build:api
+    startCommand: npm run serveur
+    healthCheckPath: /api/v1/sante
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      # Les 4 secrets, à saisir dans le dashboard Render (jamais dans ce fichier) :
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ADMIN_PIN
+        sync: false
+      - key: PIN_ASIAN_HOME
+        sync: false
+    # Volontairement absents : PORT (fourni par Render), NODE_ENV (la variable RENDER active déjà la production ;
+    # NODE_ENV=production au build ferait sauter les devDependencies nécessaires à `npm run build:api`),
+    # TZ / TRUST_PROXY (réglés par le serveur), DEMO et DB_FILE (jamais en production).

@@ -457,3 +457,35 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   `README.md` (tableau réel / à brancher, résumé de mise en ligne, comptes nécessaires, tests).
 - **Tests** : `npm test` **118/118** (avant : 109 ; +9). `npm run build` : OK (JS 366,6 kB / 110,6 kB gzip, inchangé).
 - Apple : en suspens, rien touché.
+
+## 09/11/2026 — Phase Supabase S3 : render.yaml + vérification finale de la procédure
+- **Toujours aucun compte, aucun projet, aucune clé, rien poussé, rien dépensé, rien déployé.**
+- **`render.yaml` (racine)** : 1 service `web` `asian-home-fidelite`, `runtime: node`, `plan: free`, `region: frankfurt`,
+  build `npm ci && npm run build:api`, start `npm run serveur`, `healthCheckPath: /api/v1/sante`, `NODE_VERSION="24"`, et
+  `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PIN`, `PIN_ASIAN_HOME` en `sync: false` (aucune valeur). Pas de `branch`
+  (celle choisie à la création). Noms de champs vérifiés le 09/11 dans la doc officielle *Blueprint spec* (`runtime` remplace
+  `env`, déprécié ; `free` et `frankfurt` valides ; `sync: false` demandé **seulement à la création** du Blueprint).
+  YAML validé par PyYAML 6.0.1 (contrôle manuel) et par le test.
+- **Vérifié dans la doc Render (09/11)** : parcours *New > Blueprint* → **Connect** sur le dépôt → nom + branche → aperçu →
+  **Deploy Blueprint** (le brief disait « Apply » : libellé corrigé) ; `RENDER=true` posé partout ; `NODE_ENV=production`
+  posé **au runtime seulement** → `npm ci` installe bien les devDependencies (TypeScript, Vite) au build ; précédence
+  `NODE_VERSION` > `.node-version` > `.nvmrc` > `engines`.
+- **Seed de production vérifié dans le code** (`initialiser`, `server/app.ts`) : base neuve → seul `seed.commerces[0]`
+  (Asian Home Paris réel), `demo: false`, PIN haché, 0 client / avis / tirage ; démo seulement si `DEMO=1` ; en production
+  sans `PIN_ASIAN_HOME` → refus de démarrer sans rien écrire. Le test Supabase existant ne vérifiait que `clients` vide et
+  pas le mode production → **nouveau test** « S3 : base Supabase neuve en production » (tirages / avis / meta, `demo: false`,
+  lien d'avis, `/sante` = supabase / production / demo false, refus sans PIN).
+- **Procédure relue de bout en bout** (`server/README.md`) — corrigé : étape d réécrite autour du Blueprint (formulaire manuel
+  gardé en secours), secrets à corriger plus tard via *Environment*, garde-fou « plan Free, pas de carte », messages des
+  journaux en cas de refus de démarrer ; étape d.7 relie le résultat attendu au code et au test ; étape e : libellés
+  vérifiés dans le code (« Déverrouiller » manquait, « Inscrire » → « + Inscrire un client », « Copier le lien de la page de
+  jeu », message exact de la page de jeu, réveil ~1 min) ; note générale : libellés Supabase **à confirmer à l'écran** (doc
+  seulement), Render relus dans la doc, app vérifiés dans le code. README : résumé étape 4 → Blueprint.
+- **Tests** : `tests/render-yaml.test.ts` (5) — mini-lecteur YAML strict sans dépendance (refuse tabulations, flow, ancres,
+  clés en double, indentation incohérente), structure exacte attendue, 4 secrets sans valeur, aucune clé / URL Supabase /
+  nombre ≥ 4 chiffres hors commentaires, cohérence avec `package.json`, `.env.api`, lockfile et variables lues par le serveur.
+  `npm test` **124/124** (avant : 118 ; +5 render, +1 Supabase). `npm run build` : OK (366,6 kB / 110,6 kB gzip, inchangé) ;
+  `npm run build:api` : OK.
+- **Non vérifié** : aucun écran Render / Supabase réel vu (pas de compte) ; affichage exact du formulaire des secrets Render ;
+  disponibilité du plan Free en Frankfurt (la doc accepte `plan: free` + `region: frankfurt`, sans le garantir par région).
+- Apple : en suspens, rien touché.

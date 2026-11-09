@@ -19,6 +19,7 @@ voient enfin **les mêmes données**. Une seule instance Node pour tous les comm
 | `server/wallet.ts`, `server/notifications/` | **V3** : intégrations préparées, inactives (voir « Intégrations préparées »). |
 | `tests/serveur.test.ts` | Tests HTTP réels (port éphémère, base temporaire, `fetch`), lancés par `npm test`. |
 | `tests/migration-pglite.test.ts` | **S2** : la migration Supabase exécutée par un vrai Postgres local (PGlite, WebAssembly). |
+| `render.yaml` (racine) | **S3** : Blueprint Render du serveur (Free, Frankfurt, build / start, `NODE_VERSION`, 4 secrets `sync: false`). Validé par `tests/render-yaml.test.ts`. |
 
 ## Choix de la base : `node:sqlite` (retenu)
 
@@ -271,6 +272,10 @@ fonctions — écartés.
 
 ### Procédure pas à pas (à faire par vous ; tout est faisable depuis un ordinateur, la plupart depuis un téléphone)
 
+Les libellés de boutons Supabase (étapes a à c) viennent de la doc lue le 09/11/2026, pas d'un écran réel : **à confirmer à
+l'écran**. Ceux de Render (étape d) ont été relus le 09/11/2026 dans [Blueprint spec](https://render.com/docs/blueprint-spec)
+et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceux de l'app (étape e) sont vérifiés dans le code.
+
 **a. Créer le projet Supabase**
 1. supabase.com → **Start your project** / **Sign up** : adresse e-mail + mot de passe (ou connexion GitHub). Une
    organisation est créée (plan **Free**).
@@ -307,35 +312,53 @@ fonctions — écartés.
 1. Mettre le code sur un **dépôt GitHub privé** : github.com → **New repository** → *Private* → puis, depuis le dossier du
    projet, `git remote add origin …` et `git push -u origin master` (à faire par vous ; rien n'a été poussé).
    Vérifier que `.env` n'est **pas** dans le dépôt (il est dans `.gitignore`).
-2. render.com → **Sign up** (connexion avec GitHub) → **New +** → **Web Service** → autoriser l'accès au dépôt privé → le choisir.
-3. Réglages :
-   - **Language / Runtime** : Node
-   - **Branch** : `master`
-   - **Region** : **Frankfurt (EU Central)**
-   - **Build Command** : `npm ci && npm run build:api` (front en mode API, servi à la même adresse que l'API)
-   - **Start Command** : `npm run serveur`
-   - **Instance Type** : **Free**
-4. **Environment Variables** (« Add Environment Variable ») :
-   - `NODE_VERSION` = `24`
-   - `SUPABASE_URL` = l'URL de l'étape c
-   - `SUPABASE_SERVICE_ROLE_KEY` = la clé secrète de l'étape c
-   - `ADMIN_PIN` = un PIN de 8 à 12 chiffres choisi par vous (gardez-le pour vous)
-   - `PIN_ASIAN_HOME` = le PIN 4-6 chiffres que vous donnerez au restaurant (lu au **premier** démarrage seulement)
-   - (`PORT` est fourni par Render ; `TZ`, `TRUST_PROXY` et le mode production sont réglés automatiquement.
-     **Ne pas** mettre `DEMO=1` ni `DB_FILE`.)
-5. **Create Web Service** → attendre « Live » (journaux : « base Supabase <ref>.supabase.co » — l'hôte seulement, jamais la clé).
+   `render.yaml` (racine du dépôt) doit faire partie du push : c'est lui qui décrit le service.
+2. render.com → **Sign up** (connexion avec GitHub, pour que Render voie le dépôt privé).
+3. **Blueprint** (recommandé, phase S3) : dashboard Render → **New** → **Blueprint** → dans la liste des dépôts, **Connect**
+   sur le dépôt (autoriser l'accès au dépôt privé si Render le demande) → *Blueprint Name* : `asian-home-fidelite` ;
+   *Branch* : `master` (celle que vous avez poussée) ; *Blueprint Path* : laisser vide (`render.yaml` est à la racine).
+   Render lit `render.yaml` et affiche ce qu'il va créer : **1 service web** `asian-home-fidelite`, Node, **Free**,
+   **Frankfurt**, build `npm ci && npm run build:api` (front en mode API, servi à la même adresse que l'API), start
+   `npm run serveur`, contrôle de santé `/api/v1/sante`, `NODE_VERSION=24`. Si le fichier contient une erreur, la page
+   l'affiche à la place (il est validé par `npm test`, donc ça ne devrait pas arriver).
+4. Render demande alors les **4 secrets** (`sync: false` dans `render.yaml` ; ils ne sont **jamais** dans le dépôt) :
+   - `SUPABASE_URL` = l'URL de l'étape c (`https://<ref>.supabase.co`)
+   - `SUPABASE_SERVICE_ROLE_KEY` = la clé secrète de l'étape c (`sb_secret_…`)
+   - `ADMIN_PIN` = un PIN de **8 à 12 chiffres**, pas tous identiques, choisi par vous (gardez-le pour vous)
+   - `PIN_ASIAN_HOME` = le PIN **4 à 6 chiffres** que vous donnerez au restaurant (lu au **premier** démarrage seulement ;
+     ensuite on le change dans l'app)
+   Puis **Deploy Blueprint** (libellé de la doc Render du 09/11/2026 ; le brief disait « Apply » — prendre le bouton de
+   validation affiché). Rien d'autre à saisir : `PORT`, `RENDER` et `NODE_ENV=production` (au démarrage seulement, pas au
+   build — donc `npm ci` installe bien TypeScript et Vite) sont posés par Render ; `TZ`, `TRUST_PROXY` et le mode production
+   sont réglés par le serveur. **Ne pas** ajouter `DEMO` ni `DB_FILE`.
+   ⚠️ Render ne demande ces secrets **qu'à la création** du Blueprint. Pour en corriger un plus tard : service →
+   **Environment** → modifier → enregistrer (Render redéploie ; sinon **Manual Deploy**). Si Render réclame une carte
+   bancaire ou propose un plan payant : **ne pas valider** — vérifier que le plan affiché est bien *Free* (à confirmer à l'écran).
+   *Sans Blueprint* (secours) : **New** → **Web Service** → même dépôt → Language **Node**, Branch `master`, Region
+   **Frankfurt**, les mêmes Build / Start Commands, Instance Type **Free**, et les 5 variables (`NODE_VERSION=24` + les 4
+   secrets) dans *Environment Variables* → **Create Web Service**.
+5. Attendre « Live » (premier build : quelques minutes). Journaux attendus : « mode production · base Supabase
+   <ref>.supabase.co » — l'hôte seulement, jamais la clé. Le serveur refuse de démarrer (et le déploiement échoue au
+   contrôle de santé) si `ADMIN_PIN` est trop court, si une seule des 2 variables Supabase est saisie, ou si
+   `PIN_ASIAN_HOME` manque alors que la base est neuve : le message est dans les journaux.
 6. Ouvrir `https://<nom>.onrender.com/api/v1/sante` → attendu : `"stockage":"supabase"`, `"mode":"production"`,
    `"demo":false`. Si `"sqlite"` : une variable manque ou est mal nommée. Si le service refuse de démarrer : lire les
    journaux (variable Supabase seule, PIN admin trop court…).
-7. Dans Supabase → Table Editor → `commerces` : **1 ligne** `c-asian-home-paris` ; `clients`, `tirages`, `avis` vides.
-   (Si les variables sont changées plus tard : **Manual Deploy → Restart** / redéploiement.)
+7. Dans Supabase → Table Editor → `commerces` : **1 ligne** `c-asian-home-paris` ; `clients`, `tirages`, `avis` vides ;
+   `meta` : 1 ligne `initialise`. C'est ce que fait le code (`initialiser`, `server/app.ts`) sur une base neuve : seul le
+   1er commerce du seed (Asian Home Paris : coordonnées, lien d'avis direct, lots), `demo: false`, PIN haché, **sans** les
+   clients / avis / tirages fictifs ; les commerces de démo seulement avec `DEMO=1` — vérifié par le test « S3 : base
+   Supabase neuve en production » (`tests/supabase.test.ts`).
 
 **e. Refaire le parcours de base contre le vrai projet** (sur un commerce de test, pour ne pas salir Asian Home)
-1. `https://<nom>.onrender.com/` → **Admin (tous)** + PIN admin → Plus → Admin → **+ Ajouter un commerce** « Test S2 » (PIN `4321`).
-2. Clients → **Inscrire** un client (votre prénom + votre numéro) ; réinscrire le même numéro au format `+33 6…` →
+1. `https://<nom>.onrender.com/` (1re ouverture : jusqu'à ~1 min, réveil Render) → onglet **Admin (tous)** → PIN admin →
+   **Déverrouiller** → Plus → Admin → **+ Ajouter un commerce** « Test S2 » (PIN `4321`) → **Créer** (le commerce test
+   devient le commerce affiché).
+2. Clients → **+ Inscrire un client** (votre prénom + votre numéro) ; réinscrire le même numéro au format `+33 6…` →
    le même client est retrouvé (pas de doublon).
-3. Roulette → ouvrir la page de jeu **sur votre téléphone**, entrer le même numéro → « validez d'abord votre visite ».
-4. Sur l'écran commerçant : **Valider une visite (+1)** → la roue du téléphone se débloque (≤ 10 s) → tourner → un lot et
+3. Roulette → **Copier le lien de la page de jeu** (ou scanner le QR) et l'ouvrir **sur votre téléphone**, entrer le même
+   numéro → « Pour jouer, validez d'abord votre visite du jour au comptoir. »
+4. Sur l'écran commerçant : Clients → **Valider une visite (+1)** → la roue du téléphone se débloque (≤ 10 s) → tourner → un lot et
    un **code** ; le même code apparaît côté commerçant (Tableau de bord / Roulette).
 5. Retourner sur la page de jeu → **2e tirage refusé** (« déjà tourné la roue »).
 6. Clients → **Exporter (CSV)** → le fichier s'ouvre dans Excel avec les accents corrects.

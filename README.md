@@ -134,8 +134,10 @@ Rien n'a été créé ni déployé. Ce que vous aurez à cliquer :
 2. **SQL Editor** : exécuter `supabase/migrations/0001_schema_initial.sql` puis `0002_rls.sql` ; vérifier 5 tables avec RLS.
 3. Récupérer `SUPABASE_URL` (bouton *Connect*) et la clé secrète `sb_secret_…` (*Settings → API Keys*) — libellés d'après la
    doc du 09/11/2026, à confirmer à l'écran.
-4. **GitHub** : dépôt privé, pousser le code. **Render** : *New Web Service*, Frankfurt, Free, build `npm ci && npm run build:api`,
-   start `npm run serveur`, variables `NODE_VERSION=24`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PIN`, `PIN_ASIAN_HOME`.
+4. **GitHub** : dépôt privé, pousser le code. **Render** : *New → Blueprint* → choisir le dépôt → le fichier `render.yaml`
+   (S3) règle tout seul Frankfurt, Free, build `npm ci && npm run build:api`, start `npm run serveur`, `NODE_VERSION=24` →
+   saisir les 4 secrets demandés (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PIN`, `PIN_ASIAN_HOME`) →
+   **Deploy Blueprint**.
 5. Vérifier `https://<nom>.onrender.com/api/v1/sante` → `"stockage":"supabase"`, puis refaire le parcours sur un commerce
    de test (inscription → visite → tirage → 2e tirage refusé → export CSV) et le supprimer.
 
@@ -194,10 +196,10 @@ Badge « Démo » : en mode API, il n'apparaît **que** sur les commerces venant
 
 ## Tests
 
-`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (118 tests : 36 de logique,
+`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (124 tests : 36 de logique,
 21 du serveur dans `tests/serveur.test.ts`, 24 du front V2 dans `tests/front-v2.test.ts`, 13 des intégrations V3 dans
-`tests/integrations-v3.test.ts`, 15 du stockage Supabase dans `tests/supabase.test.ts`, 9 de la migration SQL exécutée
-sur Postgres dans `tests/migration-pglite.test.ts`).
+`tests/integrations-v3.test.ts`, 16 du stockage Supabase dans `tests/supabase.test.ts`, 9 de la migration SQL exécutée
+sur Postgres dans `tests/migration-pglite.test.ts`, 5 du Blueprint Render dans `tests/render-yaml.test.ts`).
 Pas de Vitest : Node exécute le TypeScript directement, ça évite une dépendance et ne touche pas au build.
 
 Les tests portent sur la **logique pure** (hors React) :
