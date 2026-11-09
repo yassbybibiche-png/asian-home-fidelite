@@ -40,8 +40,8 @@ export function nouveauClient(commerceId: string, prenom: string, contact: Conta
     ...contact,
     tampons: 0,
     visites: [],
-    // Pas encore de visite validée : la date d'inscription sert de point de départ pour les relances.
-    derniereVisite: iso,
+    // Pas encore de visite validée : ni actif, ni à relancer (cf. stats.ts).
+    derniereVisite: null,
     creeLe: iso,
   }
 }

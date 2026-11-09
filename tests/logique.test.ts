@@ -15,7 +15,9 @@ import {
   trouverClientParContact,
   validerVisite,
 } from '../src/lib/fidelite.ts'
-import { lotsJouables, rotationCible, secteurs, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
+import { lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
+import { calculerChiffres, estActif, estARelancer } from '../src/lib/stats.ts'
+import { migrer } from '../src/data/depot.ts'
 import { appliquerRegles, modeleSuggere, statutAvis, texteModele } from '../src/lib/avis.ts'
 import type { Avis, Client, Commerce, Tirage } from '../src/types.ts'
 
@@ -206,6 +208,92 @@ describe('Roulette', () => {
     assert.equal(tirageDuJour(tirages, 'c-test', 'cl-2', MAINTENANT), undefined, 'un autre client peut jouer')
     assert.equal(tirageDuJour(tirages, 'c-autre', 'cl-1', MAINTENANT), undefined, 'autre commerce')
     assert.equal(tirageDuJour(tirages, 'c-test', 'cl-1', new Date(2026, 10, 10, 0, 5)), undefined, 'le lendemain, on rejoue')
+  })
+
+  describe('non-régression : 1 participation = 1 visite validée le jour même', () => {
+    const commerce = commerceTest()
+    const inscrit = () => nouveauClient(commerce.id, 'Linh', { telephone: '06 12 34 56 78' }, new Date(2026, 10, 1, 10, 0))
+    const tirage = (clientId: string, date: Date): Tirage => ({ id: 't', commerceId: commerce.id, clientId, lot: 'Thé offert', date: date.toISOString() })
+
+    test('client sans aucune visite → ne peut pas jouer', () => {
+      const client = inscrit()
+      assert.equal(statutJeu(client, [], commerce.id, MAINTENANT), 'sansVisite')
+      assert.equal(peutJouer(client, [], commerce.id, MAINTENANT), false)
+    })
+
+    test('visite validée aujourd’hui → peut jouer', () => {
+      const client = validerVisite(inscrit(), commerce, new Date(2026, 10, 9, 9, 15))
+      assert.equal(statutJeu(client, [], commerce.id, MAINTENANT), 'pret')
+      assert.equal(peutJouer(client, [], commerce.id, MAINTENANT), true)
+    })
+
+    test('visite hier seulement → ne peut pas jouer aujourd’hui', () => {
+      const client = validerVisite(inscrit(), commerce, new Date(2026, 10, 8, 23, 50))
+      assert.equal(statutJeu(client, [], commerce.id, MAINTENANT), 'sansVisite')
+      assert.equal(peutJouer(client, [], commerce.id, MAINTENANT), false)
+    })
+
+    test('déjà joué aujourd’hui → ne peut pas rejouer, même avec une 2e visite', () => {
+      let client = validerVisite(inscrit(), commerce, new Date(2026, 10, 9, 9, 15))
+      const tirages = [tirage(client.id, new Date(2026, 10, 9, 9, 20))]
+      assert.equal(statutJeu(client, tirages, commerce.id, MAINTENANT), 'dejaJoue')
+      client = validerVisite(client, commerce, new Date(2026, 10, 9, 11, 0))
+      assert.equal(peutJouer(client, tirages, commerce.id, MAINTENANT), false)
+    })
+
+    test('une visite dans un autre commerce ne compte pas', () => {
+      const client = validerVisite(inscrit(), commerce, new Date(2026, 10, 9, 9, 15))
+      assert.equal(peutJouer(client, [], 'c-autre', MAINTENANT), false)
+    })
+
+    test('vérifier le droit de jouer ne crée jamais de visite', () => {
+      const client = inscrit()
+      statutJeu(client, [], commerce.id, MAINTENANT)
+      assert.deepEqual(client.visites, [])
+      assert.equal(client.tampons, 0)
+    })
+  })
+})
+
+describe('Clients actifs / à relancer', () => {
+  const JOUR = 24 * 60 * 60 * 1000
+  const commerce = commerceTest()
+  const t = MAINTENANT.getTime()
+
+  test('non-régression : nouveau client sans visite → ni actif, ni à relancer, pas compté dans les actifs', () => {
+    const client = nouveauClient(commerce.id, 'Linh', { telephone: '06 12 34 56 78' }, MAINTENANT)
+    assert.equal(client.derniereVisite, null)
+    assert.equal(estActif(client, t), false)
+    assert.equal(estARelancer(client, t), false)
+    // Même inscrit il y a 3 mois sans jamais venir : toujours pas à relancer.
+    const ancien = nouveauClient(commerce.id, 'Linh', { telephone: '06 12 34 56 78' }, new Date(t - 90 * JOUR))
+    assert.equal(estARelancer(ancien, t), false)
+    assert.equal(calculerChiffres([client, ancien], [], MAINTENANT).clientsActifs, 0)
+  })
+
+  test('après 1 visite → actif', () => {
+    const client = validerVisite(nouveauClient(commerce.id, 'Linh', { telephone: '06 12 34 56 78' }), commerce, MAINTENANT)
+    assert.equal(estActif(client, t), true)
+    assert.equal(estARelancer(client, t), false)
+    assert.equal(calculerChiffres([client], [], MAINTENANT).clientsActifs, 1)
+  })
+
+  test('« venus ces 30 derniers jours » : 30 j pile → actif ; 30 j + 1 h ou 31 j → inactif et à relancer', () => {
+    const venuIlYa = (ms: number) => validerVisite(nouveauClient(commerce.id, 'Linh', { telephone: '06 12 34 56 78' }), commerce, new Date(t - ms))
+    assert.equal(estActif(venuIlYa(30 * JOUR), t), true)
+    for (const ms of [30 * JOUR + 60 * 60 * 1000, 31 * JOUR]) {
+      const client = venuIlYa(ms)
+      assert.equal(estActif(client, t), false)
+      assert.equal(estARelancer(client, t), true)
+    }
+  })
+
+  test('migration des anciennes données : derniereVisite = inscription sans visite → null', () => {
+    const ancien = { ...nouveauClient(commerce.id, 'Linh', { telephone: '06 12 34 56 78' }, MAINTENANT), derniereVisite: MAINTENANT.toISOString() }
+    const venu = validerVisite(nouveauClient(commerce.id, 'Karim', { email: 'k@exemple.fr' }), commerce, MAINTENANT)
+    const etat = migrer({ commerces: [commerce], clients: [ancien, venu], tirages: [], avis: [], commerceActifId: commerce.id })
+    assert.equal(etat.clients[0].derniereVisite, null)
+    assert.equal(etat.clients[1], venu, 'client avec visites inchangé')
   })
 })
 

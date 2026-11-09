@@ -1,5 +1,5 @@
 // Logique pure de la roulette : tirage pondéré, anti-abus, géométrie de la roue.
-import type { Lot, Tirage } from '../types'
+import type { Client, Lot, Tirage } from '../types'
 
 /** Lots réellement tirables (libellé non vide, probabilité > 0). */
 export function lotsJouables(lots: Lot[]): Lot[] {
@@ -29,6 +29,27 @@ function memeJour(a: Date, b: Date): boolean {
 /** Anti-abus : 1 tirage par client et par jour (jour calendaire local). */
 export function tirageDuJour(tirages: Tirage[], commerceId: string, clientId: string, maintenant = new Date()): Tirage | undefined {
   return tirages.find((t) => t.commerceId === commerceId && t.clientId === clientId && memeJour(new Date(t.date), maintenant))
+}
+
+/** Visite validée au comptoir aujourd'hui (jour calendaire local) dans ce commerce. */
+export function aVisiteDuJour(client: Client, commerceId: string, maintenant = new Date()): boolean {
+  return client.commerceId === commerceId && client.visites.some((v) => memeJour(new Date(v), maintenant))
+}
+
+export type StatutJeu = 'pret' | 'sansVisite' | 'dejaJoue'
+
+/**
+ * 1 participation par visite : il faut une visite validée par le commerçant le jour même,
+ * et pas encore de tirage aujourd'hui. Le jeu ne crée jamais de visite lui-même.
+ */
+export function statutJeu(client: Client, tirages: Tirage[], commerceId: string, maintenant = new Date()): StatutJeu {
+  if (tirageDuJour(tirages, commerceId, client.id, maintenant)) return 'dejaJoue'
+  if (!aVisiteDuJour(client, commerceId, maintenant)) return 'sansVisite'
+  return 'pret'
+}
+
+export function peutJouer(client: Client, tirages: Tirage[], commerceId: string, maintenant = new Date()): boolean {
+  return statutJeu(client, tirages, commerceId, maintenant) === 'pret'
 }
 
 export interface Secteur {

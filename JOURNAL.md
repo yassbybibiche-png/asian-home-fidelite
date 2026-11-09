@@ -189,3 +189,28 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   « 21 visites, seuil 10 », « tous les formats français… même client », « réinscription avec un autre
   format → pas de doublon ». `npm test` : 23/23 OK (avant : 19). `npm run build` : OK.
 - Hors périmètre, toujours ouverts : MAJEUR 3 (roulette sans visite) et les mineurs (phases FIX-B/C).
+
+## 09/11/2026 — Phase FIX-B : majeur 3 et mineur 1 de l'audit Codex
+- **MAJEUR 3 (roulette jouable sans visite) — corrigé.** Nouvelles fonctions pures dans `src/lib/roulette.ts` :
+  `aVisiteDuJour`, `statutJeu` (`'pret' | 'sansVisite' | 'dejaJoue'`) et `peutJouer`. `Jouer.tsx` les utilise
+  à l'affichage ET dans `tourner()` : sans visite validée le jour même (jour calendaire local) dans ce
+  commerce, pas de bouton « Tourner la roue », message « Pour jouer, validez d'abord votre visite du jour au
+  comptoir. » + lien vers la carte. La page de jeu ne crée jamais de visite. Sous-titre de la page Roulette
+  commerçant mis à jour. `store.tsx` écoute l'événement `storage` : une visite validée dans l'onglet commerçant
+  débloque la roue ouverte dans un autre onglet du même navigateur.
+  Seed : inchangé ; `tests/seed.test.ts` vérifiait déjà que chaque tirage tombe un jour de visite (vert).
+- **MINEUR 1 (« Clients actifs » trompeur) — corrigé.** `Client.derniereVisite: string | null` (null tant
+  qu'aucune visite) ; `nouveauClient` met null. `estActif` = visite il y a ≤ 30 j (en millisecondes, plus
+  d'arrondi au jour : 30 j + 23 h n'est plus actif) ; nouveau `estARelancer` = au moins une visite et plus
+  d'actif. Usages traités : `stats.ts`, `Clients.tsx` (filtres, compteurs, tri sans `localeCompare` sur null,
+  badge « inactif », libellés), `CarteFidelite.tsx`, `depot.ts` (`seedRecale` + `migrer` qui recalcule
+  `derniereVisite = dernière visite ou null` pour les données déjà stockées). Le libellé du tableau de bord
+  « venus ces 30 derniers jours » correspond désormais au calcul.
+- Tests ajoutés (10) : sans visite / visite aujourd'hui / visite hier / déjà joué (même avec 2e visite) /
+  visite dans un autre commerce / vérification sans création de visite ; nouveau client ni actif ni à relancer
+  (même inscrit il y a 90 j) ; après 1 visite → actif ; 30 j pile actif, 30 j + 1 h et 31 j → à relancer ;
+  migration des anciennes données. `npm test` : 33/33 OK (avant : 23). `npm run build` : OK.
+- Non vérifié : rendu réel dans un navigateur (pas de test UI dans cette phase). Limite de fond inchangée :
+  sans backend, la règle repose sur les données de ce navigateur (le commerçant et le joueur doivent partager
+  le même navigateur pour la démo).
+- Hors périmètre, toujours ouverts : mineurs 2 à 6 (phase FIX-C).

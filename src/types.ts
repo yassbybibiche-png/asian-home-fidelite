@@ -46,7 +46,8 @@ export interface Client {
   tampons: number
   /** Historique des passages (dates ISO, ordre chronologique). */
   visites: string[]
-  derniereVisite: string
+  /** Date de la dernière visite validée ; null tant qu'aucune visite (ni actif, ni à relancer). */
+  derniereVisite: string | null
   creeLe: string
   /** Récompenses fidélité déjà remises au client. */
   recompensesOffertes?: RecompenseOfferte[]

@@ -38,10 +38,19 @@ soit l'app est hébergée quelque part (pas fait pour l'instant).
    Le sélecteur en haut permet de passer aux 2 autres commerces.
 2. **Clients** → « + Inscrire un client » (prénom + téléphone ou e-mail), puis « Valider une visite (+1) » :
    la progression passe à 1/10. Karim a une carte pleine : ouvrez sa fiche → « Offrir la récompense ».
-   L'onglet « À relancer » liste les clients absents depuis 30 jours, avec un message à copier.
-3. **Roulette** → « Ouvrir la page client » : entrez un prénom et un numéro, tournez la roue.
-   Un 2e essai le même jour est refusé. Après le jeu, l'invitation à laisser un avis Google s'affiche
-   (le lot ne dépend pas de l'avis).
+   L'onglet « À relancer » liste les clients déjà venus mais absents depuis plus de 30 jours, avec un message
+   à copier. Un inscrit sans aucune visite n'est ni « actif » ni « à relancer ».
+3. **Roulette** (1 participation = 1 visite validée le jour même) :
+   1. **Clients** → inscrivez un client (ou prenez un client existant) et cliquez « Valider une visite (+1) »
+      — c'est le geste du commerçant au comptoir.
+   2. **Roulette** → « Ouvrir la page client » : entrez le même prénom et le même numéro, tournez la roue.
+   3. Sans visite validée aujourd'hui, la roue ne se lance pas : « Pour jouer, validez d'abord votre visite
+      du jour au comptoir. » + lien vers la carte (essayez avec un numéro jamais validé). La page de jeu
+      ne crée jamais de visite elle-même.
+   4. Un 2e essai le même jour est refusé. Après le jeu, l'invitation à laisser un avis Google s'affiche
+      (le lot ne dépend pas de l'avis).
+   La page de jeu peut rester ouverte dans un autre onglet : la visite validée côté commerçant la débloque
+   aussitôt (même navigateur uniquement).
 4. **Avis** → « + Simuler un nouvel avis » en 5★ : la réponse automatique s'applique. Sur un avis négatif,
    « Relire et valider le brouillon » → « Marquer comme répondu ».
 5. **Plus → Admin** : ajoutez un commerce en 1 formulaire (nom, type, lien Google), puis « Réinitialiser
@@ -57,7 +66,7 @@ une démo cohérente, faites tout sur le même téléphone.
 |---|---|
 | Carte de fidélité (inscription, tampons, progression, récompense, historique) | **Réel** dans l'app, stocké dans le navigateur (localStorage) |
 | QR code personnel du client et QR code unique du commerce | **Réel** : générés localement (lib `qrcode-generator`), scannables |
-| Roulette (tirage pondéré, roue animée, 1 tirage par client et par jour) | **Réel** dans l'app ; l'anti-abus repose sur le téléphone/e-mail saisi et ne vaut que dans ce navigateur |
+| Roulette (tirage pondéré, roue animée, 1 participation par visite validée le jour même, 1 tirage par client et par jour) | **Réel** dans l'app ; l'anti-abus repose sur le téléphone/e-mail saisi et ne vaut que dans ce navigateur |
 | Relance des clients inactifs (30 jours) | Liste et message **réels** ; l'**envoi** est à faire soi-même (copier-coller) |
 | Lien « Laisser un avis Google » | **Réel** (ouvre le lien configuré) ; pour Asian Home Paris c'est une recherche Google Maps, pas encore le lien direct « laisser un avis » |
 | Avis Google affichés | **Simulés** : données de démo, aucune connexion à Google |
@@ -70,7 +79,7 @@ une démo cohérente, faites tout sur le même téléphone.
 
 ## Tests
 
-`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (23 tests).
+`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (33 tests).
 Pas de Vitest : Node exécute le TypeScript directement, ça évite une dépendance et ne touche pas au build.
 
 Les tests portent sur la **logique pure** (hors React) :
@@ -78,7 +87,9 @@ Les tests portent sur la **logique pure** (hors React) :
 - création d'un commerce (formulaire court, mêmes réglages par défaut pour tous les secteurs) ;
 - inscription d'un client (téléphone ou e-mail, pas de doublon quel que soit le format : 06…, +33…, 0033…) ;
 - 1 visite = 1 tampon, progression, affichage plafonné au seuil, récompense offerte avec report des tampons excédentaires ;
-- roulette : tirage pondéré, roue qui s'arrête dans le bon secteur, 1 tirage par client et par jour ;
+- roulette : tirage pondéré, roue qui s'arrête dans le bon secteur, 1 tirage par client et par jour,
+  jeu refusé sans visite validée le jour même (ni la veille, ni dans un autre commerce) ;
+- clients actifs / à relancer : un inscrit sans visite n'est ni l'un ni l'autre, actif = visite dans les 30 derniers jours ;
 - avis : choix du modèle, réponse auto aux 5★, brouillons, réponse existante jamais écrasée ;
 - cohérence du seed (dates récentes et jamais futures, tampons = visites − récompenses, tirages un jour
   de visite) et « Réinitialiser la démo » (avec un localStorage simulé).

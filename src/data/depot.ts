@@ -26,7 +26,7 @@ export function seedRecale(maintenant = Date.now()): Etat {
     clients: d.clients.map((c) => ({
       ...c,
       visites: c.visites.map(recale),
-      derniereVisite: recale(c.derniereVisite),
+      derniereVisite: c.derniereVisite ? recale(c.derniereVisite) : null,
       creeLe: recale(c.creeLe),
       ...(c.recompensesOffertes ? { recompensesOffertes: c.recompensesOffertes.map((r) => ({ ...r, date: recale(r.date) })) } : {}),
     })),
@@ -36,10 +36,17 @@ export function seedRecale(maintenant = Date.now()): Etat {
   }
 }
 
-/** Données enregistrées par la phase 1 : lots en simple texte → chances égales. */
-function migrer(etat: Etat): Etat {
+/**
+ * Anciennes données enregistrées : lots en simple texte (phase 1) → chances égales ;
+ * client sans visite dont `derniereVisite` valait la date d'inscription (avant FIX-B) → null.
+ */
+export function migrer(etat: Etat): Etat {
   return {
     ...etat,
+    clients: etat.clients.map((c) => {
+      const derniereVisite = c.visites.at(-1) ?? null
+      return c.derniereVisite === derniereVisite ? c : { ...c, derniereVisite }
+    }),
     commerces: etat.commerces.map((c) => {
       const lots = c.lots as unknown[]
       if (!lots.some((l) => typeof l === 'string')) return c

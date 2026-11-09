@@ -59,7 +59,7 @@ export function CarteFidelite({ client, commerce }: { client: Client; commerce: 
           {debloquee ? `🎉 Récompense débloquée : ${commerce.recompense}` : `Objectif : ${commerce.recompense}`}
         </p>
         <p className="mt-2 text-sm text-gray-500">
-          Dernière visite : {client.visites.length ? dateRelative(client.derniereVisite) : 'aucune pour l’instant'}
+          Dernière visite : {client.derniereVisite ? dateRelative(client.derniereVisite) : 'aucune pour l’instant'}
         </p>
       </div>
     </section>

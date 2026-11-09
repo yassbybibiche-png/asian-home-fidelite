@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, Tirage } from '../types'
 import { analyserContact } from '../lib/fidelite'
-import { estPerdant, lotsJouables, rotationCible, secteurs, tirageDuJour, tirerLot } from '../lib/roulette'
+import { estPerdant, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot } from '../lib/roulette'
 import { DUREE_ROTATION_MS, Roue } from '../components/Roue'
 import { BadgeDemo, LogoCommerce } from '../components/ui'
 
@@ -61,7 +61,8 @@ function Partie({ commerce }: { commerce: Commerce }) {
   const trouver = (id: string | null) => (id ? etat.clients.find((c) => c.id === id && c.commerceId === commerce.id) : undefined)
   const joueur = trouver(joueurId)
   const memorise = trouver(memoriseId)
-  const dejaJoue = joueur && etape === 'pret' ? tirageDuJour(etat.tirages, commerce.id, joueur.id) : undefined
+  const statut = joueur && etape === 'pret' ? statutJeu(joueur, etat.tirages, commerce.id) : undefined
+  const dejaJoue = joueur && statut === 'dejaJoue' ? tirageDuJour(etat.tirages, commerce.id, joueur.id) : undefined
 
   function choisirJoueur(client: Client) {
     setJoueurId(client.id)
@@ -69,7 +70,8 @@ function Partie({ commerce }: { commerce: Commerce }) {
   }
 
   function tourner() {
-    if (!joueur || etape !== 'pret' || tirageDuJour(etat.tirages, commerce.id, joueur.id)) return
+    // Pas de visite validée aujourd'hui ou déjà joué : rien ne se passe (le jeu ne crée jamais de visite).
+    if (!joueur || etape !== 'pret' || !peutJouer(joueur, etat.tirages, commerce.id)) return
     const parts = secteurs(commerce.lots)
     const secteur = parts[tirerLot(commerce.lots)]
     const tirage: Tirage = {
@@ -130,6 +132,15 @@ function Partie({ commerce }: { commerce: Commerce }) {
           </p>
           <p className="mt-2 text-sm text-gray-500">1 tirage par personne et par jour. Revenez demain !</p>
         </section>
+      ) : statut === 'sansVisite' ? (
+        <section className="carte space-y-3 text-center" role="status">
+          <p className="text-lg font-bold">Bonjour {joueur.prenom} !</p>
+          <p className="text-gray-700">Pour jouer, validez d’abord votre visite du jour au comptoir.</p>
+          <p className="text-sm text-gray-500">Présentez votre carte de fidélité en caisse : 1 visite validée = 1 participation.</p>
+          <a href={`#/carte/${joueur.id}`} className="bouton-secondaire w-full">
+            Voir ma carte de fidélité
+          </a>
+        </section>
       ) : (
         <button className="bouton w-full py-4 text-lg" onClick={tourner} disabled={etape !== 'pret'}>
           {etape === 'rotation' ? 'La roue tourne…' : `🎡 Tourner la roue, ${joueur.prenom} !`}
@@ -146,7 +157,7 @@ function Partie({ commerce }: { commerce: Commerce }) {
       )}
 
       <p className="text-center text-xs text-gray-500">
-        <BadgeDemo>Démo</BadgeDemo> Données stockées dans ce navigateur uniquement. 1 tirage par personne et par jour.
+        <BadgeDemo>Démo</BadgeDemo> Données stockées dans ce navigateur uniquement. 1 participation par visite validée, 1 tirage par jour.
       </p>
     </div>
   )

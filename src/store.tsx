@@ -39,6 +39,16 @@ export function FournisseurStore({ children, depot = depotLocal }: { children: R
     depot.enregistrer(etat)
   }, [depot, etat])
 
+  // Démo dans un seul navigateur : une visite validée dans l'onglet commerçant débloque aussitôt
+  // la roue déjà ouverte dans un autre onglet (et inversement, sans écraser les données de l'autre onglet).
+  useEffect(() => {
+    const recharger = (e: StorageEvent) => {
+      if (e.key?.startsWith('fidelite:etat:')) setEtat(depot.charger())
+    }
+    window.addEventListener('storage', recharger)
+    return () => window.removeEventListener('storage', recharger)
+  }, [depot])
+
   const choisirCommerce = useCallback((id: string) => setEtat((e) => ({ ...e, commerceActifId: id })), [])
   // Enregistrer les réglages applique aussitôt les règles de réponse automatique aux avis en attente.
   const majCommerce = useCallback(

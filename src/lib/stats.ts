@@ -12,8 +12,14 @@ export function joursDepuis(iso: string, maintenant = Date.now()): number {
   return Math.floor((maintenant - new Date(iso).getTime()) / JOUR)
 }
 
+/** Actif = au moins une visite dans les 30 derniers jours (à la milliseconde près). */
 export function estActif(client: Client, maintenant = Date.now()): boolean {
-  return joursDepuis(client.derniereVisite, maintenant) <= JOURS_INACTIVITE
+  return !!client.derniereVisite && maintenant - new Date(client.derniereVisite).getTime() <= JOURS_INACTIVITE * JOUR
+}
+
+/** À relancer = déjà venu au moins une fois, mais plus depuis plus de 30 jours. Un inscrit sans visite n'en fait pas partie. */
+export function estARelancer(client: Client, maintenant = Date.now()): boolean {
+  return !!client.derniereVisite && !estActif(client, maintenant)
 }
 
 export interface Chiffres {

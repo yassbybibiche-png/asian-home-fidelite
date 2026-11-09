@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useDonneesCommerce, useStore } from '../store'
 import type { Client } from '../types'
-import { estActif, joursDepuis } from '../lib/stats'
+import { estActif, estARelancer, joursDepuis } from '../lib/stats'
 import { dateRelative } from '../lib/format'
 import { analyserContact, messageRelance, recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { BoutonCopier, EnTete, Vide } from '../components/ui'
@@ -17,11 +17,17 @@ export default function Clients() {
 
   const q = recherche.trim().toLowerCase()
   const liste = clients
-    .filter((c) => (filtre === 'tous' ? true : filtre === 'actifs' ? estActif(c) : !estActif(c)))
+    .filter((c) => (filtre === 'tous' ? true : filtre === 'actifs' ? estActif(c) : estARelancer(c)))
     .filter((c) => !q || [c.prenom, c.telephone, c.email].some((v) => v?.toLowerCase().includes(q)))
-    .sort((a, b) => (filtre === 'relancer' ? a.derniereVisite.localeCompare(b.derniereVisite) : b.derniereVisite.localeCompare(a.derniereVisite)))
+    // Sans visite (null) : en fin de liste « Tous » ; jamais dans « À relancer ».
+    .sort((a, b) => {
+      const da = a.derniereVisite ?? ''
+      const db = b.derniereVisite ?? ''
+      return filtre === 'relancer' ? da.localeCompare(db) : db.localeCompare(da)
+    })
 
-  const nbInactifs = clients.filter((c) => !estActif(c)).length
+  const nbActifs = clients.filter((c) => estActif(c)).length
+  const nbARelancer = clients.filter((c) => estARelancer(c)).length
 
   return (
     <div>
@@ -58,8 +64,8 @@ export default function Clients() {
         {(
           [
             ['tous', `Tous (${clients.length})`],
-            ['actifs', `Actifs (${clients.length - nbInactifs})`],
-            ['relancer', `À relancer (${nbInactifs})`],
+            ['actifs', `Actifs (${nbActifs})`],
+            ['relancer', `À relancer (${nbARelancer})`],
           ] as [Filtre, string][]
         ).map(([valeur, libelle]) => (
           <button
@@ -76,12 +82,12 @@ export default function Clients() {
 
       {filtre === 'relancer' && (
         <p className="mb-3 text-sm text-gray-600">
-          Clients sans visite depuis plus de 30 jours. Copiez le message et envoyez-le vous-même (SMS, WhatsApp, e-mail) : l’app n’envoie rien.
+          Clients déjà venus, mais sans visite depuis plus de 30 jours. Copiez le message et envoyez-le vous-même (SMS, WhatsApp, e-mail) : l’app n’envoie rien.
         </p>
       )}
 
       {liste.length === 0 ? (
-        <Vide>{filtre === 'relancer' ? 'Personne à relancer : tous vos clients sont venus ce mois-ci.' : 'Aucun client ne correspond.'}</Vide>
+        <Vide>{filtre === 'relancer' ? 'Personne à relancer : aucun client n’est absent depuis plus de 30 jours.' : 'Aucun client ne correspond.'}</Vide>
       ) : (
         <ul className="space-y-2">
           {liste.map((c) => (filtre === 'relancer' ? <LigneRelance key={c.id} client={c} /> : <LigneClient key={c.id} client={c} />))}
@@ -155,7 +161,7 @@ function LigneClient({ client: c }: { client: Client }) {
         <a href={`#/client/${c.id}`} className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="text-lg font-semibold text-gray-900 underline decoration-gray-300 underline-offset-4">{c.prenom}</span>
-            {!estActif(c) && <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-semibold text-gray-600">inactif</span>}
+            {estARelancer(c) && <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-semibold text-gray-600">inactif</span>}
           </span>
           <span className="block truncate text-sm text-gray-500">{c.telephone ?? c.email}</span>
         </a>
@@ -170,7 +176,7 @@ function LigneClient({ client: c }: { client: Client }) {
         <div className="h-full rounded-full bg-marque-500 transition-all" style={{ width: `${pct}%` }} />
       </div>
       <div className="mt-2 flex justify-between text-xs text-gray-500">
-        <span>Dernière visite : {c.visites.length ? dateRelative(c.derniereVisite) : 'aucune'}</span>
+        <span>Dernière visite : {c.derniereVisite ? dateRelative(c.derniereVisite) : 'aucune'}</span>
         <span>
           {c.visites.length} visite{c.visites.length > 1 ? 's' : ''}
         </span>
@@ -205,7 +211,7 @@ function LigneRelance({ client: c }: { client: Client }) {
         <a href={`#/client/${c.id}`} className="text-lg font-semibold underline decoration-gray-300 underline-offset-4">
           {c.prenom}
         </a>
-        <span className="text-sm text-gray-500">sans visite depuis {joursDepuis(c.derniereVisite)} j</span>
+        <span className="text-sm text-gray-500">sans visite depuis {c.derniereVisite ? joursDepuis(c.derniereVisite) : '?'} j</span>
       </div>
       <div className="truncate text-sm text-gray-500">{c.telephone ?? c.email}</div>
       <p className="mt-2 rounded-xl bg-gray-50 p-3 text-sm text-gray-800 select-all">{message}</p>

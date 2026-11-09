@@ -12,7 +12,7 @@ export default function Roulette() {
 
   return (
     <div className="space-y-5">
-      <EnTete titre="Roulette" sousTitre="Le client scanne le QR code, tourne la roue et gagne un lot. 1 tirage par client et par jour." />
+      <EnTete titre="Roulette" sousTitre="Après une visite validée au comptoir, le client scanne le QR code et tourne la roue. 1 participation par visite, 1 tirage par jour." />
 
       <section className="carte flex flex-col items-center gap-3 text-center sm:flex-row sm:text-left">
         <a href="#/qr" aria-label="Agrandir le QR vitrine">
