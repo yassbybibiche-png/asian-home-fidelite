@@ -10,7 +10,7 @@ import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, messageRelance, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
-import { estPerdant, lotsJouables, statutJeu, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
+import { estPerdant, lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles } from '../src/lib/avis.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
 import { actionDejaTraitee, avecAction, echangerPoints, formaterPrix, soldePoints } from '../src/lib/points.ts'
@@ -516,6 +516,18 @@ function cartePublique(c: Client) {
 function clientCaisse(c: Client) {
   const { messages: _m, clesMessages: _k, actionsTraitees: _a, ...reste } = c
   return reste
+}
+
+/** Gain vu en caisse (P0-U3) : de quoi reconnaître le client (prénom seul, jamais son contact) et l'état du code. */
+function gainCaisse(t: Tirage, client: Client | undefined, maintenant: Date) {
+  return {
+    code: t.code ?? '',
+    lot: t.lot,
+    date: t.date,
+    statut: statutGain(t, maintenant),
+    client: client ? { id: client.id, prenom: client.prenom } : null,
+    remis: t.remis ? { le: t.remis.le, par: t.remis.par.nom } : null,
+  }
 }
 
 // ---------- Initialisation de la base ----------
@@ -1166,7 +1178,8 @@ export async function creerServeur(o: OptionsServeur) {
     }
     if (ressource === 'cartes' && id && !sous && m === 'GET') {
       // PUBLIC (ajout V2) : la carte vue par le client (#/carte/<clientId>) et l'état de son jeu du jour.
-      // Mêmes informations que POST /clients en public : jamais de téléphone, d'e-mail ni de code gagnant.
+      // Mêmes informations que POST /clients en public : jamais de téléphone ni d'e-mail. Seule exception (P0-U3) : le
+      // code gagnant DU JOUR de ce client, re-servi à son titulaire (autre téléphone, cache vidé) — jamais dans une liste.
       limiterIp(req, 'lecture', limites.lectureParIp)
       compteurs.consommer(`carte:${id}`, limites.lectureParCarte, TROP)
       for (const c of await st.commerces()) {
@@ -1196,7 +1209,12 @@ export async function creerServeur(o: OptionsServeur) {
           json: {
             client: cartePublique(client),
             commerce: commercePublic(c),
-            jeu: { statut: statutJeu(client, tirages, c.id, t), lotDuJour: duJour?.lot ?? null },
+            jeu: {
+              statut: statutJeu(client, tirages, c.id, t),
+              lotDuJour: duJour?.lot ?? null,
+              codeDuJour: duJour?.code && !estPerdant(duJour.lot) ? duJour.code : null,
+              remisDuJour: !!duJour?.remis,
+            },
             menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
           },
         }
@@ -1431,6 +1449,39 @@ export async function creerServeur(o: OptionsServeur) {
         return { client: apres, dejaTraite: false }
       })
       return { json: { client: clientCaisse(resultat.client), dejaTraite: resultat.dejaTraite } }
+    }
+
+    // ---------- Code gagnant de la roue (P0-U3) : vérifié puis marqué « remis » en caisse ----------
+    // GET  /commerces/:id/caisse/gains/:code         → le gain (lot, client, date, statut) ; 404 code inconnu.
+    // POST /commerces/:id/caisse/gains/:code/remise  → 200 remis ; 409 déjà remis / perdant ; 410 expiré (pas du jour).
+
+    if (sous === 'caisse' && sousId === 'gains' && action && ((!extra && m === 'GET') || (extra === 'remise' && m === 'POST'))) {
+      const { auteur } = await exigerAuteur(req, id)
+      exigerActif(commerce)
+      const code = normaliserCodeGagnant(action)
+      if (!code) throw err(400, 'Le code gagnant compte 6 caractères (lettres et chiffres).')
+      const t = maintenant()
+      const trouve = tirageDuCode(await st.tiragesParCode(id, code), t)
+      if (!trouve) throw err(404, `Code inconnu : aucun tirage de ce commerce ne porte le code ${code}.`)
+      const gain = async (x: Tirage) => gainCaisse(x, await st.client(id, x.clientId), t)
+      if (m === 'GET') return { json: { gain: await gain(trouve) } }
+
+      // Perdant / déjà remis : 409 ; expiré (tirage d'un autre jour) : 410.
+      const refus = (x: Tirage) => {
+        const g = gainCaisse(x, undefined, t)
+        if (g.statut !== 'valable') throw err(g.statut === 'expire' ? 410 : 409, messageGain(g))
+      }
+      refus(trouve)
+      const remis: Tirage = { ...trouve, remis: { le: t.toISOString(), par: auteur } }
+      // Garde de la base : l'écriture n'a lieu que si personne ne l'a remis entre-temps (deux caisses au même moment).
+      if (!(await st.marquerTirageRemis(remis))) {
+        const relu = (await st.tiragesParCode(id, code)).find((x) => x.id === trouve.id)
+        if (relu) refus(relu)
+        throw err(409, 'Lot déjà remis : un code ne sert qu’une fois.')
+      }
+      const client = await st.client(id, remis.clientId)
+      await journaliser(id, auteur, 'gain', `Gain de la roue remis : ${remis.lot} (code ${code})`, client)
+      return { json: { gain: gainCaisse(remis, client, t) } }
     }
 
     // ---------- Fiche client (gérant) : anniversaire, plat préféré ----------

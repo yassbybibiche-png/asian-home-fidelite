@@ -156,7 +156,7 @@ export interface MembreEquipe {
   creeLe: string
 }
 
-export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi'
+export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi' | 'gain'
 
 /** Parrainage réussi (trace d'audit ; les points sont sur les cartes des deux clients). */
 export interface Parrainage {
@@ -321,6 +321,8 @@ export interface Tirage {
   date: string
   /** Code gagnant à montrer au comptoir (tirages faits par le serveur). */
   code?: string
+  /** Lot remis au comptoir après vérification du code en caisse (P0-U3) : un code = une remise. */
+  remis?: { le: string; par: EntreeJournal['auteur'] }
 }
 
 export interface Avis {
