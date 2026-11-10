@@ -144,7 +144,7 @@ export default function MenuCarte() {
           >
             📖 Charger la carte officielle d’Asian Home ({COMPTE_PLATS_REELS} plats, prix inclus)
           </button>
-          <p className="text-xs text-gray-600">Pensez à « Enregistrer le menu » ensuite : la carte devient votre menu publié, modifiable à tout moment.</p>
+          <p className="text-sm text-gray-600">Pensez à « Enregistrer le menu » ensuite : la carte devient votre menu publié, modifiable à tout moment.</p>
         </section>
       )}
 
@@ -326,13 +326,15 @@ function EditeurProduit({ produit, onChange }: { produit: ProduitEdite; onChange
         <summary className="min-h-11 cursor-pointer py-2 font-medium">Allergènes ({produit.allergenes.length})</summary>
         <div className="grid grid-cols-2 gap-1">
           {ALLERGENES.map((a) => (
-            <label key={a} className="flex min-h-11 items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="h-5 w-5"
-                checked={produit.allergenes.includes(a)}
-                onChange={(e) => maj('allergenes', e.target.checked ? [...produit.allergenes, a] : produit.allergenes.filter((x) => x !== a))}
-              />
+            <label key={a} className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+              <span className="zone-case my-0">
+                <input
+                  type="checkbox"
+                  className="case-a-cocher"
+                  checked={produit.allergenes.includes(a)}
+                  onChange={(e) => maj('allergenes', e.target.checked ? [...produit.allergenes, a] : produit.allergenes.filter((x) => x !== a))}
+                />
+              </span>
               {a}
             </label>
           ))}

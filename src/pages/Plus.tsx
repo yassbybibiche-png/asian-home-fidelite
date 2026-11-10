@@ -64,7 +64,7 @@ export default function Plus() {
               <span className="block font-semibold">{l.titre}</span>
               <span className="block text-sm text-gray-600">{l.aide}</span>
             </span>
-            <span className="text-xl text-gray-500" aria-hidden>
+            <span className="text-xl text-gray-600" aria-hidden>
               ›
             </span>
           </a>

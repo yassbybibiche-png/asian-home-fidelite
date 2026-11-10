@@ -14,6 +14,12 @@ import { estAsianHome, VISUELS } from '../lib/visuels'
 import { configRattrapage, peutCompleterProfil } from '../lib/programme'
 import { nomFichierExportClient } from '../lib/rgpd'
 import { HorsLignePublic, MessagePublic } from './Jouer'
+import { CommutateurLangue, useLangue } from '../components/Langue'
+
+/** Texte traduit dans la langue choisie (pages clientes). */
+function Traduit({ texte }: { texte: string }) {
+  return <>{useLangue().t(texte)}</>
+}
 
 /** Page publique #/carte/<clientId> : la carte de fidélité sur le téléphone du client. */
 export default function CartePublique() {
@@ -29,16 +35,19 @@ function BoiteReception({ messages, commerce }: { messages: MessageClient[]; com
   if (!messages.length) return null
   const tries = [...messages].sort((a, b) => b.date.localeCompare(a.date))
   const nonLus = messages.filter((m) => !m.lu).length
+  const { t } = useLangue()
   return (
-    <section className="carte space-y-3" aria-label="Messages">
+    <section className="carte space-y-3" aria-label={t('Messages')}>
       <h2 className="titre-carte">
-        Messages {nonLus > 0 && <span className="ml-1 rounded-full bg-marque-600 px-2 py-0.5 text-xs font-bold text-white">{nonLus} nouveau{nonLus > 1 ? 'x' : ''}</span>}
+        {t('Messages')}{' '}
+        {/* Pastille « nouveau » : étiquette, text-xs conservé (P2-Q1). */}
+        {nonLus > 0 && <span className="ml-1 rounded-full bg-marque-600 px-2 py-0.5 text-xs font-bold text-white">{nonLus} nouveau{nonLus > 1 ? 'x' : ''}</span>}
       </h2>
       <ul className="space-y-3">
         {tries.slice(0, 10).map((m) => (
           <li key={m.id} className={`rounded-xl p-3 ring-1 ${m.lu ? 'bg-gray-50 ring-gray-900/5' : 'bg-amber-50 ring-amber-200'}`}>
             <p className="text-gray-900">{m.texte}</p>
-            <p className="mt-1 text-xs text-gray-600">
+            <p className="mt-1 text-sm text-gray-600">
               {commerce.nom} · {dateRelative(m.date)}
             </p>
             {m.type === 'avis' && (
@@ -56,20 +65,21 @@ function BoiteReception({ messages, commerce }: { messages: MessageClient[]; com
 /** Historique des visites et des lots (P1-C3), replié : la carte et ses boutons restent en haut de page. */
 function Historique({ client, lotsRoue }: { client: Client; lotsRoue: LotHistorique[] }) {
   const lignes = historiqueCarte(client, lotsRoue)
+  const { t } = useLangue()
   return (
     <details className="carte">
-      <summary className="titre-carte min-h-11 cursor-pointer">Historique des visites et des lots</summary>
+      <summary className="titre-carte min-h-11 cursor-pointer">{t('Historique des visites et des lots')}</summary>
       {lignes.length ? (
         <ul className="mt-3 divide-y divide-gray-100">
           {lignes.map((l, i) => (
             <li key={`${l.date}-${i}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
               <span className="min-w-0 text-gray-900">{l.libelle}</span>
-              <span className="shrink-0 text-xs text-gray-600">{new Date(l.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+              <span className="shrink-0 text-sm text-gray-600">{new Date(l.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-3 text-sm text-gray-600">Aucune visite pour l’instant : votre premier tampon arrive au comptoir.</p>
+        <p className="mt-3 text-sm text-gray-600">{t('Aucune visite pour l’instant : votre premier tampon arrive au comptoir.')}</p>
       )}
     </details>
   )
@@ -77,12 +87,13 @@ function Historique({ client, lotsRoue }: { client: Client; lotsRoue: LotHistori
 
 /** Lien court personnel (P1-C3) : /c/<id> redirige vers la carte ; à garder ou à s'envoyer. */
 function LienCourt({ lien }: { lien: string }) {
+  const { t } = useLangue()
   return (
-    <section className="carte space-y-2" aria-label="Votre lien personnel">
+    <section className="carte space-y-2" aria-label={t('Votre lien personnel')}>
       <p className="text-sm text-gray-700">
-        Votre lien personnel : <span className="font-mono font-semibold break-all text-gray-900">{lien.replace(/^https?:\/\//, '')}</span>
+        {t('Votre lien personnel :')} <span className="font-mono font-semibold break-all text-gray-900">{lien.replace(/^https?:\/\//, '')}</span>
       </p>
-      <BoutonCopier texte={lien} libelle="Copier mon lien" className="bouton-secondaire w-full" />
+      <BoutonCopier texte={lien} libelle={t('Copier mon lien')} className="bouton-secondaire w-full" />
     </section>
   )
 }
@@ -108,9 +119,11 @@ function Carte({
   lotsRoue?: LotHistorique[]
   lienCourt?: string
 }) {
+  const { t } = useLangue()
   if (!commerce.actif) return <MessagePublic titre={commerce.nom}>La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
   return (
-    <div className="mx-auto max-w-md space-y-4 px-4 pt-6 pb-10">
+    <div className="mx-auto max-w-md space-y-4 px-4 pt-2 pb-10">
+      <CommutateurLangue />
       {estAsianHome(commerce) && (
         <img
           src={VISUELS.tableSushis}
@@ -124,16 +137,16 @@ function Carte({
       <BoiteReception messages={client.messages ?? []} commerce={commerce} />
       <Historique client={client} lotsRoue={lotsRoue} />
       <a href={`#/jouer/${commerce.id}`} className="bouton w-full">
-        🎡 Tourner la roue du jour
+        {t('🎡 Tourner la roue du jour')}
       </a>
       {menu && (
         <a href={`#/menu/${commerce.id}`} className="bouton-secondaire w-full">
-          📖 Voir le menu
+          {t('📖 Voir le menu')}
         </a>
       )}
       {estAsianHome(commerce) && (
         <section className="carte space-y-3" aria-label="Le restaurant">
-          <h2 className="titre-carte">Le restaurant</h2>
+          <h2 className="titre-carte">{t('Le restaurant')}</h2>
           <img
             src={VISUELS.interieur}
             alt="Salle d’Asian Home Paris : plafond d’ombrelles et tables dressées"
@@ -151,7 +164,7 @@ function Carte({
       )}
       <EncartWallet demo={demo} replie />
       {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}
-      <p className="text-center text-xs text-gray-600">{pied}</p>
+      <p className="text-center text-sm text-gray-600">{pied}</p>
       <PiedPublic commerceId={commerce.id} />
     </div>
   )
@@ -171,7 +184,7 @@ function CarteLocale() {
       demo
       pied={
         <>
-          <BadgeDemo>Démo</BadgeDemo> Données stockées dans ce navigateur uniquement.
+          <BadgeDemo>Démo</BadgeDemo> <Traduit texte="Données stockées dans ce navigateur uniquement." />
         </>
       }
     />
@@ -183,6 +196,7 @@ function CarteApi({ api }: { api: ClientApi }) {
   const { param } = useRoute()
   const [donnees, setDonnees] = useState<{ client: Client; commerce: CommercePublic; menu: boolean; gainDuJour: GainDuJour | null; lots: LotHistorique[] } | null>(null)
   const [erreur, setErreur] = useState<'introuvable' | 'inactif' | 'horsLigne' | null>(null)
+  const { t } = useLangue()
 
   const charger = useCallback(() => {
     if (!param) return setErreur('introuvable')
@@ -227,7 +241,7 @@ function CarteApi({ api }: { api: ClientApi }) {
   if (erreur === 'inactif') return <MessagePublic titre="Carte indisponible">La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
   // Hors ligne sans carte déjà affichée : message clair (une carte déjà affichée reste visible).
   if (erreur === 'horsLigne' && !donnees) return <HorsLignePublic onReessayer={charger} />
-  if (!donnees) return <SqueletteCarte libelle="Un instant, votre carte arrive." />
+  if (!donnees) return <SqueletteCarte libelle={t('Un instant, votre carte arrive.')} />
   return (
     <Carte
       client={donnees.client}
@@ -246,7 +260,8 @@ function CarteApi({ api }: { api: ClientApi }) {
       pied={
         <>
           {donnees.commerce.demo && <BadgeDemo>Démo</BadgeDemo>}
-          {erreur === 'horsLigne' ? ' Hors ligne : carte affichée telle qu’au dernier chargement.' : ' Carte à jour.'}
+          {' '}
+          {t(erreur === 'horsLigne' ? 'Hors ligne : carte affichée telle qu’au dernier chargement.' : 'Carte à jour.')}
         </>
       }
     />
@@ -265,6 +280,7 @@ function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi
   const [enCours, setEnCours] = useState(false)
   const rattrapage = configRattrapage(commerce)
   const enAttente = (client.demandesRattrapage ?? []).filter((d) => d.statut === 'en_attente')
+  const { t } = useLangue()
 
   async function envoyerProfil(e: FormEvent) {
     e.preventDefault()
@@ -311,7 +327,7 @@ function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi
     <div className="space-y-4">
       {peutCompleterProfil(client) && (
         <form onSubmit={envoyerProfil} className="carte space-y-3">
-          <h2 className="titre-carte">Votre profil</h2>
+          <h2 className="titre-carte">{t('Votre profil')}</h2>
           <p className="text-sm text-gray-600">Pour recevoir votre récompense d’anniversaire et des offres sur vos plats préférés.</p>
           <div>
             <label className="etiquette" htmlFor="cp-anniversaire">
@@ -326,36 +342,36 @@ function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi
             <input id="cp-plat" className="champ" maxLength={80} placeholder="ex : poulet satay" value={plat} onChange={(e) => setPlat(e.target.value)} />
           </div>
           <button type="submit" className="bouton-secondaire w-full" disabled={enCours || (!anniversaire.trim() && !plat.trim())}>
-            Enregistrer mon profil
+            {t('Enregistrer mon profil')}
           </button>
         </form>
       )}
       {rattrapage.actif && (
         <form onSubmit={envoyerRattrapage} className="carte space-y-3">
-          <h2 className="titre-carte">J’ai oublié de scanner</h2>
+          <h2 className="titre-carte">{t('J’ai oublié de scanner')}</h2>
           <p className="text-sm text-gray-600">Signalez une visite oubliée (sous {rattrapage.delaiJours} jours) : le restaurant la validera et votre tampon + vos points seront crédités.</p>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="etiquette" htmlFor="cp-date">
-                Date de la visite
+                {t('Date de la visite')}
               </label>
               <input id="cp-date" className="champ" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
             </div>
             <div>
               <label className="etiquette" htmlFor="cp-montant">
-                Montant payé (€)
+                {t('Montant payé (€)')}
               </label>
               <input id="cp-montant" className="champ" inputMode="decimal" placeholder="24,50" value={montant} onChange={(e) => setMontant(e.target.value)} required />
             </div>
           </div>
           <div>
             <label className="etiquette" htmlFor="cp-ticket">
-              N° de ticket (optionnel)
+              {t('N° de ticket (optionnel)')}
             </label>
             <input id="cp-ticket" className="champ" maxLength={80} placeholder="ex : T-1234" value={ticket} onChange={(e) => setTicket(e.target.value)} />
           </div>
           <button type="submit" className="bouton-secondaire w-full" disabled={enCours}>
-            Envoyer ma demande
+            {t('Envoyer ma demande')}
           </button>
           {enAttente.length > 0 && (
             <p className="text-sm text-gray-700">
@@ -380,6 +396,8 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
   const [message, setMessage] = useState('')
   const [erreur, setErreur] = useState('')
   const [enCours, setEnCours] = useState(false)
+
+  const { t } = useLangue()
 
   async function agir(action: 'donnees' | 'suppression') {
     if (enCours) return
@@ -406,7 +424,7 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
 
   return (
     <details className="carte">
-      <summary className="titre-carte min-h-11 cursor-pointer">Mes données personnelles</summary>
+      <summary className="titre-carte min-h-11 cursor-pointer">{t('Mes données personnelles')}</summary>
       <div className="mt-3 space-y-3">
         <p className="text-sm text-gray-600">
           Recevez une copie de vos données ou demandez leur suppression. <LienConfidentialite commerceId={commerce.id} />
@@ -418,16 +436,16 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
         )}
         <div>
           <label className="etiquette" htmlFor="cp-contact-rgpd">
-            Votre téléphone ou e-mail (celui de l’inscription)
+            {t('Votre téléphone ou e-mail (celui de l’inscription)')}
           </label>
           <input id="cp-contact-rgpd" className="champ" inputMode="email" autoComplete="off" value={contact} onChange={(e) => setContact(e.target.value)} />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <button type="button" className="bouton-secondaire min-h-11" disabled={enCours} onClick={() => void agir('donnees')}>
-            Recevoir mes données
+            {t('Recevoir mes données')}
           </button>
           <button type="button" className="bouton-secondaire min-h-11" disabled={enCours || !!client.demandeSuppressionLe} onClick={() => void agir('suppression')}>
-            Demander la suppression
+            {t('Demander la suppression')}
           </button>
         </div>
         {message && <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">{message}</p>}
@@ -446,6 +464,8 @@ function RetrouverCarte({ api }: { api: ClientApi }) {
   const [reponse, setReponse] = useState('')
   const [erreur, setErreur] = useState('')
   const [enCours, setEnCours] = useState(false)
+
+  const { t } = useLangue()
 
   async function envoyer(e: FormEvent) {
     e.preventDefault()
@@ -468,15 +488,15 @@ function RetrouverCarte({ api }: { api: ClientApi }) {
   return (
     <div className="mx-auto -mt-10 max-w-md px-4 pb-16">
       <form onSubmit={envoyer} className="carte space-y-3">
-        <h2 className="titre-carte">Retrouver ma carte</h2>
+        <h2 className="titre-carte">{t('Retrouver ma carte')}</h2>
         <div>
           <label className="etiquette" htmlFor="cp-retrouver">
-            Téléphone ou e-mail donné à l’inscription
+            {t('Téléphone ou e-mail donné à l’inscription')}
           </label>
           <input id="cp-retrouver" className="champ" inputMode="email" autoComplete="off" value={contact} onChange={(e) => setContact(e.target.value)} />
         </div>
         <button type="submit" className="bouton w-full" disabled={enCours}>
-          Retrouver ma carte
+          {t('Retrouver ma carte')}
         </button>
         {reponse && (
           <p className="rounded-xl bg-gray-50 p-3 text-sm text-gray-800 ring-1 ring-gray-200" role="status">

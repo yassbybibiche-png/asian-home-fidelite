@@ -1,10 +1,11 @@
-import type { ComponentType } from 'react'
+import { useEffect, type ComponentType } from 'react'
 import { useStore } from './store'
 import { aller, useRoute, PAGES_PUBLIQUES, type Page } from './router'
 import { BadgeDemo, Icone, LogoCommerce } from './components/ui'
 import { useDepasse, Verrou } from './components/Verrou'
 import { DELAI_ACCES_MS } from './lib/connexion'
 import { SqueletteCommercant } from './components/Squelette'
+import { useLangue } from './components/Langue'
 import { NOM_APP, libelleType } from './data/defaults'
 import TableauDeBord from './pages/TableauDeBord'
 import Clients from './pages/Clients'
@@ -86,7 +87,7 @@ function SelecteurCommerce() {
           <span className="truncate font-bold leading-tight text-white">{commerce.nom}</span>
           {mode === 'api' && commerce.demo && <BadgeDemo />}
         </span>
-        <span className="block text-xs text-white/70">
+        <span className="block text-sm text-white/70">
           {libelleType(commerce.type)}
           {choix ? ' · changer de commerce ▾' : ''}
         </span>
@@ -141,6 +142,11 @@ export default function App() {
   const { page } = useRoute()
   const { commerce, mode, acces, accesPret, verrouiller, relireAcces } = useStore()
   const Contenu = COMPOSANTS[page]
+  // <html lang> suit la langue affichée : anglais possible sur les pages clientes seulement (P2-Q1).
+  const { langue } = useLangue()
+  useEffect(() => {
+    document.documentElement.lang = langue
+  }, [langue])
   const onglet = ONGLET_PARENT[page] ?? page
   // Filet de sécurité : la relecture de l'accès est déjà bornée (5 s), mais aucune attente ne doit dépasser 30 s sans issue.
   const accesLent = useDepasse(mode === 'api' && !accesPret, DELAI_ACCES_MS)

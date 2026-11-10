@@ -55,7 +55,7 @@ export default function Offre() {
             </li>
           ))}
         </ul>
-        <p className="mt-2 text-sm text-gray-500">
+        <p className="mt-2 text-sm text-gray-600">
           Le QR code à imprimer est généré par l’app (page « QR vitrine »). L’impression des supports n’est pas incluse dans l’app.
         </p>
       </section>

@@ -128,8 +128,8 @@ describe('Page de jeu et inscription en caisse (source)', () => {
   test('« Continuer en tant que… » : zéro saisie, avec ou sans prénom', () => {
     const continuer = corpsDe(jouer, 'Continuer')
     assert.doesNotMatch(continuer, /<input/)
-    assert.match(continuer, /`Continuer en tant que \$\{p\}`/)
-    assert.match(continuer, /'Continuer avec ma carte'/)
+    assert.match(continuer, /t\('Continuer en tant que \{prenom\}', \{ prenom: p \}\)/)
+    assert.match(continuer, /t\('Continuer avec ma carte'\)/)
     // Les deux modes : le profil mémorisé est repris tel quel (aucun formulaire), « Ce n'est pas moi » l'oublie.
     assert.match(jouer, /<Continuer prenom=\{memorise\.prenom\} onContinuer=\{\(\) => choisirJoueur\(memorise\)\} onOublier=\{\(\) => \(memoriserJoueur\(commerce\.id, null\), setMemoriseId\(null\)\)\} \/>/)
     assert.match(jouer, /<Continuer prenom=\{memorise\.prenom\} onContinuer=\{\(\) => choisirJoueur\(memorise\)\} onOublier=\{\(\) => \(memoire\.memoriser\(null\), setMemorise\(null\)\)\} \/>/)
@@ -145,7 +145,7 @@ describe('Page de jeu et inscription en caisse (source)', () => {
 
   test('phrases du jeu sans prénom', () => {
     assert.doesNotMatch(jouer, /Bravo \$\{prenom\}|, \$\{joueur\.prenom\} !|Bonjour \{prenom\}|aujourd’hui, \{prenom\}/)
-    assert.match(jouer, /`🎡 Tourner la roue\$\{virgulePrenom\(joueur\.prenom\)\} !`/)
+    assert.match(jouer, /t\('🎡 Tourner la roue\{prenom\} !', \{ prenom: virgulePrenom\(joueur\.prenom\) \}\)/)
   })
 
   test('inscription en caisse : prénom optionnel, contact obligatoire, pas d’autocomplétion avec les données de l’appareil', () => {

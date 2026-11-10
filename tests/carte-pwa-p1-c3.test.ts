@@ -378,7 +378,7 @@ describe('Carte : lien court, QR personnel, encart Wallet honnête', () => {
   test('lien court /c/<id> copiable et QR personnel sur la carte publique', () => {
     const page = lire('src/pages/CartePublique.tsx')
     assert.match(page, /lienCourt=\{lienCourtCarte\(window\.location\.origin, donnees\.client\.id\)\}/)
-    assert.match(page, /<BoutonCopier texte=\{lien\} libelle="Copier mon lien"/)
+    assert.match(page, /<BoutonCopier texte=\{lien\} libelle=\{t\('Copier mon lien'\)\}/)
     assert.match(lire('src/components/CarteFidelite.tsx'), /<QrCode texte=\{urlAbsolue\('carte', client\.id\)\}/)
   })
 

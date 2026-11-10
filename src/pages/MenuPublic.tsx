@@ -11,6 +11,7 @@ import { SqueletteMenu } from '../components/Squelette'
 import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
 import { estSignature, menuReelAsianHome } from '../data/menu-reel'
 import { HorsLignePublic, MessagePublic } from './Jouer'
+import { CommutateurLangue, useLangue } from '../components/Langue'
 
 /** Page publique #/menu/<commerceId> (QR du menu, lien depuis la carte de fidélité). */
 export default function MenuPublic() {
@@ -21,6 +22,7 @@ export default function MenuPublic() {
   const [recherche, setRecherche] = useState('')
   const [categorie, setCategorie] = useState<string>('toutes')
   const [ouvert, setOuvert] = useState<string | null>(null)
+  const { t } = useLangue()
 
   const charger = useCallback(() => {
     if (!api || !param) return
@@ -35,7 +37,7 @@ export default function MenuPublic() {
   if (!param || erreur === 'introuvable') return <MessagePublic titre="Menu introuvable">Ce lien ne correspond à aucun commerce.</MessagePublic>
   if (erreur === 'inactif') return <MessagePublic titre="Menu indisponible">Le menu de ce commerce n’est plus disponible.</MessagePublic>
   if (erreur === 'horsLigne' && !donnees) return <HorsLignePublic onReessayer={charger} />
-  if (!donnees) return <SqueletteMenu libelle="Un instant, le menu arrive." />
+  if (!donnees) return <SqueletteMenu libelle={t('Un instant, le menu arrive.')} />
 
   return <MenuAffiche menu={donnees.menu} commerce={donnees.commerce} recherche={recherche} setRecherche={setRecherche} categorie={categorie} setCategorie={setCategorie} ouvert={ouvert} setOuvert={setOuvert} />
 }
@@ -90,6 +92,8 @@ export function MenuAffiche({
   const midi = useMemo(() => categorieMidi(menuAffiche.categories.filter((c) => c.produits.length)), [menuAffiche])
   const bandeauMidi = !!midi && estHeureMenuMidi(maintenant)
   const avecBadges = visibles.some((c) => c.produits.some((p) => badgesPlat(p).length))
+  // Interface traduite (P2-Q1) ; les noms de plats et de catégories restent ceux du restaurant.
+  const { t } = useLangue()
 
   // Indicateur de l'onglet actif : en « Toutes », la catégorie dont la section est à l'écran (suivi au défilement).
   const [enVue, setEnVue] = useState<string | null>(null)
@@ -124,17 +128,18 @@ export function MenuAffiche({
 
   return (
     <div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
-      <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-6 pb-6 text-center shadow-relief">
+      <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-2 pb-6 text-center shadow-relief">
+        <CommutateurLangue sombre />
         <div className="flex justify-center">
           <LogoCommerce commerce={commerce} taille="lg" />
         </div>
-        <p className="surtitre-sombre mt-3">Menu</p>
+        <p className="surtitre-sombre mt-3">{t('Menu')}</p>
         <h1 className="titre-or mt-1 text-2xl">{commerce.nom}</h1>
-        <p className="mt-1 text-sm text-white/70">Cuisine asiatique halal · Thaï, Japon, Vietnam, Chine</p>
+        <p className="mt-1 text-sm text-white/80">{t('Cuisine asiatique halal · Thaï, Japon, Vietnam, Chine')}</p>
       </header>
 
       {boutons.length > 0 && (
-        <nav className="flex flex-wrap justify-center gap-2" aria-label="Contacter le restaurant">
+        <nav className="flex flex-wrap justify-center gap-2" aria-label={t('Contacter le restaurant')}>
           {boutons.map((b) => (
             <a key={b.id} href={b.href} className="bouton-secondaire min-h-11 px-4 py-2 text-sm" {...(b.externe ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
               {b.libelle}
@@ -150,11 +155,11 @@ export function MenuAffiche({
             🍱
           </span>
           <p className="min-w-0 flex-1 text-sm">
-            <span className="block font-bold">C’est l’heure du Menu Midi !</span>
-            Formules du lundi au vendredi, jusqu’à 14h30.
+            <span className="block font-bold">{t('C’est l’heure du Menu Midi !')}</span>
+            {t('Formules du lundi au vendredi, jusqu’à 14h30.')}
           </p>
           <button type="button" className="bouton shrink-0 min-h-11 px-4 py-2 text-sm" onClick={() => (setRecherche(''), choisir(midi.id, true))}>
-            Voir
+            {t('Voir')}
           </button>
         </div>
       )}
@@ -177,20 +182,20 @@ export function MenuAffiche({
           <div className="sticky top-0 z-20 -mx-4 space-y-2 bg-fond/95 px-4 pt-2 pb-2 shadow-[0_6px_12px_-10px_rgb(17_24_39/0.25)] backdrop-blur">
             <div role="search">
               <label className="sr-only" htmlFor="recherche-plat">
-                Rechercher un plat
+                {t('Rechercher un plat')}
               </label>
               <input
                 id="recherche-plat"
                 type="search"
                 className="champ"
-                placeholder="🔍 Rechercher un plat… (ex : dynamite, maki)"
+                placeholder={t('🔍 Rechercher un plat… (ex : dynamite, maki)')}
                 value={recherche}
                 onChange={(e) => (setRecherche(e.target.value), setOuvert(null))}
               />
             </div>
 
-            <nav ref={nav} className="flex gap-2 overflow-x-auto pb-1" aria-label="Catégories">
-              <OngletCategorie libelle="Toutes" choisi={active === 'toutes'} indique={active === 'toutes' && !enVue} onClick={() => choisir('toutes')} />
+            <nav ref={nav} className="flex gap-2 overflow-x-auto pb-1" aria-label={t('Catégories')}>
+              <OngletCategorie libelle={t('Toutes')} choisi={active === 'toutes'} indique={active === 'toutes' && !enVue} onClick={() => choisir('toutes')} />
               {categories.map((c) => (
                 <OngletCategorie key={c.id} libelle={c.nom} choisi={active === c.id} indique={ongletIndique === c.id} onClick={() => choisir(c.id)} />
               ))}
@@ -199,13 +204,13 @@ export function MenuAffiche({
 
           {total === 0 ? (
             <p className="carte text-center text-gray-600" role="status">
-              Aucun plat ne correspond à « {recherche} ».
+              {t('Aucun plat ne correspond à « {recherche} ».', { recherche })}
             </p>
           ) : (
             <>
               <p id="liste-menu" className="scroll-mt-36 text-sm text-gray-600" role="status">
-                {total} plat{total > 1 ? 's' : ''}
-                {recherche ? ` pour « ${recherche} »` : ''}
+                {t(total > 1 ? '{n} plats' : '{n} plat', { n: total })}
+                {recherche ? t(' pour « {recherche} »', { recherche }) : ''}
               </p>
               {visibles.map((c) => {
                 const photo = photoCategorie(c.nom)
@@ -232,11 +237,12 @@ export function MenuAffiche({
                               <span className="min-w-0 flex-1">
                                 <span className="flex flex-wrap items-center gap-2">
                                   <span className="font-semibold">{p.nom}</span>
+                                  {/* Pastilles (étiquettes décoratives) : text-xs, 12,75 px, exception documentée (P2-Q1). */}
                                   {signature && (
-                                    <span className="rounded-full bg-marque-500 px-2 py-0.5 text-[11px] font-bold tracking-wide text-white uppercase">★ Signature</span>
+                                    <span className="rounded-full bg-marque-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">★ Signature</span>
                                   )}
                                   {badges.map((b) => (
-                                    <span key={b} className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-700" title={`Déduit de la description — ${MENTION_BADGE_DEDUIT}`}>
+                                    <span key={b} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700" title={`Déduit de la description — ${MENTION_BADGE_DEDUIT}`}>
                                       {LIBELLES_BADGES[b]}*<span className="sr-only"> ({MENTION_BADGE_DEDUIT})</span>
                                     </span>
                                   ))}
@@ -244,30 +250,30 @@ export function MenuAffiche({
                                 {p.description && !detail && <span className="mt-0.5 line-clamp-2 block text-sm text-gray-700">{p.description}</span>}
                               </span>
                               {p.prix == null ? (
-                                <span className="shrink-0 text-sm text-gray-500 italic">Prix sur place</span>
+                                <span className="shrink-0 text-sm text-gray-600 italic">{t('Prix sur place')}</span>
                               ) : (
                                 <span className="shrink-0 font-semibold text-marque-700 tabular-nums">{formaterPrix(p.prix)}</span>
                               )}
                             </button>
                             {detail && (
                               <div className="apparition space-y-3 border-t border-gray-100 px-4 py-3">
-                                {p.photo && <img src={p.photo} alt={`Photo du plat : ${p.nom}`} loading="lazy" className="h-44 w-full rounded-2xl object-cover" />}
+                                {p.photo && <img src={p.photo} alt={t('Photo du plat : {nom}', { nom: p.nom })} loading="lazy" className="h-44 w-full rounded-2xl object-cover" />}
                                 {p.description ? (
                                   <p className="text-sm text-gray-700">{p.description}</p>
                                 ) : (
-                                  <p className="text-sm text-gray-500 italic">Description à venir — demandez conseil à l’équipe.</p>
+                                  <p className="text-sm text-gray-600 italic">{t('Description à venir — demandez conseil à l’équipe.')}</p>
                                 )}
                                 <p className="text-sm">
-                                  <span className="font-semibold">Prix : </span>
-                                  {p.prix == null ? <span className="text-gray-500 italic">sur place</span> : <span className="font-semibold text-marque-700 tabular-nums">{formaterPrix(p.prix)}</span>}
+                                  <span className="font-semibold">{t('Prix :')} </span>
+                                  {p.prix == null ? <span className="text-gray-600 italic">{t('sur place')}</span> : <span className="font-semibold text-marque-700 tabular-nums">{formaterPrix(p.prix)}</span>}
                                 </p>
                                 {badges.length > 0 && (
                                   <p className="text-sm text-gray-600">
                                     {badges.map((b) => LIBELLES_BADGES[b]).join(' · ')} — {MENTION_BADGE_DEDUIT} auprès de l’équipe.
                                   </p>
                                 )}
-                                {p.allergenes.length > 0 && <p className="text-sm text-gray-600">Allergènes : {p.allergenes.join(', ')}</p>}
-                                {signature && <p className="text-sm font-semibold text-marque-700">★ Plat signature — l’un des best-sellers du restaurant.</p>}
+                                {p.allergenes.length > 0 && <p className="text-sm text-gray-600">{t('Allergènes :')} {p.allergenes.join(', ')}</p>}
+                                {signature && <p className="text-sm font-semibold text-marque-700">{t('★ Plat signature — l’un des best-sellers du restaurant.')}</p>}
                               </div>
                             )}
                           </li>
@@ -281,9 +287,9 @@ export function MenuAffiche({
           )}
         </>
       )}
-      {avecBadges && <p className="text-center text-xs text-gray-600">* 🌶 / 🌱 : déduit du nom ou de la description du plat, {MENTION_BADGE_DEDUIT} auprès de l’équipe.</p>}
+      {avecBadges && <p className="text-center text-sm text-gray-600">* 🌶 / 🌱 : déduit du nom ou de la description du plat, {MENTION_BADGE_DEDUIT} auprès de l’équipe.</p>}
       {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}
-      <p className="text-center text-xs text-gray-600">Allergènes : demandez conseil à l’équipe en cas de doute.</p>
+      <p className="text-center text-sm text-gray-600">{t('Allergènes : demandez conseil à l’équipe en cas de doute.')}</p>
       <PiedPublic commerceId={commerce.id} />
     </div>
   )

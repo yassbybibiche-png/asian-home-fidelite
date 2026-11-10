@@ -1,10 +1,11 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useId, useMemo, useState, type ReactNode } from 'react'
 import qrcode from 'qrcode-generator'
 import type { Commerce } from '../types'
 import { initiales } from '../lib/format'
 import { estLogoLocal, logoCommerce } from '../lib/visuels'
 import { estLogoTeleverse } from '../lib/logo'
 import { ETATS_WALLET, EXPLICATION_WALLET, LIBELLE_WALLET, MENTIONS_RGPD } from '../lib/integrations'
+import { useLangue } from './Langue'
 
 export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Commerce, 'id' | 'nom' | 'logo'>; taille?: 'sm' | 'md' | 'lg' }) {
   const dims = { sm: 'h-9 w-9 text-sm', md: 'h-11 w-11 text-base', lg: 'h-16 w-16 text-xl' }[taille]
@@ -37,6 +38,7 @@ export function Etoiles({ note }: { note: number }) {
 }
 
 export function BadgeDemo({ children = 'Démo' }: { children?: ReactNode }) {
+  // Étiquette décorative : text-xs (12,75 px) conservé (P2-Q1, exception documentée).
   return <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">{children}</span>
 }
 
@@ -45,28 +47,44 @@ export function EnTete({ titre, sousTitre, action }: { titre: string; sousTitre?
     <div className="mb-5 flex items-start justify-between gap-3">
       <div className="min-w-0">
         <h1 className="font-titre text-[1.75rem] font-bold tracking-tight text-gray-900">{titre}</h1>
-        {sousTitre && <p className="mt-1 text-[0.95rem] text-gray-600">{sousTitre}</p>}
+        {sousTitre && <p className="mt-1 text-base text-gray-600">{sousTitre}</p>}
       </div>
       {action}
     </div>
   )
 }
 
+/**
+ * Interrupteur (P2-Q1) : zone tactile de 44 × 64 px (le bouton), rail visible de 32 px dedans. Nommé par son libellé
+ * (aria-labelledby) et décrit par l'aide (aria-describedby) ; le `label` englobant rend aussi le texte cliquable.
+ */
 export function Interrupteur({ actif, onChange, libelle, aide }: { actif: boolean; onChange: (v: boolean) => void; libelle: string; aide?: string }) {
+  const id = useId()
   return (
     <label className="flex min-h-12 cursor-pointer items-center justify-between gap-4 py-2">
       <span>
-        <span className="block font-medium">{libelle}</span>
-        {aide && <span className="block text-sm text-gray-500">{aide}</span>}
+        <span id={`${id}-libelle`} className="block font-medium">
+          {libelle}
+        </span>
+        {aide && (
+          <span id={`${id}-aide`} className="block text-sm text-gray-600">
+            {aide}
+          </span>
+        )}
       </span>
       <button
         type="button"
         role="switch"
         aria-checked={actif}
+        aria-labelledby={`${id}-libelle`}
+        aria-describedby={aide ? `${id}-aide` : undefined}
         onClick={() => onChange(!actif)}
-        className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${actif ? 'bg-marque-500' : 'bg-gray-300'}`}
+        className="relative inline-flex h-11 w-16 shrink-0 items-center justify-center rounded-full"
+        data-interrupteur
       >
-        <span className={`absolute top-1 left-1 h-6 w-6 rounded-full bg-white shadow transition-transform ${actif ? 'translate-x-6' : ''}`} />
+        <span className={`relative h-8 w-14 rounded-full transition-colors ${actif ? 'bg-marque-500' : 'bg-gray-500'}`} aria-hidden>
+          <span className={`absolute top-1 left-1 h-6 w-6 rounded-full bg-white shadow transition-transform ${actif ? 'translate-x-6' : ''}`} />
+        </span>
       </button>
     </label>
   )
@@ -169,6 +187,7 @@ export function telecharger(nom: string, contenu: string, type = 'text/csv;chars
 
 export function BoutonCopier({ texte, libelle = 'Copier le message', className = 'bouton-secondaire' }: { texte: string; libelle?: string; className?: string }) {
   const [resultat, setResultat] = useState<'' | 'ok' | 'echec'>('')
+  const { t } = useLangue()
   return (
     <button
       type="button"
@@ -178,7 +197,7 @@ export function BoutonCopier({ texte, libelle = 'Copier le message', className =
         setTimeout(() => setResultat(''), 2000)
       }}
     >
-      {resultat === 'ok' ? '✓ Copié' : resultat === 'echec' ? 'Copie impossible : sélectionnez le texte' : libelle}
+      {resultat === 'ok' ? t('✓ Copié') : resultat === 'echec' ? t('Copie impossible : sélectionnez le texte') : libelle}
     </button>
   )
 }
@@ -240,9 +259,10 @@ export function BlocRgpd({ commerceId }: { commerceId?: string }) {
 
 /** Lien vers la politique de confidentialité du commerce (P1-B6) : inscription, pied des pages client, Plus / Offre. */
 export function LienConfidentialite({ commerceId, className = '' }: { commerceId: string; className?: string }) {
+  const { t } = useLangue()
   return (
     <a href={`#/confidentialite/${encodeURIComponent(commerceId)}`} className={`font-semibold text-marque-700 underline ${className}`}>
-      Politique de confidentialité
+      {t('Politique de confidentialité')}
     </a>
   )
 }
@@ -250,7 +270,7 @@ export function LienConfidentialite({ commerceId, className = '' }: { commerceId
 /** Pied de page des pages client (jeu, carte, menu) : la politique de confidentialité toujours à un tap. */
 export function PiedPublic({ commerceId }: { commerceId: string }) {
   return (
-    <footer className="mt-2 border-t border-gray-200 pt-3 text-center text-xs text-gray-600">
+    <footer className="mt-2 border-t border-gray-200 pt-3 text-center text-sm text-gray-600">
       <LienConfidentialite commerceId={commerceId} className="inline-flex min-h-11 items-center" />
     </footer>
   )

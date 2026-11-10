@@ -42,14 +42,17 @@ import {
 import { LegendeRoue, Roue, useMouvementReduit } from '../components/Roue'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteJeu } from '../components/Squelette'
+import { CommutateurLangue, useLangue } from '../components/Langue'
+import { texteValiditeLangue } from '../lib/langue'
 import { BadgeDemo, BoutonCopier, LienConfidentialite, LogoCommerce, MessageErreur, PiedPublic } from '../components/ui'
 
 export function MessagePublic({ titre, children }: { titre: string; children: ReactNode }) {
+  const { t } = useLangue()
   return (
     <div className="mx-auto max-w-md px-4 py-16">
       <div className="carte px-6 py-8 text-center">
-        <h1 className="font-titre text-2xl font-bold">{titre}</h1>
-        <div className="mt-3 text-gray-600">{children}</div>
+        <h1 className="font-titre text-2xl font-bold">{t(titre)}</h1>
+        <div className="mt-3 text-gray-600">{typeof children === 'string' ? t(children) : children}</div>
       </div>
     </div>
   )
@@ -57,11 +60,12 @@ export function MessagePublic({ titre, children }: { titre: string; children: Re
 
 /** Serveur injoignable sur une page publique : message clair + nouvel essai, jamais de faux résultat. */
 export function HorsLignePublic({ onReessayer }: { onReessayer(): void }) {
+  const { t } = useLangue()
   return (
     <MessagePublic titre="Serveur injoignable">
-      <p>{MESSAGE_HORS_LIGNE}</p>
+      <p>{t(MESSAGE_HORS_LIGNE)}</p>
       <button className="bouton mt-4 w-full" onClick={onReessayer}>
-        Réessayer
+        {t('Réessayer')}
       </button>
     </MessagePublic>
   )
@@ -86,14 +90,16 @@ type Etape = 'pret' | 'rotation' | 'resultat'
 
 /** En-tête + roue, communs aux deux modes. */
 function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; rotation: number; children: ReactNode; pied: ReactNode }) {
+  const { t } = useLangue()
   return (
     <div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
-      <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-6 pb-8 text-center shadow-relief">
+      <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-2 pb-8 text-center shadow-relief">
+        <CommutateurLangue sombre />
         <div className="flex justify-center">
           <LogoCommerce commerce={commerce} taille="lg" />
         </div>
         <h1 className="titre-or mt-3 text-2xl">{commerce.nom}</h1>
-        <p className="mt-1 font-semibold text-or-300">Tournez la roue et gagnez un cadeau !</p>
+        <p className="mt-1 font-semibold text-or-300">{t('Tournez la roue et gagnez un cadeau !')}</p>
         {commerce.coordonnees && <p className="mt-1 text-sm text-white/70">{commerce.coordonnees}</p>}
       </header>
 
@@ -104,7 +110,7 @@ function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; 
 
       {children}
 
-      <p className="text-center text-xs text-gray-600">{pied}</p>
+      <p className="text-center text-sm text-gray-600">{pied}</p>
       <PiedPublic commerceId={commerce.id} />
     </div>
   )
@@ -127,52 +133,53 @@ export function MessageSansVisite({
   horsLigne?: boolean
   onVerifier?: () => void
 }) {
+  const { t } = useLangue()
   return (
     <section className="carte space-y-4" aria-labelledby="attente-titre">
       <div className="text-center">
         <p id="attente-titre" className="titre-carte">
-          {avecPrenom('Bonjour', prenom)} !
+          {t('Bonjour{prenom} !', { prenom: avecPrenom('', prenom) })}
         </p>
-        <p className="mt-1 text-gray-700">{INTRO_ATTENTE}</p>
+        <p className="mt-1 text-gray-700">{t(INTRO_ATTENTE)}</p>
       </div>
-      <ol className="space-y-2" aria-label="Pour débloquer la roue">
+      <ol className="space-y-2" aria-label={t('Pour débloquer la roue')}>
         {ETAPES_VALIDATION.map((etape, i) => (
           <li key={etape} className="flex items-start gap-3 rounded-xl bg-fond p-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-nuit-950 font-bold text-or-400" aria-hidden>
               {i + 1}
             </span>
-            <span className="pt-1 text-gray-800">{etape}</span>
+            <span className="pt-1 text-gray-800">{t(etape)}</span>
           </li>
         ))}
       </ol>
       {horsLigne ? (
         <div className="space-y-1 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="alert" data-attente="hors-ligne">
-          <p>{MESSAGE_ATTENTE_HORS_LIGNE}</p>
+          <p>{t(MESSAGE_ATTENTE_HORS_LIGNE)}</p>
           {onVerifier && (
             <button type="button" className="lien" onClick={onVerifier}>
-              Réessayer maintenant
+              {t('Réessayer maintenant')}
             </button>
           )}
         </div>
       ) : (
         <div className="hero-sombre flex items-center justify-center gap-3 rounded-xl px-4 py-3" role="status" aria-live="polite" aria-busy="true" data-attente="en-cours">
           <span className="attente-pulse" aria-hidden />
-          <span className="font-semibold text-or-300">{TEXTE_ATTENTE}</span>
+          <span className="font-semibold text-or-300">{t(TEXTE_ATTENTE)}</span>
         </div>
       )}
-      <p className="text-center text-sm text-gray-600">1 visite validée = 1 participation par jour.</p>
+      <p className="text-center text-sm text-gray-600">{t('1 visite validée = 1 participation par jour.')}</p>
       <div className="grid gap-2">
         <a href={lienCarte} className="bouton w-full">
-          Voir ma carte de fidélité
+          {t('Voir ma carte de fidélité')}
         </a>
         {lienMenu && (
           <a href={lienMenu} className="bouton-secondaire w-full">
-            📖 Voir le menu en attendant
+            {t('📖 Voir le menu en attendant')}
           </a>
         )}
         {onVerifier && !horsLigne && (
           <button type="button" className="min-h-11 w-full text-sm font-semibold text-gray-600 underline" onClick={onVerifier}>
-            C’est validé ? Vérifier maintenant
+            {t('C’est validé ? Vérifier maintenant')}
           </button>
         )}
       </div>
@@ -182,9 +189,10 @@ export function MessageSansVisite({
 
 /** Transition visible quand la caisse vient de valider la visite : la roue est débloquée. */
 export function VisiteValidee() {
+  const { t } = useLangue()
   return (
     <p className="alerte-succes apparition text-center text-base" role="status" aria-live="polite" data-attente="validee">
-      ✓ {MESSAGE_VISITE_VALIDEE}
+      ✓ {t(MESSAGE_VISITE_VALIDEE)}
     </p>
   )
 }
@@ -197,16 +205,17 @@ function useVisiteValidee(statut: StatutJeu | null | undefined): boolean {
 }
 
 function MessageDejaJoue({ prenom, lot, code, remis }: { prenom: string; lot: string | null; code?: string; remis?: boolean }) {
+  const { t } = useLangue()
   return (
     <section className="carte text-center" role="status">
-      <p className="titre-carte">Vous avez déjà joué aujourd’hui{virgulePrenom(prenom)} !</p>
+      <p className="titre-carte">{t('Vous avez déjà joué aujourd’hui{prenom} !', { prenom: virgulePrenom(prenom) })}</p>
       {lot && (
         <p className="mt-1 text-gray-600">
-          Résultat du jour : <strong className="text-gray-900">{lot}</strong>
+          {t('Résultat du jour :')} <strong className="text-gray-900">{lot}</strong>
         </p>
       )}
-      {remis ? <p className="mt-2 font-semibold text-green-800">✓ Lot déjà remis au comptoir. Bon appétit !</p> : code && <CodeGagnant code={code} />}
-      <p className="mt-2 text-sm text-gray-600">{TEXTE_DEJA_JOUE}</p>
+      {remis ? <p className="mt-2 font-semibold text-green-800">{t('✓ Lot déjà remis au comptoir. Bon appétit !')}</p> : code && <CodeGagnant code={code} />}
+      <p className="mt-2 text-sm text-gray-600">{t(TEXTE_DEJA_JOUE)}</p>
     </section>
   )
 }
@@ -214,16 +223,18 @@ function MessageDejaJoue({ prenom, lot, code, remis }: { prenom: string; lot: st
 /** Client déjà connu sur ce téléphone : zéro saisie, un seul bouton (avec ou sans prénom sur la carte). */
 function Continuer({ prenom, onContinuer, onOublier }: { prenom: string; onContinuer(): void; onOublier(): void }) {
   const p = prenom.trim()
+  const { t } = useLangue()
   return (
     <section className="carte space-y-2 text-center">
       <p className="text-lg">
-        Re-bonjour{p && <> <strong>{p}</strong></>} 👋
+        {t('Re-bonjour')}
+        {p && <> <strong>{p}</strong></>} 👋
       </p>
       <button className="bouton w-full" onClick={onContinuer}>
-        {p ? `Continuer en tant que ${p}` : 'Continuer avec ma carte'}
+        {p ? t('Continuer en tant que {prenom}', { prenom: p }) : t('Continuer avec ma carte')}
       </button>
       <button className="min-h-11 w-full text-sm font-semibold text-gray-600 underline" onClick={onOublier}>
-        Ce n’est pas moi
+        {t('Ce n’est pas moi')}
       </button>
     </section>
   )
@@ -270,6 +281,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
   const minuterie = useRef<number | undefined>(undefined)
   useEffect(() => () => window.clearTimeout(minuterie.current), [])
   const reduit = useMouvementReduit()
+  const { t } = useLangue()
 
   const trouver = (id: string | null) => (id ? etat.clients.find((c) => c.id === id && c.commerceId === commerce.id) : undefined)
   const joueur = trouver(joueurId)
@@ -315,7 +327,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
       rotation={rotation}
       pied={
         <>
-          <BadgeDemo>Démo</BadgeDemo> Données stockées dans ce navigateur uniquement. 1 participation par visite validée, 1 tirage par jour.
+          <BadgeDemo>{t('Démo')}</BadgeDemo> {t('Données stockées dans ce navigateur uniquement. 1 participation par visite validée, 1 tirage par jour.')}
         </>
       }
     >
@@ -341,7 +353,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
         <>
           {visiteValidee && etape === 'pret' && <VisiteValidee />}
           <button className="bouton w-full py-4 text-lg" onClick={tourner} disabled={etape !== 'pret'}>
-            {etape === 'rotation' ? 'La roue tourne…' : `🎡 Tourner la roue${virgulePrenom(joueur.prenom)} !`}
+            {etape === 'rotation' ? t('La roue tourne…') : t('🎡 Tourner la roue{prenom} !', { prenom: virgulePrenom(joueur.prenom) })}
           </button>
         </>
       )}
@@ -351,7 +363,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
           <InvitationAvis commerce={commerce} onMessagePrive={messagePrive} lienCarte={carte} />
           <DemandePrenom prenom={joueur.prenom} onEnregistrer={async (p) => nommerClient(joueur.id, p)} />
           <a href={`#/carte/${joueur.id}`} className="bouton-secondaire w-full">
-            Voir ma carte de fidélité
+            {t('Voir ma carte de fidélité')}
           </a>
         </>
       )}
@@ -382,10 +394,11 @@ function JouerApi({ api }: { api: ClientApi }) {
     api.commerce(param).then(setCommerce, (e) => setErreur(e instanceof ErreurApi && e.statut === 404 ? 'inconnu' : 'horsLigne'))
   }, [api, param])
   useEffect(charger, [charger])
+  const { t } = useLangue()
 
   if (erreur === 'inconnu') return <MessagePublic titre="QR code inconnu">Ce QR code ne correspond à aucun commerce.</MessagePublic>
   if (erreur === 'horsLigne') return <HorsLignePublic onReessayer={charger} />
-  if (!commerce) return <SqueletteJeu libelle="Un instant, la roue arrive." />
+  if (!commerce) return <SqueletteJeu libelle={t('Un instant, la roue arrive.')} />
   return verifierCommerce(commerce) ?? <PartieApi key={commerce.id} api={api} commerce={commerce} />
 }
 
@@ -407,6 +420,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
   const verifierMaintenant = useRef<() => void>(() => {})
   useEffect(() => () => window.clearTimeout(minuterie.current), [])
   const reduit = useMouvementReduit()
+  const { t } = useLangue()
   const visiteValidee = useVisiteValidee(jeu?.statut)
 
   // État du jeu du jour, vu par le serveur (visite validée ? déjà joué ?). Renvoie le statut, ou null en cas d'échec.
@@ -517,7 +531,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
       rotation={rotation}
       pied={
         <>
-          {commerce.demo && <BadgeDemo>Démo</BadgeDemo>} 1 participation par visite validée au comptoir, 1 tirage par jour. Tirage effectué par le serveur.
+          {commerce.demo && <BadgeDemo>{t('Démo')}</BadgeDemo>} {t('1 participation par visite validée au comptoir, 1 tirage par jour. Tirage effectué par le serveur.')}
         </>
       }
     >
@@ -540,7 +554,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
           <Resultat lot={gain.lot} prenom={joueur.prenom} code={gain.perdant ? undefined : gain.code} lienCarte={`#/carte/${joueur.clientId}`} />
         ) : (
           <button className="bouton w-full py-4 text-lg" disabled>
-            La roue tourne…
+            {t('La roue tourne…')}
           </button>
         )
       ) : !jeu ? (
@@ -549,11 +563,11 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
           <>
             <MessageErreur>{message}</MessageErreur>
             <button className="bouton-secondaire w-full" onClick={() => verifierMaintenant.current()}>
-              Réessayer
+              {t('Réessayer')}
             </button>
           </>
         ) : (
-          <p className="text-center text-gray-500">Vérification de votre carte…</p>
+          <p className="text-center text-gray-600">{t('Vérification de votre carte…')}</p>
         )
       ) : jeu.statut === 'dejaJoue' ? (
         <MessageDejaJoue
@@ -579,7 +593,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
           {visiteValidee && <VisiteValidee />}
           <MessageErreur>{message}</MessageErreur>
           <button className="bouton w-full py-4 text-lg" onClick={() => void tourner()} disabled={enCours}>
-            {enCours ? 'Tirage en cours…' : `🎡 Tourner la roue${virgulePrenom(joueur.prenom)} !`}
+            {enCours ? t('Tirage en cours…') : t('🎡 Tourner la roue{prenom} !', { prenom: virgulePrenom(joueur.prenom) })}
           </button>
         </>
       )}
@@ -595,7 +609,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
             }}
           />
           <a href={`#/carte/${joueur.clientId}`} className="bouton-secondaire w-full">
-            Voir ma carte de fidélité
+            {t('Voir ma carte de fidélité')}
           </a>
         </>
       )}
@@ -632,6 +646,7 @@ function Identification({
   const contact = analyserContact(contactSaisi)
   const saisie = etatSaisieContact(contactSaisi, essaye)
   const attributs = attributsChamp(mode)
+  const { t } = useLangue()
 
   function choisirMode(m: ModeContact) {
     setMode(m)
@@ -656,14 +671,14 @@ function Identification({
   return (
     // noValidate : le champ « email » accepte aussi un numéro ; la validation est celle affichée sous le champ.
     <form onSubmit={envoyer} className="carte space-y-3" noValidate>
-      <p className="titre-carte">Pour jouer, votre téléphone ou votre e-mail suffit</p>
+      <p className="titre-carte">{t('Pour jouer, votre téléphone ou votre e-mail suffit')}</p>
       {parrain && (
         <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">
           👥 Vous êtes parrainé(e) ! Inscrivez-vous : vous gagnerez 50 points à votre 1re visite, et votre ami aussi.
         </p>
       )}
       <div>
-        <div className="mb-2 grid grid-cols-2 gap-2" role="group" aria-label="Clavier du champ">
+        <div className="mb-2 grid grid-cols-2 gap-2" role="group" aria-label={t('Clavier du champ')}>
           {(['tel', 'email'] as const).map((m) => (
             <button
               key={m}
@@ -672,12 +687,12 @@ function Identification({
               onClick={() => choisirMode(m)}
               className={`min-h-11 rounded-xl text-sm font-semibold ring-1 ${mode === m ? 'bg-nuit-950 text-or-300 ring-nuit-950' : 'bg-white text-gray-700 ring-gray-300'}`}
             >
-              {m === 'tel' ? '📱 Téléphone' : '✉️ E-mail'}
+              {t(m === 'tel' ? '📱 Téléphone' : '✉️ E-mail')}
             </button>
           ))}
         </div>
         <label className="etiquette" htmlFor="j-contact">
-          Téléphone ou e-mail
+          {t('Téléphone ou e-mail')}
         </label>
         <input
           ref={champ}
@@ -699,20 +714,22 @@ function Identification({
           aria-live="polite"
           className={`mt-1 min-h-5 text-sm ${saisie.niveau === 'erreur' ? 'text-red-700' : saisie.niveau === 'ok' ? 'font-semibold text-green-800' : 'text-gray-600'}`}
         >
-          {saisie.message}
+          {t(saisie.message)}
         </p>
-        <p className="mt-1 text-xs text-gray-600">Déjà client ? Le même numéro ou e-mail retrouve votre carte de fidélité.</p>
+        <p className="mt-1 text-sm text-gray-600">{t('Déjà client ? Le même numéro ou e-mail retrouve votre carte de fidélité.')}</p>
       </div>
-      <label className="flex items-start gap-2 text-sm text-gray-700">
-        <input type="checkbox" className="mt-0.5" checked={consentement} onChange={(e) => setConsentement(e.target.checked)} />
-        <span>J’accepte de recevoir les offres de {nomCommerce} par SMS ou e-mail (désinscription à tout moment).</span>
+      <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-gray-700">
+        <span className="zone-case">
+          <input type="checkbox" className="case-a-cocher" checked={consentement} onChange={(e) => setConsentement(e.target.checked)} />
+        </span>
+        <span>{t('J’accepte de recevoir les offres de {commerce} par SMS ou e-mail (désinscription à tout moment).', { commerce: nomCommerce })}</span>
       </label>
-      <p className="text-xs text-gray-600">
-        Vos données servent uniquement à votre carte de fidélité, jamais revendues : <LienConfidentialite commerceId={commerceId} />.
+      <p className="text-sm text-gray-600">
+        {t('Vos données servent uniquement à votre carte de fidélité, jamais revendues :')} <LienConfidentialite commerceId={commerceId} />.
       </p>
       <MessageErreur>{erreur}</MessageErreur>
       <button type="submit" className="bouton w-full" disabled={!contactSaisi.trim() || enCours}>
-        {enCours ? 'Un instant…' : 'C’est parti'}
+        {enCours ? t('Un instant…') : t('C’est parti')}
       </button>
     </form>
   )
@@ -727,11 +744,12 @@ function DemandePrenom({ prenom, onEnregistrer }: { prenom: string; onEnregistre
   const [enregistre, setEnregistre] = useState(false)
   const [enCours, setEnCours] = useState(false)
   const [erreur, setErreur] = useState<string | null>(null)
+  const { t } = useLangue()
 
   if (prenom.trim()) {
     return enregistre ? (
       <p className="alerte-succes text-center" role="status">
-        Merci {prenom.trim()}, votre carte est à votre nom.
+        {t('Merci {prenom}, votre carte est à votre nom.', { prenom: prenom.trim() })}
       </p>
     ) : null
   }
@@ -753,9 +771,9 @@ function DemandePrenom({ prenom, onEnregistrer }: { prenom: string; onEnregistre
   }
 
   return (
-    <form onSubmit={envoyer} className="carte space-y-2" aria-label="Votre prénom (optionnel)">
+    <form onSubmit={envoyer} className="carte space-y-2" aria-label={t('Votre prénom (optionnel)')}>
       <label className="etiquette" htmlFor="j-prenom">
-        Votre prénom, pour que l’équipe vous reconnaisse ? (optionnel)
+        {t('Votre prénom, pour que l’équipe vous reconnaisse ? (optionnel)')}
       </label>
       <div className="flex gap-2">
         <input
@@ -777,18 +795,19 @@ function DemandePrenom({ prenom, onEnregistrer }: { prenom: string; onEnregistre
 }
 
 function CodeGagnant({ code }: { code: string }) {
+  const { langue, t } = useLangue()
   return (
     <div className="mt-3 space-y-2" data-code-gagnant>
-      <p className="text-sm text-gray-600">{TEXTE_CODE_A_MONTRER}</p>
+      <p className="text-sm text-gray-600">{t(TEXTE_CODE_A_MONTRER)}</p>
       <p className="rounded-xl border-2 border-dashed border-or-500 bg-amber-50 py-4 font-mono text-4xl font-extrabold tracking-[0.3em] text-gray-900 select-all">
         {code}
       </p>
       {/* Le code n'est accepté en caisse que le jour du tirage (P0-U3). */}
       <p className="text-base font-bold text-gray-900" data-validite>
-        🗓️ {texteValidite(new Date())}
+        🗓️ {texteValiditeLangue(new Date(), langue, texteValidite)}
       </p>
-      <p className="text-xs text-gray-600">{TEXTE_CODE_UNE_FOIS}</p>
-      <BoutonCopier texte={code} libelle="Copier le code" className="bouton-secondaire w-full" />
+      <p className="text-sm text-gray-600">{t(TEXTE_CODE_UNE_FOIS)}</p>
+      <BoutonCopier texte={code} libelle={t('Copier le code')} className="bouton-secondaire w-full" />
     </div>
   )
 }
@@ -832,11 +851,12 @@ function Confettis() {
 export function GarderCarte({ lienCarte }: { lienCarte: string }) {
   const [ouvert, setOuvert] = useState(false)
   const plateforme = useMemo(() => detecterPlateforme(navigator.userAgent, navigator.maxTouchPoints ?? 0), [])
+  const { t } = useLangue()
   if (estInstallee()) return null
   return (
     <div className="mt-3 text-left" data-garder-carte={plateforme}>
       <button type="button" className="bouton w-full" aria-expanded={ouvert} aria-controls="garder-carte" onClick={() => setOuvert((o) => !o)}>
-        📲 Garder ma carte sur mon téléphone
+        {t('📲 Garder ma carte sur mon téléphone')}
       </button>
       {ouvert && (
         <div id="garder-carte" className="apparition mt-3 space-y-2 rounded-xl bg-fond p-3 text-sm text-gray-800">
@@ -849,9 +869,9 @@ export function GarderCarte({ lienCarte }: { lienCarte: string }) {
             ))}
           </ol>
           <a href={lienCarte} className="bouton-secondaire w-full">
-            Ouvrir ma carte
+            {t('Ouvrir ma carte')}
           </a>
-          <p className="text-xs text-gray-600">{NOTE_WALLET}</p>
+          <p className="text-sm text-gray-600">{t(NOTE_WALLET)}</p>
         </div>
       )}
     </div>
@@ -860,6 +880,7 @@ export function GarderCarte({ lienCarte }: { lienCarte: string }) {
 
 export function Resultat({ lot, prenom, code, lienCarte }: { lot: string; prenom: string; code?: string; lienCarte: string }) {
   const perdu = estPerdant(lot)
+  const { langue, t } = useLangue()
   // Retour tactile à l'apparition du résultat (Android ; sans effet sur iPhone, qui n'a pas l'API).
   useEffect(() => void vibrer(perdu ? MOTIF_VIBRATION_PERDU : MOTIF_VIBRATION_GAIN), [perdu])
   if (perdu)
@@ -868,12 +889,9 @@ export function Resultat({ lot, prenom, code, lienCarte }: { lot: string; prenom
         <p className="text-5xl" aria-hidden>
           🍀
         </p>
-        <p className="mt-2 text-lg font-bold">
-          {TITRE_PERDU}
-          {virgulePrenom(prenom)}… mais votre visite compte !
-        </p>
-        <p className="mt-2 rounded-xl bg-green-50 p-3 text-sm font-semibold text-green-900 ring-1 ring-green-200">✓ {TEXTE_PERDU_TAMPON}</p>
-        <p className="mt-2 text-sm text-gray-700">{TEXTE_PERDU_PROCHAINE}</p>
+        <p className="mt-2 text-lg font-bold">{t(`${TITRE_PERDU}{prenom}… mais votre visite compte !`, { prenom: virgulePrenom(prenom) })}</p>
+        <p className="mt-2 rounded-xl bg-green-50 p-3 text-sm font-semibold text-green-900 ring-1 ring-green-200">✓ {t(TEXTE_PERDU_TAMPON)}</p>
+        <p className="mt-2 text-sm text-gray-700">{t(TEXTE_PERDU_PROCHAINE)}</p>
         <GarderCarte lienCarte={lienCarte} />
       </section>
     )
@@ -883,15 +901,15 @@ export function Resultat({ lot, prenom, code, lienCarte }: { lot: string; prenom
       <p className="text-5xl" aria-hidden>
         🎉
       </p>
-      <p className="mt-2 text-lg font-bold">{`${avecPrenom('Bravo', prenom)}, vous avez gagné :`}</p>
+      <p className="mt-2 text-lg font-bold">{t('{bravo}, vous avez gagné :', { bravo: avecPrenom(t('Bravo'), prenom) })}</p>
       <p className="mt-1 font-titre text-4xl leading-tight font-bold break-words text-marque-600">{lot}</p>
       {code ? (
         <CodeGagnant code={code} />
       ) : (
         <>
-          <p className="mt-2 text-sm text-gray-600">{TEXTE_GAIN_SANS_CODE}</p>
+          <p className="mt-2 text-sm text-gray-600">{t(TEXTE_GAIN_SANS_CODE)}</p>
           <p className="mt-1 text-base font-bold text-gray-900" data-validite>
-            🗓️ {texteValidite(new Date())}
+            🗓️ {texteValiditeLangue(new Date(), langue, texteValidite)}
           </p>
         </>
       )}

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type { Commerce } from '../types'
 import { MESSAGE_HORS_LIGNE } from '../data/api'
 import {
@@ -10,6 +10,7 @@ import {
   TITRE_MESSAGE_PRIVE,
 } from '../lib/messagePrive'
 import { MessageErreur } from './ui'
+import { useLangue } from './Langue'
 import {
   NOTE_PAR_DEFAUT,
   TEXTE_CONFIRMATION_GOOGLE,
@@ -21,17 +22,31 @@ import {
   lienAvisGoogle,
 } from '../lib/invitationAvis'
 
-/** 5 étoiles dorées, déjà remplies par défaut ; un tap sur une étoile ajuste la note (1 à 5). */
+/**
+ * 5 étoiles dorées, déjà remplies par défaut ; un tap sur une étoile ajuste la note (1 à 5).
+ * Clavier (P2-Q1, motif « radiogroup ») : une seule étoile dans l'ordre de tabulation, flèches pour changer la note.
+ */
 export function SelecteurEtoiles({ note, onChange }: { note: number; onChange(n: number): void }) {
+  const groupe = useRef<HTMLDivElement>(null)
+  const { t } = useLangue()
+  function clavier(e: KeyboardEvent) {
+    const pas = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0
+    const cible = e.key === 'Home' ? 1 : e.key === 'End' ? 5 : pas ? choisirNote(note + pas) : 0
+    if (!cible) return
+    e.preventDefault()
+    onChange(cible)
+    groupe.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[cible - 1]?.focus()
+  }
   return (
-    <div className="flex justify-center gap-1" role="radiogroup" aria-label="Votre note">
+    <div ref={groupe} className="flex justify-center gap-1" role="radiogroup" aria-label={t('Votre note')} onKeyDown={clavier}>
       {etoilesRemplies(note).map((remplie, i) => (
         <button
           key={i}
           type="button"
           role="radio"
           aria-checked={note === i + 1}
-          aria-label={`${i + 1} étoile${i ? 's' : ''}`}
+          tabIndex={note === i + 1 ? 0 : -1}
+          aria-label={t(i ? '{n} étoiles' : '{n} étoile', { n: i + 1 })}
           onClick={() => onChange(choisirNote(i + 1))}
           className={`etoile ${remplie ? 'text-amber-400' : 'text-gray-300'}`}
         >
@@ -93,7 +108,7 @@ function MessagePriveRestaurant({ note, onEnvoyer }: { note: number; onEnvoyer?(
       <button type="submit" className="bouton w-full" disabled={!onEnvoyer || !texte.trim() || enCours}>
         {enCours ? 'Envoi…' : 'Envoyer au restaurant'}
       </button>
-      {!onEnvoyer && <p className="text-xs text-gray-500">Aperçu : le client écrit ici depuis la page de jeu.</p>}
+      {!onEnvoyer && <p className="text-sm text-gray-600">Aperçu : le client écrit ici depuis la page de jeu.</p>}
     </form>
   )
 }
@@ -118,15 +133,16 @@ export function InvitationAvis({
   const [ouvert, setOuvert] = useState(false)
   const lien = lienAvisGoogle(commerce)
   const prive = proposerMessagePrive(note)
+  const { t } = useLangue()
   return (
     <section className="carte space-y-3 text-center">
       <div>
-        <p className="titre-carte">Vous avez aimé votre passage ?</p>
-        <p className="mt-1 text-sm text-gray-600">{TEXTE_INVITATION}</p>
+        <p className="titre-carte">{t('Vous avez aimé votre passage ?')}</p>
+        <p className="mt-1 text-sm text-gray-600">{t(TEXTE_INVITATION)}</p>
       </div>
       <SelecteurEtoiles note={note} onChange={setNote} />
       <p className="text-sm font-semibold text-amber-800" aria-live="polite">
-        {note}/5 · {libelleNote(note)}
+        {note}/5 · {t(libelleNote(note))}
       </p>
       {prive && <MessagePriveRestaurant note={note} onEnvoyer={onMessagePrive} />}
       {prive && lien && <p className="text-sm text-gray-600">{TEXTE_GOOGLE_APRES_PRIVE}</p>}
@@ -138,18 +154,18 @@ export function InvitationAvis({
           className={`${prive ? 'bouton-secondaire' : 'bouton'} w-full`}
           onClick={() => setOuvert(true)}
         >
-          {libelleBoutonAvis(note)} ↗
+          {t(libelleBoutonAvis(note))} ↗
         </a>
       ) : (
-        <p className="text-sm text-gray-500">(Le commerce n’a pas encore renseigné son lien Google.)</p>
+        <p className="text-sm text-gray-600">(Le commerce n’a pas encore renseigné son lien Google.)</p>
       )}
-      <p className="text-xs text-gray-500">{ouvert ? TEXTE_CONFIRMATION_GOOGLE : 'Sur Google, vous confirmez vous-même vos étoiles avant de publier.'}</p>
+      <p className="text-sm text-gray-600">{t(ouvert ? TEXTE_CONFIRMATION_GOOGLE : 'Sur Google, vous confirmez vous-même vos étoiles avant de publier.')}</p>
       {ouvert && lienCarte && (
         <a href={lienCarte} className="lien block text-sm" data-retour-carte>
-          Avis publié ? Revenir à ma carte de fidélité
+          {t('Avis publié ? Revenir à ma carte de fidélité')}
         </a>
       )}
-      <p className="text-xs text-gray-500">Le lot n’est pas conditionné à l’avis — gagnez d’abord, avis libre ensuite.</p>
+      <p className="text-sm text-gray-600">{t('Le lot n’est pas conditionné à l’avis — gagnez d’abord, avis libre ensuite.')}</p>
     </section>
   )
 }

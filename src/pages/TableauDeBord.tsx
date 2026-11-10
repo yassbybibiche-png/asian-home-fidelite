@@ -29,7 +29,7 @@ function Chiffre({ valeur, libelle, aide }: { valeur: string | number; libelle: 
       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-marque-500 to-marque-300" aria-hidden />
       <div className="surtitre">{libelle}</div>
       <div className="mt-1 text-3xl font-extrabold tracking-tight text-gray-900 tabular-nums">{valeur}</div>
-      <div className="mt-0.5 text-xs text-gray-600">{aide}</div>
+      <div className="mt-0.5 text-sm text-gray-600">{aide}</div>
     </div>
   )
 }
@@ -194,8 +194,8 @@ export default function TableauDeBord() {
                     <span className="min-w-0 truncate font-semibold">{a.auteur}</span>
                     <Etoiles note={a.note} />
                   </div>
-                  <p className="mt-1 line-clamp-2 text-gray-700">{a.texte || <em className="text-gray-500">Note sans commentaire</em>}</p>
-                  <p className="mt-1 text-xs text-gray-600">
+                  <p className="mt-1 line-clamp-2 text-gray-700">{a.texte || <em className="text-gray-600">Note sans commentaire</em>}</p>
+                  <p className="mt-1 text-sm text-gray-600">
                     {dateRelative(a.date)} · {a.reponse ? (a.reponseAuto ? 'Répondu (auto)' : 'Répondu') : a.brouillon ? 'Brouillon' : 'Sans réponse'}
                   </p>
                 </li>

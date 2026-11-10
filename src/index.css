@@ -21,6 +21,10 @@
   --color-violet-nuit: #3b2d8f; /* [ESTIMÉ] lumière bleu-violet du soir — décor uniquement */
   /* Fond chaud, légèrement ivoire, plus doux qu'un gris froid. */
   --color-fond: #f7f5f2;
+  /* Typographie (P2-Q1) : base 17 px ; text-sm relevé à 16 px (0,941 rem) pour tous les textes de contenu.
+     text-xs (12,75 px) reste réservé aux étiquettes et micro-textes décoratifs (pastilles, surtitres, unités). */
+  --text-sm: 0.9412rem;
+  --text-sm--line-height: 1.5;
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-titre: ui-serif, 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
   --shadow-douce: 0 1px 2px rgb(17 24 39 / 0.04), 0 4px 16px -4px rgb(17 24 39 / 0.08);
@@ -47,7 +51,7 @@ h3 {
 }
 
 /* Focus clavier visible partout, discret au toucher. */
-:where(a, button, select, summary, [role='radio'], [role='tab'], [role='switch']):focus-visible {
+:where(a, button, select, summary, input[type='checkbox'], [role='radio'], [role='tab'], [role='switch'], [tabindex]):focus-visible {
   outline: 3px solid var(--color-marque-200);
   outline-offset: 2px;
   border-radius: 0.75rem;
@@ -148,6 +152,13 @@ h3 {
   /* Messages d'état cohérents. */
   .alerte-succes {
     @apply rounded-xl bg-green-50 p-3 text-sm font-semibold text-green-900 ring-1 ring-green-200;
+  }
+  /* Cases à cocher (P2-Q1) : case visible de 24 px dans une zone tactile de 44 × 44 px (marges négatives : la ligne garde sa hauteur). */
+  .zone-case {
+    @apply -my-2.5 -ml-2.5 inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center;
+  }
+  .case-a-cocher {
+    @apply h-6 w-6 shrink-0 cursor-pointer accent-marque-500;
   }
   .etoile {
     @apply inline-flex h-12 w-12 items-center justify-center rounded-xl transition-transform active:scale-90;

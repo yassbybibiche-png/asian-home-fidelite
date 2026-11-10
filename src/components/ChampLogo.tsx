@@ -105,7 +105,7 @@ export function ChampLogo({ commerce, onChange }: { commerce: Commerce; onChange
         </div>
       </div>
       {mode === 'local' ? (
-        <p className="mt-2 text-sm text-gray-500">{MESSAGE_MODE_SERVEUR}</p>
+        <p className="mt-2 text-sm text-gray-600">{MESSAGE_MODE_SERVEUR}</p>
       ) : (
         <>
           <label className="bouton-secondaire mt-3 inline-flex cursor-pointer" htmlFor="logo-fichier">
@@ -122,7 +122,7 @@ export function ChampLogo({ commerce, onChange }: { commerce: Commerce; onChange
               e.target.value = '' // rechoisir le même fichier redéclenche la vérification
             }}
           />
-          <p id="logo-aide" className="mt-1 text-sm text-gray-500">
+          <p id="logo-aide" className="mt-1 text-sm text-gray-600">
             PNG, JPEG ou WebP · 2 Mo maximum · entre {LIMITES_LOGO.coteMin} et {LIMITES_LOGO.coteMax} px de côté. Idéal : logo carré, clair, sur fond
             transparent ou sombre (l’app est noire et dorée).
           </p>
