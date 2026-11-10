@@ -1,31 +1,117 @@
-import { useEffect, type ComponentType } from 'react'
+import { Component, Suspense, lazy, useEffect, type ComponentType, type ReactNode } from 'react'
 import { useStore } from './store'
 import { aller, useRoute, PAGES_PUBLIQUES, type Page } from './router'
 import { BadgeDemo, Icone, LogoCommerce } from './components/ui'
 import { useDepasse, Verrou } from './components/Verrou'
 import { DELAI_ACCES_MS } from './lib/connexion'
-import { SqueletteCommercant } from './components/Squelette'
+import { Bloc, Squelette, SqueletteCommercant, SqueletteMenu } from './components/Squelette'
 import { useLangue } from './components/Langue'
 import { NOM_APP, libelleType } from './data/defaults'
-import TableauDeBord from './pages/TableauDeBord'
-import Clients from './pages/Clients'
-import Roulette from './pages/Roulette'
-import AvisPage from './pages/Avis'
-import Reglages from './pages/Reglages'
-import Offre from './pages/Offre'
-import Admin from './pages/Admin'
-import Plus from './pages/Plus'
-import FicheClient from './pages/FicheClient'
-import QrVitrine from './pages/QrVitrine'
+// Chargées tout de suite (P2-Q2) : le parcours client après un scan de QR (#/jouer, #/carte) et la caisse, qui doit
+// s'ouvrir hors ligne sans dépendre d'un fichier pas encore en cache.
 import Jouer from './pages/Jouer'
 import CartePublique from './pages/CartePublique'
 import Caisse from './pages/Caisse'
-import MenuPublic from './pages/MenuPublic'
-import Equipe from './pages/Equipe'
-import Messages from './pages/Messages'
-import MenuCarte from './pages/MenuCarte'
-import Desinscription from './pages/Desinscription'
-import Confidentialite from './pages/Confidentialite'
+
+// Chargées à la demande (P2-Q2) : back-office et pages publiques secondaires, chacune dans son propre fichier.
+// Les fonctions d'import servent aussi au préchargement des pages commerçant (voir `prechargerPagesCommercant`).
+const IMPORTS = {
+  accueil: () => import('./pages/TableauDeBord'),
+  clients: () => import('./pages/Clients'),
+  roulette: () => import('./pages/Roulette'),
+  avis: () => import('./pages/Avis'),
+  reglages: () => import('./pages/Reglages'),
+  offre: () => import('./pages/Offre'),
+  admin: () => import('./pages/Admin'),
+  plus: () => import('./pages/Plus'),
+  client: () => import('./pages/FicheClient'),
+  qr: () => import('./pages/QrVitrine'),
+  menu: () => import('./pages/MenuPublic'),
+  equipe: () => import('./pages/Equipe'),
+  messages: () => import('./pages/Messages'),
+  menuCarte: () => import('./pages/MenuCarte'),
+  desinscription: () => import('./pages/Desinscription'),
+  confidentialite: () => import('./pages/Confidentialite'),
+} satisfies Partial<Record<Page, () => Promise<{ default: ComponentType }>>>
+
+const TableauDeBord = lazy(IMPORTS.accueil)
+const Clients = lazy(IMPORTS.clients)
+const Roulette = lazy(IMPORTS.roulette)
+const AvisPage = lazy(IMPORTS.avis)
+const Reglages = lazy(IMPORTS.reglages)
+const Offre = lazy(IMPORTS.offre)
+const Admin = lazy(IMPORTS.admin)
+const Plus = lazy(IMPORTS.plus)
+const FicheClient = lazy(IMPORTS.client)
+const QrVitrine = lazy(IMPORTS.qr)
+const MenuPublic = lazy(IMPORTS.menu)
+const Equipe = lazy(IMPORTS.equipe)
+const Messages = lazy(IMPORTS.messages)
+const MenuCarte = lazy(IMPORTS.menuCarte)
+const Desinscription = lazy(IMPORTS.desinscription)
+const Confidentialite = lazy(IMPORTS.confidentialite)
+
+const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidentialite']
+
+/**
+ * Une fois l'espace commerçant ouvert, les autres pages du back-office sont téléchargées en arrière-plan (navigateur
+ * au repos) : le service worker les garde en cache, la navigation reste immédiate et marche ensuite sans réseau.
+ * Jamais sur les pages clientes : un client qui scanne un QR ne télécharge pas le back-office.
+ */
+function prechargerPagesCommercant() {
+  const lancer = () => {
+    for (const [page, importer] of Object.entries(IMPORTS)) {
+      if (!PAGES_PUBLIQUES_DIFFEREES.includes(page as Page)) importer().catch(() => {})
+    }
+  }
+  if ('requestIdleCallback' in window) window.requestIdleCallback(lancer, { timeout: 5000 })
+  else setTimeout(lancer, 2000)
+}
+
+/** En attendant le fichier d'une page du back-office : quelques cartes grisées (l'en-tête reste affiché). */
+function SquelettePage() {
+  return (
+    <Squelette libelle="Chargement de la page…" className="space-y-4">
+      <Bloc className="h-8 w-1/2 rounded-lg" />
+      <Bloc className="h-28 w-full rounded-2xl" />
+      <Bloc className="h-28 w-full rounded-2xl" />
+    </Squelette>
+  )
+}
+
+/** Pages publiques différées : squelette du menu pour #/menu, forme simple pour les pages de texte. */
+function SquelettePublique({ page }: { page: Page }) {
+  const { t } = useLangue()
+  if (page === 'menu') return <SqueletteMenu libelle={t('Un instant, le menu arrive.')} />
+  return (
+    <Squelette libelle="Chargement de la page…" className="mx-auto max-w-md space-y-4 px-4 pt-6 pb-10">
+      <Bloc className="h-8 w-2/3 rounded-lg" />
+      <Bloc className="h-32 w-full rounded-2xl" />
+    </Squelette>
+  )
+}
+
+/**
+ * Fichier d'une page introuvable (hors ligne avant toute visite, ou ancien onglet après un déploiement : les anciens
+ * fichiers n'existent plus) : message et bouton pour recharger, au lieu d'un écran blanc.
+ */
+class ErreurChargementPage extends Component<{ children: ReactNode }, { erreur: boolean }> {
+  state = { erreur: false }
+  static getDerivedStateFromError() {
+    return { erreur: true }
+  }
+  render() {
+    if (!this.state.erreur) return this.props.children
+    return (
+      <div className="mx-auto max-w-md space-y-4 px-4 py-10 text-center" role="alert">
+        <p className="text-gray-700">Cette page n’a pas pu être chargée. Vérifiez la connexion puis rechargez.</p>
+        <button type="button" className="bouton w-full" onClick={() => window.location.reload()}>
+          Recharger
+        </button>
+      </div>
+    )
+  }
+}
 
 const ONGLETS: { page: Page; libelle: string }[] = [
   { page: 'accueil', libelle: 'Tableau de bord' },
@@ -150,12 +236,21 @@ export default function App() {
   const onglet = ONGLET_PARENT[page] ?? page
   // Filet de sécurité : la relecture de l'accès est déjà bornée (5 s), mais aucune attente ne doit dépasser 30 s sans issue.
   const accesLent = useDepasse(mode === 'api' && !accesPret, DELAI_ACCES_MS)
+  const publique = PAGES_PUBLIQUES.includes(page)
+  const espaceOuvert = !publique && (mode === 'local' || (accesPret && !!acces && !!commerce))
+  useEffect(() => {
+    if (espaceOuvert) prechargerPagesCommercant()
+  }, [espaceOuvert])
 
   // Pages vues par le client final (QR code scanné) : ni en-tête ni navigation commerçant.
-  if (PAGES_PUBLIQUES.includes(page)) {
+  if (publique) {
     return (
       <main className="min-h-dvh">
-        <Contenu />
+        <ErreurChargementPage key={page}>
+          <Suspense fallback={<SquelettePublique page={page} />}>
+            <Contenu />
+          </Suspense>
+        </ErreurChargementPage>
       </main>
     )
   }
@@ -222,7 +317,11 @@ export default function App() {
       )}
 
       <main className="mx-auto max-w-5xl px-4 py-5">
-        <Contenu />
+        <ErreurChargementPage key={page}>
+          <Suspense fallback={<SquelettePage />}>
+            <Contenu />
+          </Suspense>
+        </ErreurChargementPage>
       </main>
 
       <nav
