@@ -27,7 +27,7 @@ function ChampCode({ id, valeur, onChange, libelle }: { id: string; valeur: stri
   )
 }
 
-/** Équipe : membres + code à 4 chiffres (jamais réaffiché), lien de la caisse. */
+/** Équipe : membres + code à 4 chiffres (réaffichable une seule fois, PIN gérant), lien de la caisse. */
 export default function Equipe() {
   const { mode, avecPin } = useStore()
   const { commerce, membres } = useDonneesCommerce()
@@ -35,6 +35,14 @@ export default function Equipe() {
   const [nom, setNom] = useState('')
   const [code, setCode] = useState('')
   const [annonce, setAnnonce] = useState('')
+  // Codes saisis sur CET appareil depuis l'ouverture de la page (ajout ou changement) : seule source possible d'un
+  // réaffichage, le serveur ne gardant que le haché. En mémoire seulement, effacé dès qu'il a été réaffiché une fois.
+  const [codesRecents, setCodesRecents] = useState<Record<string, string>>({})
+  const retenirCode = (membreId: string, c: string | null) =>
+    setCodesRecents((x) => {
+      const { [membreId]: _ancien, ...reste } = x
+      return c ? { ...reste, [membreId]: c } : reste
+    })
   const lienCaisse = urlAbsolue('caisse', commerce.id)
 
   if (mode === 'local') {
@@ -51,7 +59,8 @@ export default function Equipe() {
     if (!nom.trim() || !CODE.test(code)) return
     const r = await executer(() => avecPin((a, api) => api.ajouterMembre(commerce.id, a, nom.trim(), code)))
     if (r.ok) {
-      setAnnonce(`✓ ${nom.trim()} ajouté(e). Son code ne sera plus jamais affiché : transmettez-le de vive voix.`)
+      retenirCode(r.valeur.membre.id, code)
+      setAnnonce(`✓ ${nom.trim()} ajouté(e). Transmettez son code de vive voix : il pourra être réaffiché une seule fois (PIN gérant), tant que cette page reste ouverte.`)
       setNom('')
       setCode('')
     }
@@ -82,7 +91,7 @@ export default function Equipe() {
         ) : (
           <ul className="divide-y divide-gray-100">
             {membres.map((m) => (
-              <LigneMembre key={m.id} membre={m} />
+              <LigneMembre key={m.id} membre={m} codeRecent={codesRecents[m.id]} onCode={(c) => retenirCode(m.id, c)} />
             ))}
           </ul>
         )}
@@ -112,7 +121,7 @@ export default function Equipe() {
   )
 }
 
-function LigneMembre({ membre }: { membre: MembreEquipe }) {
+function LigneMembre({ membre, codeRecent, onCode }: { membre: MembreEquipe; codeRecent?: string; onCode(c: string | null): void }) {
   const { avecPin } = useStore()
   const { executer, enCours, erreur } = useAction()
   const [edition, setEdition] = useState(false)
@@ -127,6 +136,7 @@ function LigneMembre({ membre }: { membre: MembreEquipe }) {
     if (!Object.keys(champs).length) return setEdition(false)
     const r = await executer(() => avecPin((a, api) => api.majMembre(membre.commerceId, a, membre.id, champs)))
     if (r.ok) {
+      if (champs.code) onCode(champs.code)
       setEdition(false)
       setCode('')
     }
@@ -168,6 +178,71 @@ function LigneMembre({ membre }: { membre: MembreEquipe }) {
         </form>
       )}
       <MessageErreur>{erreur}</MessageErreur>
+      <ReaffichageCode membre={membre} codeRecent={codeRecent} onConsomme={() => onCode(null)} />
     </li>
+  )
+}
+
+/**
+ * « Réafficher le code une fois » (P1-C6) : PIN gérant exigé et vérifié par le serveur, qui journalise le réaffichage.
+ * Le code vient de la mémoire de cette page (saisi ici à l'ajout ou au changement) et en est effacé dès qu'il s'affiche.
+ */
+function ReaffichageCode({ membre, codeRecent, onConsomme }: { membre: MembreEquipe; codeRecent?: string; onConsomme(): void }) {
+  const { api } = useStore()
+  const { executer, enCours, erreur } = useAction()
+  const [ouvert, setOuvert] = useState(false)
+  const [pin, setPin] = useState('')
+  const [affiche, setAffiche] = useState<string | null>(null)
+
+  async function reafficher(e: FormEvent) {
+    e.preventDefault()
+    if (!api || !codeRecent || !/^\d{4,12}$/.test(pin)) return
+    const r = await executer(() => api.journaliserReaffichage(membre.commerceId, pin, membre.id))
+    setPin('')
+    if (!r.ok) return
+    setAffiche(codeRecent)
+    onConsomme()
+  }
+
+  if (affiche)
+    return (
+      <div className="mt-3 space-y-2 rounded-xl bg-amber-50 p-3 text-center ring-1 ring-amber-200" role="status">
+        <p className="text-sm text-amber-900">Code de {membre.nom} — affiché une seule fois (réaffichage journalisé) :</p>
+        <p className="font-mono text-3xl font-bold tracking-[0.4em]">{affiche}</p>
+        <button type="button" className="bouton-secondaire min-h-11 w-full" onClick={() => setAffiche(null)}>
+          Masquer définitivement
+        </button>
+      </div>
+    )
+  if (!codeRecent) return null
+  return ouvert ? (
+    <form onSubmit={reafficher} className="mt-3 space-y-2 rounded-xl bg-gray-50 p-3">
+      <label className="etiquette" htmlFor={`pin-reaffichage-${membre.id}`}>
+        PIN gérant (requis pour réafficher le code)
+      </label>
+      <input
+        id={`pin-reaffichage-${membre.id}`}
+        className="champ tracking-[0.4em]"
+        type="password"
+        inputMode="numeric"
+        autoComplete="off"
+        maxLength={12}
+        value={pin}
+        onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+      />
+      <MessageErreur>{erreur}</MessageErreur>
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" className="bouton-secondaire min-h-11" onClick={() => (setOuvert(false), setPin(''))}>
+          Annuler
+        </button>
+        <button className="bouton min-h-11" disabled={enCours || !/^\d{4,12}$/.test(pin)}>
+          {enCours ? 'Vérification…' : 'Réafficher'}
+        </button>
+      </div>
+    </form>
+  ) : (
+    <button type="button" className="mt-2 min-h-11 text-sm font-semibold text-marque-700 underline" onClick={() => setOuvert(true)}>
+      Réafficher le code une fois
+    </button>
   )
 }

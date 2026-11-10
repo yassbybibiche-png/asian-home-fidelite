@@ -8,6 +8,7 @@ import { analyserContact, messageRelance, recompenseDebloquee, tamponsAffiches }
 import { correspondRecherche } from '../lib/recherche'
 import { etatSaisieContact, nomAffiche } from '../lib/inscriptionJeu'
 import { MENTION_ENVOI } from '../lib/integrations'
+import { pageClients, TAILLE_PAGE_CLIENTS } from '../lib/ecransCommercant'
 import { BoutonCopier, EnTete, MessageErreur, telecharger, Vide } from '../components/ui'
 
 type Filtre = 'tous' | 'actifs' | 'relancer'
@@ -29,6 +30,11 @@ export default function Clients() {
       const db = b.derniereVisite ?? ''
       return filtre === 'relancer' ? da.localeCompare(db) : db.localeCompare(da)
     })
+
+  // Au-delà de 50 clients : « Charger plus » (la liste repart à 50 quand la recherche ou le filtre change).
+  const [nbAffiches, setNbAffiches] = useState(TAILLE_PAGE_CLIENTS)
+  useEffect(() => setNbAffiches(TAILLE_PAGE_CLIENTS), [recherche, filtre])
+  const page = pageClients(liste, nbAffiches)
 
   const nbActifs = clients.filter((c) => estActif(c)).length
   const nbARelancer = clients.filter((c) => estARelancer(c)).length
@@ -108,9 +114,21 @@ export default function Clients() {
       {liste.length === 0 ? (
         <Vide>{filtre === 'relancer' ? 'Personne à relancer : aucun client n’est absent depuis plus de 30 jours.' : 'Aucun client ne correspond.'}</Vide>
       ) : (
-        <ul className="space-y-2">
-          {liste.map((c) => (filtre === 'relancer' ? <LigneRelance key={c.id} client={c} /> : <LigneClient key={c.id} client={c} />))}
-        </ul>
+        <>
+          <ul className="space-y-2">
+            {page.visibles.map((c) => (filtre === 'relancer' ? <LigneRelance key={c.id} client={c} /> : <LigneClient key={c.id} client={c} />))}
+          </ul>
+          {page.restants > 0 && (
+            <div className="mt-3 space-y-1 text-center">
+              <p className="text-sm text-gray-600" role="status">
+                {page.visibles.length} affichés sur {liste.length}
+              </p>
+              <button type="button" className="bouton-secondaire w-full" onClick={() => setNbAffiches(page.visibles.length + page.prochain)}>
+                Charger {page.prochain} de plus
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

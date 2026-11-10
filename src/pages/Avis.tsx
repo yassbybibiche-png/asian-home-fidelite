@@ -10,6 +10,7 @@ import { ETAPES_CONNEXION_GOOGLE, GUIDE_GOOGLE_BUSINESS, TEXTE_AVIS_DEMO, TEXTE_
 import { BadgeDemo, EnTete, Etoiles, MessageErreur, Vide } from '../components/ui'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { messagesPrivesDuCommerce, type MessagePriveCommerce } from '../lib/messagePrive'
+import { googleDejaLu, marquerGoogleLu } from '../lib/ecransCommercant'
 
 /** État Google Business Profile (P1-B4) : null = non configuré sur le serveur, mode local ou état inconnu. */
 const ContexteGoogle = createContext<{ etat: EtatGoogle | null; relire(): void }>({ etat: null, relire: () => {} })
@@ -227,6 +228,12 @@ function ConnecterGoogle() {
   const [bilan, setBilan] = useState<string | null>(null)
   const { badge } = etatGoogleBusiness(etat)
   const branche = !!etat?.configure
+  // Replié une fois lu (P1-C6) : mémorisé sur l'appareil, le badge d'état reste visible dans le titre.
+  const [lu, setLu] = useState(() => googleDejaLu(stockageLocal(), commerce.id))
+  const marquerLu = () => {
+    marquerGoogleLu(stockageLocal(), commerce.id)
+    setLu(true)
+  }
 
   async function connecter() {
     const r = await executer(() => avecPin((a, api) => api.lienConnexionGoogle(commerce.id, a)))
@@ -251,7 +258,7 @@ function ConnecterGoogle() {
   }
 
   return (
-    <details className="carte mb-4" open={branche}>
+    <details className="carte mb-4" open={branche && !lu} onToggle={(e) => !e.currentTarget.open && !lu && marquerLu()} data-google-lu={lu}>
       <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 font-bold">
         Connecter Google <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{badge}</span>
       </summary>
@@ -303,8 +310,21 @@ function ConnecterGoogle() {
           </a>
         </p>
       )}
+      {!lu && (
+        <button type="button" className="mt-3 min-h-11 text-sm font-semibold text-gray-700 underline" onClick={(e) => (marquerLu(), e.currentTarget.closest('details')?.removeAttribute('open'))}>
+          J’ai lu — replier
+        </button>
+      )}
     </details>
   )
+}
+
+function stockageLocal(): Storage | null {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
 }
 
 function CarteAvis({ avis: a }: { avis: Avis }) {
