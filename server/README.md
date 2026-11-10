@@ -16,7 +16,8 @@ voient enfin **les mêmes données**. Une seule instance Node pour tous les comm
 | `server/stockage.ts` | Base SQLite (schéma + requêtes) et contrat `Stockage` commun aux deux bases. |
 | `server/stockage-supabase.ts` | **S1** : même contrat sur Supabase (API REST PostgREST, clé service_role). |
 | `supabase/migrations/` | **S1** : schéma Postgres (`0001_schema_initial.sql`) et RLS (`0002_rls.sql`). |
-| `server/wallet.ts`, `server/notifications/` | **V3** : intégrations préparées, inactives (voir « Intégrations préparées »). |
+| `server/wallet.ts` | **V3** : Google Wallet préparé, inactif (voir « Intégrations préparées »). |
+| `server/notifications/` | **P1-B3** : relances SMS (Twilio) / e-mail (Brevo) branchées de bout en bout ; aucun envoi sans clés (501). Voir « SMS / e-mail ». |
 | `tests/serveur.test.ts` | Tests HTTP réels (port éphémère, base temporaire, `fetch`), lancés par `npm test`. |
 | `tests/migration-pglite.test.ts` | **S2** : la migration Supabase exécutée par un vrai Postgres local (PGlite, WebAssembly). |
 | `render.yaml` (racine) | **S3** : Blueprint Render du serveur (Free, Frankfurt, build / start, `NODE_VERSION`, 4 secrets `sync: false`). Validé par `tests/render-yaml.test.ts`. |
@@ -62,13 +63,13 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `TRUST_PROXY` | `0` (`1` d'office sur Render) | Lire l'IP du client dans `X-Forwarded-For` (indispensable derrière un équilibreur, sinon l'anti-bruteforce compterait tout le monde comme une seule IP). |
 | `CORS_ORIGIN` | `*` (avertissement au démarrage) ; **production : à créer** | **P0-S4.** Origine exacte autorisée à appeler l'API depuis un autre site, ex. `https://asian-home-fidelite.onrender.com` (protocole + hôte [+ port], sans chemin ; un `/` final est toléré). Comparaison stricte : toute autre origine ne reçoit aucun `Access-Control-Allow-Origin` (jamais de reflet), les requêtes sans `Origin` (curl, même origine) passent. Valeur qui n'est pas une origine → refus de démarrer. Absente en production : le serveur **démarre quand même** (avertissement) — le front servi par ce serveur est à la même origine, le CORS ne le concerne pas. Voir « En-têtes HTTP ». |
 | `STATIC_DIR` | `dist` | Dossier du front compilé servi sur `/` (s'il contient `index.html`). |
-| `PUBLIC_URL` | — (déduit de l'en-tête `Host`) | **V3.** Adresse publique du site (`https://…`), encodée dans le QR des passes Google Wallet. |
+| `PUBLIC_URL` | — (déduit de l'en-tête `Host`) | **V3.** Adresse publique du site (`https://…`), encodée dans le QR des passes Google Wallet, et (P1-B3) dans les liens des SMS / e-mails de relance et l'URL signée du webhook Twilio STOP — à renseigner avant d'activer Twilio. |
 | `SUPABASE_URL` | — | **S1.** URL du projet Supabase (`https://<projet>.supabase.co`). Avec la suivante : stockage Supabase au lieu de SQLite. |
 | `SUPABASE_SERVICE_ROLE_KEY` | — | **S1. Secret serveur.** Clé service_role / `sb_secret_…`. Voir « Supabase » ci-dessous. |
 | `GOOGLE_WALLET_ISSUER_ID` | — | **V3, non configuré.** Identifiant émetteur Google Wallet. |
 | `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` | — | **V3, non configuré.** Chemin du fichier JSON de la clé du compte de service Google. Les deux variables Google Wallet sont nécessaires, sinon `pass.json` répond 501. |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | — | **V3, non configuré.** SMS via Twilio (`TWILIO_FROM` = numéro expéditeur `+33…` ou identifiant de Messaging Service `MG…`). Les trois sont nécessaires, sinon 501. |
-| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | — | **V3, non configuré.** E-mail via Brevo (adresse expéditrice à valider chez Brevo ; nom optionnel). Clé + adresse nécessaires, sinon 501. |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | — | **P1-B3, non configuré.** SMS via Twilio (`TWILIO_FROM` = numéro expéditeur `+33…` ou identifiant de Messaging Service `MG…`). Les trois sont nécessaires, sinon 501. |
+| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | — | **P1-B3, non configuré.** E-mail via Brevo (adresse expéditrice à valider chez Brevo ; nom optionnel). Clé + adresse nécessaires, sinon 501. |
 
 ## Supabase (phases S1 + S2) — prêt, projet PAS encore créé
 
@@ -204,7 +205,7 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 |---|---|---|
 | `POST /sessions` | PIN / code dans le corps | **P0-S1.** `{ role: 'commerce', commerceId, pin }`, `{ role: 'admin', pin }` ou `{ role: 'equipe', commerceId, code }` → 201 `{ jeton, role, commerceId?, membreNom?, expireLe }`. Même anti-bruteforce que les en-têtes (401 / 429), re-hachage scrypt au passage. 503 si `SESSION_SECRET` absente. |
 | `DELETE /sessions` | `X-Session` | **P0-S1.** Révoque le jeton (« Verrouiller ») → `{ ok: true }` ; idempotent ; 401 si jeton absent ou falsifié. |
-| `GET /sante` | public | `{ ok, version, mode, stockage, demo, integrations }` — `integrations` (V3) : `{ googleWallet, appleWallet: 'en_suspens', googleBusinessProfile, sms, email }`, chacun `false` tant que rien n'est configuré. |
+| `GET /sante` | public | `{ ok, version, mode, stockage, demo, integrations }` — `integrations` (V3) : `{ googleWallet, appleWallet: 'en_suspens', googleBusinessProfile, sms, email }`, chacun `false` tant que rien n'est configuré. `migrations` : `{ cartiz, programme, relances }` — `relances` = migration 0007 (table `envois`) appliquée. |
 | `GET /commerces` | public | Fiches publiques (jamais de PIN ni de hash). |
 | `GET /commerces/:id` | public | Une fiche publique. |
 | `GET /cartes/:clientId` | public | **Ajout V2** (page `#/carte/:clientId` et état de la roue) : `{ client (sans téléphone ni e-mail), commerce (fiche publique), jeu: { statut: 'pret' \| 'sansVisite' \| 'dejaJoue', lotDuJour, codeDuJour, remisDuJour } }`. P0-U3 : `codeDuJour` = code gagnant du tirage **du jour** de ce client (null si perdant ou pas de tirage), re-servi à son titulaire (autre téléphone, cache vidé) ; aucune autre route publique ne renvoie de code. 404 inconnue, 409 commerce inactif. |
@@ -230,14 +231,20 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `GET /commerces/:id/caisse/gains/:code` | idem (code équipe, session équipe ou commerçant) | **P0-U3.** Code gagnant de la roue (6 car., casse / espaces / tirets ignorés) → `{ gain: { code, lot, date, statut: 'valable' \| 'remis' \| 'perdant' \| 'expire', client: { id, prenom } \| null, remis: { le, par } \| null } }`. Jamais le contact du client. 400 format, 404 code inconnu. Lecture seule. |
 | `POST /commerces/:id/caisse/gains/:code/remise` | idem | **P0-U3.** Marque le gain « remis » (`tirages.donnees.remis = { le, par: auteur }`) → `{ gain }`. **409 déjà remis** (avec date et auteur de la remise) **ou tirage perdant**, **410 expiré** (tirage d'un autre jour), 404 inconnu. Un code = une remise, garanti par un UPDATE conditionnel (`… AND donnees->remis IS NULL`) : deux caisses simultanées → 200 + 409. Journalisé (action `gain`). Sans migration. |
 | `POST /commerces/:id/clients/:clientId/visite` / `recompense` (complément) | commerçant **ou code équipe** | Inchangés côté règles ; désormais journalisés (auteur « Gérant » ou membre). La règle « 1 tampon par jour » n'est appliquée que par la route caisse (comportement historique conservé ici). |
-| `PATCH /commerces/:id/clients/:clientId` | commerçant | `{ anniversaire: "MM-JJ" \| "" }`. |
+| `PATCH /commerces/:id/clients/:clientId` | commerçant | `{ anniversaire?: "MM-JJ" \| "", platPrefere?, consentementRelance?: boolean }`. **P1-B3** : `consentementRelance` pose / retire le consentement aux relances (bouton de la fiche client), avec `consentementRelanceLe` + `consentementRelanceOrigine: 'commercant'`, journalisé (action `consentement`). |
 | `GET` / `POST /commerces/:id/equipe`, `PATCH` / `DELETE /commerces/:id/equipe/:membreId` | commerçant | Membres `{ nom, code }` ; code de 4 chiffres, unique dans l'équipe (409), stocké haché + salé, **jamais renvoyé ni journalisé**. |
 | `GET /commerces/:id/messages` | commerçant | 100 derniers messages (auto + ciblés) avec prénom et contact, pour copier le texte. |
 | `POST /commerces/:id/messages` | commerçant | `{ cible: 'tous' \| 'inactifs' \| 'proches' \| 'nouveaux', texte }` → déposé dans l'espace client des clients ciblés. **Aucun SMS / e-mail.** |
 | `GET /commerces/:id/menu` | public | `{ menu, commerce }` (menu vide si jamais enregistré ; 409 si commerce inactif). |
 | `PUT /commerces/:id/menu` | commerçant | `{ categories: [{ nom, produits: [{ nom, prix (centimes), description?, photo? (https ou JPEG/PNG/WebP ≤ 60 Ko), allergenes[] }] }] }` (20 catégories / 60 produits max, corps ≤ 3 Mo). |
 | `GET /commerces/:id/etat` (complément) | commerçant | Aussi `membres` (sans code) et `journal` (200 dernières actions). Les clients n'y ont plus leur boîte de réception (egress). |
-| `POST /commerces/:id/clients/:clientId/relance` | commerçant | **V3, à brancher.** `{ canal: 'sms' \| 'email', message? }`. **501** sans prestataire (cas actuel), rien n'est envoyé. Configuré : 409 si le client n'a pas `consentementRelance: true` (aucun écran ne le recueille encore) ou n'a pas le contact demandé ; sinon envoi du message de relance + mention de désinscription. |
+| `POST /commerces/:id/clients` (complément P1-B3) | public ou commerçant | `consentementRelance: true` seulement si la case « offres par SMS ou e-mail » (jamais pré-cochée, page de jeu et inscription en caisse) est cochée ; absent = pas de consentement. Ignoré pour un client **déjà inscrit** (personne ne peut réabonner un numéro après un STOP en se ré-identifiant). |
+| `POST /commerces/:id/clients/:clientId/relance` | commerçant | **P1-B3.** `{ modele?: 'bienvenue' \| 'proche' \| 'inactif' \| 'anniversaire', canal?: 'sms' \| 'email', message? }` (modèle **ou** message libre ; canal par défaut : téléphone → SMS, sinon e-mail). **501** sans prestataire pour ce canal (cas actuel : rien n'est envoyé) ; **409** sans consentement, sans contact pour ce canal, ou même modèle déjà envoyé à ce client aujourd'hui (Paris) ; **503** migration 0007 absente (pas d'envoi sans anti-doublon) ; **502** prestataire en erreur ; 200 `{ envoye, canal, modele, envoi }`. Chaque tentative, même refusée, est journalisée dans `envois`. |
+| `GET /commerces/:id/envois` | commerçant | **P1-B3.** Journal des relances (200 dernières, `?client=<id>` pour un client) → `{ envois: [{ clientPrenom, date, modele, canal, statut, declencheur, auteur, raison? }], migration }`. Aussi dans `GET …/etat` (`envois`). Jamais le téléphone, l'e-mail ni le texte. |
+| `POST /commerces/:id/stop-sms` | public (signature Twilio) | **P1-B3.** Webhook Twilio « A message comes in » : `Body` = STOP / ARRET / DESINSCRIPTION… (casse et accents ignorés, 1er mot) → consentement du client de ce numéro (`From`) retiré, journalisé ; autre mot : rien. **501** sans Twilio configuré, **403** si `X-Twilio-Signature` est fausse. Répond un TwiML vide. |
+| `POST /desinscription/:clientId/:jeton` | public (jeton HMAC) | **P1-B3.** Lien de désinscription des e-mails (page `#/desinscription/<clientId>/<jeton>`, bouton « Me désinscrire ») et One-Click `List-Unsubscribe-Post`. Jeton = HMAC du commerce + client (secret tiré une fois, gardé dans `meta`). Idempotent → `{ ok, commerce }` ; 404 lien invalide. |
+| `GET /c/:clientId` (hors `/api`) | public | **P1-B3.** Lien court des SMS → 302 vers `/#/carte/<clientId>`. |
+| `PATCH /commerces/:id` (complément P1-B3) | commerçant | `relancesAuto: { inactif, anniversaire }` (désactivées par défaut ; case dans l'écran Messages). Tournée lancée en arrière-plan à l'ouverture du tableau de bord (`GET …/etat`), une fois par commerce et par jour : clients consentants seulement, une relance auto par client et par tournée, une fois par absence (inactif 30-120 j) / par an (anniversaire). Rien sans prestataire ni migration 0007. |
 
 Accès « commerçant » = en-tête `X-Session` (jeton `commerce` de ce commerce ou `admin`), **ou** en repli `X-Commerce-PIN`
 du commerce, **ou** `X-Admin-PIN` (l'admin ouvre tous les commerces).
@@ -574,7 +581,7 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
 - `GET /cartes/:clientId` (V2) parcourt les commerces pour trouver le client (pas d'index par identifiant seul) :
   sans importance à cette échelle.
 
-## Intégrations préparées (V3) — rien n'est branché, aucun compte créé
+## Intégrations préparées (V3) — aucun compte créé ; relances SMS / e-mail branchées en P1-B3 (sans clés)
 
 | Fichier | Rôle |
 |---|---|
@@ -634,11 +641,50 @@ un identifiant OAuth 2.0 avec le scope `https://www.googleapis.com/auth/business
 vérifiée le 09/11/2026) ; le consentement du commerce ; puis lire les avis
 (`GET https://mybusiness.googleapis.com/v4/accounts/*/locations/*/reviews`) et publier les réponses — non développé.
 
-### SMS / e-mail — à brancher
+### SMS / e-mail — relances branchées (P1-B3), en attente des clés
 
-Variables : voir le tableau ci-dessus. Garde-fous déjà codés : 501 sans prestataire ; jamais d'envoi sans
-`consentementRelance: true` ; mention de désinscription ajoutée à chaque message (« STOP » en SMS, réponse « désinscription »
-en e-mail — un vrai lien de désinscription géré par le prestataire reste à prévoir).
+**État réel (10/11/2026)** : tout le parcours est codé et testé contre des prestataires **simulés** ; aucune clé Twilio ni
+Brevo n'existe, donc en production **rien ne part** : la route relance répond 501 et la tentative est journalisée
+« non branché ». Le code d'appel n'a jamais été exécuté contre le vrai Twilio ni le vrai Brevo.
+
+- **Consentement** : case NON pré-cochée, une ligne, à l'inscription publique (`#/jouer`) et en caisse (écran Clients) ;
+  modifiable sur la fiche client (« Le client accepte les relances » / « Retirer le consentement »). Stocké sur le client
+  (`consentementRelance`, `consentementRelanceLe`, `consentementRelanceOrigine` : `inscription`, `commercant`, `stop-sms`,
+  `lien-email`) — preuve datée, sans migration. Tout changement est journalisé (action `consentement`).
+- **Modèles** (`src/lib/relances.ts`, fonctions pures) : bienvenue, récompense proche (8-9 tampons sur 10, ou carte pleine),
+  inactif 30 jours, anniversaire. SMS en alphabet GSM ≤ 160 caractères (1 SMS facturé), nom du commerce, lien court `/c/<id>`,
+  mention « STOP ». E-mail : objet + corps vouvoyés, lien vers la carte, lien de désinscription en pied.
+- **STOP (SMS)** : webhook `POST /api/v1/commerces/<id>/stop-sms`, signé par Twilio. **Choix** : désinscription traitée par
+  l'app (pas seulement par la liste d'opposition native de Twilio) pour que le consentement de la fiche reflète le STOP.
+  Selon le pays et le type d'expéditeur, Twilio peut aussi gérer ses propres mots-clés STOP (à vérifier à l'activation).
+- **Désinscription (e-mail)** : **Choix** : lien de l'app (`#/desinscription/<clientId>/<jeton HMAC>`, retrait au clic,
+  pas à l'ouverture — un antivirus qui suit les liens ne désinscrit personne) + en-têtes `List-Unsubscribe` /
+  `List-Unsubscribe-Post` (bouton « Se désabonner » de Gmail…). Brevo n'ajoute pas de lien de désinscription aux e-mails
+  transactionnels (`v3/smtp/email`), d'où la route de l'app.
+- **Journal des envois** : **Choix** : table dédiée `envois` (migration 0007) plutôt que le `journal` existant — il faut un
+  index unique (commerce, client, modèle, jour) pour l'anti-doublon tenu par la base (deux clics simultanés n'envoient
+  qu'une fois), des statuts mis à jour après l'appel au prestataire (`en_cours` → `envoye` / `erreur`), et le `journal`
+  d'audit est en ajout seul. Lecture : écran **Messages** (« Journal des envois ») et fiche client (« Envois à ce client »).
+- **Relances automatiques** (inactif, anniversaire) : cases dans l'écran Messages, désactivées par défaut ; tournée à
+  l'ouverture du tableau de bord du gérant (pas de tâche planifiée : Render Free endort le serveur). Une tournée par jour.
+
+**Pour activer (à faire par l'utilisateur, comptes payants — rien n'a été créé) :**
+1. Appliquer la migration 0007 (ci-dessous) — sans elle, aucun envoi ne part (503).
+2. Renseigner `PUBLIC_URL` (ex. `https://asian-home-fidelite.onrender.com`).
+3. SMS : compte Twilio, numéro ou Messaging Service expéditeur → `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` ;
+   dans la console Twilio, numéro → *Messaging* → « A message comes in » : Webhook `POST`
+   `<PUBLIC_URL>/api/v1/commerces/<id du commerce>/stop-sms`.
+4. E-mail : compte Brevo, adresse expéditrice validée (domaine authentifié SPF/DKIM conseillé) → `BREVO_API_KEY`,
+   `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`.
+5. Vérifier `/api/v1/sante` → `integrations.sms` / `email` à `true`, `migrations.relances` à `true` ; puis un essai réel
+   sur un client test consentant (son propre numéro), et un STOP en réponse.
+
+### Migration 0007 (journal des envois de relances) — à appliquer avant tout envoi réel
+
+Supabase → **SQL Editor** → coller `supabase/migrations/0007_relances.sql` → **Run** (rejouable). Vérifier :
+`/api/v1/sante` → `"migrations": { …, "relances": true }` (relu au plus toutes les 60 s). Sans elle : journal des envois
+vide, refus non tracés, aucun envoi réel (503). Annulation : `0007_relances.down.sql` (supprime la table `envois` ; le
+consentement, stocké sur les clients, est conservé).
 
 ## Migration future (écrite avant S1 — Supabase est désormais préparé et la procédure écrite, voir plus haut)
 
