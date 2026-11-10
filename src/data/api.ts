@@ -1,6 +1,6 @@
 // Client HTTP de l'API /api/v1 (server/). Aucune règle métier ici : le serveur décide de tout
 // (tampons, récompense, tirage). `fetch` est injectable pour les tests (aucun vrai serveur dans `npm test`).
-import type { Avis, Client, Commerce, CommercePublic, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce } from '../types'
+import type { Avis, Client, Commerce, CommercePublic, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce } from '../types'
 import type { StatutGain, StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
 import type { ClientAPurger } from '../lib/rgpd'
@@ -141,7 +141,7 @@ export type ChampsReglages = Partial<
     | 'relancesAuto'
     | 'conservationMois'
   >
->
+> & { testsAB?: { accroche?: { actif: boolean } } }
 
 /**
  * `VITE_API_URL` → base de l'API. Absente ou vide → null (mode local, localStorage).
@@ -285,6 +285,12 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
         ok: boolean
         message: { id: string; creeLe: string }
       }>,
+    /**
+     * Mesure anonyme (P2-Q3) : « page de jeu ouverte » ou « clic vers Google ». Le corps ne contient QUE le type —
+     * jamais d'identifiant de carte ni de contact. Délai court : la page n'attend jamais cette requête.
+     */
+    signalerEvenement: (commerceId: string, type: 'scan' | 'clicGoogle') =>
+      requete('POST', `/commerces/${enc(commerceId)}/evenements`, { corps: { type }, delaiMs: 5_000 }) as Promise<{ ok: boolean; compte: boolean }>,
     /** Le navigateur n'envoie qu'un contact : la visite du jour, le tirage du jour et le lot sont décidés par le serveur. */
     tirer: (commerceId: string, contact: string, prenom?: string, parrain?: string) =>
       requete('POST', `/commerces/${enc(commerceId)}/tirages`, { corps: { contact, ...(prenom ? { prenom } : {}), ...(parrain ? { parrain } : {}) } }) as Promise<ResultatTirage>,
@@ -333,6 +339,9 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     /** Publie la réponse validée (ou la réponse auto 5★) sur Google ; 409 si elle n'est pas validée. */
     publierReponse: async (commerceId: string, acces: Acces, avisId: string) =>
       ((await requete('POST', `/commerces/${enc(commerceId)}/avis/${enc(avisId)}/publier-reponse`, { acces })) as { avis: Avis }).avis,
+    /** Compteurs anonymes par jour (P2-Q3) ; `migration: false` tant que la 0008 n'est pas appliquée. */
+    mesures: (commerceId: string, acces: Acces) =>
+      requete('GET', `/commerces/${enc(commerceId)}/mesures`, { acces }) as Promise<{ compteurs: CompteurEvenement[]; migration: boolean; depuis: string; aujourdhui: string }>,
     exportCsv: (commerceId: string, acces: Acces) => requete('GET', `/commerces/${enc(commerceId)}/export.csv`, { acces, texte: true }) as Promise<string>,
     majClient: async (commerceId: string, acces: Acces, clientId: string, champs: { anniversaire?: string; platPrefere?: string; consentementRelance?: boolean; exclusPurge?: boolean }) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}`, { acces, corps: champs })) as { client: Client }).client,

@@ -17,7 +17,7 @@
 // d'un commerce peut enregistrer les réglages puis échouer sur un des avis réévalués.
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createClient, type PostgrestError } from '@supabase/supabase-js'
-import type { Avis, Client, Commerce, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
+import type { Avis, Client, Commerce, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
 import { cleContact } from '../src/lib/fidelite.ts'
 import { ErreurConflit, ErreurMigrationManquante, type DemandeRattrapageTrace, type Pin, type Stockage, type TentativesAuth } from './stockage.ts'
 
@@ -26,6 +26,10 @@ const TABLES_0004 = ['parrainages', 'demandes_rattrapage']
 const TABLES_0005 = ['sessions_revoquees']
 const TABLES_0006 = ['tentatives_auth']
 const TABLES_0007 = ['envois']
+/** 0008_mesure.sql : la table et la fonction d'incrément (appelée par `rpc`, rangée sous le nom de la table). */
+const TABLES_0008 = ['evenements_jour']
+/** Lignes lues par requête : PostgREST (Supabase) plafonne une réponse à 1 000 lignes par défaut. */
+const PAGE = 1000
 
 /** Lecture d'une table de la migration 0003 : vide tant que la migration n'est pas appliquée (l'existant continue de marcher). */
 async function ouVide<T>(lecture: Promise<T>, vide: T): Promise<T> {
@@ -77,12 +81,14 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     if (error) {
       if (error.code === '23505') throw new ErreurConflit(`Doublon refusé par la base (${table}) : ${error.message}`)
       // Table inconnue (PostgREST : PGRST205 ; Postgres : 42P01) → migration 0003 / 0004 / 0005 pas encore appliquée.
-      if (error.code === 'PGRST205' || error.code === '42P01') {
+      // Fonction inconnue (PostgREST : PGRST202 ; Postgres : 42883) → idem pour la fonction d'incrément de la 0008.
+      if (error.code === 'PGRST205' || error.code === '42P01' || error.code === 'PGRST202' || error.code === '42883') {
         if (TABLES_0003.includes(table)) throw new ErreurMigrationManquante(table)
         if (TABLES_0004.includes(table)) throw new ErreurMigrationManquante(table, '0004_programme.sql')
         if (TABLES_0005.includes(table)) throw new ErreurMigrationManquante(table, '0005_sessions_revoquees.sql')
         if (TABLES_0006.includes(table)) throw new ErreurMigrationManquante(table, '0006_tentatives_auth.sql')
         if (TABLES_0007.includes(table)) throw new ErreurMigrationManquante(table, '0007_relances.sql')
+        if (TABLES_0008.includes(table)) throw new ErreurMigrationManquante(table, '0008_mesure.sql')
       }
       throw new Error(`Supabase (${table}) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
     }
@@ -284,6 +290,37 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     schemaRelances: async () => {
       try {
         await ok('envois', sb.from('envois').select('*').limit(0))
+        return true
+      } catch (e) {
+        if (e instanceof ErreurMigrationManquante) return false
+        throw e
+      }
+    },
+
+    // ---- Mesure anonyme (0008_mesure.sql) : tant que la migration manque, rien n'est compté et tout se lit vide ----
+    // L'incrément passe par une fonction SQL (`insert … on conflict do update set n = n + 1`) : atomique pour la base,
+    // deux événements simultanés ne s'écrasent jamais (un upsert PostgREST écrirait une valeur lue avant, et perdrait +1).
+    compterEvenement: async (commerceId, jour, type) =>
+      void (await ok('evenements_jour', sb.rpc('incrementer_evenement', { p_commerce_id: commerceId, p_jour: jour, p_type: type }))),
+    compteursEvenements: async (commerceId, depuis) => {
+      const tout: CompteurEvenement[] = []
+      for (let debut = 0; ; debut += PAGE) {
+        const requete = sb
+          .from('evenements_jour')
+          .select('jour,type,n')
+          .eq('commerce_id', commerceId)
+          .gte('jour', depuis)
+          .order('jour', { ascending: true })
+          .order('type', { ascending: true })
+          .range(debut, debut + PAGE - 1)
+        const lignes = await ouVide(ok<CompteurEvenement[]>('evenements_jour', requete), [])
+        tout.push(...lignes.map((l) => ({ jour: String(l.jour).slice(0, 10), type: l.type, n: Number(l.n) })))
+        if (lignes.length < PAGE) return tout
+      }
+    },
+    schemaMesure: async () => {
+      try {
+        await ok('evenements_jour', sb.from('evenements_jour').select('*').limit(0))
         return true
       } catch (e) {
         if (e instanceof ErreurMigrationManquante) return false

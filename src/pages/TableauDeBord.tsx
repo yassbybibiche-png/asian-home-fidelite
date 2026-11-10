@@ -3,6 +3,7 @@ import { useDonneesCommerce, useStore } from '../store'
 import { calculerChiffres, calculerChiffresCartes, noteMoyenne } from '../lib/stats'
 import { dateRelative } from '../lib/format'
 import { Etoiles, Vide } from '../components/ui'
+import { Mesure } from '../components/Mesure'
 import type { ActionJournal } from '../types'
 
 const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
@@ -107,6 +108,8 @@ export default function TableauDeBord() {
           aide="3 visites en 14 jours"
         />
       </section>
+
+      <Mesure />
 
       <nav className="grid grid-cols-3 gap-2" aria-label="Actions rapides">
         {mode === 'api' ? (

@@ -41,6 +41,11 @@ export interface Lot {
   libelle: string
   /** En %, ex. 30. Si le total ≠ 100, les chances sont recalculées au prorata. */
   probabilite: number
+  /**
+   * Coût unitaire du lot pour le commerce, en centimes (P2-Q3) : matière + emballage, saisi dans Réglages. Absent =
+   * non renseigné (le tableau de bord le signale, il n'invente rien). Jamais publié aux clients (`commercePublic`).
+   */
+  coutCentimes?: number
 }
 
 export interface Commerce {
@@ -87,6 +92,31 @@ export interface Commerce {
    * visite, à défaut l'inscription). Absent = 36 mois (3 ans). Voir `src/lib/rgpd.ts`.
    */
   conservationMois?: number
+  /** Tests A/B (P2-Q3, docs/TESTS-AB.md). Absent = aucun test en cours. */
+  testsAB?: TestsAB
+}
+
+/**
+ * Tests A/B (P2-Q3). `accroche` : phrase sous le nom du commerce sur la page de jeu, A = générique, B = cite un lot ;
+ * la variante dépend du JOUR à Paris (`varianteDuJour`), jamais du client : rien n'est stocké sur le téléphone.
+ * `depuis` / `jusqua` (AAAA-MM-JJ, Paris) : posés par le serveur à l'activation / l'arrêt, bornes de la comparaison.
+ */
+export interface TestsAB {
+  accroche?: { actif: boolean; depuis?: string; jusqua?: string }
+}
+
+/**
+ * Mesure anonyme (P2-Q3, migration 0008 : `evenements_jour`) : un compteur par commerce, jour à Paris et type. Aucune
+ * identité : ni client, ni contact, ni IP, ni appareil. `scan` = ouverture de la page de jeu (QR ou lien), `clicGoogle`
+ * = tap sur le bouton d'avis Google, `tirage` / `gain` = comptés par le serveur au tirage (gain = lot non perdant).
+ */
+export type TypeEvenement = 'scan' | 'tirage' | 'gain' | 'clicGoogle'
+
+export interface CompteurEvenement {
+  /** AAAA-MM-JJ, jour à Paris. */
+  jour: string
+  type: TypeEvenement
+  n: number
 }
 
 /** Relances automatiques (P1-B3) : « inactif 30 jours » et « anniversaire ». */
@@ -173,6 +203,8 @@ export interface CommercePublic {
   programme: ProgrammePublic
   /** Durée de conservation EFFECTIVE en mois (défaut appliqué), affichée sur la page de confidentialité (P1-B6). */
   conservationMois: number
+  /** Test A/B « accroche » en cours (P2-Q3) : présent seulement s'il est actif ; la variante se déduit du jour. */
+  testAccroche?: true
 }
 
 export type TypeMessageAuto = 'bienvenue' | 'recompense' | 'presque' | 'inactif' | 'anniversaire' | 'avis'

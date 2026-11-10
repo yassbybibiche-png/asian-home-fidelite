@@ -4,7 +4,7 @@
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Avis, Client, Commerce, DemandeRattrapage, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
+import type { Avis, Client, Commerce, CompteurEvenement, DemandeRattrapage, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, Parrainage, Tirage, TypeEvenement } from '../src/types.ts'
 import { cleContact } from '../src/lib/fidelite.ts'
 
 export interface Pin {
@@ -134,6 +134,16 @@ export interface Stockage {
   /** Table de la migration 0007 présente (toujours vrai sous SQLite). */
   schemaRelances(): P<boolean>
   /**
+   * Mesure anonyme (P2-Q3, migration 0008 : `evenements_jour`) : +1 sur le compteur (commerce, jour à Paris, type),
+   * atomique pour la base. Aucune identité : ni client, ni contact, ni IP.
+   * Supabase sans la migration : lève ErreurMigrationManquante (le serveur ignore alors l'événement).
+   */
+  compterEvenement(commerceId: string, jour: string, type: TypeEvenement): P<void>
+  /** Compteurs du commerce depuis `depuis` (AAAA-MM-JJ, inclus), par jour croissant. Supabase sans la migration : []. */
+  compteursEvenements(commerceId: string, depuis: string): P<CompteurEvenement[]>
+  /** Table de la migration 0008 présente (toujours vrai sous SQLite). */
+  schemaMesure(): P<boolean>
+  /**
    * Suppression d'un client (P1-B6, RGPD) avec sa cascade : ses tirages, ses entrées de journal (`clientId`), les
    * parrainages où il est parrain OU filleul, ses demandes de rattrapage, ses envois de relances, puis sa ligne.
    * Dépendances d'abord, client en dernier : une suppression interrompue (Supabase, sans transaction) se rejoue.
@@ -217,6 +227,10 @@ const SCHEMA = `
   CREATE UNIQUE INDEX IF NOT EXISTS envois_un_par_jour ON envois (commerce_id, client_id, modele, jour) WHERE statut IN ('en_cours', 'envoye');
   CREATE INDEX IF NOT EXISTS envois_commerce ON envois (commerce_id, date);
   CREATE INDEX IF NOT EXISTS envois_client ON envois (commerce_id, client_id, date);
+  CREATE TABLE IF NOT EXISTS evenements_jour (
+    commerce_id TEXT NOT NULL, jour TEXT NOT NULL, type TEXT NOT NULL, n INTEGER NOT NULL,
+    PRIMARY KEY (commerce_id, jour, type)
+  );
 `
 
 type Ligne = { donnees: string }
@@ -278,6 +292,10 @@ export function ouvrirStockage(fichier: string) {
     majEnvoi: db.prepare('UPDATE envois SET statut = ?, donnees = ? WHERE id = ? AND commerce_id = ?'),
     envois: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
     envoisClient: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? AND client_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
+    compterEvenement: db.prepare(
+      'INSERT INTO evenements_jour (commerce_id, jour, type, n) VALUES (?, ?, ?, 1) ON CONFLICT (commerce_id, jour, type) DO UPDATE SET n = n + 1',
+    ),
+    compteursEvenements: db.prepare('SELECT jour, type, n FROM evenements_jour WHERE commerce_id = ? AND jour >= ? ORDER BY jour, type'),
     // RGPD (P1-B6) : cascade de la suppression d'un client.
     supprTirages: db.prepare('DELETE FROM tirages WHERE commerce_id = ? AND client_id = ?'),
     supprJournal: db.prepare("DELETE FROM journal WHERE commerce_id = ? AND json_extract(donnees, '$.clientId') = ?"),
@@ -361,6 +379,10 @@ export function ouvrirStockage(fichier: string) {
     envois: (commerceId: string, limite: number, clientId?: string) =>
       lire<EnvoiRelance>(clientId ? q.envoisClient.all(commerceId, clientId, limite) : q.envois.all(commerceId, limite)),
     schemaRelances: () => true,
+    compterEvenement: (commerceId: string, jour: string, type: TypeEvenement) => void q.compterEvenement.run(commerceId, jour, type),
+    compteursEvenements: (commerceId: string, depuis: string) =>
+      (q.compteursEvenements.all(commerceId, depuis) as unknown as CompteurEvenement[]).map((l) => ({ jour: l.jour, type: l.type, n: Number(l.n) })),
+    schemaMesure: () => true,
     supprimerClient: (commerceId: string, clientId: string) => {
       const n = (r: { changes: number | bigint }) => Number(r.changes)
       return {

@@ -11,6 +11,8 @@ import {
 } from '../lib/messagePrive'
 import { MessageErreur } from './ui'
 import { useLangue } from './Langue'
+import { useStore } from '../store'
+import { useRoute } from '../router'
 import {
   NOTE_PAR_DEFAUT,
   TEXTE_CONFIRMATION_GOOGLE,
@@ -117,14 +119,15 @@ function MessagePriveRestaurant({ note, onEnvoyer }: { note: number; onEnvoyer?(
  * Invitation à l'avis Google, toujours APRÈS le jeu et jamais en condition du lot.
  * Les étoiles ne sont pré-remplies que dans l'app : Google ne permet pas de pré-sélectionner une note.
  * Note basse (≤ SEUIL_NOTE_BASSE) : le message privé au restaurant est proposé d'abord, le lien Google reste juste en
- * dessous. Le clic vers Google n'est pas compté : aucune mesure d'événements n'existe encore (prévue au lot P2-Q3).
+ * dessous. Le clic vers Google est compté ANONYMEMENT (P2-Q3) : seulement depuis la page de jeu en mode serveur (pas
+ * l'aperçu de #/avis ni la démo locale), et seul le type d'événement part — ni carte, ni contact, ni note.
  */
 export function InvitationAvis({
   commerce,
   onMessagePrive,
   lienCarte,
 }: {
-  commerce: Pick<Commerce, 'lienGoogle'>
+  commerce: Pick<Commerce, 'lienGoogle'> & { id?: string }
   onMessagePrive?(note: number, texte: string): Promise<void>
   /** Après l'ouverture de Google (nouvel onglet) : lien de retour vers la carte du client. */
   lienCarte?: string
@@ -134,6 +137,12 @@ export function InvitationAvis({
   const lien = lienAvisGoogle(commerce)
   const prive = proposerMessagePrive(note)
   const { t } = useLangue()
+  const { api } = useStore()
+  const { page } = useRoute()
+  function ouvrirGoogle() {
+    setOuvert(true)
+    if (page === 'jouer' && api && commerce.id) api.signalerEvenement(commerce.id, 'clicGoogle').catch(() => {})
+  }
   return (
     <section className="carte space-y-3 text-center">
       <div>
@@ -152,7 +161,7 @@ export function InvitationAvis({
           target="_blank"
           rel="noopener noreferrer"
           className={`${prive ? 'bouton-secondaire' : 'bouton'} w-full`}
-          onClick={() => setOuvert(true)}
+          onClick={ouvrirGoogle}
         >
           {t(libelleBoutonAvis(note))} ↗
         </a>

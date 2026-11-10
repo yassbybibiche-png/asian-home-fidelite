@@ -5,7 +5,7 @@ import { createHash, createHmac, randomBytes, randomInt, randomUUID, scrypt, tim
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, Tirage, TypeCommerce } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
@@ -36,6 +36,7 @@ import { problemesApparence } from '../src/lib/apparence.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
 import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurLogo, LIMITES_LOGO, messageTropLourd, urlLogo, validerLogo, type FormatLogo } from '../src/lib/logo.ts'
+import { EVENEMENTS_PUBLICS, ajouterJours, basculerAccroche } from '../src/lib/mesure.ts'
 import { CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, dureeConservationMois, estPurgeable, exportClientCsv, libelleDuree, listePurge, nomFichierExportClient } from '../src/lib/rgpd.ts'
 import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSuppression, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
@@ -89,6 +90,11 @@ export const LIMITES_PUBLIQUES = {
    * large car toute l'équipe ouvre sa session depuis le même wifi en début de service.
    */
   sessionParIp: 30,
+  /**
+   * POST /commerces/:id/evenements (mesure anonyme P2-Q3 : page de jeu ouverte, clic vers Google) — par IP. Une page de
+   * jeu en envoie 1 ou 2 ; au-delà, l'événement est refusé (429) et simplement pas compté.
+   */
+  evenementParIp: 30,
 }
 export type LimitesPubliques = typeof LIMITES_PUBLIQUES
 const FENETRE_PUBLIQUE_MS = 60_000
@@ -423,7 +429,14 @@ function lots(v: unknown): Lot[] {
     const o = (l ?? {}) as Corps
     const p = o.probabilite
     if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 100) throw err(400, `Lot n° ${i + 1} : la probabilité doit être un nombre entre 0 et 100.`)
-    return { libelle: texte(o.libelle, `lot n° ${i + 1}`, 80), probabilite: p }
+    const lot: Lot = { libelle: texte(o.libelle, `lot n° ${i + 1}`, 80), probabilite: p }
+    // Coût unitaire (P2-Q3), en centimes : facultatif ; absent / null = non renseigné.
+    const c = o.coutCentimes
+    if (c != null) {
+      if (typeof c !== 'number' || !Number.isInteger(c) || c < 0 || c > 100_000) throw err(400, `Lot n° ${i + 1} : le coût doit être un nombre entier de centimes (0 à 100 000, soit 1 000 € au plus).`)
+      lot.coutCentimes = c
+    }
+    return lot
   })
   if (!lotsJouables(liste).length) throw err(400, 'Il faut au moins un lot avec un libellé et une probabilité > 0.')
   return liste
@@ -463,7 +476,22 @@ function apparence(v: unknown): Apparence {
   return a
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois']
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB']
+
+/**
+ * Tests A/B (P2-Q3) : le navigateur n'envoie que `{ accroche: { actif } }` ; les dates de début et de fin sont posées
+ * ici (jour à Paris) au changement d'état, jamais reçues du navigateur.
+ */
+function testsAB(v: unknown, existant: TestsAB | undefined, aujourdhui: string): TestsAB {
+  const o = (v ?? {}) as Corps
+  const inconnus = Object.keys(o).filter((k) => k !== 'accroche')
+  if (inconnus.length) throw err(400, `Test A/B inconnu : ${inconnus.join(', ')}.`)
+  const r: TestsAB = { ...existant }
+  if ('accroche' in o) {
+    r.accroche = basculerAccroche(existant?.accroche, booleen(((o.accroche ?? {}) as Corps).actif, 'testsAB.accroche.actif'), aujourdhui)
+  }
+  return r
+}
 
 /** Fusion d'une configuration de programme partielle (PATCH) : chaque bloc est fusionné, pas remplacé. */
 function fusionnerProgramme(existant: Commerce['programme'], patch: NonNullable<Commerce['programme']>): NonNullable<Commerce['programme']> {
@@ -476,7 +504,7 @@ function fusionnerProgramme(existant: Commerce['programme'], patch: NonNullable<
 }
 
 /** Réglages modifiables d'un commerce : tout autre champ est refusé (400). */
-function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGES): Commerce {
+function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGES, aujourdhui = jourParis(new Date())): Commerce {
   const inconnus = Object.keys(corps).filter((k) => !autorises.includes(k))
   if (inconnus.length) throw err(400, `Champ non modifiable : ${inconnus.join(', ')}.`)
   const r: Commerce = { ...c }
@@ -494,6 +522,7 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
     r.seuilTampons = s
   }
   if ('lots' in corps) r.lots = lots(corps.lots)
+  if ('testsAB' in corps) r.testsAB = testsAB(corps.testsAB, c.testsAB, aujourdhui)
   if ('reglesReponseAuto' in corps) {
     const o = (corps.reglesReponseAuto ?? {}) as Corps
     r.reglesReponseAuto = {
@@ -1136,6 +1165,35 @@ export async function creerServeur(o: OptionsServeur) {
     return relancesPresent
   }
 
+  // Même principe pour la migration 0008 (compteurs anonymes de la mesure, P2-Q3).
+  let mesurePresent = false
+  let mesureVerifieLe = 0
+  async function schemaMesure(): Promise<boolean> {
+    if (mesurePresent || Date.now() - mesureVerifieLe < 60_000) return mesurePresent
+    mesureVerifieLe = Date.now()
+    try {
+      mesurePresent = await st.schemaMesure()
+    } catch {
+      mesurePresent = false
+    }
+    return mesurePresent
+  }
+
+  /**
+   * Mesure anonyme (P2-Q3) : +1 sur le compteur du jour. Jamais bloquant : migration absente, base en panne → l'événement
+   * n'est pas compté, et la requête qui l'a déclenché (un tirage, par exemple) n'en est jamais affectée.
+   */
+  async function compter(commerceId: string, type: TypeEvenement): Promise<boolean> {
+    try {
+      if (!(await schemaMesure())) return false
+      await st.compterEvenement(commerceId, jourParis(maintenant()), type)
+      return true
+    } catch (e) {
+      console.warn(`[serveur] événement « ${type} » non compté : ${e instanceof Error ? e.message : e}`)
+      return false
+    }
+  }
+
   // ---- Relances SMS / e-mail (P1-B3) ----
 
   /** Adresse publique du site (liens des SMS / e-mails, URL signée par Twilio) : PUBLIC_URL, sinon Host (+ X-Forwarded-Proto). */
@@ -1573,7 +1631,8 @@ export async function creerServeur(o: OptionsServeur) {
           // Migration 0003 (équipe, journal, menu) appliquée sur la base ?
           // Migration 0004 (parrainages, demandes de rattrapage) appliquée sur la base ?
           // Migration 0007 (journal des envois de relances) appliquée ? Sans elle, aucun envoi réel ne part.
-          migrations: { cartiz: await schemaCartiz(), programme: await schemaProgramme(), relances: await schemaRelances() },
+          // Migration 0008 (compteurs anonymes de la mesure) appliquée ? Sans elle, l'entonnoir reste vide.
+          migrations: { cartiz: await schemaCartiz(), programme: await schemaProgramme(), relances: await schemaRelances(), mesure: await schemaMesure() },
         },
       }
     }
@@ -1737,7 +1796,7 @@ export async function creerServeur(o: OptionsServeur) {
     if (!sous) {
       if (m === 'PATCH') {
         await exigerCommercant(req, id)
-        const maj = appliquerReglages(commerce, await lireCorps(req))
+        const maj = appliquerReglages(commerce, await lireCorps(req), CHAMPS_REGLAGES, jourParis(maintenant()))
         // Comme le front : enregistrer les réglages réapplique les règles aux avis en attente.
         await st.transaction(async () => {
           await st.majCommerce(maj)
@@ -2457,7 +2516,36 @@ export async function creerServeur(o: OptionsServeur) {
       // Le client éventuellement créé reste inscrit même en cas de refus (la transaction est validée).
       if ('refus' in resultat) throw err(409, resultat.refus!)
       const { lot, code, date } = resultat.tirage!
+      // Mesure anonyme (P2-Q3) : après le tirage enregistré, sans identité ; un échec ici ne change rien au tirage.
+      await compter(id, 'tirage')
+      if (!estPerdant(lot)) await compter(id, 'gain')
       return { statut: 201, json: { lot, code, date, perdant: estPerdant(lot) } }
+    }
+
+    if (sous === 'evenements' && !sousId && m === 'POST') {
+      // PUBLIC — mesure anonyme (P2-Q3) : « page de jeu ouverte » (scan) ou « clic vers l'avis Google ». Le corps ne
+      // contient QUE le type : tout autre champ (identifiant, contact…) est refusé, rien d'autre n'est lu ni stocké
+      // (ni IP, ni appareil, ni heure : un compteur par jour). Limite par IP, comme les autres routes publiques.
+      limiterIp(req, 'evenement', limites.evenementParIp)
+      const corps = await lireCorps(req, 200)
+      const inconnus = Object.keys(corps).filter((k) => k !== 'type')
+      if (inconnus.length) throw err(400, `Champ refusé : ${inconnus.join(', ')}. Seul « type » est accepté (mesure anonyme).`)
+      const type = corps.type as TypeEvenement
+      if (!EVENEMENTS_PUBLICS.includes(type)) throw err(400, `« type » doit valoir : ${EVENEMENTS_PUBLICS.join(', ')}.`)
+      // Commerce en pause : rien à compter (la page de jeu l'affiche déjà fermé).
+      const compte = commerce.actif ? await compter(id, type) : false
+      return { statut: 202, json: { ok: true, compte } }
+    }
+
+    if (sous === 'mesures' && !sousId && m === 'GET') {
+      // Gérant (P2-Q3) : compteurs anonymes par jour depuis ?depuis=AAAA-MM-JJ (défaut et minimum : 400 jours).
+      await exigerCommercant(req, id)
+      const aujourdhui = jourParis(maintenant())
+      const plusTot = ajouterJours(aujourdhui, -400)
+      const demande = new URL(req.url ?? '/', 'http://localhost').searchParams.get('depuis') ?? ''
+      const depuis = /^\d{4}-\d{2}-\d{2}$/.test(demande) && demande > plusTot ? demande : plusTot
+      const migration = await schemaMesure()
+      return { json: { compteurs: migration ? await st.compteursEvenements(id, depuis) : [], migration, depuis, aujourdhui } }
     }
 
     // ---- Google Business Profile (P1-B4) : 501 tant que GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET manquent ----

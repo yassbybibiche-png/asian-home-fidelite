@@ -63,3 +63,20 @@ export function memoireJoueur(s: Stockage | null, commerceId: string) {
     memoriserGain: (g: GainMemorise) => ecrireJson(s, cleGain, g),
   }
 }
+
+/**
+ * Mesure anonyme (P2-Q3) : « page de jeu ouverte » (scan du QR ou lien), signalée UNE fois par onglet et par commerce
+ * (`sessionStorage` : oublié à la fermeture de l'onglet, jamais envoyé). Rien d'autre que le type ne part : ni carte,
+ * ni contact. Échec réseau / 429 : ignoré, la page n'attend jamais cette requête. Renvoie true si le signal est parti.
+ */
+export function signalerScan(api: Pick<ClientApi, 'signalerEvenement'>, commerceId: string, session: Stockage | null): boolean {
+  const cle = `fidelite:scan:${commerceId}`
+  try {
+    if (session?.getItem(cle)) return false
+    session?.setItem(cle, '1')
+  } catch {
+    // Stockage indisponible (navigation privée stricte) : le signal part quand même, une fois par affichage.
+  }
+  api.signalerEvenement(commerceId, 'scan').catch(() => {})
+  return true
+}

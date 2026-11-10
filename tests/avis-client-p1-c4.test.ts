@@ -146,9 +146,10 @@ describe('Page de jeu : ordre et lien Google', () => {
     assert.match(jouer, /const carte = joueur \? `#\/carte\/\$\{joueur\.clientId\}` : ''/)
   })
 
-  test('mode API : message envoyé avec la carte et le contact du joueur ; clic Google non compté (P2-Q3)', () => {
+  test('mode API : message envoyé avec la carte et le contact du joueur ; clic Google compté anonymement (P2-Q3)', () => {
     assert.match(jouer, /api\.messagePrive\(commerce\.id, joueur\.clientId, joueur\.contact, note, texte\)/)
-    assert.match(invitation, /prévue au lot P2-Q3/)
+    // P2-Q3 : le clic est compté, depuis la page de jeu seulement, avec le seul type d'événement (aucune identité).
+    assert.match(invitation, /if \(page === 'jouer' && api && commerce\.id\) api\.signalerEvenement\(commerce\.id, 'clicGoogle'\)/)
     assert.doesNotMatch(invitation, /fetch\(|sendBeacon/)
   })
 
