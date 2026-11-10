@@ -188,14 +188,19 @@ Rien n'a été créé ni déployé. Ce que vous aurez à cliquer :
 
 ### Données personnelles (RGPD) — affiché aussi dans Plus et Offre
 
-- **Données collectées** : prénom + téléphone ou e-mail du client, ses visites, tampons, récompenses et gains de la roulette.
+Politique complète : page publique `#/confidentialite/<commerceId>` (P1-B6), liée depuis l'inscription et le pied des
+pages client. Détails techniques (cascade, purge) : `server/README.md`, « RGPD (P1-B6) ».
+
+- **Données collectées** : prénom + téléphone ou e-mail du client, ses visites, tampons, points, récompenses et gains de la
+  roulette ; anniversaire et plat préféré seulement s'il les donne.
 - **Finalité** : la carte de fidélité et la roulette du commerce. Aucune revente, aucune publicité tierce.
-- **Relances** : uniquement avec consentement explicite et moyen de désinscription (envoi pas encore branché).
-- **Conservation** : tant que le client utilise sa carte ; durée maximale à fixer par le commerce (par ex. 3 ans après la dernière visite).
-- **Export / suppression** sur simple demande au commerçant : export CSV disponible ; la suppression n'a pas encore de bouton
-  (l'administrateur la fait à la main dans la base).
-- **Hébergement** : à préciser selon le déploiement choisi — dans l'Union européenne de préférence.
-- Restent à rédiger : politique de confidentialité, registre des traitements, règlement de la roulette.
+- **Relances** : uniquement avec consentement explicite (case non pré-cochée) ; STOP, lien de désinscription.
+- **Conservation** : 3 ans après la dernière visite par défaut (réglable de 6 mois à 10 ans dans Réglages). L'écran Clients
+  liste à l'avance les cartes à purger ; la purge est confirmée par le commerçant (jamais automatique) et journalisée.
+- **Droits** : export (CSV individuel) et suppression depuis la fiche client (bouton « Supprimer ce client… », cascade
+  journalisée) ; le client peut aussi télécharger ses données et demander la suppression depuis sa carte.
+- **Hébergement** : serveur Render Frankfurt ; base Supabase, région à confirmer (Central EU Frankfurt prévue).
+- Restent à rédiger : registre des traitements, règlement de la roulette.
 
 Badge « Démo » : en mode API, il n'apparaît **que** sur les commerces venant du seed de démonstration (`DEMO=1`,
 `demo: true`) ; Asian Home Paris (réel) n'en a jamais. En démo locale, il est affiché partout.
