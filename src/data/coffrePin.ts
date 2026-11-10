@@ -15,6 +15,9 @@ import type { Acces, AccesEquipe } from './api'
 /** Ce que le coffre sait garder : accès gérant / admin (PIN ou jeton), ou session équipe de la caisse. */
 export type ContenuCoffre = Acces | AccesEquipe
 
+/** `raison` : pour le journal de diagnostic uniquement (jamais le contenu). */
+export type LectureCoffre = { statut: 'vide' } | { statut: 'ok'; contenu: ContenuCoffre } | { statut: 'illisible'; raison: string }
+
 type Stockage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
 export interface RangementCle {
@@ -57,6 +60,27 @@ export function creerCoffrePin(
     return neuve
   }
 
+  /**
+   * Comme `lire`, mais distingue « rien de mémorisé » (cas normal) d'un accès mémorisé illisible
+   * (clé IndexedDB perdue ou inaccessible, données abîmées) : ce dernier cas doit être expliqué, pas ignoré.
+   * Rien n'est effacé ici (un nouveau déverrouillage réécrit l'accès).
+   */
+  async function lireDetaille(): Promise<LectureCoffre> {
+    if (!disponible) return { statut: 'vide' }
+    try {
+      const brut = session!.getItem(CLE_SESSION)
+      if (!brut) return { statut: 'vide' }
+      const { iv, donnees } = JSON.parse(brut) as { iv: string; donnees: string }
+      const k = await cle(false)
+      if (!k) return { statut: 'illisible', raison: 'cle-absente' }
+      const clair = await subtle!.decrypt({ name: 'AES-GCM', iv: deBase64(iv) }, k, deBase64(donnees))
+      const acces: unknown = JSON.parse(new TextDecoder().decode(clair))
+      return estContenu(acces) ? { statut: 'ok', contenu: acces } : { statut: 'illisible', raison: 'contenu-invalide' }
+    } catch (e) {
+      return { statut: 'illisible', raison: e instanceof Error && e.name ? e.name : 'erreur' }
+    }
+  }
+
   return {
     disponible,
     async memoriser(acces: ContenuCoffre): Promise<boolean> {
@@ -72,20 +96,10 @@ export function creerCoffrePin(
       }
     },
     async lire(): Promise<ContenuCoffre | null> {
-      if (!disponible) return null
-      try {
-        const brut = session!.getItem(CLE_SESSION)
-        if (!brut) return null
-        const { iv, donnees } = JSON.parse(brut) as { iv: string; donnees: string }
-        const k = await cle(false)
-        if (!k) return null
-        const clair = await subtle!.decrypt({ name: 'AES-GCM', iv: deBase64(iv) }, k, deBase64(donnees))
-        const acces: unknown = JSON.parse(new TextDecoder().decode(clair))
-        return estContenu(acces) ? acces : null
-      } catch {
-        return null
-      }
+      const r = await lireDetaille()
+      return r.statut === 'ok' ? r.contenu : null
     },
+    lireDetaille,
     async oublier(): Promise<void> {
       try {
         session?.removeItem(CLE_SESSION)

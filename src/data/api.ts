@@ -143,6 +143,19 @@ export function accesDeSession(s: Session): Acces | null {
 
 const enc = encodeURIComponent
 
+/**
+ * Signal qui annule la requête après `ms`. `AbortSignal.timeout` manque sur des navigateurs encore répandus
+ * (Safari iOS < 16) : sans repli, une requête vers un serveur endormi pourrait y attendre indéfiniment.
+ */
+export function signalDelai(ms: number): AbortSignal | undefined {
+  if (typeof AbortSignal === 'undefined') return undefined
+  if ('timeout' in AbortSignal) return AbortSignal.timeout(ms)
+  if (typeof AbortController === 'undefined') return undefined
+  const c = new AbortController()
+  setTimeout(() => c.abort(), ms)
+  return c.signal
+}
+
 export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(...a), delaiMs = 10_000) {
   async function requete(methode: string, chemin: string, options: { acces?: AccesCaisse | null; corps?: unknown; texte?: boolean } = {}) {
     const entetes: Record<string, string> = { ...entetesAcces(options.acces) }
@@ -154,7 +167,7 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
         headers: entetes,
         body: options.corps === undefined ? undefined : JSON.stringify(options.corps),
         cache: 'no-store',
-        signal: typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(delaiMs) : undefined,
+        signal: signalDelai(delaiMs),
       })
     } catch {
       throw new ErreurApi(0, MESSAGE_HORS_LIGNE)
