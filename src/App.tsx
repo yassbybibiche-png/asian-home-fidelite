@@ -2,7 +2,8 @@ import type { ComponentType } from 'react'
 import { useStore } from './store'
 import { aller, useRoute, PAGES_PUBLIQUES, type Page } from './router'
 import { BadgeDemo, Icone, LogoCommerce } from './components/ui'
-import { Verrou } from './components/Verrou'
+import { useDepasse, Verrou } from './components/Verrou'
+import { DELAI_ACCES_MS } from './lib/connexion'
 import { SqueletteCommercant } from './components/Squelette'
 import { NOM_APP, libelleType } from './data/defaults'
 import TableauDeBord from './pages/TableauDeBord'
@@ -134,9 +135,11 @@ function BandeauDonnees() {
 
 export default function App() {
   const { page } = useRoute()
-  const { commerce, mode, acces, accesPret, verrouiller } = useStore()
+  const { commerce, mode, acces, accesPret, verrouiller, relireAcces } = useStore()
   const Contenu = COMPOSANTS[page]
   const onglet = ONGLET_PARENT[page] ?? page
+  // Filet de sécurité : la relecture de l'accès est déjà bornée (5 s), mais aucune attente ne doit dépasser 30 s sans issue.
+  const accesLent = useDepasse(mode === 'api' && !accesPret, DELAI_ACCES_MS)
 
   // Pages vues par le client final (QR code scanné) : ni en-tête ni navigation commerçant.
   if (PAGES_PUBLIQUES.includes(page)) {
@@ -148,6 +151,16 @@ export default function App() {
   }
 
   // Mode API : pages commerçant derrière le PIN.
+  if (mode === 'api' && !accesPret && accesLent) {
+    return (
+      <div className="mx-auto max-w-md space-y-4 px-4 py-10 text-center" role="alert">
+        <p className="text-gray-700">L’ouverture de votre espace prend plus de 30 secondes. Vous pouvez réessayer ; si cela se répète, rechargez la page.</p>
+        <button type="button" className="bouton w-full" onClick={() => void relireAcces()}>
+          Réessayer
+        </button>
+      </div>
+    )
+  }
   if (mode === 'api' && !accesPret) return <SqueletteCommercant libelle="Chargement…" />
   if (mode === 'api' && (!acces || !commerce)) return <Verrou />
 

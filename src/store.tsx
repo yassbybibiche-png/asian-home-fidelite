@@ -2,8 +2,20 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { Avis, Client, Commerce, Etat, Tirage, TypeCommerce } from './types'
 import { depotLocal, type Depot } from './data/depot'
 import { creerDepotApi, etatVide, type DepotApi } from './data/depotApi'
-import { accesDeSession, baseApi, creerClientApi, echangerContreSession, ErreurApi, MESSAGE_HORS_LIGNE, type Acces, type ClientApi } from './data/api'
+import { baseApi, creerClientApi, ErreurApi, type Acces, type ClientApi } from './data/api'
 import { creerCoffrePin, rangementIndexedDb, type CoffrePin } from './data/coffrePin'
+import {
+  avecDelai,
+  causeEchec,
+  DELAI_COFFRE_MS,
+  ErreurCoffre,
+  issueRechargement,
+  journaliserEchec,
+  lireCoffreBorne,
+  messageEchec,
+  MESSAGE_COFFRE_ILLISIBLE,
+  ouvrirAcces,
+} from './lib/connexion'
 import { analyserContact, nouveauClient, offrirRecompense, trouverClientParContact, validerVisite } from './lib/fidelite'
 import { appliquerInscription } from './lib/programme'
 import { appliquerRegles } from './lib/avis'
@@ -42,12 +54,20 @@ interface Store {
   /** Dernier chargement réussi depuis le serveur (ISO). */
   derniereSynchro: string | null
   erreurConnexion: string | null
+  /**
+   * Pourquoi l'écran de déverrouillage est revenu sans que l'utilisateur ait appuyé sur « Verrouiller »
+   * (session expirée, PIN changé, connexion mémorisée illisible). Reste affiché jusqu'au prochain déverrouillage.
+   */
+  verrouillage: Verrouillage | null
   acces: Acces | null
   /** Le PIN mémorisé (chiffré) a été relu : on sait s'il faut afficher l'écran de déverrouillage. */
   accesPret: boolean
   api: ClientApi | null
   deverrouiller(acces: Acces): Promise<void>
+  /** Sans message : « Verrouiller » volontaire. Avec : verrouillage subi, expliqué par `verrouillage.message`. */
   verrouiller(message?: string): Promise<void>
+  /** Relit l'accès mémorisé sur cet appareil (après un échec ou une attente trop longue). */
+  relireAcces(): Promise<void>
   recharger(): Promise<void>
   choisirCommerce(id: string): void
   majCommerce(commerce: Commerce): Promise<void>
@@ -73,7 +93,15 @@ interface Store {
   avecPin<T>(f: (a: Acces, api: ClientApi) => Promise<T>): Promise<T>
 }
 
-export const MESSAGE_MODE_SERVEUR = 'Disponible avec le serveur (données partagées) : pas dans la démo locale.'
+export interface Verrouillage {
+  message: string
+  /** Rôle de l'accès perdu : l'écran de déverrouillage le présélectionne. */
+  role?: Acces['role']
+  /** La connexion mémorisée n'a pas pu être relue : « Réessayer » la relit. */
+  coffre?: boolean
+}
+
+export const MESSAGE_MODE_SERVEUR ='Disponible avec le serveur (données partagées) : pas dans la démo locale.'
 
 const Contexte = createContext<Store | null>(null)
 
@@ -143,6 +171,7 @@ function StoreLocal({ children, depot }: { children: ReactNode; depot: Depot }) 
     () => ({
       deverrouiller: async () => {},
       verrouiller: async () => {},
+      relireAcces: async () => {},
       recharger: async () => setEtat(depot.charger()),
       choisirCommerce: (id: string) => setEtat((e) => ({ ...e, commerceActifId: id })),
       // Enregistrer les réglages applique aussitôt les règles de réponse automatique aux avis en attente.
@@ -218,6 +247,7 @@ function StoreLocal({ children, depot }: { children: ReactNode; depot: Depot }) 
       connexion: 'local',
       derniereSynchro: null,
       erreurConnexion: null,
+      verrouillage: null,
       acces: null,
       accesPret: true,
       api: null,
@@ -244,12 +274,16 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
   const [connexion, setConnexion] = useState<Connexion>('chargement')
   const [derniereSynchro, setDerniereSynchro] = useState<string | null>(null)
   const [erreurConnexion, setErreurConnexion] = useState<string | null>(null)
+  const [verrouillage, setVerrouillage] = useState<Verrouillage | null>(null)
 
   // Références lues par les chargements asynchrones (évite les fermetures périmées).
   const accesRef = useRef<Acces | null>(null)
   const actifRef = useRef('')
   const numero = useRef(0)
   const dernierApplique = useRef(0)
+  // Dernière cause d'échec de rechargement journalisée : hors ligne, on ne remplit pas le journal toutes les 10 s.
+  const causeJournalisee = useRef<string | null>(null)
+  const journal = useMemo(() => ({ stockage: stockage('localStorage') }), [])
 
   const appliquer = useCallback(
     (e: Etat) => {
@@ -258,12 +292,14 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       setDerniereSynchro(depot.derniereSynchro())
       setConnexion('enLigne')
       setErreurConnexion(null)
+      causeJournalisee.current = null
     },
     [depot],
   )
 
   const verrouiller = useCallback(
     async (message?: string) => {
+      const role = accesRef.current?.role
       // Révocation côté serveur, sans attendre ni bloquer (hors ligne : le jeton expirera seul).
       const jeton = accesRef.current?.jeton
       if (jeton) void api.fermerSession(jeton).catch(() => {})
@@ -271,45 +307,69 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       // Les chargements encore en cours (faits avec l'ancien PIN) seront ignorés.
       dernierApplique.current = ++numero.current
       setAcces(null)
-      await coffre.oublier()
+      // Verrouillage subi (session expirée, PIN changé) : l'explication reste affichée jusqu'au prochain déverrouillage
+      // (les rechargements périodiques ne l'effacent pas). « Verrouiller » volontaire : aucun message.
+      setVerrouillage(message ? { message, role } : null)
+      setErreurConnexion(null)
       // Efface du navigateur les données privées (clients, téléphones) ; garde la liste publique des commerces.
+      // Rien n'est perdu : en mode serveur, le cache n'est qu'une copie des données du serveur.
       depot.reinitialiser()
       setEtat((e) => ({ ...etatVide(), commerces: e.commerces.map((c) => ({ ...c })), commerceActifId: e.commerceActifId }))
-      setErreurConnexion(message ?? null)
+      // Après les mises à jour d'écran : un IndexedDB bloqué ne doit pas retenir le verrouillage.
+      await avecDelai(coffre.oublier(), DELAI_COFFRE_MS).catch(() => {})
     },
     [api, coffre, depot],
   )
 
   const recharger = useCallback(async () => {
     const n = ++numero.current
+    // L'accès utilisé pour CE chargement : si un déverrouillage (ou un verrouillage) a lieu pendant la requête,
+    // le résultat est périmé — sans ce contrôle, une liste publique chargée sans accès pouvait arriver APRÈS
+    // le déverrouillage et remplacer les données privées tout juste chargées (réponses lentes au réveil du serveur).
+    const a = accesRef.current
     try {
-      const e = await depot.chargerServeur(accesRef.current, actifRef.current)
-      if (n <= dernierApplique.current) return
+      const e = await depot.chargerServeur(a, actifRef.current)
+      if (n <= dernierApplique.current || a !== accesRef.current) return
       dernierApplique.current = n
       appliquer(e)
     } catch (err) {
       if (n <= dernierApplique.current) return
-      if (err instanceof ErreurApi && err.statut === 401 && accesRef.current) {
-        await verrouiller(
-          accesRef.current.jeton ? 'Session expirée ou fermée : déverrouillez à nouveau avec votre PIN.' : 'PIN refusé (il a peut-être été changé) : déverrouillez à nouveau.',
-        )
+      const issue = issueRechargement(err, a, accesRef.current)
+      if (issue.type === 'ignorer') return
+      const cause = causeEchec(err)
+      if (causeJournalisee.current !== cause) {
+        causeJournalisee.current = cause
+        journaliserEchec('rechargement', err, journal)
+      }
+      if (issue.type === 'verrouiller') {
+        await verrouiller(issue.message)
         return
       }
       // « Hors ligne » seulement si le serveur est vraiment injoignable (pas pour un refus 429 ou une erreur 500).
-      if (!(err instanceof ErreurApi) || err.horsLigne) setConnexion('horsLigne')
-      setErreurConnexion(err instanceof ErreurApi && !err.horsLigne ? err.message : MESSAGE_HORS_LIGNE)
+      if (issue.type === 'horsLigne') setConnexion('horsLigne')
+      setErreurConnexion(issue.message)
     }
-  }, [appliquer, depot, verrouiller])
+  }, [appliquer, depot, journal, verrouiller])
 
-  // Démarrage : PIN mémorisé (chiffré) dans cet onglet ? Si oui, cache affiché tout de suite, puis serveur.
-  useEffect(() => {
-    let annule = false
-    coffre.lire().then((lu) => {
-      if (annule) return
-      const a = lu && lu.role !== 'equipe' ? lu : null
+  /**
+   * Démarrage : accès mémorisé (chiffré) dans cet onglet ? Si oui, cache affiché tout de suite, puis serveur.
+   * La relecture est bornée (DELAI_COFFRE_MS) et un échec est expliqué (plus de « Chargement… » sans fin ni
+   * de retour muet à l'écran de déverrouillage). Le cache local n'est pas effacé dans ce cas.
+   */
+  const demarrer = useCallback(
+    async (estAnnule: () => boolean = () => false) => {
+      setAccesPret(false)
+      const lu = await lireCoffreBorne(coffre)
+      if (estAnnule()) return
+      if (lu.statut === 'illisible') {
+        journaliserEchec('demarrage', new ErreurCoffre(lu.raison), journal)
+        setVerrouillage({ message: MESSAGE_COFFRE_ILLISIBLE, coffre: true })
+      }
+      const a = lu.statut === 'ok' && lu.contenu.role !== 'equipe' ? lu.contenu : null
       if (a) {
         accesRef.current = a
         setAcces(a)
+        setVerrouillage(null)
         const cache = depot.charger()
         actifRef.current = cache.commerceActifId
         setEtat(cache)
@@ -317,11 +377,19 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       }
       setAccesPret(true)
       void recharger()
-    })
+    },
+    [coffre, depot, journal, recharger],
+  )
+
+  useEffect(() => {
+    let annule = false
+    void demarrer(() => annule)
     return () => {
       annule = true
     }
-  }, [coffre, depot, recharger])
+  }, [demarrer])
+
+  const relireAcces = useCallback(() => demarrer(), [demarrer])
 
   // Rechargement périodique (page visible) + au retour au premier plan.
   useEffect(() => {
@@ -344,20 +412,24 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
     async (saisi: Acces) => {
       // Le PIN part une seule fois (POST /sessions) contre un jeton court ; ensuite seul le jeton circule.
       // Serveur sans sessions (503 : SESSION_SECRET absente, ancien serveur) : repli sur le PIN en en-tête, comme avant.
-      let a = saisi
-      if (saisi.pin) {
-        const s = await echangerContreSession(api, saisi.role === 'admin' ? { role: 'admin', pin: saisi.pin } : { role: 'commerce', commerceId: saisi.commerceId, pin: saisi.pin })
-        a = (s && accesDeSession(s)) ?? saisi
-      }
+      // Serveur endormi : nouveaux essais pendant 30 s au plus (cf. `ouvrirAcces`), puis échec expliqué.
       const n = ++numero.current
-      const e = await depot.chargerServeur(a, a.role === 'commerce' ? a.commerceId : actifRef.current)
+      let r: Awaited<ReturnType<typeof ouvrirAcces>>
+      try {
+        r = await ouvrirAcces(api, depot, saisi, actifRef.current)
+      } catch (err) {
+        journaliserEchec('deverrouillage', err, journal)
+        throw err
+      }
       dernierApplique.current = Math.max(dernierApplique.current, n)
-      accesRef.current = a
-      setAcces(a)
-      appliquer(e)
-      await coffre.memoriser(a)
+      accesRef.current = r.acces
+      setAcces(r.acces)
+      setVerrouillage(null)
+      appliquer(r.etat)
+      // Mémoriser est un confort (éviter de ressaisir le PIN au rechargement) : jamais bloquant.
+      await avecDelai(coffre.memoriser(r.acces), DELAI_COFFRE_MS).catch(() => false)
     },
-    [api, appliquer, coffre, depot],
+    [api, appliquer, coffre, depot, journal],
   )
 
   /** Toute action passe par le serveur avec le PIN, puis l'état est rechargé (le serveur fait foi). */
@@ -372,7 +444,7 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       } catch (err) {
         if (err instanceof ErreurApi && err.horsLigne) {
           setConnexion('horsLigne')
-          setErreurConnexion(MESSAGE_HORS_LIGNE)
+          setErreurConnexion(messageEchec(err))
         }
         throw err
       }
@@ -386,6 +458,7 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
     () => ({
       deverrouiller,
       verrouiller,
+      relireAcces,
       recharger,
       choisirCommerce: (id: string) => {
         actifRef.current = id
@@ -448,7 +521,7 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       },
       avecPin: <T,>(f: (a: Acces, api: ClientApi) => Promise<T>) => avecPin((a) => f(a, api)),
     }),
-    [api, avecPin, commerceDe, depot, deverrouiller, etat.commerces, recharger, verrouiller],
+    [api, avecPin, commerceDe, depot, deverrouiller, etat.commerces, recharger, relireAcces, verrouiller],
   )
 
   const commerce = (etat.commerces.find((c) => c.id === etat.commerceActifId) ?? etat.commerces[0]) as Commerce
@@ -462,12 +535,13 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       connexion,
       derniereSynchro,
       erreurConnexion,
+      verrouillage,
       acces,
       accesPret,
       api,
       ...actions,
     }),
-    [etat, commerce, connexion, derniereSynchro, erreurConnexion, acces, accesPret, api, actions],
+    [etat, commerce, connexion, derniereSynchro, erreurConnexion, verrouillage, acces, accesPret, api, actions],
   )
   return <Contexte.Provider value={valeur}>{children}</Contexte.Provider>
 }

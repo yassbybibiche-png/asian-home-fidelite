@@ -5,6 +5,7 @@ import type { Client, Commerce, EntreeJournal } from '../types'
 import { echangerContreSession, ErreurApi, type AccesCaisse, type ClientApi, type GainCaisse } from '../data/api'
 import { messageGain, normaliserCodeGagnant } from '../lib/roulette'
 import { creerCoffrePin, rangementIndexedDb } from '../data/coffrePin'
+import { ErreurCoffre, journaliserEchec, lireCoffreBorne, MESSAGE_COFFRE_ILLISIBLE } from '../lib/connexion'
 import { recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { analyserMontant, formaterPrix, passageCeJour, pointsPourMontant, soldePoints } from '../lib/points'
 import { niveauClient, reserveUtilisable } from '../lib/programme'
@@ -135,7 +136,13 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
     } catch {
       // cache illisible : ignoré
     }
-    void coffre.lire().then((lu) => {
+    // Relecture bornée (un IndexedDB bloqué ne fige plus « Ouverture de la caisse… ») ; illisible = expliqué, pas ignoré.
+    void lireCoffreBorne(coffre).then((r) => {
+      if (r.statut === 'illisible') {
+        journaliserEchec('caisse', new ErreurCoffre(r.raison), { stockage: stockage('localStorage') })
+        setErreurAcces(MESSAGE_COFFRE_ILLISIBLE)
+      }
+      const lu = r.statut === 'ok' ? r.contenu : null
       // Session équipe (jeton) ; ou code équipe chiffré (repli, et format d'avant les sessions : { role: 'commerce', pin: code }).
       const a: AccesCaisse | null =
         !lu || lu.role === 'admin' || lu.commerceId !== commerceId ? null : lu.role === 'equipe' ? lu : lu.pin ? { code: lu.pin } : null
@@ -183,7 +190,8 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
       await coffre.memoriser('jeton' in a ? a : { role: 'commerce', commerceId, pin: saisi })
       void synchroniser()
     } catch (e) {
-      setErreurAcces(e instanceof ErreurApi && e.horsLigne ? 'Serveur injoignable : le code équipe doit être vérifié en ligne une première fois.' : messageErreur(e))
+      journaliserEchec('caisse', e, { stockage: stockage('localStorage') })
+      setErreurAcces(e instanceof ErreurApi && e.horsLigne ?'Serveur injoignable : le code équipe doit être vérifié en ligne une première fois.' : messageErreur(e))
     }
   }
 
