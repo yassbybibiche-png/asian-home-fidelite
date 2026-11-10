@@ -56,6 +56,8 @@ const SCHEMA: Record<string, { pk: string; uniques: Unicite[]; fk?: [string, str
   demandes_rattrapage: { pk: 'id', uniques: [], fk: [['commerce_id', 'commerces']] },
   // 0005_sessions_revoquees.sql
   sessions_revoquees: { pk: 'jti', uniques: [] },
+  // 0006_tentatives_auth.sql
+  tentatives_auth: { pk: 'cle', uniques: [] },
 }
 
 interface Requete {
@@ -66,12 +68,13 @@ interface Requete {
   corps: unknown
 }
 
-/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` / `sans0005` : idem pour 0004 / 0005. */
-function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false } = {}) {
+/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` à `sans0006` : idem pour 0004 à 0006. */
+function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, sans0006 = false } = {}) {
   const absentes = new Set([
     ...(sans0003 ? ['equipe', 'journal', 'menus'] : []),
     ...(sans0004 ? ['parrainages', 'demandes_rattrapage'] : []),
     ...(sans0005 ? ['sessions_revoquees'] : []),
+    ...(sans0006 ? ['tentatives_auth'] : []),
   ])
   const tables: Record<string, Ligne[]> = Object.fromEntries(Object.keys(SCHEMA).map((t) => [t, []]))
   const requetes: Requete[] = []
@@ -89,8 +92,12 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false } 
     for (const [col, v] of params) {
       if (['select', 'order', 'on_conflict', 'limit'].includes(col)) continue
       if (v.startsWith('lt.')) {
-        // Seul usage : dates (timestamptz) — nettoyage des sessions révoquées expirées.
-        lignes = lignes.filter((l) => Date.parse(String(l[col])) < Date.parse(v.slice(3)))
+        // Seul usage : dates (timestamptz) — nettoyage des sessions révoquées et des tentatives d'accès. NULL < x : faux.
+        lignes = lignes.filter((l) => l[col] != null && Date.parse(String(l[col])) < Date.parse(v.slice(3)))
+        continue
+      }
+      if (v === 'is.null') {
+        lignes = lignes.filter((l) => l[col] == null)
         continue
       }
       if (!v.startsWith('eq.')) throw new Error(`Opérateur non géré par le faux PostgREST : ${col}=${v}`)
@@ -694,6 +701,41 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, entete)).statut, 401, 'révoquée en mémoire')
       assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).statut, 200, 'le PIN en en-tête marche toujours')
       assert.deepEqual(Object.keys((await api('GET', '/sante')).contenu.migrations), ['cartiz', 'programme'], '/sante inchangé')
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S2 : blocage PIN écrit dans `tentatives_auth` (sans PIN ni contact) et relu après redémarrage', async () => {
+    const f = fauxPostgrest()
+    let { app, api } = await demarrer(f)
+    try {
+      for (let i = 0; i < 10; i++) assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, { 'X-Commerce-PIN': '9999' })).statut, 401)
+      assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).statut, 429)
+    } finally {
+      await app.fermer()
+    }
+    const ip = f.tables.tentatives_auth.find((l) => l.cle === 'ip:127.0.0.1')!
+    assert.deepEqual([ip.portee, ip.echecs], ['commerce', 10])
+    assert.ok(Date.parse(String(ip.bloque_jusqu_a)) > horloge.getTime())
+    assert.equal(f.tables.tentatives_auth.find((l) => l.cle === `cible:${AH}`)!.echecs, 10)
+    assert.doesNotMatch(JSON.stringify(f.tables.tentatives_auth), /9999|1234/)
+    ;({ app, api } = await demarrer(f))
+    try {
+      assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).statut, 429, 'blocage relu en base')
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S2 : production AVANT la migration 0006 — comptage en mémoire, blocage quand même, jamais de 500', async () => {
+    const f = fauxPostgrest({ sans0006: true })
+    const { app, api } = await demarrer(f)
+    try {
+      assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).statut, 200)
+      for (let i = 0; i < 10; i++) assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, { 'X-Commerce-PIN': '9999' })).statut, 401)
+      assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).statut, 429)
+      assert.equal((await api('GET', '/sante')).statut, 200)
     } finally {
       await app.fermer()
     }
