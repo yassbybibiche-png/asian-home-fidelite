@@ -60,7 +60,7 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `DEMO` | `0` | `1` = ajoute aussi les 2 commerces de démo (Atelier Coiff' Camille, Maison Lila) avec leurs données fictives, marqués `demo: true`. |
 | `TZ` | `Europe/Paris` | Fuseau utilisé pour « visite du jour » / « 1 tirage par jour ». Forcé à Paris si absent (les hébergeurs sont souvent en UTC). |
 | `TRUST_PROXY` | `0` (`1` d'office sur Render) | Lire l'IP du client dans `X-Forwarded-For` (indispensable derrière un équilibreur, sinon l'anti-bruteforce compterait tout le monde comme une seule IP). |
-| `CORS_ORIGIN` | `*` | Origine autorisée pour un front hébergé ailleurs (ex. `https://mon-front.example`). |
+| `CORS_ORIGIN` | `*` (avertissement au démarrage) ; **production : à créer** | **P0-S4.** Origine exacte autorisée à appeler l'API depuis un autre site, ex. `https://asian-home-fidelite.onrender.com` (protocole + hôte [+ port], sans chemin ; un `/` final est toléré). Comparaison stricte : toute autre origine ne reçoit aucun `Access-Control-Allow-Origin` (jamais de reflet), les requêtes sans `Origin` (curl, même origine) passent. Valeur qui n'est pas une origine → refus de démarrer. Absente en production : le serveur **démarre quand même** (avertissement) — le front servi par ce serveur est à la même origine, le CORS ne le concerne pas. Voir « En-têtes HTTP ». |
 | `STATIC_DIR` | `dist` | Dossier du front compilé servi sur `/` (s'il contient `index.html`). |
 | `PUBLIC_URL` | — (déduit de l'en-tête `Host`) | **V3.** Adresse publique du site (`https://…`), encodée dans le QR des passes Google Wallet. |
 | `SUPABASE_URL` | — | **S1.** URL du projet Supabase (`https://<projet>.supabase.co`). Avec la suivante : stockage Supabase au lieu de SQLite. |
@@ -357,6 +357,45 @@ sans effet sur les données métier).
   accessible qu'au serveur (RLS + clé secrète uniquement chez Render).
 - Le tirage est entièrement décidé par le serveur : le navigateur n'envoie qu'un contact, jamais un lot.
 - HTTPS : fourni par l'hébergeur (Render le fait d'office). Ne pas exposer le serveur en HTTP simple sur Internet (jetons et PIN passent dans les en-têtes).
+
+### En-têtes HTTP (P0-S4, audit F-08)
+
+**Sur toutes les réponses** (API JSON, CSV, erreurs, 304, front statique, preflight `OPTIONS`) — `ENTETES_SECURITE` dans
+`server/app.ts`, justification directive par directive en commentaire :
+
+| En-tête | Valeur |
+|---|---|
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; media-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` (pas de `preload` : sous-domaine onrender.com, à décider avec un domaine à soi) |
+| `X-Frame-Options` | `DENY` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `same-origin` |
+| `Permissions-Policy` | `camera=(self), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()` |
+
+- **Seul assouplissement de la CSP : `img-src data: https:`** — photos du menu importées en base64 (`data:image/…`) et
+  logo / bannière / photos saisis comme adresse `https://…` quelconque par le commerçant. Pas de `'unsafe-inline'` : le
+  build Vite ne contient ni script ni `<style>` inline, et les `style={…}` de React passent par le CSSOM (non bloqué).
+- `camera=(self)` : le scan du QR client à la caisse (`getUserMedia`). Le QR affiché est un `<svg>` généré localement.
+- `connect-src 'self'` suppose le front servi par ce serveur avec `VITE_API_URL=/` (`npm run build:api`). Un front servi
+  ailleurs reçoit les en-têtes de son propre hébergeur.
+
+**CORS** (`CORS_ORIGIN`) : définie → seule cette origine exacte reçoit `Access-Control-Allow-Origin` (+ `Vary: Origin`),
+y compris au preflight ; une autre origine ne reçoit aucun en-tête CORS (le navigateur bloque la réponse) ; une requête
+sans `Origin` est servie normalement. Absente → `*` comme avant, avec avertissement. En production le front est servi
+**par ce même serveur** : c'est la même origine, le CORS ne s'applique pas à lui — `CORS_ORIGIN` sert à fermer l'API aux
+*autres* sites. Valeur à mettre sur Render : `https://asian-home-fidelite.onrender.com` (à remplacer par le domaine
+personnalisé le jour où il existe).
+
+**Cache** :
+
+| Réponse | `Cache-Control` |
+|---|---|
+| API JSON (succès et erreurs), export CSV | `no-store` |
+| `dist/assets/*` (nom avec hash Vite) | `public, max-age=31536000, immutable` ; un asset absent → 404 (pas index.html) |
+| `index.html` (et toute route du front) | `no-cache` (revérifié à chaque fois : un déploiement est pris au rechargement) |
+| autres fichiers (`/visuels/*.jpg`…) | `public, max-age=3600` |
+
+Tous les fichiers statiques ont un `ETag` faible (taille + date de modification) : `If-None-Match` correspondant → 304.
 
 ## Mise en production : Supabase (base) + Render Free (serveur) — aucun déploiement n'a été fait
 

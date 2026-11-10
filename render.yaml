@@ -30,6 +30,11 @@ services:
       # désactivées (le PIN reste utilisé), le serveur démarre quand même.
       - key: SESSION_SECRET
         sync: false
+      # P0-S4 : origine exacte du front (ex. https://asian-home-fidelite.onrender.com, sans / final). Pas un secret.
+      # Service déjà créé : l'ajouter à la main dans Environment. Absente = CORS « * » (avertissement au démarrage) ;
+      # le front servi par ce même service n'est pas concerné (même origine).
+      - key: CORS_ORIGIN
+        sync: false
     # Volontairement absents : PORT (fourni par Render), NODE_ENV (la variable RENDER active déjà la production ;
     # NODE_ENV=production au build ferait sauter les devDependencies nécessaires à `npm run build:api`),
     # TZ / TRUST_PROXY (réglés par le serveur), DEMO et DB_FILE (jamais en production).
