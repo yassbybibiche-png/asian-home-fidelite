@@ -254,6 +254,8 @@ describe('SMS / e-mail : branchements préparés, aucun envoi', () => {
   test('configuration lue dans l’environnement : incomplète = non configurée', () => {
     assert.deepEqual(creerNotifications(configDepuisEnv({})).statut(), { sms: false, email: false })
     assert.deepEqual(creerNotifications(configDepuisEnv({ TWILIO_ACCOUNT_SID: 'AC1', BREVO_API_KEY: 'k' })).statut(), { sms: false, email: false })
+    // SMS Brevo seul (même clé API que l'e-mail) : sms true, e-mail false.
+    assert.deepEqual(creerNotifications(configDepuisEnv({ BREVO_API_KEY: 'k', BREVO_SMS_SENDER: 'ASIANHOME' })).statut(), { sms: true, email: false })
     const env = { TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't', TWILIO_FROM: '+33700000000', BREVO_API_KEY: 'k', BREVO_SENDER_EMAIL: 'a@b.fr' }
     assert.deepEqual(creerNotifications(configDepuisEnv(env)).statut(), { sms: true, email: true })
   })
@@ -349,7 +351,7 @@ describe('Textes : aucune promesse d’ajout ou d’envoi réel', () => {
     assert.doesNotMatch(encart, /<button/, 'aucun bouton qui prétendrait ajouter une carte')
     assert.doesNotMatch(readFileSync(join(import.meta.dirname, '../src/lib/integrations.ts'), 'utf8'), /Ajouter à (Apple|Google)? ?Wallet/)
     // P1-B3 : la relance est branchée, mais n'envoie rien sans prestataire configuré ni consentement.
-    assert.match(textes.MENTION_ENVOI, /seulement si Twilio .* ou Brevo .* est configuré .* et que le client a consenti/)
+    assert.match(textes.MENTION_ENVOI, /seulement si Brevo .* ou Twilio .* est configuré .* et que le client a consenti/)
     const rgpd = textes.MENTIONS_RGPD.join(' ')
     for (const mot of [/prénom/, /téléphone ou e-mail/, /Finalité/, /Conservation/, /Export/, /suppression/, /Hébergement/, /Union européenne/]) assert.match(rgpd, mot)
   })

@@ -131,7 +131,7 @@ function Relances({ client, commerce }: { client: Client; commerce: Commerce }) 
   async function relancer() {
     setAnnonce('')
     const r = await executer(() => avecPin((a, api) => api.relancer(commerce.id, a, client.id, { modele })))
-    if (r.ok) setAnnonce(`✓ ${r.valeur.canal === 'sms' ? 'SMS' : 'E-mail'} envoyé (${libelleModele(modele)}).`)
+    if (r.ok) setAnnonce(r.valeur.test ? `✓ Mode test — rien envoyé (${libelleModele(modele)}).` : `✓ ${r.valeur.canal === 'sms' ? 'SMS' : 'E-mail'} envoyé (${libelleModele(modele)}).`)
     // Refus (409, 501…) : la tentative est quand même journalisée côté serveur — on relit le journal.
     else void recharger()
   }

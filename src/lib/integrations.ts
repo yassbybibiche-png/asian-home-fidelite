@@ -9,19 +9,21 @@ export const EXPLICATION_WALLET =
   'Aucun pass Wallet n’est créé pour l’instant. En attendant, gardez cette carte en favori ou ajoutez-la à l’écran d’accueil : son QR code suffit au comptoir.'
 
 /**
- * Relances SMS / e-mail (P1-B3) : branchées de bout en bout côté serveur, mais un envoi réel n'a lieu que si le
- * prestataire du canal est configuré (Twilio pour les SMS, Brevo pour les e-mails) ET que le client a consenti.
+ * Relances SMS / e-mail (P1-B3, SMS Brevo depuis le lot « Brancher Brevo ») : branchées de bout en bout côté
+ * serveur, mais un envoi réel n'a lieu que si le prestataire du canal est configuré (Brevo pour les SMS et les
+ * e-mails, Twilio en repli pour les SMS seulement) ET que le client a consenti.
  */
 export const MENTION_ENVOI =
-  'Relance SMS / e-mail depuis la fiche du client : envoi réel seulement si Twilio (SMS) ou Brevo (e-mail) est configuré sur le serveur et que le client a consenti'
+  'Relance SMS / e-mail depuis la fiche du client : envoi réel seulement si Brevo (SMS et e-mail) ou Twilio (SMS, en repli) est configuré sur le serveur et que le client a consenti'
 
 /** État des relances affiché dans Messages, selon `GET /sante` (`null` = état inconnu, serveur injoignable). */
-export function etatRelances(s: { sms?: boolean; email?: boolean; migration?: boolean } | null): string[] {
+export function etatRelances(s: { sms?: boolean; email?: boolean; migration?: boolean; modeTest?: boolean } | null): string[] {
   if (!s) return ['État des prestataires inconnu (serveur injoignable) : aucune relance ne part sans prestataire configuré.']
   const lignes = [
-    s.sms ? 'SMS : Twilio configuré — envois réels possibles.' : 'SMS : non branché (Twilio non configuré) — aucun SMS n’est envoyé.',
+    s.sms ? 'SMS : Brevo configuré — envois réels possibles.' : 'SMS : non branché (Brevo non configuré — Twilio accepté en repli) — aucun SMS n’est envoyé.',
     s.email ? 'E-mail : Brevo configuré — envois réels possibles.' : 'E-mail : non branché (Brevo non configuré) — aucun e-mail n’est envoyé.',
   ]
+  if (s.modeTest) lignes.push('Mode test Brevo actif : aucun SMS / e-mail réel ne part (e-mail en sandbox Brevo, SMS simulé — journal « Test — rien envoyé »).')
   if (s.migration === false) lignes.push('Journal des envois : migration 0007 non appliquée sur la base — aucune relance ne part tant qu’elle manque.')
   return lignes
 }
@@ -77,7 +79,7 @@ export function etatGoogleBusiness(s: { configure: boolean; connecte: boolean } 
 export const MENTIONS_RGPD = [
   'Données collectées : prénom + téléphone ou e-mail du client, ses visites, tampons, points, récompenses et gains de la roulette ; anniversaire et plat préféré seulement s’il les donne.',
   'Finalité : la carte de fidélité et la roulette du commerce. Aucune revente, aucune publicité tierce.',
-  'Relances SMS / e-mail : seulement avec le consentement explicite du client (case non pré-cochée, date et origine conservées) ; désinscription à tout moment (réponse STOP par SMS, lien dans chaque e-mail, ou auprès du commerçant). Aucun envoi tant qu’aucun prestataire n’est configuré.',
+  'Relances SMS / e-mail : seulement avec le consentement explicite du client (case non pré-cochée, date et origine conservées) ; désinscription à tout moment (lien dans chaque e-mail, réponse STOP au SMS quand il vient d’un numéro, ou auprès du commerçant). Aucun envoi tant qu’aucun prestataire n’est configuré.',
   'Conservation : 3 ans après la dernière visite par défaut (réglable dans Réglages) ; l’écran Clients liste à l’avance les cartes à purger, le commerce confirme la purge (jamais automatique, journalisée).',
   'Droits du client : accès, rectification, export, suppression, retrait du consentement — depuis sa carte (« Recevoir mes données », « Demander la suppression »), en caisse ou par message au commerce.',
   'Export et suppression côté commerce : sur la fiche client, export CSV de ses données et bouton « Supprimer ce client » (tirages, journal, parrainages, demandes et relances supprimés avec lui ; suppression journalisée).',

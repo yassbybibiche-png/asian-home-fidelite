@@ -880,6 +880,12 @@ export async function creerServeur(o: OptionsServeur) {
     appleWallet: 'en_suspens',
     googleBusinessProfile: googleBusinessConfigure(o.googleBusiness),
     ...notifications.statut(),
+    // Nom du prestataire SMS effectif (`Brevo` par défaut, `Twilio` en repli) : la page de confidentialité doit
+    // nommer le bon sous-traitant. Absent tant que le SMS n'est pas configuré.
+    ...(notifications.prestataire('sms') ? { smsPrestataire: notifications.prestataire('sms') } : {}),
+    // Mode test (`BREVO_MODE_TEST=1`) : les relances sont simulées (e-mail en sandbox Brevo, SMS simulé) — aucun
+    // envoi réel tant que cette variable vaut `1`. Visible ici pour que personne ne croie à un vrai envoi.
+    ...(notifications.modeTest ? { modeTest: true } : {}),
   })
 
   const ipDe = (req: IncomingMessage) =>
@@ -1352,7 +1358,13 @@ export async function creerServeur(o: OptionsServeur) {
     let fin: Tentative
     try {
       const r = await notifications.envoyer(canal, message)
-      fin = { http: 200, message: 'Relance envoyée.', envoi: { ...envoi, statut: 'envoye', ...(r.id ? { idPrestataire: r.id } : {}) } }
+      // Mode test (`BREVO_MODE_TEST=1`) : rien n'a été livré (e-mail en sandbox Brevo, SMS simulé) — statut `test`
+      // explicite dans le journal, jamais `envoye`. La simulation n'occupe PAS le créneau anti-doublon du jour
+      // (index partiel sur `en_cours` / `envoye` seulement) : un vrai envoi reste possible le même jour, une fois
+      // le mode test coupé ; `relanceAutoDue` ne compte pas non plus les `test` comme des envois.
+      fin = r.test
+        ? { http: 200, message: 'Mode test : rien envoyé (simulation tracée dans le journal).', envoi: { ...envoi, statut: 'test', raison: 'Mode test Brevo : simulation, rien envoyé.', idPrestataire: 'test' } }
+        : { http: 200, message: 'Relance envoyée.', envoi: { ...envoi, statut: 'envoye', ...(r.id ? { idPrestataire: r.id } : {}) } }
     } catch (e) {
       const raison = e instanceof Error && e.message ? e.message : 'Le prestataire n’a pas répondu.'
       fin = { http: 502, message: `Relance non envoyée : ${raison}`, envoi: { ...envoi, statut: 'erreur', raison } }
@@ -2453,7 +2465,7 @@ export async function creerServeur(o: OptionsServeur) {
       const modele: ModeleRelance | 'libre' = libre ? 'libre' : ((corps.modele as ModeleRelance | undefined) ?? 'inactif')
       const r = await relancer(commerce, client, { modele, canal: corps.canal as Canal | undefined, libre, declencheur: 'manuel', auteur }, sitePublic(req))
       if (r.http !== 200) throw err(r.http, r.message)
-      return { json: { envoye: true, canal: r.envoi.canal, modele, id: r.envoi.idPrestataire ?? '', envoi: r.envoi } }
+      return { json: { envoye: r.envoi.statut === 'envoye', test: r.envoi.statut === 'test', canal: r.envoi.canal, modele, id: r.envoi.idPrestataire ?? '', envoi: r.envoi } }
     }
 
     if (sous === 'envois' && !sousId && m === 'GET') {
@@ -2467,8 +2479,15 @@ export async function creerServeur(o: OptionsServeur) {
       // PUBLIC — webhook Twilio « A message comes in » (à régler sur le numéro expéditeur, voir server/README.md) :
       // une réponse STOP (ou ARRET, DESINSCRIPTION…) retire le consentement du client qui a ce numéro dans ce commerce.
       // Twilio non configuré → 501 ; signature X-Twilio-Signature fausse → 403 (personne d'autre ne peut désinscrire).
+      // SMS via Brevo → 501 aussi : avec un expéditeur alphanumérique le client ne peut pas répondre au SMS, Brevo
+      // gère le STOP dans sa propre base (liste noire) quand une réponse est possible, et l'app ne branche pas de
+      // webhook Brevo pour les réponses ; le consentement se retire depuis la fiche client, le lien de
+      // désinscription des e-mails, ou auprès du commerçant — jamais par cette route.
       limiterIp(req, 'stop', limites.lectureParIp)
       if (!notifications.statut().sms) throw err(501, 'Réception des réponses STOP à brancher : Twilio n’est pas configuré sur ce serveur. Aucun consentement n’a été modifié.')
+      if (notifications.prestataire('sms') === 'Brevo') {
+        throw err(501, 'Réception des réponses STOP non applicable : les SMS partent via Brevo (expéditeur alphanumérique, pas de réponse possible) ; Brevo gère sa propre liste noire et le consentement se retire depuis la fiche client. Aucun consentement n’a été modifié.')
+      }
       const params = await lireFormulaire(req)
       if (!notifications.signatureSmsValide(`${sitePublic(req)}${req.url ?? ''}`, params, enTete(req, 'x-twilio-signature'))) {
         throw err(403, 'Signature Twilio invalide : requête ignorée.')

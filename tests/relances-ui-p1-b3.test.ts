@@ -64,6 +64,8 @@ describe('Consentement : case non pré-cochée, envoyée seulement si cochée', 
     assert.match(s, /window\.confirm\(question\)/)
     assert.match(s, /api\.relancer\(commerce\.id, a, client\.id, \{ modele \}\)/)
     assert.match(s, /<JournalEnvois envois=\{duClient\}/)
+    // Mode test : l'annonce dit explicitement que rien n'a été envoyé.
+    assert.match(s, /Mode test — rien envoyé/)
     // La relance n'est proposée qu'avec consentement et un contact.
     assert.match(s, /\{consenti && canal && \(/)
   })
@@ -89,12 +91,15 @@ describe('Journal des envois (écran Messages)', () => {
 describe('Textes honnêtes : rien ne part sans prestataire configuré', () => {
   test('état des relances selon /sante', () => {
     assert.deepEqual(etatRelances({ sms: false, email: false, migration: true }), [
-      'SMS : non branché (Twilio non configuré) — aucun SMS n’est envoyé.',
+      'SMS : non branché (Brevo non configuré — Twilio accepté en repli) — aucun SMS n’est envoyé.',
       'E-mail : non branché (Brevo non configuré) — aucun e-mail n’est envoyé.',
     ])
-    assert.match(etatRelances({ sms: true, email: false, migration: true })[0], /Twilio configuré/)
+    assert.match(etatRelances({ sms: true, email: false, migration: true })[0], /Brevo configuré/)
     assert.match(etatRelances({ sms: true, email: true, migration: false }).at(-1)!, /migration 0007 non appliquée/)
     assert.match(etatRelances(null)[0], /inconnu/)
+    // Mode test : ligne explicite, aucun envoi réel possible.
+    assert.match(etatRelances({ sms: true, email: true, migration: true, modeTest: true }).at(-1)!, /Mode test Brevo actif/)
+    assert.equal(libelleStatutEnvoi('test'), 'Test — rien envoyé')
   })
 
   test('mentions : consentement, STOP, lien e-mail ; plus de « aucun écran ne le recueille »', () => {

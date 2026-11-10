@@ -133,7 +133,7 @@ export type ModeleRelance = 'bienvenue' | 'proche' | 'inactif' | 'anniversaire'
  * `refuse` (rien envoyé : pas de consentement, pas de contact, déjà envoyée aujourd'hui), `erreur` (le prestataire a
  * refusé ou ne répond pas), `non_branche` (aucun prestataire configuré : 501, rien envoyé).
  */
-export type StatutEnvoi = 'en_cours' | 'envoye' | 'refuse' | 'erreur' | 'non_branche'
+export type StatutEnvoi = 'en_cours' | 'envoye' | 'refuse' | 'erreur' | 'non_branche' | 'test'
 
 /** Journal des envois (migration 0007 : table `envois`). Jamais le téléphone ni l'e-mail, jamais le texte complet. */
 export interface EnvoiRelance {

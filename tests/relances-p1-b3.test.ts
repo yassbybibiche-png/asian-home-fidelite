@@ -149,6 +149,10 @@ interface OptionsTest {
   /** Prestataires simulés ; absent = rien de configuré (501). */
   twilio?: boolean
   brevo?: boolean
+  /** SMS via Brevo (même clé API que l'e-mail) : prioritaire sur Twilio quand il est configuré. */
+  brevoSms?: boolean
+  /** Mode test (`BREVO_MODE_TEST=1`) : e-mail en sandbox Brevo, SMS simulé, journal statut `test`. */
+  modeTest?: boolean
   /** Réponse du prestataire simulé (statut HTTP). */
   statutPrestataire?: () => number
 }
@@ -171,8 +175,10 @@ async function demarrer(nom: string, o: OptionsTest = {}, options: Partial<Optio
     maintenant: () => horloge.t,
     limitesPubliques: { inscriptionParIp: 1000, inscriptionParContact: 1000, ficheClientParIp: 1000, lectureParIp: 1000 },
     notifications: {
-      ...(o.twilio ? { twilio: { accountSid: 'ACtest', authToken: 'jeton-twilio-test', expediteur: '+33700000000' } } : {}),
-      ...(o.brevo ? { brevo: { cleApi: 'cle-test', expediteurEmail: 'contact@exemple.fr', expediteurNom: 'Asian Home Paris' } } : {}),
+      ...(o.twilio ? { twilio: { accountSid: 'ACtest', authToken: 'jeton-twilio-test', expediteur: '+33700000000', ...(o.modeTest ? { modeTest: true } : {}) } } : {}),
+      ...(o.brevo ? { brevo: { cleApi: 'cle-test', expediteurEmail: 'contact@exemple.fr', expediteurNom: 'Asian Home Paris', ...(o.modeTest ? { bacASable: true } : {}) } } : {}),
+      ...(o.brevoSms ? { brevoSms: { cleApi: 'cle-test', expediteurSms: 'ASIANHOME', ...(o.modeTest ? { modeTest: true } : {}) } } : {}),
+      ...(o.modeTest ? { modeTest: true } : {}),
       fetch,
     },
     ...options,
@@ -564,6 +570,153 @@ describe('Relances automatiques (inactif 30 jours, anniversaire) à l’ouvertur
       await s.api('GET', `/commerces/${AH}/etat`, undefined, PIN)
       await s.app.relancesEnCours()
       assert.deepEqual(await s.envois(), [])
+      assert.equal(s.appels.length, 0)
+    } finally {
+      await s.app.fermer()
+    }
+  })
+})
+
+describe('SMS via Brevo (prioritaire sur Twilio) — lot « Brancher Brevo »', () => {
+  test('relance SMS de bout en bout via Brevo : requête JSON, journal, /sante sms true', async () => {
+    const s = await demarrer('brevo-sms.db', { brevoSms: true })
+    try {
+      assert.deepEqual((await s.api('GET', '/sante')).contenu.integrations, { googleWallet: false, appleWallet: 'en_suspens', googleBusinessProfile: false, sms: true, email: false, smsPrestataire: 'Brevo' })
+      const lina = (await s.api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0611111111', consentementRelance: true }, PIN)).contenu.client as Client
+      const ok = await s.api('POST', `/commerces/${AH}/clients/${lina.id}/relance`, { modele: 'proche' }, PIN)
+      assert.equal(ok.statut, 200)
+      assert.deepEqual([ok.contenu.canal, ok.contenu.modele, ok.contenu.id, ok.contenu.envoi.statut], ['sms', 'proche', '<m1@brevo>', 'envoye'])
+      assert.equal(s.appels.length, 1)
+      assert.equal(s.appels[0].url, 'https://api.brevo.com/v3/transactionalSMS/send')
+      assert.equal(s.appels[0].entetes['api-key'], 'cle-test')
+      const corps = JSON.parse(s.appels[0].corps)
+      assert.deepEqual(corps, {
+        sender: 'ASIANHOME',
+        recipient: '+33611111111',
+        content: `Asian Home Paris : Lina, plus que 10 tampons avant votre récompense ! ${SITE}/c/${lina.id} ${MENTION_STOP_SMS}`,
+        type: 'transactional',
+        tag: 'fidelite',
+      })
+      assert.deepEqual((await s.envois()).map((x) => [x.canal, x.statut, x.idPrestataire]), [['sms', 'envoye', '<m1@brevo>']])
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('Brevo SMS prioritaire sur Twilio quand les deux sont configurés ; Twilio en repli sinon', async () => {
+    const deux = await demarrer('brevo-prioritaire.db', { brevoSms: true, twilio: true })
+    try {
+      const c = (await deux.api('POST', `/commerces/${AH}/clients`, { contact: '0611111111', consentementRelance: true }, PIN)).contenu.client as Client
+      assert.equal((await deux.api('POST', `/commerces/${AH}/clients/${c.id}/relance`, { modele: 'bienvenue' }, PIN)).statut, 200)
+      assert.equal(deux.appels.length, 1)
+      assert.equal(deux.appels[0].url, 'https://api.brevo.com/v3/transactionalSMS/send')
+    } finally {
+      await deux.app.fermer()
+    }
+    const repli = await demarrer('brevo-repli.db', { brevo: true, twilio: true })
+    try {
+      const c = (await repli.api('POST', `/commerces/${AH}/clients`, { contact: '0611111111', consentementRelance: true }, PIN)).contenu.client as Client
+      assert.equal((await repli.api('POST', `/commerces/${AH}/clients/${c.id}/relance`, { modele: 'bienvenue' }, PIN)).statut, 200)
+      assert.equal(repli.appels.length, 1)
+      assert.match(repli.appels[0].url, /api\.twilio\.com/)
+    } finally {
+      await repli.app.fermer()
+    }
+  })
+
+  test('Brevo SMS en erreur : 502, statut « erreur » journalisé, aucun secret dans le message', async () => {
+    let statut = 500
+    const s = await demarrer('brevo-erreur.db', { brevoSms: true, statutPrestataire: () => statut })
+    try {
+      const c = (await s.api('POST', `/commerces/${AH}/clients`, { contact: '0611111111', consentementRelance: true }, PIN)).contenu.client as Client
+      const r = await s.api('POST', `/commerces/${AH}/clients/${c.id}/relance`, { modele: 'bienvenue' }, PIN)
+      assert.equal(r.statut, 502)
+      assert.match(r.contenu.erreur, /Brevo a refusé l’envoi \(HTTP 500\)/)
+      assert.doesNotMatch(r.contenu.erreur, /cle-test/, 'aucun secret dans le message')
+      statut = 201
+      assert.equal((await s.api('POST', `/commerces/${AH}/clients/${c.id}/relance`, { modele: 'bienvenue' }, PIN)).statut, 200)
+      assert.deepEqual((await s.envois()).map((x) => x.statut), ['envoye', 'erreur'])
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('stop-sms avec SMS Brevo : 501 explicite (pas de réponse possible), consentement intact', async () => {
+    const s = await demarrer('brevo-stop.db', { brevoSms: true })
+    try {
+      const c = (await s.api('POST', `/commerces/${AH}/clients`, { contact: '0611111111', consentementRelance: true }, PIN)).contenu.client as Client
+      const r = await s.stop({ From: '+33611111111', Body: 'STOP' })
+      assert.equal(r.statut, 501)
+      assert.match(JSON.parse(r.texte).erreur, /Brevo.*pas de réponse possible.*Aucun consentement n’a été modifié/)
+      assert.equal((await s.client(c.id)).consentementRelance, true)
+    } finally {
+      await s.app.fermer()
+    }
+  })
+})
+
+describe('Mode test Brevo (`BREVO_MODE_TEST=1`, consigne du 10/11/2026 : aucun envoi réel)', () => {
+  test('SMS simulé : 200, `envoye: false, test: true`, aucun appel réseau, journal statut « test », /sante modeTest', async () => {
+    const s = await demarrer('brevo-test-sms.db', { brevoSms: true, modeTest: true })
+    try {
+      assert.deepEqual((await s.api('GET', '/sante')).contenu.integrations, { googleWallet: false, appleWallet: 'en_suspens', googleBusinessProfile: false, sms: true, email: false, smsPrestataire: 'Brevo', modeTest: true })
+      const lina = (await s.api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0611111111', consentementRelance: true }, PIN)).contenu.client as Client
+      const ok = await s.api('POST', `/commerces/${AH}/clients/${lina.id}/relance`, { modele: 'proche' }, PIN)
+      assert.equal(ok.statut, 200)
+      assert.deepEqual([ok.contenu.envoye, ok.contenu.test, ok.contenu.canal, ok.contenu.modele, ok.contenu.id], [false, true, 'sms', 'proche', 'test'])
+      assert.match(ok.contenu.envoi.raison, /rien envoyé/)
+      assert.equal(s.appels.length, 0, 'aucun appel réseau en mode test')
+      assert.deepEqual((await s.envois()).map((x) => [x.canal, x.statut, x.idPrestataire]), [['sms', 'test', 'test']])
+      // La simulation n'occupe pas le créneau anti-doublon du jour (index partiel sur en_cours / envoye) : une 2e
+      // simulation passe, et un vrai envoi resterait possible le même jour une fois le mode test coupé.
+      assert.equal((await s.api('POST', `/commerces/${AH}/clients/${lina.id}/relance`, { modele: 'proche' }, PIN)).statut, 200)
+      assert.deepEqual((await s.envois()).map((x) => x.statut), ['test', 'test'])
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('e-mail en sandbox Brevo : appel réel simulé avec X-Sib-Sandbox, journal « test », rien livré', async () => {
+    const s = await demarrer('brevo-test-email.db', { brevo: true, modeTest: true })
+    try {
+      const c = (await s.api('POST', `/commerces/${AH}/clients`, { prenom: 'Marc', contact: 'marc@exemple.fr', consentementRelance: true }, PIN)).contenu.client as Client
+      const ok = await s.api('POST', `/commerces/${AH}/clients/${c.id}/relance`, { modele: 'anniversaire' }, PIN)
+      assert.equal(ok.statut, 200)
+      assert.deepEqual([ok.contenu.envoye, ok.contenu.test, ok.contenu.canal], [false, true, 'email'])
+      assert.equal(s.appels.length, 1)
+      assert.equal(s.appels[0].url, 'https://api.brevo.com/v3/smtp/email')
+      const corps = JSON.parse(s.appels[0].corps)
+      assert.equal(corps.headers['X-Sib-Sandbox'], 'drop')
+      assert.ok(corps.headers['List-Unsubscribe'].includes('/api/v1/desinscription/'), 'List-Unsubscribe conservé en sandbox')
+      assert.deepEqual((await s.envois()).map((x) => [x.canal, x.statut]), [['email', 'test']])
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('repli Twilio aussi simulé en mode test (aucun vrai SMS par la porte de derrière)', async () => {
+    const s = await demarrer('brevo-test-twilio.db', { twilio: true, modeTest: true })
+    try {
+      const c = (await s.api('POST', `/commerces/${AH}/clients`, { contact: '0611111111', consentementRelance: true }, PIN)).contenu.client as Client
+      const ok = await s.api('POST', `/commerces/${AH}/clients/${c.id}/relance`, { modele: 'bienvenue' }, PIN)
+      assert.equal(ok.statut, 200)
+      assert.deepEqual([ok.contenu.envoye, ok.contenu.test], [false, true])
+      assert.equal(s.appels.length, 0)
+      assert.deepEqual((await s.envois()).map((x) => [x.canal, x.statut]), [['sms', 'test']])
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('tournée automatique en mode test : relances simulées, journal « test », aucun appel', async () => {
+    const s = await demarrer('brevo-test-auto.db', { brevoSms: true, modeTest: true })
+    try {
+      const c = (await s.api('POST', `/commerces/${AH}/clients`, { prenom: 'Ines', contact: '0611111111', consentementRelance: true }, PIN)).contenu.client as Client
+      s.modifier(c.id, { derniereVisite: new Date(s.horloge.t.getTime() - 40 * JOUR).toISOString(), visites: [new Date(s.horloge.t.getTime() - 40 * JOUR).toISOString()] })
+      await s.api('PATCH', `/commerces/${AH}`, { relancesAuto: { inactif: true } }, PIN)
+      await s.api('GET', `/commerces/${AH}/etat`, undefined, PIN)
+      await s.app.relancesEnCours()
+      assert.deepEqual((await s.envois()).map((x) => [x.modele, x.statut, x.declencheur]), [['inactif', 'test', 'auto']])
       assert.equal(s.appels.length, 0)
     } finally {
       await s.app.fermer()

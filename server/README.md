@@ -17,7 +17,7 @@ voient enfin **les mêmes données**. Une seule instance Node pour tous les comm
 | `server/stockage-supabase.ts` | **S1** : même contrat sur Supabase (API REST PostgREST, clé service_role). |
 | `supabase/migrations/` | **S1** : schéma Postgres (`0001_schema_initial.sql`) et RLS (`0002_rls.sql`). |
 | `server/wallet.ts` | **V3** : Google Wallet préparé, inactif (voir « Intégrations préparées »). |
-| `server/notifications/` | **P1-B3** : relances SMS (Twilio) / e-mail (Brevo) branchées de bout en bout ; aucun envoi sans clés (501). Voir « SMS / e-mail ». |
+| `server/notifications/` | **P1-B3** : relances SMS / e-mail branchées de bout en bout ; **lot « Brancher Brevo »** : SMS via Brevo (Twilio en repli), e-mail via Brevo ; aucun envoi sans clés (501). Voir « SMS / e-mail » et `docs/BREVO.md`. |
 | `tests/serveur.test.ts` | Tests HTTP réels (port éphémère, base temporaire, `fetch`), lancés par `npm test`. |
 | `tests/migration-pglite.test.ts` | **S2** : la migration Supabase exécutée par un vrai Postgres local (PGlite, WebAssembly). |
 | `render.yaml` (racine) | **S3** : Blueprint Render du serveur (Free, Frankfurt, build / start, `NODE_VERSION`, 4 secrets `sync: false`). Validé par `tests/render-yaml.test.ts`. |
@@ -68,8 +68,9 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `SUPABASE_SERVICE_ROLE_KEY` | — | **S1. Secret serveur.** Clé service_role / `sb_secret_…`. Voir « Supabase » ci-dessous. |
 | `GOOGLE_WALLET_ISSUER_ID` | — | **V3, non configuré.** Identifiant émetteur Google Wallet. |
 | `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` | — | **V3, non configuré.** Chemin du fichier JSON de la clé du compte de service Google. Les deux variables Google Wallet sont nécessaires, sinon `pass.json` répond 501. |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | — | **P1-B3, non configuré.** SMS via Twilio (`TWILIO_FROM` = numéro expéditeur `+33…` ou identifiant de Messaging Service `MG…`). Les trois sont nécessaires, sinon 501. |
-| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | — | **P1-B3, non configuré.** E-mail via Brevo (adresse expéditrice à valider chez Brevo ; nom optionnel). Clé + adresse nécessaires, sinon 501. |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | — | **P1-B3, non configuré.** SMS via Twilio (`TWILIO_FROM` = numéro expéditeur `+33…` ou identifiant de Messaging Service `MG…`). Les trois sont nécessaires, sinon 501. **Depuis le lot « Brancher Brevo » : Twilio n'est plus que le repli SMS** (utilisé seulement si Brevo SMS n'est pas configuré). |
+| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `BREVO_SMS_SENDER` | — | **P1-B3 + lot « Brancher Brevo », non configuré.** E-mail via Brevo (adresse expéditrice à valider chez Brevo ; nom optionnel) **et SMS via Brevo** (`BREVO_SMS_SENDER` = nom d'expéditeur alphanumérique, 11 caractères max, ex. `ASIANHOME`). Clé + adresse nécessaires pour l'e-mail, clé + expéditeur SMS pour le SMS, sinon 501. Procédure complète : `docs/BREVO.md`. |
+| `BREVO_MODE_TEST` | `0` | **Lot « Brancher Brevo », consigne du 10/11/2026 : aucun envoi réel pendant le développement.** `1` = mode test : e-mail en sandbox Brevo (`X-Sib-Sandbox: drop`, rien livré), SMS simulé (aucun appel réseau, Twilio aussi simulé), journal des envois avec le statut `test` (« Test — rien envoyé »), `/sante` → `integrations.modeTest: true`. **À retirer pour envoyer pour de vrai** (plus tard, avec accord explicite — voir `docs/BREVO.md` §5). |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | **P1-B4, non configuré. `GOOGLE_CLIENT_SECRET` = secret serveur.** Identifiants OAuth 2.0 (application Web) du projet Google Cloud approuvé pour les API Business Profile. Les deux sont nécessaires, sinon les routes Google répondent 501. Voir `docs/GOOGLE-BUSINESS.md`. |
 | `GOOGLE_REDIRECT_URI` | `PUBLIC_URL` (ou adresse du serveur) + `/api/v1/commerces/<id>/google/callback` | **P1-B4.** URI de redirection déclarée chez Google, à l'identique. |
 | `GOOGLE_BUSINESS_LOCATION` | — (fiche trouvée à l'import) | **P1-B4, facultatif.** `accounts/<n°>/locations/<n°>` si le compte gère plusieurs fiches et que l'app ne trouve pas la bonne. |
@@ -208,11 +209,11 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 |---|---|---|
 | `POST /sessions` | PIN / code dans le corps | **P0-S1.** `{ role: 'commerce', commerceId, pin }`, `{ role: 'admin', pin }` ou `{ role: 'equipe', commerceId, code }` → 201 `{ jeton, role, commerceId?, membreNom?, expireLe }`. Même anti-bruteforce que les en-têtes (401 / 429), re-hachage scrypt au passage. 503 si `SESSION_SECRET` absente. |
 | `DELETE /sessions` | `X-Session` | **P0-S1.** Révoque le jeton (« Verrouiller ») → `{ ok: true }` ; idempotent ; 401 si jeton absent ou falsifié. |
-| `GET /sante` | public | `{ ok, version, mode, stockage, demo, integrations }` — `integrations` (V3) : `{ googleWallet, appleWallet: 'en_suspens', googleBusinessProfile, sms, email }`, chacun `false` tant que rien n'est configuré. `migrations` : `{ cartiz, programme, relances }` — `relances` = migration 0007 (table `envois`) appliquée. |
+| `GET /sante` | public | `{ ok, version, mode, stockage, demo, integrations }` — `integrations` (V3) : `{ googleWallet, appleWallet: 'en_suspens', googleBusinessProfile, sms, email }`, chacun `false` tant que rien n'est configuré ; `smsPrestataire: 'Brevo' \| 'Twilio'` présent seulement si `sms` est `true` (nom du prestataire SMS effectif, pour la page de confidentialité) ; `modeTest: true` présent seulement si `BREVO_MODE_TEST=1` (aucun envoi réel). `migrations` : `{ cartiz, programme, relances }` — `relances` = migration 0007 (table `envois`) appliquée. |
 | `GET /commerces` | public | Fiches publiques (jamais de PIN ni de hash). |
 | `GET /commerces/:id` | public | Une fiche publique. |
 | `GET /cartes/:clientId` | public | **Ajout V2** (page `#/carte/:clientId` et état de la roue) : `{ client (sans téléphone ni e-mail), commerce (fiche publique), jeu: { statut: 'pret' \| 'sansVisite' \| 'dejaJoue', lotDuJour, codeDuJour, remisDuJour } }`. P0-U3 : `codeDuJour` = code gagnant du tirage **du jour** de ce client (null si perdant ou pas de tirage), re-servi à son titulaire (autre téléphone, cache vidé) ; aucune autre route publique ne renvoie de code. 404 inconnue, 409 commerce inactif. P1-C3 : `historiqueLots` = lots gagnés à la roue (20 derniers, perdants exclus) `{ lot, date, statut: 'valable' \| 'remis' \| 'expire' }`, **sans aucun code**. |
-| `POST /cartes/retrouver` | public | **P1-C3** (« Carte introuvable », audit F-12). `{ contact }` → **toujours 202 `{ ok: true, envoi }`**, que le contact ait une carte ou non ; `envoi` = un prestataire est configuré pour ce canal (Twilio pour un numéro, Brevo pour un e-mail — état du serveur, déjà public dans `/sante`). Si `envoi`, la recherche et l'envoi du lien (`/c/<id>` en SMS, `#/carte/<id>` en e-mail) se font **après** la réponse (le temps de réponse ne trahit rien) ; 3 envois max par contact et par 24 h. Sans prestataire : rien n'est cherché ni envoyé. 400 si le contact est illisible ; limite `ficheClientParIp`. |
+| `POST /cartes/retrouver` | public | **P1-C3** (« Carte introuvable », audit F-12). `{ contact }` → **toujours 202 `{ ok: true, envoi }`**, que le contact ait une carte ou non ; `envoi` = un prestataire est configuré pour ce canal (Brevo pour un numéro comme pour un e-mail, Twilio en repli pour un numéro — état du serveur, déjà public dans `/sante`). Si `envoi`, la recherche et l'envoi du lien (`/c/<id>` en SMS, `#/carte/<id>` en e-mail) se font **après** la réponse (le temps de réponse ne trahit rien) ; 3 envois max par contact et par 24 h. Sans prestataire : rien n'est cherché ni envoyé. 400 si le contact est illisible ; limite `ficheClientParIp`. |
 | `POST /commerces` | admin | `{ nom, type, lienGoogle?, pin, …réglages? }` → crée le commerce (défauts de `nouveauCommerce`). |
 | `PATCH /commerces/:id` | commerçant | Réglages : `nom, type, logo, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, actif`. Tout autre champ → 400. Réapplique les règles d'avis (comme le front). |
 | `PUT /commerces/:id/logo` | commerçant | **P1-B5.** Corps = le fichier brut (pas de JSON). PNG / JPEG / WebP lus dans les octets (le `Content-Type` est ignoré) ; 2 Mo max (413), 100 à 4 096 px de côté, autre format (GIF, SVG, texte…) → 400 avec message clair. Rangé dans `meta` (clé `logo:<id>`, aucune migration) ; `logo` du commerce = `/api/v1/commerces/:id/logo?v=<empreinte>` → `{ commerce, logo: { type, largeur, hauteur, octets } }`. Le front (Réglages) réduit l'image à 512 px en WebP avant l'envoi. |
@@ -257,7 +258,7 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `POST /commerces/:id/clients/:clientId/message-prive` | public (carte + contact) | **P1-C4.** `{ contact, note, texte }` → **201** `{ ok, message: { id, creeLe } }` (ni carte ni contact dans la réponse). Proposé sur l'écran de gain quand le client choisit **3★ ou moins** dans l'app, avant le lien Google (qui reste affiché). Stocké dans `clients.donnees.messagesPrives` (aucune migration), visible par le commerce dans `GET …/etat` (écran #/avis), **jamais renvoyé par `GET /cartes/:id`**, **jamais expédié** (ni SMS ni e-mail). **403** contact différent, 400 note hors 1–5 entier / texte vide / > 1000 car., 404 carte inconnue, **429** au-delà de 3 messages par carte et par jour (20 conservés au plus). Limite `ficheClientParIp` par IP **et** par carte. Effacé avec la fiche (RGPD) et inclus dans l'export individuel. |
 | `POST /commerces/:id/clients/:clientId/relance` | commerçant | **P1-B3.** `{ modele?: 'bienvenue' \| 'proche' \| 'inactif' \| 'anniversaire', canal?: 'sms' \| 'email', message? }` (modèle **ou** message libre ; canal par défaut : téléphone → SMS, sinon e-mail). **501** sans prestataire pour ce canal (cas actuel : rien n'est envoyé) ; **409** sans consentement, sans contact pour ce canal, ou même modèle déjà envoyé à ce client aujourd'hui (Paris) ; **503** migration 0007 absente (pas d'envoi sans anti-doublon) ; **502** prestataire en erreur ; 200 `{ envoye, canal, modele, envoi }`. Chaque tentative, même refusée, est journalisée dans `envois`. |
 | `GET /commerces/:id/envois` | commerçant | **P1-B3.** Journal des relances (200 dernières, `?client=<id>` pour un client) → `{ envois: [{ clientPrenom, date, modele, canal, statut, declencheur, auteur, raison? }], migration }`. Aussi dans `GET …/etat` (`envois`). Jamais le téléphone, l'e-mail ni le texte. |
-| `POST /commerces/:id/stop-sms` | public (signature Twilio) | **P1-B3.** Webhook Twilio « A message comes in » : `Body` = STOP / ARRET / DESINSCRIPTION… (casse et accents ignorés, 1er mot) → consentement du client de ce numéro (`From`) retiré, journalisé ; autre mot : rien. **501** sans Twilio configuré, **403** si `X-Twilio-Signature` est fausse. Répond un TwiML vide. |
+| `POST /commerces/:id/stop-sms` | public (signature Twilio) | **P1-B3.** Webhook Twilio « A message comes in » : `Body` = STOP / ARRET / DESINSCRIPTION… (casse et accents ignorés, 1er mot) → consentement du client de ce numéro (`From`) retiré, journalisé ; autre mot : rien. **501** sans Twilio configuré, **403** si `X-Twilio-Signature` est fausse. Répond un TwiML vide. **SMS via Brevo → 501 aussi** (expéditeur alphanumérique : pas de réponse possible ; voir « SMS / e-mail » et `docs/BREVO.md` §6). |
 | `POST /desinscription/:clientId/:jeton` | public (jeton HMAC) | **P1-B3.** Lien de désinscription des e-mails (page `#/desinscription/<clientId>/<jeton>`, bouton « Me désinscrire ») et One-Click `List-Unsubscribe-Post`. Jeton = HMAC du commerce + client (secret tiré une fois, gardé dans `meta`). Idempotent → `{ ok, commerce }` ; 404 lien invalide. |
 | `GET /c/:clientId` (hors `/api`) | public | **P1-B3.** Lien court des SMS → 302 vers `/#/carte/<clientId>`. |
 | `GET /commerces/:id/clients/:clientId/export.csv` | commerçant | **P1-B6.** Toutes les données de CE client en CSV (même format que l'export global : `;`, BOM, anti-injection) : profil, contact, tampons, points, visites, récompenses, échanges, tirages (lot, code, remise), rattrapages, consentement (date, origine), messages, relances. Une ligne par donnée : `rubrique;date;libelle;valeur`. Rien d'un autre client (le parrain n'apparaît que par « oui »), jamais de PIN / hash / code équipe ni d'identifiant technique. Journalisé (action `rgpd`). |
@@ -666,11 +667,11 @@ oubliée en attente de décision. Chaque purge est journalisée (auteur, date, d
 | `server/wallet.ts` | Google Wallet « Generic pass » : JWT signé RS256, OAuth compte de service, création de classe (inactif sans configuration). |
 | `server/wallet-apple.ts` | Apple Wallet `.pkpass` (manifeste, signature CMS, zip) — en suspens, branché sur aucune route. |
 | `server/notifications/index.ts` | Interface d'envoi (`creerNotifications`) : 501 « à brancher » sans clé. |
-| `server/notifications/twilio.ts` | Adaptateur SMS Twilio (API REST Messages). |
-| `server/notifications/brevo.ts` | Adaptateur e-mail Brevo (API `v3/smtp/email`). |
+| `server/notifications/twilio.ts` | Adaptateur SMS Twilio (API REST Messages) — **repli SMS** depuis le lot « Brancher Brevo ». |
+| `server/notifications/brevo.ts` | Adaptateurs Brevo : e-mail (API `v3/smtp/email`) **et SMS (API `v3/transactionalSMS/send`)**. |
 
 Le code des adaptateurs n'a **jamais** été exécuté contre Twilio, Brevo ou Google : il n'est testé qu'avec un `fetch`
-simulé (`tests/integrations-v3.test.ts`). Avant la mise en service, un essai réel sera nécessaire.
+simulé (`tests/integrations-v3.test.ts`, `tests/brevo-sms.test.ts`). Avant la mise en service, un essai réel sera nécessaire.
 
 ### Apple Wallet — EN SUSPENS (décision du 09/11/2026), code prêt mais NON branché
 
@@ -724,11 +725,22 @@ migration à appliquer, table déjà fermée à `anon` / `authenticated` (RLS, 0
 clé dérivée de `GOOGLE_CLIENT_SECRET` : une copie de la base seule ne livre pas le refresh token. Le client secret reste
 dans la variable d'environnement et ne transite jamais par le front.
 
-### SMS / e-mail — relances branchées (P1-B3), en attente des clés
+### SMS / e-mail — relances branchées (P1-B3), SMS via Brevo (lot « Brancher Brevo »), en attente des clés
 
 **État réel (10/11/2026)** : tout le parcours est codé et testé contre des prestataires **simulés** ; aucune clé Twilio ni
 Brevo n'existe, donc en production **rien ne part** : la route relance répond 501 et la tentative est journalisée
-« non branché ». Le code d'appel n'a jamais été exécuté contre le vrai Twilio ni le vrai Brevo.
+« non branché ». Le code d'appel n'a jamais été exécuté contre le vrai Twilio ni le vrai Brevo. **Fournisseur choisi :
+Brevo** (SMS + e-mail, une seule clé API) ; Twilio n'est plus que le repli SMS si Brevo SMS n'est pas configuré.
+Procédure complète de mise en service : **`docs/BREVO.md`** (compte, clé API, expéditeurs, coûts, test).
+
+**Mode test (consigne du 10/11/2026 : aucun envoi réel pendant le développement)** : `BREVO_MODE_TEST=1` —
+e-mail en sandbox Brevo (`X-Sib-Sandbox: drop` : Brevo valide la requête et répond 201 + `messageId`, rien livré,
+rien journalisé chez Brevo), SMS simulé (Brevo ne propose pas de sandbox SMS : aucun appel réseau), Twilio simulé
+lui aussi ; journal des envois avec le statut `test` (« Test — rien envoyé »), route relance → 200
+`{ envoye: false, test: true }`, `/sante` → `integrations.modeTest: true`, écran Messages : ligne « Mode test
+Brevo actif ». La simulation n'occupe pas le créneau anti-doublon du jour : un vrai envoi reste possible le même
+jour une fois le mode test coupé. **Retirer la variable pour envoyer pour de vrai** (plus tard, avec accord
+explicite — voir `docs/BREVO.md` §5).
 
 - **Consentement** : case NON pré-cochée, une ligne, à l'inscription publique (`#/jouer`) et en caisse (écran Clients) ;
   modifiable sur la fiche client (« Le client accepte les relances » / « Retirer le consentement »). Stocké sur le client
@@ -737,9 +749,13 @@ Brevo n'existe, donc en production **rien ne part** : la route relance répond 5
 - **Modèles** (`src/lib/relances.ts`, fonctions pures) : bienvenue, récompense proche (8-9 tampons sur 10, ou carte pleine),
   inactif 30 jours, anniversaire. SMS en alphabet GSM ≤ 160 caractères (1 SMS facturé), nom du commerce, lien court `/c/<id>`,
   mention « STOP ». E-mail : objet + corps vouvoyés, lien vers la carte, lien de désinscription en pied.
-- **STOP (SMS)** : webhook `POST /api/v1/commerces/<id>/stop-sms`, signé par Twilio. **Choix** : désinscription traitée par
-  l'app (pas seulement par la liste d'opposition native de Twilio) pour que le consentement de la fiche reflète le STOP.
-  Selon le pays et le type d'expéditeur, Twilio peut aussi gérer ses propres mots-clés STOP (à vérifier à l'activation).
+- **STOP (SMS)** : webhook `POST /api/v1/commerces/<id>/stop-sms`, signé par Twilio — **seulement quand les SMS
+  partent via Twilio**. **Choix** : désinscription traitée par l'app (pas seulement par la liste d'opposition native
+  de Twilio) pour que le consentement de la fiche reflète le STOP. Selon le pays et le type d'expéditeur, Twilio peut
+  aussi gérer ses propres mots-clés STOP (à vérifier à l'activation). **SMS via Brevo : pas de réponse STOP possible**
+  (expéditeur alphanumérique `ASIANHOME`, pas de numéro destinataire) ; Brevo gère sa propre liste noire quand une
+  réponse est possible, et la route `stop-sms` répond 501 — le consentement se retire alors depuis la fiche client,
+  le lien de désinscription des e-mails, ou auprès du commerçant (voir `docs/BREVO.md` §6).
 - **Désinscription (e-mail)** : **Choix** : lien de l'app (`#/desinscription/<clientId>/<jeton HMAC>`, retrait au clic,
   pas à l'ouverture — un antivirus qui suit les liens ne désinscrit personne) + en-têtes `List-Unsubscribe` /
   `List-Unsubscribe-Post` (bouton « Se désabonner » de Gmail…). Brevo n'ajoute pas de lien de désinscription aux e-mails
@@ -754,13 +770,18 @@ Brevo n'existe, donc en production **rien ne part** : la route relance répond 5
 **Pour activer (à faire par l'utilisateur, comptes payants — rien n'a été créé) :**
 1. Appliquer la migration 0007 (ci-dessous) — sans elle, aucun envoi ne part (503).
 2. Renseigner `PUBLIC_URL` (ex. `https://asian-home-fidelite.onrender.com`).
-3. SMS : compte Twilio, numéro ou Messaging Service expéditeur → `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` ;
-   dans la console Twilio, numéro → *Messaging* → « A message comes in » : Webhook `POST`
-   `<PUBLIC_URL>/api/v1/commerces/<id du commerce>/stop-sms`.
-4. E-mail : compte Brevo, adresse expéditrice validée (domaine authentifié SPF/DKIM conseillé) → `BREVO_API_KEY`,
-   `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`.
-5. Vérifier `/api/v1/sante` → `integrations.sms` / `email` à `true`, `migrations.relances` à `true` ; puis un essai réel
-   sur un client test consentant (son propre numéro), et un STOP en réponse.
+3. SMS + e-mail : compte Brevo → `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` (optionnel),
+   `BREVO_SMS_SENDER` (ex. `ASIANHOME`) — procédure complète : `docs/BREVO.md`. Crédits SMS à acheter
+   (~0,045 € HT / SMS vers la France).
+4. Repli SMS (facultatif) : compte Twilio, numéro ou Messaging Service expéditeur → `TWILIO_ACCOUNT_SID`,
+   `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` ; dans la console Twilio, numéro → *Messaging* → « A message comes in » :
+   Webhook `POST` `<PUBLIC_URL>/api/v1/commerces/<id du commerce>/stop-sms`. Utilisé seulement si Brevo SMS
+   n'est pas configuré.
+5. Vérifier `/api/v1/sante` → `integrations.sms` / `email` à `true`, `migrations.relances` à `true` ; puis vérifier
+   en **mode test** (`BREVO_MODE_TEST=1` : e-mail en sandbox Brevo, SMS simulé, journal « Test — rien envoyé » —
+   voir `docs/BREVO.md` §5). **Aucun essai réel pendant le développement** : le test d'envoi réel se fait plus
+   tard, hors développement, avec l'accord explicite de l'utilisateur (retirer `BREVO_MODE_TEST`, puis
+   `docs/BREVO.md` §5 B).
 
 ### Migration 0007 (journal des envois de relances) — à appliquer avant tout envoi réel
 
