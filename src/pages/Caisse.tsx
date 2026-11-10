@@ -6,7 +6,10 @@ import { echangerContreSession, ErreurApi, type AccesCaisse, type ClientApi, typ
 import { messageGain, normaliserCodeGagnant } from '../lib/roulette'
 import { creerCoffrePin, rangementIndexedDb } from '../data/coffrePin'
 import { ErreurCoffre, journaliserEchec, lireCoffreBorne, MESSAGE_COFFRE_ILLISIBLE } from '../lib/connexion'
-import { recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
+import { tamponsAffiches } from '../lib/fidelite'
+import { creerCodesDuJour, MESSAGE_MODE_DEGRADE } from '../lib/codeDuJour'
+import { aideTampons, recapitulatif, type DemandeConfirmation } from '../lib/ecransCommercant'
+import { Confirmation } from '../components/Confirmation'
 import { analyserMontant, formaterPrix, passageCeJour, pointsPourMontant, soldePoints } from '../lib/points'
 import { niveauClient, reserveUtilisable } from '../lib/programme'
 import { correspondRecherche } from '../lib/recherche'
@@ -46,6 +49,8 @@ const LIBELLES: Record<TypeActionCaisse, string> = { passage: 'Passage', recompe
 function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) {
   const coffre = useMemo(() => creerCoffrePin(stockage('sessionStorage'), rangementIndexedDb('caisse'), globalThis.crypto?.subtle, 'fidelite:caisse'), [])
   const file = useMemo(() => creerFileCaisse(stockage('localStorage'), `fidelite:caisse:file:v1:${commerceId}`), [commerceId])
+  // Codes vérifiés en ligne aujourd'hui sur cet appareil (empreintes) : seul usage, le mode dégradé hors ligne.
+  const codesDuJour = useMemo(() => creerCodesDuJour(stockage('localStorage'), `fidelite:caisse:codes-du-jour:v1:${commerceId}`), [commerceId])
   const cleCache = `fidelite:caisse:cache:v1:${commerceId}`
 
   // Accès de la caisse : session équipe (jeton, cas normal) ou code équipe (repli : serveur sans sessions).
@@ -57,6 +62,9 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
   const [enLigne, setEnLigne] = useState(true)
   const [etatFile, setEtatFile] = useState<EtatFile>(() => file.lire())
   const [erreurAcces, setErreurAcces] = useState<string | null>(null)
+  // Mode dégradé : ouverte hors ligne avec un « code déjà vu », pas encore revérifié par le serveur.
+  const [degrade, setDegrade] = useState(false)
+  const degradeRef = useRef(false)
   const accesRef = useRef<AccesCaisse | null>(null)
   const reponses = useRef(new Map<string, Client>())
 
@@ -81,19 +89,29 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
         ecrireCache({ commerce: r.commerce, clients: r.clients, auteur: r.auteur, synchroLe: new Date().toISOString() })
         setEnLigne(true)
         setErreurAcces(null)
+        // Fin du mode dégradé : le serveur vient d'accepter le code (mémorisé comme un déverrouillage en ligne).
+        if (degradeRef.current && 'code' in a) {
+          degradeRef.current = false
+          setDegrade(false)
+          void codesDuJour.memoriser(a.code)
+          await coffre.memoriser({ role: 'commerce', commerceId, pin: a.code })
+        }
       } catch (e) {
         if (e instanceof ErreurApi && e.horsLigne) setEnLigne(false)
         else if (e instanceof ErreurApi && e.statut === 401) {
+          degradeRef.current = false
+          setDegrade(false)
           accesRef.current = null
           setAcces(null)
           await coffre.oublier()
+          if ('code' in a) codesDuJour.oublier()
           setErreurAcces(
             'jeton' in a ? 'Session de caisse expirée ou fermée : saisissez votre code équipe.' : 'Code équipe refusé (il a peut-être été changé) : saisissez-le à nouveau.',
           )
         } else setErreurAcces(messageErreur(e))
       }
     },
-    [api, coffre, commerceId, ecrireCache],
+    [api, codesDuJour, coffre, commerceId, ecrireCache],
   )
 
   const envoyer = useCallback(
@@ -123,6 +141,15 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
   )
 
   const synchroniser = useCallback(async () => {
+    // Mode dégradé : le code est d'abord revérifié par le serveur (refusé → caisse reverrouillée, actions gardées en file).
+    if (degradeRef.current) {
+      await charger()
+      if (degradeRef.current || !accesRef.current) {
+        const e = file.lire()
+        setEtatFile(e)
+        return e
+      }
+    }
     const e = await file.synchroniser(envoyer)
     setEtatFile(e)
     if (!e.attente.length) await charger()
@@ -189,10 +216,23 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
       ecrireCache({ commerce: r.commerce, clients: r.clients, auteur: r.auteur, synchroLe: new Date().toISOString() })
       setEnLigne(true)
       await coffre.memoriser('jeton' in a ? a : { role: 'commerce', commerceId, pin: saisi })
+      // Vérifié par le serveur à l'instant : empreinte gardée pour la journée (mode dégradé si le réseau tombe ensuite).
+      void codesDuJour.memoriser(saisi)
       void synchroniser()
     } catch (e) {
       journaliserEchec('caisse', e, { stockage: stockage('localStorage') })
-      setErreurAcces(e instanceof ErreurApi && e.horsLigne ?'Serveur injoignable : le code équipe doit être vérifié en ligne une première fois.' : messageErreur(e))
+      const horsLigne = e instanceof ErreurApi && e.horsLigne
+      // Hors ligne seulement : un code déjà vérifié en ligne aujourd'hui sur cet appareil ouvre la caisse en mode dégradé.
+      if (horsLigne && donnees && (await codesDuJour.dejaVu(saisi))) {
+        const a: AccesCaisse = { code: saisi }
+        accesRef.current = a
+        degradeRef.current = true
+        setDegrade(true)
+        setEnLigne(false)
+        setAcces(a)
+        return
+      }
+      setErreurAcces(horsLigne ? 'Serveur injoignable : le code équipe doit être vérifié en ligne une première fois aujourd’hui sur cet appareil.' : messageErreur(e))
     }
   }
 
@@ -201,6 +241,8 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
     // Révocation côté serveur, sans attendre (hors ligne : le jeton expirera seul).
     if (a && 'jeton' in a && a.jeton) void api.fermerSession(a.jeton).catch(() => {})
     accesRef.current = null
+    degradeRef.current = false
+    setDegrade(false)
     setAcces(null)
     await coffre.oublier()
   }
@@ -240,6 +282,7 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
     <Comptoir
       donnees={donnees}
       enLigne={enLigne}
+      degrade={degrade}
       etatFile={etatFile}
       erreurAcces={erreurAcces}
       onGain={gain}
@@ -307,6 +350,7 @@ type Resultat = { statut: 'ok'; client?: Client } | { statut: 'refus' | 'attente
 function Comptoir({
   donnees,
   enLigne,
+  degrade,
   etatFile,
   erreurAcces,
   onGain,
@@ -318,6 +362,7 @@ function Comptoir({
 }: {
   donnees: Cache
   enLigne: boolean
+  degrade: boolean
   etatFile: EtatFile
   erreurAcces: string | null
   onGain(quoi: 'verifier' | 'remettre', code: string): Promise<GainCaisse>
@@ -334,6 +379,9 @@ function Comptoir({
   const [montant, setMontant] = useState('')
   const [enCours, setEnCours] = useState(false)
   const [annonce, setAnnonce] = useState<{ type: 'ok' | 'attente' | 'refus'; texte: string } | null>(null)
+  // Échange de points / récompense : confirmé dans une modale avec récapitulatif (plus de boîte native du navigateur).
+  const [demande, setDemande] = useState<DemandeConfirmation | null>(null)
+  const rechercheRef = useRef<HTMLInputElement>(null)
   const choisi = clients.find((c) => c.id === choisiId) ?? null
   const resultats = recherche.trim() ? clients.filter((c) => correspondRecherche(c, recherche)).slice(0, 8) : []
   const centimes = analyserMontant(montant)
@@ -378,6 +426,15 @@ function Comptoir({
     if (type === 'passage') setMontant('')
   }
 
+  function confirmer() {
+    const d = demande
+    setDemande(null)
+    if (!d) return
+    if (d.type === 'echange') void agir('echange', { recompenseId: d.recompense.id })
+    else if (d.type === 'attente') void agir('attente', { recompenseId: d.attente.id })
+    else void agir(d.type)
+  }
+
   const statut = libelleFile(etatFile, enLigne)
 
   return (
@@ -386,7 +443,7 @@ function Comptoir({
         <LogoCommerce commerce={commerce} />
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-titre text-xl font-bold">Caisse · {commerce.nom}</h1>
-          <p className="text-sm text-gray-600">Connecté : {auteur.nom}</p>
+          <p className="text-sm text-gray-600">{degrade ? 'Connecté : code reconnu sur cet appareil (nom vérifié au retour du réseau)' : `Connecté : ${auteur.nom}`}</p>
         </div>
         <button className="min-h-11 shrink-0 rounded-xl px-3 text-sm font-semibold text-gray-700 ring-1 ring-gray-300 active:bg-gray-100" onClick={onVerrouiller}>
           🔒 Verrouiller
@@ -408,6 +465,11 @@ function Comptoir({
           </button>
         )}
       </div>
+      {degrade && (
+        <p className="rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-900 ring-2 ring-amber-400" role="status" data-mode-degrade>
+          ⚠ {MESSAGE_MODE_DEGRADE}
+        </p>
+      )}
       <MessageErreur>{erreurAcces}</MessageErreur>
 
       {etatFile.refusees.length > 0 && (
@@ -427,7 +489,7 @@ function Comptoir({
       )}
 
       {scanner ? (
-        <ScannerQr onLu={surQr} onFermer={() => setScanner(false)} />
+        <ScannerQr onLu={surQr} onFermer={() => setScanner(false)} onSaisieManuelle={() => (setScanner(false), setTimeout(() => rechercheRef.current?.focus(), 0))} />
       ) : (
         <section className="carte space-y-3">
           <button className="bouton w-full" onClick={() => setScanner(true)}>
@@ -437,7 +499,7 @@ function Comptoir({
             <label className="etiquette" htmlFor="caisse-recherche">
               Ou chercher : prénom, téléphone ou e-mail
             </label>
-            <input id="caisse-recherche" className="champ" type="search" value={recherche} onChange={(e) => setRecherche(e.target.value)} autoComplete="off" />
+            <input ref={rechercheRef} id="caisse-recherche" className="champ" type="search" value={recherche} onChange={(e) => setRecherche(e.target.value)} autoComplete="off" />
           </div>
           {resultats.length > 0 && (
             <ul className="divide-y divide-gray-100">
@@ -504,7 +566,7 @@ function Comptoir({
                     <ul className="space-y-2">
                       {(choisi.recompensesEnAttente ?? []).map((r) => (
                         <li key={r.id}>
-                          <button className="bouton min-h-12 w-full justify-between bg-green-700 hover:bg-green-800 active:bg-green-900" disabled={enCours} onClick={() => void agir('attente', { recompenseId: r.id })}>
+                          <button className="bouton min-h-12 w-full justify-between bg-green-700 hover:bg-green-800 active:bg-green-900" disabled={enCours} onClick={() => setDemande({ type: 'attente', attente: r })}>
                             <span>🎁 {r.libelle}</span>
                             <span className="text-sm">{r.origine === 'palier' ? 'Palier' : r.origine === 'defi' ? 'Défi' : 'Anniversaire'}</span>
                           </button>
@@ -514,7 +576,7 @@ function Comptoir({
                   </div>
                 )}
                 {reserve && (
-                  <button className="bouton min-h-12 w-full justify-between bg-green-700 hover:bg-green-800 active:bg-green-900" disabled={enCours} onClick={() => void agir('reserve')}>
+                  <button className="bouton min-h-12 w-full justify-between bg-green-700 hover:bg-green-800 active:bg-green-900" disabled={enCours} onClick={() => setDemande({ type: 'reserve' })}>
                     <span>🍜 Plat en réserve</span>
                     <span className="text-sm">avant le {new Date(reserve.expireLe).toLocaleDateString('fr-FR')}</span>
                   </button>
@@ -548,14 +610,26 @@ function Comptoir({
           <button className="bouton min-h-16 w-full text-lg" disabled={enCours || centimes === null} onClick={() => void agir('passage', centimes ? { montantCentimes: centimes } : {})}>
             ＋ Ajouter un passage
           </button>
-          <button
-            className="bouton min-h-16 w-full bg-green-700 text-lg hover:bg-green-800 active:bg-green-900"
-            disabled={enCours || !recompenseDebloquee(choisi, commerce)}
-            onClick={() => void agir('recompense')}
-          >
-            🎁 Valider une récompense
-          </button>
-          {!recompenseDebloquee(choisi, commerce) && <p className="-mt-2 text-sm text-gray-600">Récompense « {commerce.recompense} » : au {commerce.seuilTampons}e tampon.</p>}
+          {(() => {
+            // Aide AU-DESSUS du bouton : ce qu'il manque, et pourquoi le bouton est désactivé.
+            const aide = aideTampons(choisi, commerce)
+            return (
+              <div className="space-y-1">
+                <p id="caisse-aide-tampons" className={`text-sm ${aide.debloquee ? 'font-semibold text-green-800' : 'text-gray-700'}`} data-aide-tampons>
+                  {aide.debloquee ? '🎉' : '⏳'} {aide.texte}
+                </p>
+                <button
+                  className="bouton min-h-16 w-full bg-green-700 text-lg hover:bg-green-800 active:bg-green-900"
+                  disabled={enCours || !aide.debloquee}
+                  aria-describedby="caisse-aide-tampons"
+                  onClick={() => setDemande({ type: 'recompense' })}
+                >
+                  🎁 Valider une récompense
+                </button>
+                {!aide.debloquee && <p className="text-xs text-gray-600">Bouton actif au {commerce.seuilTampons}e tampon.</p>}
+              </div>
+            )
+          })()}
 
           {!!commerce.catalogue?.length && (
             <div>
@@ -566,9 +640,7 @@ function Comptoir({
                     <button
                       className="bouton-secondaire min-h-12 w-full justify-between"
                       disabled={enCours || soldePoints(choisi) < r.cout}
-                      onClick={() => {
-                        if (window.confirm(`Échanger ${r.cout} points de ${nomAffiche(choisi.prenom)} contre « ${r.nom} » ?`)) void agir('echange', { recompenseId: r.id })
-                      }}
+                      onClick={() => setDemande({ type: 'echange', recompense: r })}
                     >
                       <span>{r.nom}</span>
                       <span className="tabular-nums">{r.cout} pts</span>
@@ -587,6 +659,7 @@ function Comptoir({
               {annonce.type === 'refus' ? `Rien n’a été enregistré : ${annonce.texte}` : annonce.texte}
             </p>
           )}
+          {demande && <Confirmation recap={recapitulatif(demande, choisi, commerce)} enCours={enCours} onConfirmer={confirmer} onAnnuler={() => setDemande(null)} />}
         </section>
       )}
       {!choisi && annonce && <MessageErreur>{annonce.texte}</MessageErreur>}

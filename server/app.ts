@@ -2291,6 +2291,18 @@ export async function creerServeur(o: OptionsServeur) {
         await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'equipe', `Membre modifié : ${membre.nom}${code ? ' (nouveau code)' : ''}`)
         return { json: { membre } }
       }
+      // Réaffichage unique d'un code (P1-C6) : le serveur n'a que le haché, il ne renvoie JAMAIS le code. Il exige le PIN
+      // gérant lui-même (une session ne suffit pas : on revérifie la personne) et journalise le réaffichage ; le code est
+      // montré par l'appareil qui vient de le saisir (mémoire de la page), une seule fois.
+      if (sousId && action === 'reaffichage' && m === 'POST') {
+        const pin = enTete(req, 'x-commerce-pin')
+        if (!pin) throw err(401, 'PIN gérant requis pour réafficher un code.')
+        await verifierPinCommerce(ipDe(req), id, pin)
+        const existant = (await st.membres(id)).find((x) => x.membre.id === sousId)
+        if (!existant) throw err(404, 'Membre inconnu dans cette équipe.')
+        await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'equipe', `Code de ${existant.membre.nom} réaffiché une fois (PIN gérant)`)
+        return { json: { ok: true } }
+      }
       throw err(405, 'Méthode non autorisée.')
     }
 

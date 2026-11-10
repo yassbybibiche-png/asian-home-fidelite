@@ -376,6 +376,9 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     majMembre: (commerceId: string, acces: Acces, membreId: string, champs: { nom?: string; code?: string }) =>
       requete('PATCH', `/commerces/${enc(commerceId)}/equipe/${enc(membreId)}`, { acces, corps: champs }) as Promise<{ membre: MembreEquipe }>,
     supprimerMembre: (commerceId: string, acces: Acces, membreId: string) => requete('DELETE', `/commerces/${enc(commerceId)}/equipe/${enc(membreId)}`, { acces }),
+    /** Réaffichage unique d'un code (P1-C6) : le PIN gérant lui-même est exigé (pas la session) ; le serveur journalise, ne renvoie aucun code. */
+    journaliserReaffichage: (commerceId: string, pinGerant: string, membreId: string) =>
+      requete('POST', `/commerces/${enc(commerceId)}/equipe/${enc(membreId)}/reaffichage`, { acces: { role: 'commerce', commerceId, pin: pinGerant } }) as Promise<{ ok: true }>,
     messages: async (commerceId: string, acces: Acces) =>
       ((await requete('GET', `/commerces/${enc(commerceId)}/messages`, { acces })) as { messages: MessageCommercant[] }).messages,
     envoyerMessage: async (commerceId: string, acces: Acces, cible: Cible, texte: string) =>

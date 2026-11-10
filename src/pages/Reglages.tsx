@@ -314,7 +314,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
 
         <div className="space-y-3 border-t border-gray-100 pt-3">
           <Interrupteur libelle="Parrainage (les deux gagnent)" aide="Code unique par client, partageable. Les points sont versés après la 1re visite du filleul — jamais à l’inscription." actif={programme.parrainage?.actif ?? true} onChange={(v) => majBloc('parrainage', { actif: v })} />
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Nombre id="pr-parrain" libelle="Points du parrain" valeur={programme.parrainage?.pointsParrain} defaut={50} min={0} max={500} onChange={(v) => majBloc('parrainage', { pointsParrain: v })} />
             <Nombre id="pr-filleul" libelle="Points du filleul" valeur={programme.parrainage?.pointsFilleul} defaut={50} min={0} max={500} onChange={(v) => majBloc('parrainage', { pointsFilleul: v })} />
             <Nombre id="pr-plafond" libelle="Plafond / an" valeur={programme.parrainage?.plafondAn} defaut={12} min={1} max={100} aide="Anti-abus." onChange={(v) => majBloc('parrainage', { plafondAn: v })} />
@@ -352,7 +352,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
 
         <div className="space-y-3 border-t border-gray-100 pt-3">
           <Interrupteur libelle="Relance win-back en 3 temps" aide="Rappel doux à 45 j (sans remise), offre à 60 j (produit offert), dernière chance à 90 j puis arrêt. La séquence s’arrête dès le retour du client." actif={programme.winback?.actif ?? true} onChange={(v) => majBloc('winback', { actif: v })} />
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Nombre id="wb-rappel" libelle="Rappel doux (jours)" valeur={programme.winback?.rappelJours} defaut={45} min={7} max={180} onChange={(v) => majBloc('winback', { rappelJours: v })} />
             <Nombre id="wb-offre" libelle="Offre (jours)" valeur={programme.winback?.offreJours} defaut={60} min={8} max={240} onChange={(v) => majBloc('winback', { offreJours: v })} />
             <Nombre id="wb-derniere" libelle="Dernière chance (jours)" valeur={programme.winback?.derniereJours} defaut={90} min={9} max={300} onChange={(v) => majBloc('winback', { derniereJours: v })} />
@@ -404,7 +404,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
 
         <div className="space-y-3 border-t border-gray-100 pt-3">
           <Interrupteur libelle="Plat en réserve" aide="Après une commande au-dessus du seuil, le client gagne un plat offert à utiliser sous 30 jours — 1 fois par trimestre maximum. Opération limitée : désactivez-la quand vous voulez." actif={programme.reserve?.actif ?? true} onChange={(v) => majBloc('reserve', { actif: v })} />
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Nombre id="res-montant" libelle="Commande minimum (€)" valeur={programme.reserve?.montantMinCentimes != null ? programme.reserve.montantMinCentimes / 100 : undefined} defaut={25} min={5} max={1000} step={5} onChange={(v) => majBloc('reserve', { montantMinCentimes: Math.round(v * 100) })} />
             <Nombre id="res-validite" libelle="Validité (jours)" valeur={programme.reserve?.validiteJours} defaut={30} min={7} max={90} onChange={(v) => majBloc('reserve', { validiteJours: v })} />
             <Nombre id="res-trimestre" libelle="Max / trimestre" valeur={programme.reserve?.parTrimestre} defaut={1} min={1} max={4} onChange={(v) => majBloc('reserve', { parTrimestre: v })} />

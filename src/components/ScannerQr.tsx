@@ -9,7 +9,7 @@ interface Detecteur {
 }
 type ConstructeurDetecteur = new (o: { formats: string[] }) => Detecteur
 
-export function ScannerQr({ onLu, onFermer }: { onLu(texte: string): void; onFermer(): void }) {
+export function ScannerQr({ onLu, onFermer, onSaisieManuelle }: { onLu(texte: string): void; onFermer(): void; onSaisieManuelle?(): void }) {
   const video = useRef<HTMLVideoElement>(null)
   const [erreur, setErreur] = useState<string | null>(null)
   const [pret, setPret] = useState(false)
@@ -88,9 +88,17 @@ export function ScannerQr({ onLu, onFermer }: { onLu(texte: string): void; onFer
         </button>
       </div>
       {erreur ? (
-        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="alert">
-          {erreur}
-        </p>
+        <>
+          <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="alert">
+            {erreur}
+          </p>
+          {/* Caméra refusée / indisponible : la saisie manuelle est proposée ici même, pas seulement après « Fermer ». */}
+          {onSaisieManuelle && (
+            <button type="button" className="bouton w-full" onClick={onSaisieManuelle}>
+              ⌨ Saisir le prénom
+            </button>
+          )}
+        </>
       ) : (
         <>
           <video ref={video} className="aspect-square w-full rounded-2xl bg-gray-900 object-cover" muted playsInline aria-label="Image de la caméra" />

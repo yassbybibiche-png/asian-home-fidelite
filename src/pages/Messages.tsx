@@ -4,6 +4,7 @@ import type { MessageCommercant } from '../data/api'
 import { CIBLES, clientsCibles, texteCible, TYPES_MESSAGES, type Cible } from '../lib/messages'
 import { etatRelances, MENTION_ENVOI } from '../lib/integrations'
 import { libelleModele, libelleStatutEnvoi } from '../lib/relances'
+import { texteEtContacts } from '../lib/ecransCommercant'
 import { dateRelative } from '../lib/format'
 import type { EnvoiRelance } from '../types'
 import { BoutonCopier, EnTete, MessageErreur, Vide } from '../components/ui'
@@ -147,7 +148,7 @@ export default function Messages() {
     }
   }
 
-  const contacts = cibles.map((c) => c.telephone ?? c.email).filter(Boolean).join(', ')
+  const contacts = cibles.map((c) => c.telephone ?? c.email ?? '')
 
   return (
     <div className="space-y-5">
@@ -200,10 +201,12 @@ export default function Messages() {
           </label>
           <textarea id="message-texte" className="champ min-h-28" maxLength={600} value={texte} onChange={(e) => setTexte(e.target.value)} />
         </div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <BoutonCopier texte={texte} libelle="Copier le texte" className="bouton-secondaire w-full" />
-          <BoutonCopier texte={contacts} libelle={`Copier les ${cibles.length} contact(s)`} className="bouton-secondaire w-full" />
-        </div>
+        {/* Un seul tap : le texte puis la liste des contacts, à coller dans votre messagerie. */}
+        <BoutonCopier texte={texteEtContacts(texte, contacts)} libelle={`Copier le texte + ${cibles.length} contact(s)`} className="bouton-secondaire w-full" />
+        <p className="rounded-xl bg-gray-50 p-2 text-xs text-gray-700 ring-1 ring-gray-200" data-rien-envoye>
+          Rien n’est envoyé par SMS ni par e-mail depuis cet écran : sans les clés des prestataires configurées sur le serveur, SMS et e-mail ne sont pas branchés. Collez
+          le texte dans votre messagerie et envoyez-le vous-même.
+        </p>
         <button className="bouton w-full" disabled={enCours || !texte.trim() || !cibles.length} onClick={() => void deposer()}>
           {enCours ? 'Dépôt…' : 'Déposer dans l’espace client'}
         </button>
