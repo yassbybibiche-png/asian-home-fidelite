@@ -1,7 +1,7 @@
 // API REST /api/v1 (module `node:http`, aucune dépendance npm).
 // Les règles métier ne sont PAS réécrites ici : elles viennent de `src/lib/*` (les mêmes que le front).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomInt, randomUUID, scrypt, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
@@ -62,6 +62,8 @@ export interface OptionsServeur {
   googleWallet?: ConfigGoogleWallet
   /** Prestataires SMS / e-mail (V3) : absents = 501 « à brancher », rien n'est envoyé. */
   notifications?: ConfigNotifications
+  /** Secret de signature des jetons de session (SESSION_SECRET) ; absent = POST /sessions répond 503, le PIN en en-tête reste accepté. */
+  secretSession?: string
   /** Horloge injectable (tests). */
   maintenant?: () => Date
 }
@@ -82,14 +84,81 @@ const err = (statut: number, message: string) => new ErreurHttp(statut, message)
 
 const PIN_VALIDE = /^\d{4,6}$/
 
-export function hacherPin(pin: string, sel = randomBytes(16).toString('hex')): Pin {
+// Format du hash (colonnes `pin_hash` / `code_hash`, aucune colonne en plus — voir server/README.md) :
+// • actuel : `scrypt$v1$<128 hex>` = scrypt(PIN, sel, 64 o, N=16384, r=8, p=1) ;
+// • ancien : 64 hex nus = SHA-256(`<sel>:<PIN>`), 1 itération. Toujours accepté, re-haché en scrypt au 1er accès réussi.
+const PREFIXE_SCRYPT = 'scrypt$v1$'
+const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
+const LONGUEUR_SCRYPT = 64
+const ANCIEN_HASH = /^[0-9a-f]{64}$/
+
+function scryptHex(pin: string, sel: string): Promise<string> {
+  return new Promise((ok, ko) => scrypt(pin, sel, LONGUEUR_SCRYPT, SCRYPT, (e, cle) => (e ? ko(e) : ok(cle.toString('hex')))))
+}
+
+export async function hacherPin(pin: string, sel = randomBytes(16).toString('hex')): Promise<Pin> {
+  return { sel, hash: PREFIXE_SCRYPT + (await scryptHex(pin, sel)) }
+}
+
+/** Ancien format (SHA-256, 1 itération) : uniquement pour les tests de migration — ne plus jamais l'écrire. */
+export function hacherPinAncien(pin: string, sel = randomBytes(16).toString('hex')): Pin {
   return { sel, hash: createHash('sha256').update(`${sel}:${pin}`).digest('hex') }
 }
 
-function pinCorrect(pin: string, attendu: Pin): boolean {
-  const a = Buffer.from(hacherPin(pin, attendu.sel).hash, 'hex')
-  const b = Buffer.from(attendu.hash, 'hex')
-  return a.length === b.length && timingSafeEqual(a, b)
+const egaux = (a: Buffer, b: Buffer) => a.length === b.length && timingSafeEqual(a, b)
+
+/** Vérifie un PIN / code contre un hash des deux formats ; `rehacher` = hash ancien format, à remplacer par scrypt. */
+export async function pinCorrect(pin: string, attendu: Pin | undefined): Promise<{ ok: boolean; rehacher: boolean }> {
+  if (!attendu) return { ok: false, rehacher: false }
+  if (attendu.hash.startsWith(PREFIXE_SCRYPT)) {
+    const ok = egaux(Buffer.from(await scryptHex(pin, attendu.sel), 'hex'), Buffer.from(attendu.hash.slice(PREFIXE_SCRYPT.length), 'hex'))
+    return { ok, rehacher: false }
+  }
+  if (ANCIEN_HASH.test(attendu.hash)) {
+    const ok = egaux(Buffer.from(hacherPinAncien(pin, attendu.sel).hash, 'hex'), Buffer.from(attendu.hash, 'hex'))
+    return { ok, rehacher: ok }
+  }
+  return { ok: false, rehacher: false }
+}
+
+// ---------- Jetons de session ----------
+// `v1.<base64url(JSON)>.<base64url(HMAC-SHA256(SESSION_SECRET, <base64url(JSON)>))>` — signé, pas chiffré :
+// le contenu (rôle, commerce, nom du membre) n'a rien de secret ; seul le secret du serveur permet d'en fabriquer un.
+
+export type RoleSession = 'commerce' | 'admin' | 'equipe'
+
+export interface ChargeSession {
+  jti: string
+  role: RoleSession
+  commerceId?: string
+  membreId?: string
+  nom?: string
+  /** Expiration, en secondes unix. */
+  exp: number
+}
+
+const DUREE_SESSION_S: Record<RoleSession, number> = { commerce: 8 * 3600, admin: 8 * 3600, equipe: 12 * 3600 }
+
+const signature = (secret: string, charge: string) => createHmac('sha256', secret).update(charge).digest()
+
+export function emettreJeton(secret: string, c: ChargeSession): string {
+  const charge = Buffer.from(JSON.stringify(c)).toString('base64url')
+  return `v1.${charge}.${signature(secret, charge).toString('base64url')}`
+}
+
+/** Jeton bien formé et signé par ce secret (l'expiration et la révocation sont vérifiées à part) ; sinon null. */
+export function lireJeton(secret: string, jeton: string): ChargeSession | null {
+  const parties = jeton.split('.')
+  if (parties.length !== 3 || parties[0] !== 'v1' || jeton.length > 2048) return null
+  if (!egaux(Buffer.from(parties[2], 'base64url'), signature(secret, parties[1]))) return null
+  try {
+    const c = JSON.parse(Buffer.from(parties[1], 'base64url').toString('utf8')) as ChargeSession
+    const roleOk = c.role === 'admin' || ((c.role === 'commerce' || c.role === 'equipe') && typeof c.commerceId === 'string')
+    if (!roleOk || typeof c.jti !== 'string' || !Number.isInteger(c.exp) || (c.role === 'equipe' && typeof c.membreId !== 'string')) return null
+    return c
+  } catch {
+    return null
+  }
 }
 
 // ---------- Anti-bruteforce (en mémoire) ----------
@@ -317,11 +386,13 @@ async function initialiser(st: Stockage, o: OptionsServeur) {
       throw new Error('Base vide : un PIN initial (4 à 6 chiffres) est requis pour Asian Home Paris (variable PIN_ASIAN_HOME).')
     }
     const [asianHome] = seed.commerces as unknown as Commerce[]
+    // Haché avant la transaction : scrypt est asynchrone (pool de threads), rien ne doit attendre BEGIN … COMMIT.
+    const pinAsianHome = await hacherPin(o.pinInitial)
     await st.transaction(async () => {
       // Le vrai commerce, SANS les clients / avis / tirages fictifs du seed.
       // (Déjà présent : démarrage précédent interrompu avant la ligne `meta` — possible sous Supabase, sans transaction.)
       if (!(await st.commerce(asianHome.id))) {
-        await sansDoublon(st.ajouterCommerce({ ...asianHome, creeLe: new Date().toISOString(), demo: false }, hacherPin(o.pinInitial!)))
+        await sansDoublon(st.ajouterCommerce({ ...asianHome, creeLe: new Date().toISOString(), demo: false }, pinAsianHome))
       }
       await st.majMeta('initialise', new Date().toISOString())
     })
@@ -330,8 +401,9 @@ async function initialiser(st: Stockage, o: OptionsServeur) {
     const pin = o.pinInitial && PIN_VALIDE.test(o.pinInitial) ? o.pinInitial : '1234'
     const demo = seedRecale()
     const ids = new Set(demo.commerces.slice(1).map((c) => c.id))
+    const pinDemo = await hacherPin(pin)
     await st.transaction(async () => {
-      for (const c of demo.commerces) if (ids.has(c.id) && !(await st.commerce(c.id))) await sansDoublon(st.ajouterCommerce({ ...c, demo: true }, hacherPin(pin)))
+      for (const c of demo.commerces) if (ids.has(c.id) && !(await st.commerce(c.id))) await sansDoublon(st.ajouterCommerce({ ...c, demo: true }, pinDemo))
       for (const c of demo.clients) if (ids.has(c.commerceId)) await sansDoublon(st.ajouterClient(c))
       for (const t of demo.tirages) if (ids.has(t.commerceId)) await sansDoublon(st.ajouterTirage(t))
       for (const a of demo.avis) if (ids.has(a.commerceId)) await sansDoublon(st.ajouterAvis(a))
@@ -410,7 +482,8 @@ export async function creerServeur(o: OptionsServeur) {
   }
   const limiteur = creerLimiteur()
   const maintenant = o.maintenant ?? (() => new Date())
-  const adminPin = hacherPin(o.adminPin)
+  // En mémoire seulement : haché directement en scrypt à chaque démarrage.
+  const adminPin = await hacherPin(o.adminPin)
   const notifications = creerNotifications(o.notifications)
   const integrations = () => ({
     googleWallet: walletConfigure(o.googleWallet),
@@ -427,53 +500,206 @@ export async function creerServeur(o: OptionsServeur) {
     return typeof v === 'string' && v ? v : undefined
   }
 
-  function exigerAdmin(req: IncomingMessage) {
-    const pin = enTete(req, 'x-admin-pin')
-    if (!pin) throw err(401, 'PIN admin manquant (en-tête X-Admin-PIN).')
-    const ip = ipDe(req)
+  /** Re-hachage scrypt d'un hash ancien format après un accès réussi : best-effort, ne fait jamais échouer l'accès. */
+  async function rehacher(quoi: string, ecrire: (p: Pin) => unknown) {
+    try {
+      await ecrire(await hacherPin(quoi))
+    } catch (e) {
+      console.warn(`[serveur] re-hachage scrypt reporté au prochain accès : ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
+  // ---- Vérification des secrets (PIN admin, PIN commerce, code équipe) : limiteur anti-bruteforce + re-hachage ----
+
+  async function verifierPinAdmin(ip: string, pin: string) {
     limiteur.verifier(ip)
-    if (!pinCorrect(pin, adminPin)) {
+    if (!(await pinCorrect(pin, adminPin)).ok) {
       limiteur.echec(ip)
       throw err(401, 'PIN admin incorrect.')
     }
   }
 
-  /** PIN du commerce (X-Commerce-PIN) ; le PIN admin (X-Admin-PIN) ouvre aussi tous les commerces. */
-  async function exigerCommercant(req: IncomingMessage, commerceId: string) {
-    if (enTete(req, 'x-admin-pin')) return exigerAdmin(req)
-    const pin = enTete(req, 'x-commerce-pin')
-    if (!pin) throw err(401, 'PIN commerçant manquant (en-tête X-Commerce-PIN).')
-    const ip = ipDe(req)
+  async function verifierPinCommerce(ip: string, commerceId: string, pin: string) {
     limiteur.verifier(ip)
-    if (!pinCorrect(pin, (await st.pin(commerceId))!)) {
+    const r = await pinCorrect(pin, await st.pin(commerceId))
+    if (!r.ok) {
       limiteur.echec(ip)
       throw err(401, 'PIN commerçant incorrect.')
     }
+    if (r.rehacher) await rehacher(pin, (p) => st.majPin(commerceId, p))
   }
 
-  const aUnPin = (req: IncomingMessage) => !!(enTete(req, 'x-commerce-pin') || enTete(req, 'x-admin-pin'))
-
-  type Auteur = EntreeJournal['auteur']
-
-  /**
-   * Auteur d'une action de caisse : membre de l'équipe (X-Equipe-Code, 4 chiffres) ou gérant (PIN commerce / admin).
-   * Le code n'est jamais renvoyé ni écrit dans le journal : seul le nom du membre l'est.
-   */
-  async function exigerAuteur(req: IncomingMessage, commerceId: string): Promise<{ auteur: Auteur; membre?: MembreEquipe }> {
-    const code = enTete(req, 'x-equipe-code')
-    if (!code) {
-      await exigerCommercant(req, commerceId)
-      return { auteur: { type: 'gerant', nom: enTete(req, 'x-admin-pin') ? 'Admin' : 'Gérant' } }
-    }
-    const ip = ipDe(req)
+  async function verifierCodeEquipe(ip: string, commerceId: string, code: string): Promise<MembreEquipe> {
     limiteur.verifier(ip)
-    const trouve = CODE_EQUIPE.test(code) ? (await st.membres(commerceId)).find((m) => pinCorrect(code, m.code)) : undefined
+    let trouve: { membre: MembreEquipe; rehacher: boolean } | undefined
+    if (CODE_EQUIPE.test(code)) {
+      const membres = await st.membres(commerceId)
+      const resultats = await Promise.all(membres.map((m) => pinCorrect(code, m.code)))
+      const i = resultats.findIndex((r) => r.ok)
+      if (i >= 0) trouve = { membre: membres[i].membre, rehacher: resultats[i].rehacher }
+    }
     if (!trouve) {
       if (!(await schemaCartiz())) throw new ErreurMigrationManquante('equipe')
       limiteur.echec(ip)
       throw err(401, 'Code équipe incorrect.')
     }
-    return { auteur: { type: 'membre', id: trouve.membre.id, nom: trouve.membre.nom }, membre: trouve.membre }
+    if (trouve.rehacher) await rehacher(code, (p) => st.majMembre(trouve.membre, p))
+    return trouve.membre
+  }
+
+  // ---- Sessions (X-Session) ----
+
+  // Révocations connues de ce processus (jti → expiration en ms) : seule source tant que la table
+  // `sessions_revoquees` (migration 0005) manque sous Supabase. `nonRevoquees` évite d'interroger la base à chaque
+  // requête (5 min ; Render ne fait tourner qu'une instance, et toute révocation passe d'abord par `revoquees`).
+  const revoquees = new Map<string, number>()
+  const nonRevoquees = new Map<string, number>()
+  const DELAI_CACHE_REVOCATION_MS = 5 * 60_000
+
+  function purgerCaches(t: number) {
+    for (const [jti, fin] of revoquees) if (fin <= t) revoquees.delete(jti)
+    for (const [jti, fin] of nonRevoquees) if (fin <= t) nonRevoquees.delete(jti)
+  }
+
+  async function estRevoquee(c: ChargeSession): Promise<boolean> {
+    if (revoquees.has(c.jti)) return true
+    const t = maintenant().getTime()
+    if ((nonRevoquees.get(c.jti) ?? 0) > t) return false
+    if (await st.sessionRevoquee(c.jti)) {
+      revoquees.set(c.jti, c.exp * 1000)
+      return true
+    }
+    nonRevoquees.set(c.jti, t + DELAI_CACHE_REVOCATION_MS)
+    return false
+  }
+
+  async function revoquer(c: ChargeSession) {
+    revoquees.set(c.jti, c.exp * 1000)
+    nonRevoquees.delete(c.jti)
+    purgerCaches(maintenant().getTime())
+    try {
+      await st.revoquerSession(c.jti, new Date(c.exp * 1000).toISOString(), maintenant().toISOString())
+    } catch (e) {
+      // Base indisponible : la révocation reste en mémoire (perdue au redémarrage, le jeton expire de toute façon).
+      console.warn(`[serveur] révocation de session gardée en mémoire seulement : ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
+  /** Session de l'en-tête X-Session (absente → undefined). Jeton falsifié, expiré ou révoqué → 401. */
+  async function session(req: IncomingMessage): Promise<ChargeSession | undefined> {
+    const jeton = enTete(req, 'x-session')
+    if (!jeton) return undefined
+    const c = o.secretSession ? lireJeton(o.secretSession, jeton) : null
+    if (!c) throw err(401, 'Session invalide : déverrouillez à nouveau.')
+    if (c.exp * 1000 <= maintenant().getTime()) throw err(401, 'Session expirée : déverrouillez à nouveau.')
+    if (await estRevoquee(c)) throw err(401, 'Session fermée : déverrouillez à nouveau.')
+    return c
+  }
+
+  const horsPortee = () => err(403, 'Cette session ne donne pas accès à cette ressource.')
+
+  async function exigerAdmin(req: IncomingMessage) {
+    const s = await session(req)
+    if (s) {
+      if (s.role !== 'admin') throw horsPortee()
+      return
+    }
+    const pin = enTete(req, 'x-admin-pin')
+    if (!pin) throw err(401, 'PIN admin manquant (en-tête X-Admin-PIN).')
+    await verifierPinAdmin(ipDe(req), pin)
+  }
+
+  /**
+   * Session (X-Session, prioritaire) ou PIN du commerce (X-Commerce-PIN) ; le PIN admin (X-Admin-PIN) ou une session
+   * admin ouvrent aussi tous les commerces. Le PIN en en-tête reste accepté (compatibilité, à déprécier).
+   * Retourne le nom de l'auteur pour le journal.
+   */
+  async function exigerCommercant(req: IncomingMessage, commerceId: string): Promise<'Admin' | 'Gérant'> {
+    const s = await session(req)
+    if (s) {
+      if (s.role === 'admin') return 'Admin'
+      if (s.role === 'commerce' && s.commerceId === commerceId) return 'Gérant'
+      throw horsPortee()
+    }
+    if (enTete(req, 'x-admin-pin')) {
+      await exigerAdmin(req)
+      return 'Admin'
+    }
+    const pin = enTete(req, 'x-commerce-pin')
+    if (!pin) throw err(401, 'PIN commerçant manquant (en-tête X-Commerce-PIN).')
+    await verifierPinCommerce(ipDe(req), commerceId, pin)
+    return 'Gérant'
+  }
+
+  const aUnPin = (req: IncomingMessage) => !!(enTete(req, 'x-commerce-pin') || enTete(req, 'x-admin-pin') || enTete(req, 'x-session'))
+
+  type Auteur = EntreeJournal['auteur']
+
+  /**
+   * Auteur d'une action de caisse : membre de l'équipe (session équipe, ou X-Equipe-Code à 4 chiffres) ou gérant
+   * (session / PIN commerce / admin). Le code n'est jamais renvoyé ni écrit dans le journal : seul le nom du membre l'est.
+   */
+  async function exigerAuteur(req: IncomingMessage, commerceId: string): Promise<{ auteur: Auteur; membre?: MembreEquipe }> {
+    const s = await session(req)
+    if (s?.role === 'equipe') {
+      if (s.commerceId !== commerceId) throw horsPortee()
+      // Membre retiré de l'équipe depuis l'ouverture de la session : la session ne vaut plus rien.
+      const membre = (await st.membres(commerceId)).find((m) => m.membre.id === s.membreId)?.membre
+      if (!membre) throw err(401, 'Session fermée : ce membre ne fait plus partie de l’équipe.')
+      return { auteur: { type: 'membre', id: membre.id, nom: membre.nom }, membre }
+    }
+    const code = enTete(req, 'x-equipe-code')
+    if (s || !code) return { auteur: { type: 'gerant', nom: await exigerCommercant(req, commerceId) } }
+    const membre = await verifierCodeEquipe(ipDe(req), commerceId, code)
+    return { auteur: { type: 'membre', id: membre.id, nom: membre.nom }, membre }
+  }
+
+  /** POST /sessions : échange un PIN / code équipe contre un jeton court. */
+  async function ouvrirSession(req: IncomingMessage) {
+    if (!o.secretSession) throw err(503, 'Sessions non configurées sur ce serveur (SESSION_SECRET absente) : le PIN reste utilisé.')
+    const corps = await lireCorps(req)
+    const ip = ipDe(req)
+    const secret = (v: unknown, champ: string) => {
+      if (typeof v !== 'string' || !v) throw err(400, `« ${champ} » est requis.`)
+      return v
+    }
+    const c: ChargeSession = { jti: randomUUID(), role: 'admin', exp: 0 }
+    if (corps.role === 'admin') {
+      await verifierPinAdmin(ip, secret(corps.pin, 'pin'))
+    } else if (corps.role === 'commerce' || corps.role === 'equipe') {
+      const commerceId = texte(corps.commerceId, 'commerceId', 80, { requis: true })
+      await commerceOu404(commerceId)
+      c.role = corps.role
+      c.commerceId = commerceId
+      if (corps.role === 'commerce') await verifierPinCommerce(ip, commerceId, secret(corps.pin, 'pin'))
+      else {
+        const membre = await verifierCodeEquipe(ip, commerceId, secret(corps.code, 'code'))
+        c.membreId = membre.id
+        c.nom = membre.nom
+      }
+    } else throw err(400, '« role » doit valoir "commerce", "admin" ou "equipe".')
+    c.exp = Math.floor(maintenant().getTime() / 1000) + DUREE_SESSION_S[c.role]
+    return {
+      statut: 201,
+      json: {
+        jeton: emettreJeton(o.secretSession, c),
+        role: c.role,
+        ...(c.commerceId ? { commerceId: c.commerceId } : {}),
+        ...(c.nom ? { membreNom: c.nom } : {}),
+        expireLe: new Date(c.exp * 1000).toISOString(),
+      },
+    }
+  }
+
+  /** DELETE /sessions : révoque le jeton de l'en-tête X-Session (idempotent ; un jeton déjà expiré n'a rien à révoquer). */
+  async function fermerSession(req: IncomingMessage) {
+    if (!o.secretSession) throw err(503, 'Sessions non configurées sur ce serveur (SESSION_SECRET absente).')
+    const jeton = enTete(req, 'x-session')
+    if (!jeton) throw err(401, 'Session manquante (en-tête X-Session).')
+    const c = lireJeton(o.secretSession, jeton)
+    if (!c) throw err(401, 'Session invalide.')
+    if (c.exp * 1000 > maintenant().getTime()) await revoquer(c)
+    return { json: { ok: true } }
   }
 
   async function journaliser(commerceId: string, auteur: Auteur, action: EntreeJournal['action'], details: string, client?: Client, date = maintenant()) {
@@ -535,7 +761,8 @@ export async function creerServeur(o: OptionsServeur) {
   }
 
   async function verifierCodeLibre(commerceId: string, code: string, sauf?: string) {
-    if ((await st.membres(commerceId)).some((m) => m.membre.id !== sauf && pinCorrect(code, m.code))) {
+    const autres = (await st.membres(commerceId)).filter((m) => m.membre.id !== sauf)
+    if ((await Promise.all(autres.map((m) => pinCorrect(code, m.code)))).some((r) => r.ok)) {
       throw err(409, 'Ce code est déjà utilisé par un autre membre de l’équipe : choisissez-en un autre.')
     }
   }
@@ -689,18 +916,23 @@ export async function creerServeur(o: OptionsServeur) {
       }
       throw err(404, 'Carte de fidélité introuvable.')
     }
+    if (ressource === 'sessions' && !id) {
+      if (m === 'POST') return ouvrirSession(req)
+      if (m === 'DELETE') return fermerSession(req)
+      throw err(405, 'Méthode non autorisée.')
+    }
     if (ressource !== 'commerces') throw err(404, 'Route inconnue.')
 
     if (!id) {
       if (m === 'GET') return { json: { commerces: (await st.commerces()).map(commercePublic) } }
       if (m === 'POST') {
-        exigerAdmin(req)
+        await exigerAdmin(req)
         const corps = await lireCorps(req)
         const { pin, nom, type, lienGoogle, ...reglages } = corps
         const pinClair = pinNeuf(pin)
         const base = nouveauCommerce(texte(nom, 'nom', 80, { requis: true }), typeCommerce(type ?? 'autre'), lien(lienGoogle ?? ''))
         const commerce = appliquerReglages(base, reglages, CHAMPS_REGLAGES.filter((k) => !['nom', 'type', 'lienGoogle'].includes(k)))
-        await st.ajouterCommerce(commerce, hacherPin(pinClair))
+        await st.ajouterCommerce(commerce, await hacherPin(pinClair))
         return { statut: 201, json: { commerce: commercePublic(commerce) } }
       }
       throw err(405, 'Méthode non autorisée.')
@@ -743,7 +975,7 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'pin' && m === 'PUT') {
       await exigerCommercant(req, id)
       const corps = await lireCorps(req)
-      await st.majPin(id, hacherPin(pinNeuf(corps.pin)))
+      await st.majPin(id, await hacherPin(pinNeuf(corps.pin)))
       return { json: { ok: true } }
     }
 
@@ -1021,7 +1253,7 @@ export async function creerServeur(o: OptionsServeur) {
         if ((await st.membres(id)).length >= 30) throw err(409, '30 membres maximum par commerce.')
         await verifierCodeLibre(id, code)
         const membre: MembreEquipe = { id: `mb-${randomUUID()}`, commerceId: id, nom, creeLe: maintenant().toISOString() }
-        await st.ajouterMembre(membre, hacherPin(code))
+        await st.ajouterMembre(membre, await hacherPin(code))
         await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'equipe', `Membre ajouté : ${nom}`)
         return { statut: 201, json: { membre } }
       }
@@ -1042,7 +1274,7 @@ export async function creerServeur(o: OptionsServeur) {
         if ('code' in corps) {
           const c = codeEquipe(corps.code)
           await verifierCodeLibre(id, c, sousId)
-          code = hacherPin(c)
+          code = await hacherPin(c)
         }
         await st.majMembre(membre, code)
         // Jamais le code dans le journal : seulement le fait qu'il a changé.
@@ -1236,7 +1468,7 @@ export async function creerServeur(o: OptionsServeur) {
     const entetes: Record<string, string> = {
       'Access-Control-Allow-Origin': o.origineCors ?? '*',
       'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Commerce-PIN, X-Admin-PIN, X-Equipe-Code',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Session, X-Commerce-PIN, X-Admin-PIN, X-Equipe-Code',
       'Access-Control-Max-Age': '600',
     }
     const url = new URL(req.url ?? '/', 'http://localhost')

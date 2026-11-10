@@ -96,11 +96,11 @@ describe('render.yaml (Blueprint Render, phase S3)', () => {
     assert.equal(s.branch, undefined, 'pas de branche en dur : celle choisie à la création du Blueprint')
   })
 
-  test('variables : NODE_VERSION=24 et exactement les 4 secrets en `sync: false`, sans valeur', () => {
+  test('variables : NODE_VERSION=24 et exactement les 5 secrets en `sync: false`, sans valeur', () => {
     const vars = bp.services[0].envVars as Record<string, Valeur>[]
     assert.deepEqual(vars.find((v) => v.key === 'NODE_VERSION'), { key: 'NODE_VERSION', value: '24' })
     const secrets = vars.filter((v) => v.key !== 'NODE_VERSION')
-    assert.deepEqual(secrets.map((v) => v.key), ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ADMIN_PIN', 'PIN_ASIAN_HOME'])
+    assert.deepEqual(secrets.map((v) => v.key), ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ADMIN_PIN', 'PIN_ASIAN_HOME', 'SESSION_SECRET'])
     for (const v of secrets) assert.deepEqual(v, { key: v.key, sync: false }, `${v.key} : aucune valeur dans le fichier`)
     // Jamais en production (voir server/README.md) ; NODE_ENV=production au build retirerait les devDependencies.
     for (const interdite of ['DEMO', 'DB_FILE', 'NODE_ENV', 'PORT', 'SUPABASE_ANON_KEY']) {
@@ -125,8 +125,8 @@ describe('render.yaml (Blueprint Render, phase S3)', () => {
     assert.ok(existsSync(join(RACINE, 'package-lock.json')), '`npm ci` exige package-lock.json')
     const [majeur] = process.versions.node.split('.').map(Number)
     assert.ok(majeur >= 24, 'les tests tournent sous Node 24 comme NODE_VERSION')
-    // Les 4 secrets sont bien ceux que lit le serveur.
+    // Les 5 secrets sont bien ceux que lit le serveur.
     const index = readFileSync(join(RACINE, 'server', 'index.ts'), 'utf8') + readFileSync(join(RACINE, 'server', 'stockage-supabase.ts'), 'utf8')
-    for (const cle of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ADMIN_PIN', 'PIN_ASIAN_HOME']) assert.ok(index.includes(cle), cle)
+    for (const cle of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ADMIN_PIN', 'PIN_ASIAN_HOME', 'SESSION_SECRET']) assert.ok(index.includes(cle), cle)
   })
 })

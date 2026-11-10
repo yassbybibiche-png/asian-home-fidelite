@@ -173,6 +173,27 @@ describe('Migration Supabase exécutée sur Postgres (PGlite)', () => {
     assert.equal(Number(rows[0].n), 0, 'suppression en cascade')
   })
 
+  test('0005_sessions_revoquees : passe après 0001–0004, rejouable ; RLS sans policy, fermée à anon ; le DOWN la retire', async () => {
+    await db.exec(sql('0005_sessions_revoquees.sql'))
+    await db.exec(sql('0005_sessions_revoquees.sql'))
+    const t = await db.query<{ relrowsecurity: boolean }>(`select relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname = 'sessions_revoquees'`)
+    assert.deepEqual(t.rows.map((r) => r.relrowsecurity), [true])
+    assert.equal((await db.query<{ n: number }>(`select count(*)::int as n from pg_policies where schemaname = 'public'`)).rows[0].n, 0)
+    for (const role of ['anon', 'authenticated']) {
+      const { rows } = await db.query<{ ok: boolean }>(`select has_table_privilege($1, 'public.sessions_revoquees', 'select') or has_table_privilege($1, 'public.sessions_revoquees', 'insert') as ok`, [role])
+      assert.equal(rows[0].ok, false, role)
+    }
+    const { rows } = await db.query<{ ok: boolean }>(`select has_table_privilege('service_role', 'public.sessions_revoquees', 'delete') as ok`)
+    assert.equal(rows[0].ok, true)
+    await db.query(`insert into public.sessions_revoquees (jti, expire_le) values ('j1', now() + interval '8 hours')`)
+    assert.equal(await codeErreur(db.query(`insert into public.sessions_revoquees (jti, expire_le) values ('j1', now())`)), '23505')
+    assert.equal(await codeErreur(db.query(`insert into public.sessions_revoquees (jti) values ('j2')`)), '23502', 'expire_le obligatoire')
+    await db.exec(sql('0005_sessions_revoquees.down.sql'))
+    await db.exec(sql('0005_sessions_revoquees.down.sql'))
+    assert.equal((await db.query(`select 1 from pg_class where relnamespace = 'public'::regnamespace and relname = 'sessions_revoquees'`)).rows.length, 0)
+    await db.exec(sql('0005_sessions_revoquees.sql'))
+  })
+
   test('suppression d’un commerce : clients et tirages supprimés en cascade', async () => {
     await db.query(`delete from public.commerces where id = 'c1'`)
     const { rows } = await db.query<{ n: number }>(

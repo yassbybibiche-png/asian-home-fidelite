@@ -68,6 +68,14 @@ export interface Stockage {
   ajouterDemandeRattrapage(d: DemandeRattrapageTrace): P<void>
   /** Tables de la migration 0004 présentes (toujours vrai sous SQLite). */
   schemaProgramme(): P<boolean>
+  /**
+   * Révocation d'un jeton de session (migration 0005 : `sessions_revoquees`). `expireLe` = fin de validité du jeton ;
+   * les révocations déjà expirées avant `maintenant` sont supprimées au passage (nettoyage opportuniste).
+   * Supabase sans la table : lève ErreurMigrationManquante (le serveur garde alors la révocation en mémoire).
+   */
+  revoquerSession(jti: string, expireLe: string, maintenant: string): P<void>
+  /** Jeton révoqué ? Supabase sans la table : false (le serveur consulte d'abord sa mémoire). */
+  sessionRevoquee(jti: string): P<boolean>
   /** Pas d'imbrication. SQLite : vraie transaction. Supabase : voir `stockage-supabase.ts` (pas de transaction multi-requêtes). */
   transaction<T>(fn: () => P<T>): Promise<T>
   fermer(): P<void>
@@ -85,8 +93,8 @@ export class ErreurConflit extends Error {}
  * (équipe, menu) lèvent cette erreur → 503 explicite.
  */
 export class ErreurMigrationManquante extends Error {
-  constructor(table: string) {
-    super(`Fonction pas encore activée : la table « ${table} » n’existe pas. Appliquez la migration supabase/migrations/0003_cartiz.sql dans le SQL Editor de Supabase.`)
+  constructor(table: string, migration = '0003_cartiz.sql') {
+    super(`Fonction pas encore activée : la table « ${table} » n’existe pas. Appliquez la migration supabase/migrations/${migration} dans le SQL Editor de Supabase.`)
   }
 }
 
@@ -133,6 +141,7 @@ const SCHEMA = `
     id TEXT PRIMARY KEY, commerce_id TEXT NOT NULL, client_id TEXT NOT NULL, date TEXT NOT NULL, donnees TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS rattrapages_commerce ON demandes_rattrapage (commerce_id, date);
+  CREATE TABLE IF NOT EXISTS sessions_revoquees (jti TEXT PRIMARY KEY, expire_le TEXT NOT NULL);
 `
 
 type Ligne = { donnees: string }
@@ -176,6 +185,9 @@ export function ouvrirStockage(fichier: string) {
     majMenu: db.prepare('INSERT INTO menus (commerce_id, donnees) VALUES (?, ?) ON CONFLICT (commerce_id) DO UPDATE SET donnees = excluded.donnees'),
     ajoutParrainage: db.prepare('INSERT INTO parrainages (id, commerce_id, parrain_id, filleul_id, date, donnees) VALUES (?, ?, ?, ?, ?, ?)'),
     ajoutRattrapage: db.prepare('INSERT INTO demandes_rattrapage (id, commerce_id, client_id, date, donnees) VALUES (?, ?, ?, ?, ?)'),
+    revoquerSession: db.prepare('INSERT INTO sessions_revoquees (jti, expire_le) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING'),
+    purgerRevocations: db.prepare('DELETE FROM sessions_revoquees WHERE expire_le < ?'),
+    sessionRevoquee: db.prepare('SELECT 1 AS x FROM sessions_revoquees WHERE jti = ?'),
   }
 
   // Les transactions peuvent contenir des `await` (contrat commun avec Supabase) : elles passent une par une
@@ -230,6 +242,12 @@ export function ouvrirStockage(fichier: string) {
     ajouterParrainage: (p: Parrainage) => inserer(q.ajoutParrainage, p.id, p.commerceId, p.parrainId, p.filleulId, p.date, JSON.stringify(p)),
     ajouterDemandeRattrapage: (d: DemandeRattrapageTrace) => inserer(q.ajoutRattrapage, d.id, d.commerceId, d.clientId, d.date, JSON.stringify(d)),
     schemaProgramme: () => true,
+    // Dates ISO UTC (`toISOString`) : l'ordre alphabétique est l'ordre chronologique.
+    revoquerSession: (jti: string, expireLe: string, maintenant: string) => {
+      q.purgerRevocations.run(maintenant)
+      q.revoquerSession.run(jti, expireLe)
+    },
+    sessionRevoquee: (jti: string) => !!q.sessionRevoquee.get(jti),
 
     /** Exécute `fn` d'un bloc : tout est écrit, ou rien. */
     transaction<T>(fn: () => T | Promise<T>): Promise<T> {

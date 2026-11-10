@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 
-import { creerServeur, type OptionsServeur } from '../server/app.ts'
+import { creerServeur, hacherPinAncien, type OptionsServeur } from '../server/app.ts'
 import { ErreurConflit } from '../server/stockage.ts'
 import { configSupabaseDepuisEnv, ouvrirStockageSupabase } from '../server/stockage-supabase.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
@@ -54,6 +54,8 @@ const SCHEMA: Record<string, { pk: string; uniques: Unicite[]; fk?: [string, str
   // 0004_programme.sql
   parrainages: { pk: 'id', uniques: [], fk: [['commerce_id', 'commerces']] },
   demandes_rattrapage: { pk: 'id', uniques: [], fk: [['commerce_id', 'commerces']] },
+  // 0005_sessions_revoquees.sql
+  sessions_revoquees: { pk: 'jti', uniques: [] },
 }
 
 interface Requete {
@@ -64,9 +66,13 @@ interface Requete {
   corps: unknown
 }
 
-/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` : idem pour 0004. */
-function fauxPostgrest({ sans0003 = false, sans0004 = false } = {}) {
-  const absentes = new Set([...(sans0003 ? ['equipe', 'journal', 'menus'] : []), ...(sans0004 ? ['parrainages', 'demandes_rattrapage'] : [])])
+/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` / `sans0005` : idem pour 0004 / 0005. */
+function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false } = {}) {
+  const absentes = new Set([
+    ...(sans0003 ? ['equipe', 'journal', 'menus'] : []),
+    ...(sans0004 ? ['parrainages', 'demandes_rattrapage'] : []),
+    ...(sans0005 ? ['sessions_revoquees'] : []),
+  ])
   const tables: Record<string, Ligne[]> = Object.fromEntries(Object.keys(SCHEMA).map((t) => [t, []]))
   const requetes: Requete[] = []
   const rejets: string[] = []
@@ -82,6 +88,11 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false } = {}) {
     let lignes = tables[table]
     for (const [col, v] of params) {
       if (['select', 'order', 'on_conflict', 'limit'].includes(col)) continue
+      if (v.startsWith('lt.')) {
+        // Seul usage : dates (timestamptz) — nettoyage des sessions révoquées expirées.
+        lignes = lignes.filter((l) => Date.parse(String(l[col])) < Date.parse(v.slice(3)))
+        continue
+      }
       if (!v.startsWith('eq.')) throw new Error(`Opérateur non géré par le faux PostgREST : ${col}=${v}`)
       lignes = lignes.filter((l) => String(l[col]) === v.slice(3))
     }
@@ -121,11 +132,12 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false } = {}) {
 
     if (methode === 'POST') {
       const fusion = (entetes.get('prefer') ?? '').includes('resolution=merge-duplicates')
+      const ignorer = (entetes.get('prefer') ?? '').includes('resolution=ignore-duplicates')
       for (const brute of Array.isArray(corps) ? corps : [corps]) {
         const l: Ligne = { ...structuredClone(brute as Ligne) }
-        const existante = fusion ? tables[table].find((x) => x[params.get('on_conflict') ?? s.pk] === l[params.get('on_conflict') ?? s.pk]) : undefined
+        const existante = fusion || ignorer ? tables[table].find((x) => x[params.get('on_conflict') ?? s.pk] === l[params.get('on_conflict') ?? s.pk]) : undefined
         if (existante) {
-          Object.assign(existante, l)
+          if (fusion) Object.assign(existante, l)
           continue
         }
         if (s.ordre) l.ordre = ++compteur
@@ -415,7 +427,7 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.ok(!existsSync(join(dossier, 'ne-doit-pas-exister.db')), 'aucun fichier SQLite sous Supabase')
       // Initialisation : Asian Home seul, PIN haché (jamais en clair), 0 client.
       assert.deepEqual(f.tables.commerces.map((c) => c.id), [AH])
-      assert.match(String(f.tables.commerces[0].pin_hash), /^[0-9a-f]{64}$/)
+      assert.match(String(f.tables.commerces[0].pin_hash), /^scrypt\$v1\$[0-9a-f]{128}$/)
       assert.ok(!JSON.stringify(f.tables.commerces).includes('"1234"'))
       assert.equal(f.tables.clients.length, 0)
       assert.ok(f.tables.meta.some((m) => m.cle === 'initialise'))
@@ -493,7 +505,7 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
     try {
       const m = await api('POST', `/commerces/${AH}/equipe`, { nom: 'Mai', code: '2468' }, PIN)
       assert.equal(m.statut, 201)
-      assert.match(String(f.tables.equipe[0].code_hash), /^[0-9a-f]{64}$/)
+      assert.match(String(f.tables.equipe[0].code_hash), /^scrypt\$v1\$[0-9a-f]{128}$/)
       assert.ok(!JSON.stringify(f.tables.equipe).includes('2468'), 'code jamais stocké en clair')
       const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
       const p = await api('POST', `/commerces/${AH}/caisse/passage`, { clientId: c.id, montantCentimes: 1200, actionId: 'act-sb-0001' }, { 'X-Equipe-Code': '2468' })
@@ -610,6 +622,81 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
     assert.deepEqual(f.tables.commerces.map((c) => [c.id, (c.donnees as Commerce).demo]), [[AH, false], ['c-atelier-camille', true], ['c-maison-lila', true]])
     assert.ok(f.tables.clients.length > 0 && f.tables.tirages.length > 0 && f.tables.avis.length > 0)
     assert.ok(!f.tables.clients.some((c) => c.commerce_id === AH))
+  })
+
+  // ---------- P0-S1 : PIN scrypt + sessions sous Supabase ----------
+
+  const SECRET = 'secret-de-session-de-test-assez-long-0123456789'
+
+  test('P0-S1 : hash SHA-256 existant en base (pin_hash, code_hash) accepté puis re-haché en scrypt au 1er accès', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f, { secretSession: SECRET })
+    try {
+      assert.equal((await api('POST', `/commerces/${AH}/equipe`, { nom: 'Mai', code: '2468' }, PIN)).statut, 201)
+      // État de la production avant P0-S1 : hash SHA-256 (64 hex nus).
+      const ancienPin = hacherPinAncien('1234')
+      const ancienCode = hacherPinAncien('2468')
+      Object.assign(f.tables.commerces[0], { pin_hash: ancienPin.hash, pin_sel: ancienPin.sel })
+      Object.assign(f.tables.equipe[0], { code_hash: ancienCode.hash, code_sel: ancienCode.sel })
+      assert.equal((await api('POST', '/sessions', { role: 'commerce', commerceId: AH, pin: '9999' })).statut, 401)
+      assert.equal(f.tables.commerces[0].pin_hash, ancienPin.hash, 'mauvais PIN : rien n’est réécrit')
+      assert.equal((await api('POST', '/sessions', { role: 'commerce', commerceId: AH, pin: '1234' })).statut, 201)
+      assert.match(String(f.tables.commerces[0].pin_hash), /^scrypt\$v1\$[0-9a-f]{128}$/)
+      assert.notEqual(f.tables.commerces[0].pin_sel, ancienPin.sel, 'nouveau sel')
+      assert.equal((await api('GET', `/commerces/${AH}/caisse`, undefined, { 'X-Equipe-Code': '2468' })).statut, 200)
+      assert.match(String(f.tables.equipe[0].code_hash), /^scrypt\$v1\$/)
+      // Et ça marche toujours après la migration.
+      assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).statut, 200)
+      assert.equal((await api('GET', `/commerces/${AH}/caisse`, undefined, { 'X-Equipe-Code': '2468' })).statut, 200)
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S1 : révocation persistée dans sessions_revoquees (survit au redémarrage) ; révocations expirées nettoyées', async () => {
+    const f = fauxPostgrest()
+    let jeton = ''
+    let { app, api } = await demarrer(f, { secretSession: SECRET })
+    try {
+      jeton = (await api('POST', '/sessions', { role: 'commerce', commerceId: AH, pin: '1234' })).contenu.jeton
+      assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, { 'X-Session': jeton })).statut, 200)
+      assert.equal((await api('DELETE', '/sessions', undefined, { 'X-Session': jeton })).statut, 200)
+      assert.equal(f.tables.sessions_revoquees.length, 1)
+      assert.deepEqual(Object.keys(f.tables.sessions_revoquees[0]).sort(), ['expire_le', 'jti'], 'ni PIN ni jeton complet en base')
+      assert.equal((await api('DELETE', '/sessions', undefined, { 'X-Session': jeton })).statut, 200, 'idempotent')
+      assert.equal(f.tables.sessions_revoquees.length, 1)
+    } finally {
+      await app.fermer()
+    }
+    ;({ app, api } = await demarrer(f, { secretSession: SECRET }))
+    try {
+      assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, { 'X-Session': jeton })).statut, 401, 'révocation relue en base après redémarrage')
+      // Une révocation déjà expirée est supprimée à la révocation suivante.
+      f.tables.sessions_revoquees.push({ jti: 'vieux', expire_le: '2026-11-01T00:00:00.000Z' })
+      const autre = (await api('POST', '/sessions', { role: 'admin', pin: ADMIN })).contenu.jeton
+      assert.equal((await api('DELETE', '/sessions', undefined, { 'X-Session': autre })).statut, 200)
+      assert.deepEqual(f.tables.sessions_revoquees.map((l) => l.jti).includes('vieux'), false)
+      assert.equal(f.tables.sessions_revoquees.length, 2)
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S1 : production AVANT la migration 0005 — sessions et révocation en mémoire, jamais de 500', async () => {
+    const f = fauxPostgrest({ sans0005: true })
+    const { app, api } = await demarrer(f, { secretSession: SECRET })
+    try {
+      const s = await api('POST', '/sessions', { role: 'commerce', commerceId: AH, pin: '1234' })
+      assert.equal(s.statut, 201)
+      const entete = { 'X-Session': s.contenu.jeton }
+      assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, entete)).statut, 200)
+      assert.equal((await api('DELETE', '/sessions', undefined, entete)).statut, 200)
+      assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, entete)).statut, 401, 'révoquée en mémoire')
+      assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).statut, 200, 'le PIN en en-tête marche toujours')
+      assert.deepEqual(Object.keys((await api('GET', '/sante')).contenu.migrations), ['cartiz', 'programme'], '/sante inchangé')
+    } finally {
+      await app.fermer()
+    }
   })
 })
 
