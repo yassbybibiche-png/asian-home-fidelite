@@ -8,12 +8,13 @@ import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 
 import { creerServeur, type OptionsServeur } from '../server/app.ts'
-import type { Client, EntreeJournal } from '../src/types.ts'
+import type { CategorieMenu, Client, EntreeJournal } from '../src/types.ts'
 import { analyserMontant, pointsPourMontant } from '../src/lib/points.ts'
 import { clientIdDepuisQr, creerFileCaisse, libelleFile, type ActionCaisse, type Envoi } from '../src/lib/fileCaisse.ts'
 import { analyserAnniversaire, clientsCibles, genererMessages } from '../src/lib/messages.ts'
 import { contraste, problemesApparence } from '../src/lib/apparence.ts'
-import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
+import { ErreurMenu, compterPlats, menuDepuisCsv, menuEnCsv, validerMenu } from '../src/lib/menu.ts'
+import { menuReelAsianHome } from '../src/data/menu-reel.ts'
 import { calculerChiffresCartes } from '../src/lib/stats.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import { nouveauClient, validerVisite } from '../src/lib/fidelite.ts'
@@ -370,6 +371,29 @@ describe('Messages, menu, apparence (serveur)', () => {
     assert.equal(pub.contenu.menu.categories[0].produits[0].photo, '/visuels/menu-loc-lac.jpg')
     // Photo locale hors /visuels/ ou URL non https refusée.
     assert.equal((await srv.api('PUT', `/commerces/${AH}/menu`, { categories: [{ nom: 'E', produits: [{ nom: 'N', prix: 100, allergenes: [], photo: '/autre/n.jpg' }] }] }, PIN)).statut, 400)
+  })
+
+  test('menu : carte officielle (81 plats, prix) enregistrée → relue en public à l’identique ; 61 plats acceptés, 121 refusés', async () => {
+    const officiel = menuReelAsianHome()
+    assert.equal((await srv.api('PUT', `/commerces/${AH}/menu`, { categories: officiel.categories }, PIN)).statut, 200)
+    const pub = (await srv.api('GET', `/commerces/${AH}/menu`)).contenu.menu
+    assert.equal(pub.categories.length, 16)
+    assert.equal(compterPlats(pub), 81)
+    const lus = pub.categories.flatMap((c: CategorieMenu) => c.produits.map((p) => [p.nom, p.prix]))
+    assert.deepEqual(lus, officiel.categories.flatMap((c) => c.produits.map((p) => [p.nom, p.prix])))
+    assert.equal(lus.filter(([, prix]: [string, number | null]) => prix === null).length, 3)
+    assert.deepEqual(lus.find(([nom]: [string]) => nom === '6 Maki Gold'), ['6 Maki Gold', 10000])
+    // Le même menu, réimporté depuis son export CSV, est accepté tel quel par le serveur.
+    const csv = menuDepuisCsv(menuEnCsv(pub), AH, horloge)
+    assert.equal((await srv.api('PUT', `/commerces/${AH}/menu`, { categories: csv.categories }, PIN)).statut, 200)
+    assert.equal(compterPlats((await srv.api('GET', `/commerces/${AH}/menu`)).contenu.menu), 81)
+    // L'ancienne limite (60) ne bloque plus ; la nouvelle (120) tient.
+    const plats = (n: number) => ({ categories: [{ nom: 'Tout', produits: Array.from({ length: n }, (_, i) => ({ nom: `Plat ${i + 1}`, prix: 500, allergenes: [] })) }] })
+    assert.equal((await srv.api('PUT', `/commerces/${AH}/menu`, plats(61), PIN)).statut, 200)
+    const refus = await srv.api('PUT', `/commerces/${AH}/menu`, plats(121), PIN)
+    assert.equal(refus.statut, 400)
+    assert.match(JSON.stringify(refus.contenu), /120 produits maximum/)
+    assert.equal(compterPlats((await srv.api('GET', `/commerces/${AH}/menu`)).contenu.menu), 61, 'le refus ne touche pas au menu enregistré')
   })
 
   test('apparence : couleur illisible refusée (contraste), couleur conforme acceptée et publique', async () => {

@@ -68,7 +68,7 @@ describe('Association des visuels au commerce', () => {
 describe('Photo de catégorie de menu', () => {
   test('Sushis → rouleau sur ardoise ; Boissons / Cocktails → cocktails signature ; Thaï et Desserts illustrés', () => {
     assert.deepEqual(photoCategorie('Sushis & Makis'), { src: VISUELS.sushisArdoise, alt: 'Rouleau de sushis sur ardoise' })
-    assert.deepEqual(photoCategorie('Boissons'), { src: VISUELS.cocktails, alt: 'Cocktails signature : Koh Samui, Tokyo et Piña Colada' })
+    assert.deepEqual(photoCategorie('Boissons'), { src: VISUELS.cocktails, alt: 'Cocktails signature : Kohsamui, Tokyo et Piña Colada' })
     assert.equal(photoCategorie('Cocktails signature')?.src, VISUELS.cocktails)
     // Plat thaï non identifié : illustre la catégorie, jamais un plat nommé.
     assert.equal(photoCategorie('Côté thaï')?.src, VISUELS.menuPlatRiz)
@@ -77,6 +77,18 @@ describe('Photo de catégorie de menu', () => {
   })
   test('aucune photo inventée pour les autres catégories', () => {
     for (const nom of ['Entrées', 'Plats', 'Formules', 'Woks', 'Nouilles', 'Asian Street Food', 'Nos Poke Bowl']) {
+      assert.equal(photoCategorie(nom), null, nom)
+    }
+  })
+  test('catégories de la carte officielle (10/11/2026) : makis / sushi / sashimi → ardoise, thaï → ambiance, sinon rien', () => {
+    for (const nom of ['Maki Green x6', 'Maki Black x6', 'Maki Neige x6', 'Maki Pink x6', 'Sashimi', 'Sushi x2']) {
+      assert.equal(photoCategorie(nom)?.src, VISUELS.sushisArdoise, nom)
+    }
+    assert.equal(photoCategorie('Entrées thaï')?.src, VISUELS.menuPlatRiz)
+    assert.equal(photoCategorie('Plats thaï')?.src, VISUELS.menuPlatRiz)
+    assert.equal(photoCategorie('Boissons')?.src, VISUELS.cocktails)
+    assert.equal(photoCategorie('Desserts')?.src, VISUELS.menuMangoStickyRice)
+    for (const nom of ['Salades & accompagnements', 'California x6 — option Crispy +0,50 €', 'Poke Bowl', 'Menu Midi (lundi au vendredi)', 'Spécialités du chef', 'Hors carte (prix à confirmer)']) {
       assert.equal(photoCategorie(nom), null, nom)
     }
   })
