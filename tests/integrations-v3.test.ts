@@ -278,7 +278,7 @@ describe('SMS / e-mail : branchements préparés, aucun envoi', () => {
       assert.equal((await api('POST', `/commerces/${AH}/clients/${sms.id}/relance`, { canal: 'sms' }, PIN)).statut, 409)
       assert.equal(requetes.length, 0)
 
-      // Consentement posé directement en base (aucun écran ne le recueille encore).
+      // Consentement posé directement en base (P1-B3 : aussi recueilli par les écrans, testé dans relances-p1-b3).
       const st = ouvrirStockage(fichierDb)
       for (const c of [sms, mail]) st.majClient({ ...st.client(AH, c.id)!, consentementRelance: true })
       st.fermer()
@@ -286,13 +286,13 @@ describe('SMS / e-mail : branchements préparés, aucun envoi', () => {
       assert.equal((await api('POST', `/commerces/${AH}/clients/${sms.id}/relance`, { canal: 'email' }, PIN)).statut, 409, 'pas d’e-mail')
       const r = await api('POST', `/commerces/${AH}/clients/${sms.id}/relance`, { canal: 'sms' }, PIN)
       assert.equal(r.statut, 200)
-      assert.deepEqual(r.contenu, { envoye: true, canal: 'sms', id: 'SM1' })
+      assert.deepEqual([r.contenu.envoye, r.contenu.canal, r.contenu.modele, r.contenu.id, r.contenu.envoi.statut], [true, 'sms', 'inactif', 'SM1', 'envoye'])
       const t = requetes[0]
       assert.equal(t.url, 'https://api.twilio.com/2010-04-01/Accounts/ACtest/Messages.json')
       const corps = new URLSearchParams(String(t.init.body))
       assert.equal(corps.get('To'), '+33655555555')
       assert.equal(corps.get('From'), '+33700000000')
-      assert.match(corps.get('Body')!, /^Bonjour Lina.*STOP/)
+      assert.match(corps.get('Body')!, /^Asian Home Paris : Lina, vous nous manquez.*STOP : répondez STOP$/)
 
       const e = await api('POST', `/commerces/${AH}/clients/${mail.id}/relance`, { canal: 'email', message: 'Revenez nous voir !' }, PIN)
       assert.equal(e.statut, 200)
@@ -301,7 +301,7 @@ describe('SMS / e-mail : branchements préparés, aucun envoi', () => {
       assert.equal((b.init.headers as Record<string, string>)['api-key'], 'cle-test')
       const json = JSON.parse(String(b.init.body))
       assert.deepEqual(json.to, [{ email: 'lina@exemple.fr' }])
-      assert.match(json.textContent, /^Revenez nous voir !\n\nPour ne plus recevoir/)
+      assert.match(json.textContent, /^Bonjour Lina,\n\nRevenez nous voir !\n\n[\s\S]*Pour ne plus en recevoir : http:\/\/127\.0\.0\.1:\d+\/#\/desinscription\//)
     } finally {
       await app.fermer()
     }
@@ -348,7 +348,8 @@ describe('Textes : aucune promesse d’ajout ou d’envoi réel', () => {
     const encart = ui.slice(ui.indexOf('export function EncartWallet'), ui.indexOf('/** Mentions RGPD'))
     assert.doesNotMatch(encart, /<button/, 'aucun bouton qui prétendrait ajouter une carte')
     assert.doesNotMatch(readFileSync(join(import.meta.dirname, '../src/lib/integrations.ts'), 'utf8'), /Ajouter à (Apple|Google)? ?Wallet/)
-    assert.equal(textes.MENTION_ENVOI, 'Envoi SMS/e-mail à brancher')
+    // P1-B3 : la relance est branchée, mais n'envoie rien sans prestataire configuré ni consentement.
+    assert.match(textes.MENTION_ENVOI, /seulement si Twilio .* ou Brevo .* est configuré .* et que le client a consenti/)
     const rgpd = textes.MENTIONS_RGPD.join(' ')
     for (const mot of [/prénom/, /téléphone ou e-mail/, /Finalité/, /Conservation/, /Export/, /suppression/, /Hébergement/, /Union européenne/]) assert.match(rgpd, mot)
   })

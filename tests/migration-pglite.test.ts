@@ -194,6 +194,45 @@ describe('Migration Supabase exécutée sur Postgres (PGlite)', () => {
     await db.exec(sql('0005_sessions_revoquees.sql'))
   })
 
+  test('0007_relances : rejouable ; RLS fermée à anon ; 1 relance envoyée par client / modèle / jour (index partiel) ; DOWN', async () => {
+    await db.exec(sql('0007_relances.sql'))
+    await db.exec(sql('0007_relances.sql'))
+    const t = await db.query<{ relrowsecurity: boolean }>(`select relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname = 'envois'`)
+    assert.deepEqual(t.rows.map((r) => r.relrowsecurity), [true])
+    assert.equal((await db.query<{ n: number }>(`select count(*)::int as n from pg_policies where schemaname = 'public'`)).rows[0].n, 0)
+    for (const role of ['anon', 'authenticated']) {
+      const { rows } = await db.query<{ ok: boolean }>(`select has_table_privilege($1, 'public.envois', 'select') or has_table_privilege($1, 'public.envois', 'insert') as ok`, [role])
+      assert.equal(rows[0].ok, false, role)
+    }
+    await db.query(`insert into public.commerces (id, donnees, pin_hash, pin_sel) values ('c7', '{"id":"c7"}', 'h', 's')`)
+    const envoi = (id: string, statut: string, modele = 'inactif', jour = '2026-11-10') =>
+      db.query(`insert into public.envois (id, commerce_id, client_id, modele, canal, statut, jour, date, donnees) values ($1, 'c7', 'k1', $2, 'sms', $3, $4, now(), $5)`, [
+        id,
+        modele,
+        statut,
+        jour,
+        JSON.stringify({ id, commerceId: 'c7' }),
+      ])
+    await envoi('e1', 'refuse')
+    await envoi('e2', 'refuse') // les refus ne bloquent rien
+    await envoi('e3', 'en_cours')
+    assert.equal(await codeErreur(envoi('e4', 'envoye')), '23505', 'même client, modèle et jour : refusé')
+    await db.query(`update public.envois set statut = 'envoye' where id = 'e3'`)
+    assert.equal(await codeErreur(envoi('e5', 'en_cours')), '23505')
+    await envoi('e6', 'en_cours', 'anniversaire') // autre modèle
+    await envoi('e7', 'en_cours', 'inactif', '2026-11-11') // autre jour
+    await db.query(`update public.envois set statut = 'erreur' where id = 'e7'`)
+    await envoi('e8', 'en_cours', 'inactif', '2026-11-11') // une erreur libère la place
+    assert.equal(await codeErreur(envoi('e9', 'envoye', 'pigeon')), '23514', 'modèle inconnu')
+    assert.equal(await codeErreur(db.query(`insert into public.envois (id, commerce_id, client_id, modele, canal, statut, jour, date, donnees) values ('e10', 'c7', 'k1', 'inactif', 'sms', 'refuse', '2026-11-10', now(), '{"id":"autre","commerceId":"c7"}')`)), '23514')
+    await db.query(`delete from public.commerces where id = 'c7'`)
+    assert.equal((await db.query<{ n: number }>(`select count(*)::int as n from public.envois`)).rows[0].n, 0, 'suppression en cascade')
+    await db.exec(sql('0007_relances.down.sql'))
+    await db.exec(sql('0007_relances.down.sql'))
+    assert.equal((await db.query(`select 1 from pg_class where relnamespace = 'public'::regnamespace and relname = 'envois'`)).rows.length, 0)
+    await db.exec(sql('0007_relances.sql'))
+  })
+
   test('suppression d’un commerce : clients et tirages supprimés en cascade', async () => {
     await db.query(`delete from public.commerces where id = 'c1'`)
     const { rows } = await db.query<{ n: number }>(
