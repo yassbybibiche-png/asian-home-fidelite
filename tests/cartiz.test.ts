@@ -106,6 +106,21 @@ describe('File d’attente hors ligne (logique)', () => {
     assert.equal(n, 1)
   })
 
+  // Trouvé par le test E2E (tests-e2e/) : la caisse se synchronise à l'ouverture, file vide. Avant le correctif, cette
+  // synchronisation restait « en cours » pour toujours : les passages suivants restaient en file, jamais envoyés,
+  // alors que l'écran disait « ✓ Passage enregistré » et « Synchronisé ».
+  test('après une synchronisation à vide, une action ajoutée ensuite est bien envoyée', async () => {
+    const f = creerFileCaisse(memoire(), 'cle')
+    const envoyees: string[] = []
+    const envoyer = async (a: ActionCaisse): Promise<Envoi> => (envoyees.push(a.id), { ok: true })
+    assert.equal((await f.synchroniser(envoyer)).attente.length, 0)
+    f.ajouter(action('a1'))
+    const e = await f.synchroniser(envoyer)
+    assert.deepEqual(envoyees, ['a1'])
+    assert.equal(e.attente.length, 0)
+    assert.equal(f.lire().attente.length, 0)
+  })
+
   test('QR de la carte → identifiant client', () => {
     assert.equal(clientIdDepuisQr('https://asian-home-fidelite.onrender.com/#/carte/cl-abc-12'), 'cl-abc-12')
     assert.equal(clientIdDepuisQr('cl-xyz'), 'cl-xyz')

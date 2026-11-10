@@ -74,24 +74,25 @@ export function creerFileCaisse(stockage: Stockage | null, cle: string) {
     /** Envoie les actions en attente dans l'ordre ; s'arrête au premier problème réseau. Un seul envoi à la fois. */
     synchroniser(envoyer: (a: ActionCaisse) => Promise<Envoi>): Promise<EtatFile> {
       if (enCours) return enCours
-      enCours = (async () => {
-        try {
-          for (;;) {
-            const e = lire()
-            const a = e.attente[0]
-            if (!a) return e
-            const r = await envoyer(a)
-            if (!r.ok && r.reseau) return e
-            const apres = lire()
-            ecrire({
-              attente: apres.attente.filter((x) => x.id !== a.id),
-              refusees: r.ok ? apres.refusees : [...apres.refusees, { action: a, erreur: r.erreur }],
-            })
-          }
-        } finally {
-          enCours = null
+      const envoyerTout = async () => {
+        for (;;) {
+          const e = lire()
+          const a = e.attente[0]
+          if (!a) return e
+          const r = await envoyer(a)
+          if (!r.ok && r.reseau) return e
+          const apres = lire()
+          ecrire({
+            attente: apres.attente.filter((x) => x.id !== a.id),
+            refusees: r.ok ? apres.refusees : [...apres.refusees, { action: a, erreur: r.erreur }],
+          })
         }
-      })()
+      }
+      // `.finally` est toujours asynchrone : la remise à null passe APRÈS l'affectation, même quand la file est vide
+      // (un `try/finally` dans la fonction s'exécutait avant, et la synchronisation restait « en cours » pour toujours).
+      enCours = envoyerTout().finally(() => {
+        enCours = null
+      })
       return enCours
     },
   }

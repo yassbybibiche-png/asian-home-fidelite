@@ -28,6 +28,7 @@ npm run dev        # serveur de développement → http://localhost:5173
 npm run build      # vérification TypeScript + build de production dans dist/
 npm run preview    # sert dist/ → http://localhost:4173
 npm test           # tests de la logique métier (voir plus bas)
+npm run test:e2e   # parcours complet dans un vrai Chromium (Playwright, serveur local + SQLite temporaire)
 npm run seed       # régénère src/data/seed.json (déterministe)
 npm run serveur    # backend partagé (API /api/v1, SQLite) → http://localhost:3001/api/v1/sante
 npm run build:api  # build du front en MODE API, servi par le serveur lui-même (VITE_API_URL=/, cf. .env.api)
@@ -253,10 +254,24 @@ Les tests portent sur la **logique pure** (hors React) :
 
 Preuve HTTP manuelle (V2 + V3) : `npm run serveur` puis `node scripts/preuve-http-v3.mjs` — sortie dans `PREUVE-HTTP-V3.txt`.
 
-**Non testé automatiquement** : l'interface React (clics, rendu, animation de la roue). Aucun navigateur n'a pu
-être lancé dans l'environnement de développement (V2 : téléchargement de Chromium refusé par le réseau ; V3 : aucun
-navigateur installé) : en V2 chaque écran a été **rendu en HTML côté serveur** (mode local, sans erreur), mais le rendu sur
-téléphone (390 px) n'a jamais été vu à l'écran — y compris les blocs ajoutés en V3.
+### Test de bout en bout (navigateur)
+
+`npm run test:e2e` (Playwright, **hors de `npm test`** : il exige le navigateur) joue le parcours principal dans un vrai
+Chromium (profil téléphone Pixel 7) : `tests-e2e/scan-gain-carte.spec.ts`.
+
+1. Une seule fois par machine : `npx playwright install chromium` (téléchargement ~320 Mo).
+2. `npm run test:e2e` : `tests-e2e/serveur.ts` compile le front en mode API, puis démarre la vraie API sur
+   `127.0.0.1:4317` (`E2E_PORT` pour changer) avec une **base SQLite temporaire**, effacée à l'arrêt. Aucune variable
+   `SUPABASE_*` n'est lue, aucune URL distante : le test ne touche **jamais** la production.
+
+Parcours : commerce neuf + membre d'équipe (API, PIN admin de développement) → `#/jouer/<id>` (scan du QR vitrine) →
+inscription au téléphone → roue verrouillée → caisse `#/caisse/<id>` sur un 2e appareil (code équipe, recherche, « Ajouter
+un passage ») → la roue se débloque → tirage par le serveur → gain + code → code vérifié puis « Marquer remis » en caisse
+→ carte de fidélité à 1 tampon. Le lot est gagnant à 100 % dans ce commerce de test (résultat déterministe).
+Traces en cas d'échec : `node_modules/.cache/playwright-resultats/` (`npx playwright show-trace <fichier>`).
+
+**Non testé automatiquement** : le reste de l'interface React (écrans du gérant, animation de la roue, rendu visuel).
+Le test E2E vérifie le parcours, pas l'apparence.
 
 ## Limites pour une vraie mise en production
 
