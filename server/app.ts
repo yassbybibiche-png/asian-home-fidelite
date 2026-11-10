@@ -2039,6 +2039,30 @@ export async function creerServeur(o: OptionsServeur) {
       return { json: { client: clientCaisse(client) } }
     }
 
+    // ---------- Prénom demandé APRÈS le tirage (P1-C1) ----------
+    // PUBLIC — l'inscription depuis le QR ne demande que le téléphone ou l'e-mail ; le prénom est proposé sur l'écran de
+    // gain. Identité : lien de la carte + contact donné à l'inscription (403 sinon, comme les routes RGPD). Seulement si
+    // la carte n'a pas encore de prénom (409 sinon) : personne ne peut renommer la carte d'un autre.
+
+    if (sous === 'clients' && sousId && action === 'prenom' && m === 'POST') {
+      exigerActif(commerce)
+      limiterIp(req, 'fiche', limites.ficheClientParIp)
+      const corps = await lireCorps(req)
+      const prenom = texte(corps.prenom ?? '', 'prenom', 40)
+      if (!prenom) throw err(400, 'Indiquez votre prénom.')
+      const client = await st.transaction(async () => {
+        const avant = await clientOu404(id, sousId)
+        if (!contactDuClient(avant, corps.contact)) {
+          throw err(403, 'Ce téléphone ou cet e-mail ne correspond pas à cette carte : indiquez celui donné à l’inscription.')
+        }
+        if ((avant.prenom ?? '').trim()) throw err(409, 'Cette carte a déjà un prénom.')
+        const apres: Client = { ...avant, prenom }
+        await st.majClient(apres)
+        return apres
+      })
+      return { json: { client: cartePublique(client) } }
+    }
+
     // ---------- Profil progressif (client) : anniversaire + plat préféré, après la 2e visite ----------
     // Jamais exigés à l'inscription (recherche CX §1 : chaque champ coûte ~10 % de conversion).
 
