@@ -10,6 +10,7 @@ import { recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { analyserMontant, formaterPrix, passageCeJour, pointsPourMontant, soldePoints } from '../lib/points'
 import { niveauClient, reserveUtilisable } from '../lib/programme'
 import { correspondRecherche } from '../lib/recherche'
+import { nomAffiche } from '../lib/inscriptionJeu'
 import { clientIdDepuisQr, creerFileCaisse, libelleFile, nouvelIdAction, type ActionCaisse, type EtatFile, type Envoi, type TypeActionCaisse } from '../lib/fileCaisse'
 import { LogoCommerce, MessageErreur } from '../components/ui'
 import { ScannerQr } from '../components/ScannerQr'
@@ -365,14 +366,14 @@ function Comptoir({
       type: 'ok',
       texte:
         type === 'passage'
-          ? `✓ Passage enregistré pour ${c.prenom} : +1 tampon (${tamponsAffiches(c, commerce)}/${commerce.seuilTampons})${gagnes > 0 ? `, +${gagnes} point${gagnes > 1 ? 's' : ''}` : ''}.`
+          ? `✓ Passage enregistré pour ${nomAffiche(c.prenom)} : +1 tampon (${tamponsAffiches(c, commerce)}/${commerce.seuilTampons})${gagnes > 0 ? `, +${gagnes} point${gagnes > 1 ? 's' : ''}` : ''}.`
           : type === 'recompense'
-            ? `🎁 Récompense remise à ${c.prenom} : ${commerce.recompense}.`
+            ? `🎁 Récompense remise à ${nomAffiche(c.prenom)} : ${commerce.recompense}.`
             : type === 'attente'
-              ? `🎁 Récompense remise à ${c.prenom}.`
+              ? `🎁 Récompense remise à ${nomAffiche(c.prenom)}.`
               : type === 'reserve'
-                ? `🍜 Plat en réserve utilisé par ${c.prenom}.`
-                : `✓ Échange enregistré pour ${c.prenom} — nouveau solde : ${soldePoints(c)} points.`,
+                ? `🍜 Plat en réserve utilisé par ${nomAffiche(c.prenom)}.`
+                : `✓ Échange enregistré pour ${nomAffiche(c.prenom)} — nouveau solde : ${soldePoints(c)} points.`,
     })
     if (type === 'passage') setMontant('')
   }
@@ -451,7 +452,7 @@ function Comptoir({
                     }}
                   >
                     <span className="min-w-0">
-                      <span className="block font-semibold">{c.prenom}</span>
+                      <span className="block font-semibold">{nomAffiche(c.prenom)}</span>
                       <span className="block truncate text-sm text-gray-600">{c.telephone ?? c.email}</span>
                     </span>
                     <span className="shrink-0 text-sm text-gray-700 tabular-nums">
@@ -469,10 +470,10 @@ function Comptoir({
       <CodeGagnantCaisse onGain={onGain} />
 
       {choisi && (
-        <section className="carte space-y-4" aria-label={`Client : ${choisi.prenom}`}>
+        <section className="carte space-y-4" aria-label={`Client : ${nomAffiche(choisi.prenom)}`}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="truncate text-2xl font-bold">{choisi.prenom}</h2>
+              <h2 className="truncate text-2xl font-bold">{nomAffiche(choisi.prenom)}</h2>
               <p className="truncate text-sm text-gray-600">{choisi.telephone ?? choisi.email}</p>
             </div>
             <div className="shrink-0 text-right">
@@ -566,7 +567,7 @@ function Comptoir({
                       className="bouton-secondaire min-h-12 w-full justify-between"
                       disabled={enCours || soldePoints(choisi) < r.cout}
                       onClick={() => {
-                        if (window.confirm(`Échanger ${r.cout} points de ${choisi.prenom} contre « ${r.nom} » ?`)) void agir('echange', { recompenseId: r.id })
+                        if (window.confirm(`Échanger ${r.cout} points de ${nomAffiche(choisi.prenom)} contre « ${r.nom} » ?`)) void agir('echange', { recompenseId: r.id })
                       }}
                     >
                       <span>{r.nom}</span>
@@ -665,7 +666,7 @@ function CodeGagnantCaisse({ onGain }: { onGain(quoi: 'verifier' | 'remettre', c
         <div className="space-y-2 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-200">
           <p className="font-titre text-2xl font-bold">{gain.lot}</p>
           <p className="text-sm text-gray-700">
-            {gain.client ? <strong>{gain.client.prenom}</strong> : 'Client supprimé'} · tiré le {date.toLocaleDateString('fr-FR')} à{' '}
+            {gain.client ? <strong>{nomAffiche(gain.client.prenom)}</strong> : 'Client supprimé'} · tiré le {date.toLocaleDateString('fr-FR')} à{' '}
             {date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · code <span className="font-mono">{gain.code}</span>
           </p>
           {gain.statut === 'valable' ? (
@@ -674,7 +675,7 @@ function CodeGagnantCaisse({ onGain }: { onGain(quoi: 'verifier' | 'remettre', c
             </button>
           ) : remisIci ? (
             <p className="alerte-succes apparition" role="status">
-              ✓ Lot remis{gain.client ? ` à ${gain.client.prenom}` : ''} : {gain.lot}. Le code ne pourra plus resservir.
+              ✓ Lot remis{gain.client ? ` à ${nomAffiche(gain.client.prenom)}` : ''} : {gain.lot}. Le code ne pourra plus resservir.
             </p>
           ) : (
             !erreur && (

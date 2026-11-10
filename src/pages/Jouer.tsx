@@ -15,6 +15,7 @@ import {
   type SuiviVisite,
 } from '../lib/attenteVisite'
 import { estAsianHome } from '../lib/visuels'
+import { attributsChamp, avecPrenom, etatSaisieContact, virgulePrenom, type ModeContact } from '../lib/inscriptionJeu'
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ReponseCarte, type ResultatTirage } from '../data/api'
 import { lancerTirage, memoireJoueur, type JoueurMemorise } from '../data/jeuApi'
 import { DUREE_ROTATION_MS, LegendeRoue, Roue } from '../components/Roue'
@@ -109,7 +110,7 @@ export function MessageSansVisite({
     <section className="carte space-y-4" aria-labelledby="attente-titre">
       <div className="text-center">
         <p id="attente-titre" className="titre-carte">
-          Bonjour {prenom} !
+          {avecPrenom('Bonjour', prenom)} !
         </p>
         <p className="mt-1 text-gray-700">{INTRO_ATTENTE}</p>
       </div>
@@ -177,7 +178,7 @@ function useVisiteValidee(statut: StatutJeu | null | undefined): boolean {
 function MessageDejaJoue({ prenom, lot, code, remis }: { prenom: string; lot: string | null; code?: string; remis?: boolean }) {
   return (
     <section className="carte text-center" role="status">
-      <p className="titre-carte">Vous avez déjà joué aujourd’hui, {prenom} !</p>
+      <p className="titre-carte">Vous avez déjà joué aujourd’hui{virgulePrenom(prenom)} !</p>
       {lot && (
         <p className="mt-1 text-gray-600">
           Résultat du jour : <strong className="text-gray-900">{lot}</strong>
@@ -189,14 +190,16 @@ function MessageDejaJoue({ prenom, lot, code, remis }: { prenom: string; lot: st
   )
 }
 
+/** Client déjà connu sur ce téléphone : zéro saisie, un seul bouton (avec ou sans prénom sur la carte). */
 function Continuer({ prenom, onContinuer, onOublier }: { prenom: string; onContinuer(): void; onOublier(): void }) {
+  const p = prenom.trim()
   return (
     <section className="carte space-y-2 text-center">
       <p className="text-lg">
-        Re-bonjour <strong>{prenom}</strong> 👋
+        Re-bonjour{p && <> <strong>{p}</strong></>} 👋
       </p>
       <button className="bouton w-full" onClick={onContinuer}>
-        Continuer en tant que {prenom}
+        {p ? `Continuer en tant que ${p}` : 'Continuer avec ma carte'}
       </button>
       <button className="min-h-11 w-full text-sm font-semibold text-gray-600 underline" onClick={onOublier}>
         Ce n’est pas moi
@@ -237,7 +240,7 @@ function JouerLocal() {
 }
 
 function PartieLocale({ commerce }: { commerce: Commerce }) {
-  const { etat, enregistrerTirage, inscrireClient } = useStore()
+  const { etat, enregistrerTirage, inscrireClient, nommerClient } = useStore()
   const [joueurId, setJoueurId] = useState<string | null>(null)
   const [memoriseId, setMemoriseId] = useState(() => lireJoueurMemorise(commerce.id))
   const [etape, setEtape] = useState<Etape>('pret')
@@ -295,8 +298,8 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
           <Identification
             commerceId={commerce.id}
             nomCommerce={commerce.nom}
-            onEnvoyer={async (prenom, contactSaisi, consentementRelance) => {
-              choisirJoueur((await inscrireClient(commerce.id, prenom, contactSaisi, consentementRelance)).client)
+            onEnvoyer={async (contactSaisi, consentementRelance) => {
+              choisirJoueur((await inscrireClient(commerce.id, '', contactSaisi, consentementRelance)).client)
             }}
           />
         )
@@ -310,7 +313,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
         <>
           {visiteValidee && etape === 'pret' && <VisiteValidee />}
           <button className="bouton w-full py-4 text-lg" onClick={tourner} disabled={etape !== 'pret'}>
-            {etape === 'rotation' ? 'La roue tourne…' : `🎡 Tourner la roue, ${joueur.prenom} !`}
+            {etape === 'rotation' ? 'La roue tourne…' : `🎡 Tourner la roue${virgulePrenom(joueur.prenom)} !`}
           </button>
         </>
       )}
@@ -318,6 +321,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
       {joueur && (etape === 'resultat' || dejaJoue) && (
         <>
           <InvitationAvis commerce={commerce} />
+          <DemandePrenom prenom={joueur.prenom} onEnregistrer={async (p) => nommerClient(joueur.id, p)} />
           <a href={`#/carte/${joueur.id}`} className="bouton-secondaire w-full">
             Voir ma carte de fidélité
           </a>
@@ -490,8 +494,8 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
             parrain={parrain}
             commerceId={commerce.id}
             nomCommerce={commerce.nom}
-            onEnvoyer={async (prenom, contactSaisi, consentementRelance) => {
-              const { client } = await api.inscrirePublic(commerce.id, prenom, contactSaisi, parrain, consentementRelance)
+            onEnvoyer={async (contactSaisi, consentementRelance) => {
+              const { client } = await api.inscrirePublic(commerce.id, '', contactSaisi, parrain, consentementRelance)
               choisirJoueur({ clientId: client.id, prenom: client.prenom, contact: contactSaisi.trim() })
             }}
           />
@@ -540,7 +544,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
           {visiteValidee && <VisiteValidee />}
           <MessageErreur>{message}</MessageErreur>
           <button className="bouton w-full py-4 text-lg" onClick={() => void tourner()} disabled={enCours}>
-            {enCours ? 'Tirage en cours…' : `🎡 Tourner la roue, ${joueur.prenom} !`}
+            {enCours ? 'Tirage en cours…' : `🎡 Tourner la roue${virgulePrenom(joueur.prenom)} !`}
           </button>
         </>
       )}
@@ -548,6 +552,13 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
       {joueur && (etape === 'resultat' || jeu?.statut === 'dejaJoue') && (
         <>
           <InvitationAvis commerce={commerce} />
+          <DemandePrenom
+            prenom={joueur.prenom}
+            onEnregistrer={async (p) => {
+              const { client } = await api.prenomCarte(commerce.id, joueur.clientId, joueur.contact, p)
+              choisirJoueur({ ...joueur, prenom: client.prenom })
+            }}
+          />
           <a href={`#/carte/${joueur.clientId}`} className="bouton-secondaire w-full">
             Voir ma carte de fidélité
           </a>
@@ -559,25 +570,38 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
 
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * Entrée depuis le QR (P1-C1) : UN seul champ obligatoire, téléphone OU e-mail. Le choix « Téléphone / E-mail » ne
+ * change que le clavier du téléphone (inputmode + autocomplete) : le champ accepte toujours les deux. Le prénom n'est
+ * pas demandé ici, mais après le tirage (`DemandePrenom`).
+ */
 function Identification({
   onEnvoyer,
   parrain,
   commerceId,
   nomCommerce,
 }: {
-  onEnvoyer(prenom: string, contactSaisi: string, consentementRelance: boolean): Promise<void>
+  onEnvoyer(contactSaisi: string, consentementRelance: boolean): Promise<void>
   parrain?: string
   commerceId: string
   nomCommerce: string
 }) {
-  const [prenom, setPrenom] = useState('')
+  const [mode, setMode] = useState<ModeContact>('tel')
   const [contactSaisi, setContactSaisi] = useState('')
   // Relances SMS / e-mail (P1-B3) : case séparée, jamais pré-cochée.
   const [consentement, setConsentement] = useState(false)
   const [essaye, setEssaye] = useState(false)
   const [enCours, setEnCours] = useState(false)
   const [erreur, setErreur] = useState<string | null>(null)
+  const champ = useRef<HTMLInputElement>(null)
   const contact = analyserContact(contactSaisi)
+  const saisie = etatSaisieContact(contactSaisi, essaye)
+  const attributs = attributsChamp(mode)
+
+  function choisirMode(m: ModeContact) {
+    setMode(m)
+    champ.current?.focus()
+  }
 
   async function envoyer(e: FormEvent) {
     e.preventDefault()
@@ -586,7 +610,7 @@ function Identification({
     setEnCours(true)
     setErreur(null)
     try {
-      await onEnvoyer(prenom.trim(), contactSaisi, consentement)
+      await onEnvoyer(contactSaisi, consentement)
     } catch (err) {
       setErreur(err instanceof Error ? err.message : MESSAGE_HORS_LIGNE)
     } finally {
@@ -595,32 +619,53 @@ function Identification({
   }
 
   return (
-    <form onSubmit={envoyer} className="carte space-y-3">
-      <p className="titre-carte">Pour jouer, dites-nous qui vous êtes</p>
+    // noValidate : le champ « email » accepte aussi un numéro ; la validation est celle affichée sous le champ.
+    <form onSubmit={envoyer} className="carte space-y-3" noValidate>
+      <p className="titre-carte">Pour jouer, votre téléphone ou votre e-mail suffit</p>
       {parrain && (
         <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">
           👥 Vous êtes parrainé(e) ! Inscrivez-vous : vous gagnerez 50 points à votre 1re visite, et votre ami aussi.
         </p>
       )}
       <div>
-        <label className="etiquette" htmlFor="j-prenom">
-          Prénom (optionnel)
-        </label>
-        <input id="j-prenom" className="champ" autoComplete="given-name" value={prenom} onChange={(e) => setPrenom(e.target.value)} />
-      </div>
-      <div>
+        <div className="mb-2 grid grid-cols-2 gap-2" role="group" aria-label="Clavier du champ">
+          {(['tel', 'email'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={mode === m}
+              onClick={() => choisirMode(m)}
+              className={`min-h-11 rounded-xl text-sm font-semibold ring-1 ${mode === m ? 'bg-nuit-950 text-or-300 ring-nuit-950' : 'bg-white text-gray-700 ring-gray-300'}`}
+            >
+              {m === 'tel' ? '📱 Téléphone' : '✉️ E-mail'}
+            </button>
+          ))}
+        </div>
         <label className="etiquette" htmlFor="j-contact">
           Téléphone ou e-mail
         </label>
         <input
+          ref={champ}
           id="j-contact"
           className="champ"
-          inputMode="email"
-          placeholder="06 12 34 56 78 ou marie@exemple.fr"
+          type={attributs.type}
+          inputMode={attributs.inputMode}
+          autoComplete={attributs.autoComplete}
+          autoCapitalize="off"
+          spellCheck={false}
+          placeholder={attributs.placeholder}
+          aria-invalid={saisie.niveau === 'erreur'}
+          aria-describedby="j-contact-aide"
           value={contactSaisi}
           onChange={(e) => setContactSaisi(e.target.value)}
         />
-        {essaye && !contact && <p className="mt-1 text-sm text-red-700">Saisissez un numéro (10 chiffres) ou un e-mail valide.</p>}
+        <p
+          id="j-contact-aide"
+          aria-live="polite"
+          className={`mt-1 min-h-5 text-sm ${saisie.niveau === 'erreur' ? 'text-red-700' : saisie.niveau === 'ok' ? 'font-semibold text-green-800' : 'text-gray-600'}`}
+        >
+          {saisie.message}
+        </p>
         <p className="mt-1 text-xs text-gray-600">Déjà client ? Le même numéro ou e-mail retrouve votre carte de fidélité.</p>
       </div>
       <label className="flex items-start gap-2 text-sm text-gray-700">
@@ -634,6 +679,64 @@ function Identification({
       <button type="submit" className="bouton w-full" disabled={!contactSaisi.trim() || enCours}>
         {enCours ? 'Un instant…' : 'C’est parti'}
       </button>
+    </form>
+  )
+}
+
+/**
+ * Prénom demandé APRÈS le tirage (P1-C1), jamais avant : optionnel, une seule fois (la carte n'en a pas encore).
+ * Après l'envoi : remerciement tant que l'écran reste ouvert.
+ */
+function DemandePrenom({ prenom, onEnregistrer }: { prenom: string; onEnregistrer(prenom: string): Promise<void> }) {
+  const [saisie, setSaisie] = useState('')
+  const [enregistre, setEnregistre] = useState(false)
+  const [enCours, setEnCours] = useState(false)
+  const [erreur, setErreur] = useState<string | null>(null)
+
+  if (prenom.trim()) {
+    return enregistre ? (
+      <p className="alerte-succes text-center" role="status">
+        Merci {prenom.trim()}, votre carte est à votre nom.
+      </p>
+    ) : null
+  }
+
+  async function envoyer(e: FormEvent) {
+    e.preventDefault()
+    const p = saisie.trim()
+    if (!p || enCours) return
+    setEnCours(true)
+    setErreur(null)
+    try {
+      await onEnregistrer(p)
+      setEnregistre(true)
+    } catch (err) {
+      setErreur(err instanceof Error ? err.message : MESSAGE_HORS_LIGNE)
+    } finally {
+      setEnCours(false)
+    }
+  }
+
+  return (
+    <form onSubmit={envoyer} className="carte space-y-2" aria-label="Votre prénom (optionnel)">
+      <label className="etiquette" htmlFor="j-prenom">
+        Votre prénom, pour que l’équipe vous reconnaisse ? (optionnel)
+      </label>
+      <div className="flex gap-2">
+        <input
+          id="j-prenom"
+          className="champ min-w-0 flex-1"
+          autoComplete="given-name"
+          autoCapitalize="words"
+          maxLength={40}
+          value={saisie}
+          onChange={(e) => setSaisie(e.target.value)}
+        />
+        <button type="submit" className="bouton shrink-0" disabled={!saisie.trim() || enCours}>
+          {enCours ? '…' : 'OK'}
+        </button>
+      </div>
+      <MessageErreur>{erreur}</MessageErreur>
     </form>
   )
 }
@@ -663,7 +766,7 @@ function Resultat({ lot, prenom, code }: { lot: string; prenom: string; code?: s
       <p className="text-5xl" aria-hidden>
         {perdu ? '🍀' : '🎉'}
       </p>
-      <p className="mt-2 text-lg font-bold">{perdu ? `Pas cette fois, ${prenom}…` : `Bravo ${prenom}, vous avez gagné :`}</p>
+      <p className="mt-2 text-lg font-bold">{perdu ? `Pas cette fois${virgulePrenom(prenom)}…` : `${avecPrenom('Bravo', prenom)}, vous avez gagné :`}</p>
       <p className="mt-1 font-titre text-3xl font-bold text-marque-600">{lot}</p>
       {!perdu && !code && <p className="mt-2 text-sm text-gray-600">Montrez cet écran au comptoir pour profiter de votre lot.</p>}
       {!perdu && code && <CodeGagnant code={code} />}

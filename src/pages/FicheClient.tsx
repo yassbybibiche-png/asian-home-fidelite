@@ -6,6 +6,7 @@ import { canalDuClient, libelleModele, MODELES_RELANCE, modelesSuggeres } from '
 import { MENTION_ENVOI } from '../lib/integrations'
 import { JournalEnvois } from './Messages'
 import { recompenseDebloquee } from '../lib/fidelite'
+import { nomAffiche } from '../lib/inscriptionJeu'
 import { soldePoints, formaterPrix } from '../lib/points'
 import { analyserAnniversaire, anniversaireAffiche } from '../lib/messages'
 import { nouvelIdAction } from '../lib/fileCaisse'
@@ -363,7 +364,7 @@ export default function FicheClient() {
       <a href="#/clients" className="lien no-underline">
         ‹ Clients
       </a>
-      <EnTete titre={client.prenom} sousTitre={`${client.telephone ?? client.email} · client depuis le ${dateCourte(client.creeLe)}`} />
+      <EnTete titre={nomAffiche(client.prenom)}sousTitre={`${client.telephone ?? client.email} · client depuis le ${dateCourte(client.creeLe)}`} />
 
       <CarteFidelite client={client} commerce={commerce} />
 

@@ -85,6 +85,8 @@ interface Store {
   offrirRecompense(clientId: string): Promise<void>
   /** Mode local uniquement : en mode API, le tirage est fait par le serveur. */
   enregistrerTirage(tirage: Tirage): void
+  /** Mode local uniquement : prénom donné après le tirage, si la carte n'en a pas (en mode API : `api.prenomCarte`). */
+  nommerClient(clientId: string, prenom: string): void
   /** Ajoute un avis en appliquant aussitôt les règles automatiques du commerce. */
   ajouterAvis(commerceId: string, avis: { auteur: string; note: number; texte: string }): Promise<void>
   /** `brouillon` (null = supprimer) ou `reponse` (marque comme répondu). */
@@ -194,6 +196,7 @@ function StoreLocal({ children, depot }: { children: ReactNode; depot: Depot }) 
       validerVisite: async (clientId: string) => majClient(clientId, (c, co) => validerVisite(c, co)),
       offrirRecompense: async (clientId: string) => majClient(clientId, (c, co) => offrirRecompense(c, co)),
       enregistrerTirage: (tirage: Tirage) => setEtat((e) => ({ ...e, tirages: [tirage, ...e.tirages] })),
+      nommerClient: (clientId: string, prenom: string) => majClient(clientId, (c) => (c.prenom.trim() || !prenom.trim() ? c : { ...c, prenom: prenom.trim() })),
       ajouterAvis: async (commerceId: string, a: { auteur: string; note: number; texte: string }) =>
         setEtat((e) => {
           const commerce = e.commerces.find((c) => c.id === commerceId)
@@ -514,6 +517,9 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       offrirRecompense: (clientId: string) => avecPin((a) => api.recompense(commerceDe(clientId), a, clientId).then(() => undefined)),
       enregistrerTirage: () => {
         throw new Error('En mode serveur, le tirage est fait par le serveur.')
+      },
+      nommerClient: () => {
+        throw new Error('En mode serveur, le prénom passe par la page de jeu (api.prenomCarte).')
       },
       ajouterAvis: (commerceId: string, avis: { auteur: string; note: number; texte: string }) =>
         avecPin((a) => api.ajouterAvis(commerceId, a, avis).then(() => undefined)),
