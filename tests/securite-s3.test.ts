@@ -251,7 +251,12 @@ describe('P0-S3 : parcours public avec le client du front (fiche publique unique
     assert.ok(gagne.ok)
     assert.ok(gagne.secteur, 'le lot du serveur est sur la roue publique')
     assert.equal(gagne.secteur!.lot.libelle, gagne.resultat.lot)
-    assert.deepEqual((await api.carte(client.id)).jeu, { statut: 'dejaJoue', lotDuJour: gagne.resultat.lot })
+    assert.deepEqual((await api.carte(client.id)).jeu, {
+      statut: 'dejaJoue',
+      lotDuJour: gagne.resultat.lot,
+      codeDuJour: gagne.resultat.perdant ? null : gagne.resultat.code,
+      remisDuJour: false,
+    })
 
     // Le commerçant garde ses probabilités pour régler la roue.
     const etat = await api.etat(complet.id, acces)

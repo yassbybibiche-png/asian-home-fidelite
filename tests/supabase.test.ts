@@ -87,6 +87,14 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
     new Response(corps === undefined ? null : JSON.stringify(corps), { status: statut, headers: { 'content-type': 'application/json' } })
   const erreur = (statut: number, code: string, message: string) => json(statut, { code, message, details: null, hint: null })
 
+  /** Colonne, ou chemin JSONB d'un niveau (`donnees->>code` : texte ; `donnees->remis` : json) ; clé absente = NULL. */
+  function valeur(l: Ligne, col: string): unknown {
+    const m = /^(\w+)->(>?)(\w+)$/.exec(col)
+    if (!m) return l[col]
+    const v = (l[m[1]] as Record<string, unknown> | null | undefined)?.[m[3]]
+    return v == null ? null : m[2] && typeof v === 'object' ? JSON.stringify(v) : v
+  }
+
   function filtrer(table: string, params: URLSearchParams): Ligne[] {
     let lignes = tables[table]
     for (const [col, v] of params) {
@@ -97,11 +105,11 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
         continue
       }
       if (v === 'is.null') {
-        lignes = lignes.filter((l) => l[col] == null)
+        lignes = lignes.filter((l) => valeur(l, col) == null)
         continue
       }
       if (!v.startsWith('eq.')) throw new Error(`Opérateur non géré par le faux PostgREST : ${col}=${v}`)
-      lignes = lignes.filter((l) => String(l[col]) === v.slice(3))
+      lignes = lignes.filter((l) => valeur(l, col) != null && String(valeur(l, col)) === v.slice(3))
     }
     const ordre = params.get('order')
     if (ordre) {
@@ -615,6 +623,50 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.match(jeux.find((j) => j.statut === 409)!.contenu.erreur, /déjà tourné la roue/)
       assert.equal(f.tables.tirages.length, 1)
       assert.ok(f.rejets.includes('tirages:23505'), 'c’est l’index unique de la base qui a refusé le 2e tirage')
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-U3 : code gagnant remis une seule fois (UPDATE conditionnel), même simultanément ; persistant ; sans 0005/0006', async () => {
+    const f = fauxPostgrest({ sans0005: true, sans0006: true })
+    const CODE = { 'X-Equipe-Code': '2468' }
+    let code = ''
+    {
+      const { app, api } = await demarrer(f)
+      try {
+        assert.equal((await api('POST', `/commerces/${AH}/equipe`, { nom: 'Mai', code: '2468' }, PIN)).statut, 201)
+        assert.equal((await api('PATCH', `/commerces/${AH}`, { lots: [{ libelle: 'Nems offerts', probabilite: 100 }] }, PIN)).statut, 200)
+        const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
+        await api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)
+        code = (await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).contenu.code
+        assert.ok(code)
+
+        const verif = await api('GET', `/commerces/${AH}/caisse/gains/${code.toLowerCase()}`, undefined, CODE)
+        assert.deepEqual([verif.statut, verif.contenu.gain.statut, verif.contenu.gain.lot, verif.contenu.gain.client.prenom], [200, 'valable', 'Nems offerts', 'Lina'])
+        const lecture = f.requetes.findLast((r) => r.table === 'tirages' && r.methode === 'GET')!
+        assert.equal(lecture.params.get('donnees->>code'), `eq.${code}`)
+
+        // Deux caisses valident le même code au même instant : les deux lisent « valable », la base n'en laisse passer qu'une.
+        f.barriere('PATCH', 'tirages')
+        const remises = await Promise.all([1, 2].map(() => api('POST', `/commerces/${AH}/caisse/gains/${code}/remise`, undefined, CODE)))
+        assert.deepEqual(remises.map((r) => r.statut).sort(), [200, 409])
+        assert.match(remises.find((r) => r.statut === 409)!.contenu.erreur, /déjà remis/)
+        const maj = f.requetes.filter((r) => r.table === 'tirages' && r.methode === 'PATCH')
+        assert.equal(maj.length, 2)
+        for (const r of maj) assert.equal(r.params.get('donnees->remis'), 'is.null', 'garde dans la requête elle-même')
+        assert.equal(f.tables.tirages.length, 1)
+        assert.equal((f.tables.tirages[0].donnees as Tirage).remis?.par.nom, 'Mai')
+      } finally {
+        await app.fermer()
+      }
+    }
+    // Redémarrage (Render qui se réveille) : le statut est en base, pas en mémoire.
+    const { app, api } = await demarrer(f)
+    try {
+      const r = await api('POST', `/commerces/${AH}/caisse/gains/${code}/remise`, undefined, CODE)
+      assert.equal(r.statut, 409)
+      assert.equal((await api('GET', `/commerces/${AH}/caisse/gains/${code}`, undefined, CODE)).contenu.gain.statut, 'remis')
     } finally {
       await app.fermer()
     }
