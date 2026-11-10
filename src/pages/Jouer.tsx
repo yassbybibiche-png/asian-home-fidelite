@@ -6,7 +6,7 @@ import { analyserContact } from '../lib/fidelite'
 import { estPerdant, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ResultatTirage } from '../data/api'
 import { lancerTirage, memoireJoueur, type JoueurMemorise } from '../data/jeuApi'
-import { DUREE_ROTATION_MS, Roue } from '../components/Roue'
+import { DUREE_ROTATION_MS, LegendeRoue, Roue } from '../components/Roue'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteJeu } from '../components/Squelette'
 import { BadgeDemo, BoutonCopier, LogoCommerce, MessageErreur } from '../components/ui'
@@ -66,6 +66,7 @@ function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; 
 
       <div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-or-400/30">
         <Roue lots={commerce.lots} rotation={rotation} />
+        <LegendeRoue lots={commerce.lots} />
       </div>
 
       {children}
