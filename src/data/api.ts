@@ -1,6 +1,6 @@
 // Client HTTP de l'API /api/v1 (server/). Aucune règle métier ici : le serveur décide de tout
 // (tampons, récompense, tirage). `fetch` est injectable pour les tests (aucun vrai serveur dans `npm test`).
-import type { Avis, Client, Commerce, CommercePublic, EntreeJournal, MembreEquipe, Menu, MessageClient, Tirage, TypeCommerce } from '../types'
+import type { Avis, Client, Commerce, CommercePublic, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce } from '../types'
 import type { StatutGain, StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
 
@@ -48,6 +48,7 @@ export interface EtatCommerce {
   avis: Avis[]
   membres?: MembreEquipe[]
   journal?: EntreeJournal[]
+  envois?: EnvoiRelance[]
 }
 
 /** Accès à la caisse : session équipe, code équipe (4 chiffres, repli) ou accès du gérant. */
@@ -97,7 +98,7 @@ export interface GainCaisse {
 export type ChampsReglages = Partial<
   Pick<
     Commerce,
-    'nom' | 'type' | 'logo' | 'lienGoogle' | 'coordonnees' | 'recompense' | 'seuilTampons' | 'lots' | 'reglesReponseAuto' | 'actif' | 'eurosParPoint' | 'catalogue' | 'messagesAuto' | 'apparence' | 'programme'
+    'nom' | 'type' | 'logo' | 'lienGoogle' | 'coordonnees' | 'recompense' | 'seuilTampons' | 'lots' | 'reglesReponseAuto' | 'actif' | 'eurosParPoint' | 'catalogue' | 'messagesAuto' | 'apparence' | 'programme' | 'relancesAuto'
   >
 >
 
@@ -193,7 +194,14 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
 
   return {
     base,
-    sante: () => requete('GET', '/sante') as Promise<{ ok: boolean; version: string; demo: boolean }>,
+    sante: () =>
+      requete('GET', '/sante') as Promise<{
+        ok: boolean
+        version: string
+        demo: boolean
+        integrations?: { sms?: boolean; email?: boolean }
+        migrations?: { relances?: boolean }
+      }>,
 
     // ---- Sessions : le PIN / code n'est envoyé qu'ici, une fois ; ensuite seul le jeton circule (X-Session) ----
     ouvrirSession: (demande: DemandeSession) => requete('POST', '/sessions', { corps: demande }) as Promise<Session>,
@@ -206,8 +214,14 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     commerce: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}`)) as { commerce: CommercePublic }).commerce,
     carte: (clientId: string) => requete('GET', `/cartes/${enc(clientId)}`) as Promise<ReponseCarte>,
     /** Auto-inscription depuis la page de jeu (sans PIN) : renvoie la carte sans téléphone ni e-mail. Prénom optionnel, parrainage en option. */
-    inscrirePublic: (commerceId: string, prenom: string, contact: string, parrain?: string) =>
-      requete('POST', `/commerces/${enc(commerceId)}/clients`, { corps: { prenom, contact, ...(parrain ? { parrain } : {}) } }) as Promise<{ client: CartePublique; existant: boolean }>,
+    // `consentementRelance` : case des relances SMS / e-mail, jamais pré-cochée (envoyée seulement si cochée).
+    inscrirePublic: (commerceId: string, prenom: string, contact: string, parrain?: string, consentementRelance = false) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients`, {
+        corps: { prenom, contact, ...(parrain ? { parrain } : {}), ...(consentementRelance ? { consentementRelance: true } : {}) },
+      }) as Promise<{ client: CartePublique; existant: boolean }>,
+    /** Désinscription des relances depuis le lien d'un e-mail (page #/desinscription/…). */
+    desinscrire: (clientId: string, jeton: string) =>
+      requete('POST', `/desinscription/${enc(clientId)}/${enc(jeton)}`) as Promise<{ ok: boolean; commerce: string }>,
     /** Le navigateur n'envoie qu'un contact : la visite du jour, le tirage du jour et le lot sont décidés par le serveur. */
     tirer: (commerceId: string, contact: string, prenom?: string, parrain?: string) =>
       requete('POST', `/commerces/${enc(commerceId)}/tirages`, { corps: { contact, ...(prenom ? { prenom } : {}), ...(parrain ? { parrain } : {}) } }) as Promise<ResultatTirage>,
@@ -220,8 +234,11 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
 
     // ---- Commerçant (PIN du commerce ou PIN admin) ----
     etat: (commerceId: string, acces: Acces) => requete('GET', `/commerces/${enc(commerceId)}/etat`, { acces }) as Promise<EtatCommerce>,
-    inscrire: (commerceId: string, acces: Acces, prenom: string, contact: string, parrain?: string) =>
-      requete('POST', `/commerces/${enc(commerceId)}/clients`, { acces, corps: { prenom, contact, ...(parrain ? { parrain } : {}) } }) as Promise<{ client: Client; existant: boolean }>,
+    inscrire: (commerceId: string, acces: Acces, prenom: string, contact: string, parrain?: string, consentementRelance = false) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients`, {
+        acces,
+        corps: { prenom, contact, ...(parrain ? { parrain } : {}), ...(consentementRelance ? { consentementRelance: true } : {}) },
+      }) as Promise<{ client: Client; existant: boolean }>,
     visite: async (commerceId: string, acces: Acces, clientId: string) =>
       ((await requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/visite`, { acces })) as { client: Client }).client,
     recompense: async (commerceId: string, acces: Acces, clientId: string) =>
@@ -234,8 +251,11 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     majAvis: async (commerceId: string, acces: Acces, avisId: string, maj: { reponse?: string | null; brouillon?: string | null }) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}/avis/${enc(avisId)}`, { acces, corps: maj })) as { avis: Avis }).avis,
     exportCsv: (commerceId: string, acces: Acces) => requete('GET', `/commerces/${enc(commerceId)}/export.csv`, { acces, texte: true }) as Promise<string>,
-    majClient: async (commerceId: string, acces: Acces, clientId: string, champs: { anniversaire: string; platPrefere?: string }) =>
+    majClient: async (commerceId: string, acces: Acces, clientId: string, champs: { anniversaire?: string; platPrefere?: string; consentementRelance?: boolean }) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}`, { acces, corps: champs })) as { client: Client }).client,
+    /** Relance SMS / e-mail (P1-B3) : 501 sans prestataire, 409 sans consentement / déjà envoyée aujourd'hui. */
+    relancer: (commerceId: string, acces: Acces, clientId: string, demande: { modele: ModeleRelance; canal?: 'sms' | 'email' }) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/relance`, { acces, corps: demande }) as Promise<{ envoye: boolean; canal: 'sms' | 'email'; envoi: EnvoiRelance }>,
     /** Décision du commerçant sur une visite oubliée : validation = 1 visite + points ; refus = demande classée. */
     deciderRattrapage: async (commerceId: string, acces: Acces, clientId: string, demandeId: string, decision: 'valider' | 'refuser') =>
       ((await requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/rattrapage/${enc(demandeId)}`, { acces, corps: { decision } })) as { client: Client }).client,

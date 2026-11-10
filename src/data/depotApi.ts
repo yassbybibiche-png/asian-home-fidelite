@@ -89,6 +89,7 @@ export function creerDepotApi(api: ClientApi, stockage: Stockage | null, mainten
         avis: etats.flatMap((e) => e.avis),
         membres: etats.flatMap((e) => e.membres ?? []),
         journal: etats.flatMap((e) => e.journal ?? []),
+        envois: etats.flatMap((e) => e.envois ?? []),
         commerceActifId: actif,
       }
       // Pas de PIN = pas de données privées : rien à mettre en cache.

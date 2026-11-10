@@ -1,7 +1,10 @@
 import { useState, type FormEvent } from 'react'
-import { useAction, useStore } from '../store'
+import { useAction, useDonneesCommerce, useStore } from '../store'
 import { useRoute } from '../router'
-import type { Client, Commerce } from '../types'
+import type { Client, Commerce, ModeleRelance } from '../types'
+import { canalDuClient, libelleModele, MODELES_RELANCE, modelesSuggeres } from '../lib/relances'
+import { MENTION_ENVOI } from '../lib/integrations'
+import { JournalEnvois } from './Messages'
 import { recompenseDebloquee } from '../lib/fidelite'
 import { soldePoints, formaterPrix } from '../lib/points'
 import { analyserAnniversaire, anniversaireAffiche } from '../lib/messages'
@@ -91,6 +94,90 @@ function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: 
           {annonce}
         </p>
       )}
+    </section>
+  )
+}
+
+const ORIGINE_CONSENTEMENT: Record<NonNullable<Client['consentementRelanceOrigine']>, string> = {
+  inscription: 'case cochée à l’inscription',
+  commercant: 'par le commerce',
+  'stop-sms': 'réponse STOP par SMS',
+  'lien-email': 'lien de désinscription (e-mail)',
+}
+
+/** Relances SMS / e-mail (P1-B3) : consentement (poser / retirer), relance manuelle, envois de ce client. */
+function Relances({ client, commerce }: { client: Client; commerce: Commerce }) {
+  const { avecPin, recharger } = useStore()
+  const { envois } = useDonneesCommerce()
+  const { executer, enCours, erreur } = useAction()
+  const [annonce, setAnnonce] = useState('')
+  const [modele, setModele] = useState<ModeleRelance>(() => modelesSuggeres(client, commerce, new Date())[0] ?? 'bienvenue')
+  const consenti = client.consentementRelance === true
+  const canal = canalDuClient(client)
+  const duClient = envois.filter((e) => e.clientId === client.id)
+
+  async function changerConsentement(valeur: boolean) {
+    const question = valeur
+      ? `${client.prenom} accepte-t-il (elle) de recevoir vos relances par SMS ou e-mail ? Ne cochez que si le client vous l’a dit.`
+      : `Retirer le consentement de ${client.prenom} ? Plus aucune relance ne lui sera envoyée.`
+    if (!window.confirm(question)) return
+    setAnnonce('')
+    const r = await executer(() => avecPin((a, api) => api.majClient(commerce.id, a, client.id, { consentementRelance: valeur })))
+    if (r.ok) setAnnonce(valeur ? '✓ Consentement enregistré.' : '✓ Consentement retiré : plus aucune relance ne partira.')
+  }
+
+  async function relancer() {
+    setAnnonce('')
+    const r = await executer(() => avecPin((a, api) => api.relancer(commerce.id, a, client.id, { modele })))
+    if (r.ok) setAnnonce(`✓ ${r.valeur.canal === 'sms' ? 'SMS' : 'E-mail'} envoyé (${libelleModele(modele)}).`)
+    // Refus (409, 501…) : la tentative est quand même journalisée côté serveur — on relit le journal.
+    else void recharger()
+  }
+
+  return (
+    <section className="carte space-y-3">
+      <h2 className="titre-carte">Relances SMS / e-mail</h2>
+      <p className="text-sm text-gray-700">
+        {consenti ? '✅ Consentement donné' : client.consentementRelanceOrigine ? '⛔ Consentement retiré' : '— Pas de consentement'}
+        {client.consentementRelanceLe && client.consentementRelanceOrigine && (
+          <span className="text-gray-600">
+            {' '}
+            · {dateCourte(client.consentementRelanceLe)}, {ORIGINE_CONSENTEMENT[client.consentementRelanceOrigine]}
+          </span>
+        )}
+      </p>
+      <button className="bouton-secondaire w-full" disabled={enCours} onClick={() => void changerConsentement(!consenti)}>
+        {consenti ? 'Retirer le consentement' : 'Le client accepte les relances'}
+      </button>
+      {consenti && canal && (
+        <div className="space-y-2 border-t border-gray-100 pt-3">
+          <label className="etiquette" htmlFor="modele-relance">
+            Modèle ({canal === 'sms' ? 'SMS' : 'e-mail'})
+          </label>
+          <select id="modele-relance" className="champ" value={modele} onChange={(e) => (setModele(e.target.value as ModeleRelance), setAnnonce(''))}>
+            {MODELES_RELANCE.map((m) => (
+              <option key={m.modele} value={m.modele}>
+                {m.libelle}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-600">{MODELES_RELANCE.find((m) => m.modele === modele)!.aide}</p>
+          <button className="bouton w-full" disabled={enCours} onClick={() => void relancer()}>
+            {enCours ? 'Envoi…' : 'Envoyer la relance'}
+          </button>
+          <p className="text-xs text-gray-600">{MENTION_ENVOI}. Une même relance part au plus une fois par jour.</p>
+        </div>
+      )}
+      <MessageErreur>{erreur && `Rien n’a été envoyé ni modifié : ${erreur}`}</MessageErreur>
+      {annonce && (
+        <p className="alerte-succes" role="status">
+          {annonce}
+        </p>
+      )}
+      <div className="border-t border-gray-100 pt-3">
+        <h3 className="etiquette">Envois à ce client</h3>
+        <JournalEnvois envois={duClient} avecClient={false} />
+      </div>
     </section>
   )
 }
@@ -239,6 +326,7 @@ export default function FicheClient() {
 
       {mode === 'api' && <PointsEtAnniversaire client={client} commerce={commerce} />}
       {mode === 'api' && <Rattrapages client={client} commerce={commerce} />}
+      {mode === 'api' && <Relances client={client} commerce={commerce} />}
 
       <EncartWallet demo={estDemo} lienCarte={`#/carte/${client.id}`} />
 
