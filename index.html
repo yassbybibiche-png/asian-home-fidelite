@@ -5,9 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#B3262D" />
     <title>Asian Home Fidélité — carte de fidélité, roulette et avis Google</title>
+    <!-- Écran de chargement (P0-U1) : feuille liée et non bloc de style inline, la CSP a style-src 'self'. -->
+    <link rel="stylesheet" href="/src/chargement.css" />
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Le contenu de #root s'affiche avant le JS ; React le remplace au montage (createRoot vide le conteneur). -->
+    <div id="root">
+      <div class="chargement-initial" role="status" aria-busy="true">
+        <img class="chargement-initial__logo" src="/visuels/logo.png" alt="Asian Home" width="96" height="96" />
+        <p class="chargement-initial__texte">Chargement…</p>
+        <p class="chargement-initial__lent">Connexion lente : merci de patienter quelques secondes.</p>
+        <noscript><p class="chargement-initial__texte">Activez JavaScript pour utiliser l’application.</p></noscript>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

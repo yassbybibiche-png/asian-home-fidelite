@@ -6,6 +6,7 @@ import { ErreurApi } from '../data/api'
 import { formaterPrix } from '../lib/points'
 import { filtrerMenu } from '../lib/menu'
 import { LogoCommerce } from '../components/ui'
+import { SqueletteMenu } from '../components/Squelette'
 import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
 import { estSignature, menuReelAsianHome } from '../data/menu-reel'
 import { HorsLignePublic, MessagePublic } from './Jouer'
@@ -33,7 +34,7 @@ export default function MenuPublic() {
   if (!param || erreur === 'introuvable') return <MessagePublic titre="Menu introuvable">Ce lien ne correspond à aucun commerce.</MessagePublic>
   if (erreur === 'inactif') return <MessagePublic titre="Menu indisponible">Le menu de ce commerce n’est plus disponible.</MessagePublic>
   if (erreur === 'horsLigne' && !donnees) return <HorsLignePublic onReessayer={charger} />
-  if (!donnees) return <MessagePublic titre="Chargement…">Un instant, le menu arrive.</MessagePublic>
+  if (!donnees) return <SqueletteMenu libelle="Un instant, le menu arrive." />
 
   return <MenuAffiche menu={donnees.menu} commerce={donnees.commerce} recherche={recherche} setRecherche={setRecherche} categorie={categorie} setCategorie={setCategorie} ouvert={ouvert} setOuvert={setOuvert} />
 }

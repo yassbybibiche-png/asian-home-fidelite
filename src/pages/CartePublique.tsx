@@ -5,6 +5,7 @@ import type { Client, Commerce, CommercePublic, MessageClient } from '../types'
 import { ErreurApi, type ClientApi } from '../data/api'
 import { CarteFidelite } from '../components/CarteFidelite'
 import { InvitationAvis } from '../components/InvitationAvis'
+import { SqueletteCarte } from '../components/Squelette'
 import { BadgeDemo, EncartWallet, MessageErreur } from '../components/ui'
 import { dateRelative } from '../lib/format'
 import { estAsianHome, VISUELS } from '../lib/visuels'
@@ -153,7 +154,7 @@ function CarteApi({ api }: { api: ClientApi }) {
   if (erreur === 'inactif') return <MessagePublic titre="Carte indisponible">La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
   // Hors ligne sans carte déjà affichée : message clair (une carte déjà affichée reste visible).
   if (erreur === 'horsLigne' && !donnees) return <HorsLignePublic onReessayer={charger} />
-  if (!donnees) return <MessagePublic titre="Chargement…">Un instant, votre carte arrive.</MessagePublic>
+  if (!donnees) return <SqueletteCarte libelle="Un instant, votre carte arrive." />
   return (
     <Carte
       client={donnees.client}

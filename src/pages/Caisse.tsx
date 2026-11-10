@@ -11,6 +11,7 @@ import { correspondRecherche } from '../lib/recherche'
 import { clientIdDepuisQr, creerFileCaisse, libelleFile, nouvelIdAction, type ActionCaisse, type EtatFile, type Envoi, type TypeActionCaisse } from '../lib/fileCaisse'
 import { LogoCommerce, MessageErreur } from '../components/ui'
 import { ScannerQr } from '../components/ScannerQr'
+import { SqueletteCaisse } from '../components/Squelette'
 import { MessagePublic } from './Jouer'
 
 /** Page caisse #/caisse/<commerceId> : tablette du comptoir, déverrouillée par le code équipe (4 chiffres). */
@@ -206,9 +207,9 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
     return { statut: 'ok' as const, client: apres }
   }
 
-  if (!pret) return <p className="px-4 py-16 text-center text-gray-600" role="status">Chargement…</p>
+  if (!pret) return <SqueletteCaisse libelle="Ouverture de la caisse…" />
   if (!acces) return <Deverrouillage commerce={donnees?.commerce} erreur={erreurAcces} onCode={deverrouiller} attente={etatFile.attente.length} />
-  if (!donnees) return <MessagePublic titre="Caisse">{enLigne ? 'Chargement des clients…' : 'Hors ligne et aucune donnée en mémoire sur cet appareil.'}</MessagePublic>
+  if (!donnees) return enLigne ? <SqueletteCaisse libelle="Chargement des clients…" /> : <MessagePublic titre="Caisse">Hors ligne et aucune donnée en mémoire sur cet appareil.</MessagePublic>
 
   return (
     <Comptoir

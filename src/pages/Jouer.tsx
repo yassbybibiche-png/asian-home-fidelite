@@ -8,6 +8,7 @@ import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ResultatTirage } fr
 import { lancerTirage, memoireJoueur, type JoueurMemorise } from '../data/jeuApi'
 import { DUREE_ROTATION_MS, Roue } from '../components/Roue'
 import { InvitationAvis } from '../components/InvitationAvis'
+import { SqueletteJeu } from '../components/Squelette'
 import { BadgeDemo, BoutonCopier, LogoCommerce, MessageErreur } from '../components/ui'
 
 export function MessagePublic({ titre, children }: { titre: string; children: ReactNode }) {
@@ -260,7 +261,7 @@ function JouerApi({ api }: { api: ClientApi }) {
 
   if (erreur === 'inconnu') return <MessagePublic titre="QR code inconnu">Ce QR code ne correspond à aucun commerce.</MessagePublic>
   if (erreur === 'horsLigne') return <HorsLignePublic onReessayer={charger} />
-  if (!commerce) return <MessagePublic titre="Chargement…">Un instant, la roue arrive.</MessagePublic>
+  if (!commerce) return <SqueletteJeu libelle="Un instant, la roue arrive." />
   return verifierCommerce(commerce) ?? <PartieApi key={commerce.id} api={api} commerce={commerce} />
 }
 
