@@ -90,7 +90,8 @@ describe('Textes honnêtes et invitation partout', () => {
   test('page de jeu et page Avis utilisent la même invitation ; jamais conditionnée au lot', () => {
     const jouer = source('pages/Jouer.tsx')
     assert.match(jouer, /import \{ InvitationAvis \} from '\.\.\/components\/InvitationAvis'/)
-    assert.equal(jouer.match(/<InvitationAvis commerce=\{commerce\} \/>/g)?.length, 2, 'modes local et API')
+    // P1-C4 : message privé (note basse) et retour vers la carte branchés dans les deux modes.
+    assert.equal(jouer.match(/<InvitationAvis commerce=\{commerce\} onMessagePrive=\{messagePrive\} lienCarte=\{carte\} \/>/g)?.length, 2, 'modes local et API')
     assert.doesNotMatch(jouer, /function InvitationAvis/)
     // Affichée après le résultat ou le tirage du jour, gagnant comme perdant.
     assert.match(jouer, /\(etape === 'resultat' \|\| dejaJoue\) && \(\s*<>\s*<InvitationAvis/)
