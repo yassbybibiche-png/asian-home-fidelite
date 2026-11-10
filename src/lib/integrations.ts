@@ -33,14 +33,42 @@ export const TEXTE_AVIS_VIDE_PRODUCTION = 'Connectez Google Business Profile pou
 /** Scope OAuth des API Google Business Profile (doc Google « Basic setup », vérifiée le 09/11/2026). */
 export const SCOPE_GOOGLE_BUSINESS = 'https://www.googleapis.com/auth/business.manage'
 
+/** Résumé à l'écran du guide complet `docs/GOOGLE-BUSINESS.md` (P1-B4). */
 export const ETAPES_CONNEXION_GOOGLE = [
   'Le compte Google propriétaire (ou gestionnaire) de la fiche Google du commerce — fourni par le commerce.',
-  'Un projet Google Cloud, puis la demande d’accès aux API Business Profile (formulaire Google, examen par Google) : sans approbation, les API ne sont pas utilisables.',
+  'Un projet Google Cloud, puis la demande d’accès aux API Business Profile (formulaire Google « Application for Basic API Access », examen par Google, délai inconnu) : sans approbation, les API ne sont pas utilisables (quota 0).',
   'Activer les API Business Profile dans la console Google Cloud (dont « Google My Business API », qui sert à lire les avis et à y répondre).',
-  'Créer un identifiant OAuth 2.0 (client web) avec le scope « business.manage » : ' + SCOPE_GOOGLE_BUSINESS + '.',
-  'Le commerce se connecte et donne son consentement sur l’écran Google.',
-  'Import des avis puis publication des réponses — pas encore développé dans l’app.',
+  'Créer un identifiant OAuth 2.0 (application Web) avec le scope « business.manage » : ' + SCOPE_GOOGLE_BUSINESS + ', et y déclarer l’URI de redirection de l’app.',
+  'Renseigner sur Render GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET et GOOGLE_REDIRECT_URI (jamais dans le code).',
+  'Ici, « Connecter Google » : le commerce donne son consentement sur l’écran Google ; l’app peut alors importer les avis et publier les réponses validées.',
 ]
+
+export const GUIDE_GOOGLE_BUSINESS = 'Guide pas à pas : docs/GOOGLE-BUSINESS.md (dans le dépôt de l’app).'
+
+/**
+ * État de Google Business Profile affiché sur l'écran Avis. `configure` vient du serveur (`GET …/google`) ; `null` =
+ * état inconnu (mode local, serveur injoignable). Rien n'est promis tant que le serveur n'est pas configuré.
+ */
+export function etatGoogleBusiness(s: { configure: boolean; connecte: boolean } | null): { badge: string; texte: string } {
+  if (!s || !s.configure) {
+    return {
+      badge: 'à brancher',
+      texte:
+        'Connexion à Google : à brancher (aucun identifiant Google configuré sur le serveur). Aucun avis n’est importé et aucune réponse n’est publiée : recopiez un avis reçu à la main, puis copiez vous-même votre réponse sur Google.',
+    }
+  }
+  if (!s.connecte) {
+    return {
+      badge: 'à connecter',
+      texte: 'Google est configuré sur le serveur mais pas encore connecté : utilisez « Connecter Google » (compte propriétaire ou gestionnaire de la fiche).',
+    }
+  }
+  return {
+    badge: 'connecté',
+    texte:
+      'Google connecté : importez vos avis ; seule la réponse automatique aux nouveaux avis 5★ (si la règle est active) part d’office, toute autre réponse est publiée après votre validation.',
+  }
+}
 
 /** Bloc RGPD affiché dans Plus et Offre (et repris dans le README). */
 export const MENTIONS_RGPD = [

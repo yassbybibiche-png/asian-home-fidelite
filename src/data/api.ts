@@ -73,6 +73,25 @@ export interface ResultatTirage {
   perdant: boolean
 }
 
+/** GET …/google : `configure` = variables Google présentes sur le serveur ; `connecte` = consentement donné. */
+export interface EtatGoogle {
+  configure: boolean
+  connecte: boolean
+  connecteLe?: string
+  /** Fiche Google déjà trouvée (après un premier import, ou GOOGLE_BUSINESS_LOCATION). */
+  fiche?: boolean
+}
+
+export interface ResultatImportGoogle {
+  importes: number
+  misAJour: number
+  ignores: number
+  publiees: number
+  echecsPublication: number
+  erreurPublication?: string
+  avis: Avis[]
+}
+
 /** Carte publique : jamais de téléphone ni d'e-mail. */
 export type CartePublique = Omit<Client, 'telephone' | 'email'>
 
@@ -199,7 +218,7 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
         ok: boolean
         version: string
         demo: boolean
-        integrations?: { sms?: boolean; email?: boolean }
+        integrations?: { sms?: boolean; email?: boolean; googleBusinessProfile?: boolean }
         migrations?: { relances?: boolean }
       }>,
 
@@ -250,6 +269,20 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
       ((await requete('POST', `/commerces/${enc(commerceId)}/avis`, { acces, corps: avis })) as { avis: Avis }).avis,
     majAvis: async (commerceId: string, acces: Acces, avisId: string, maj: { reponse?: string | null; brouillon?: string | null }) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}/avis/${enc(avisId)}`, { acces, corps: maj })) as { avis: Avis }).avis,
+    // ---- Google Business Profile (P1-B4) : 501 tant que le serveur n'a pas GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET ----
+    /** État de la connexion (aucun jeton n'est jamais renvoyé au navigateur). */
+    etatGoogle: (commerceId: string, acces: Acces) =>
+      requete('GET', `/commerces/${enc(commerceId)}/google`, { acces }) as Promise<EtatGoogle>,
+    /** URL de l'écran de consentement Google, à ouvrir dans le navigateur. */
+    lienConnexionGoogle: async (commerceId: string, acces: Acces) =>
+      ((await requete('GET', `/commerces/${enc(commerceId)}/google/auth?format=json`, { acces })) as { url: string }).url,
+    deconnecterGoogle: (commerceId: string, acces: Acces) =>
+      requete('POST', `/commerces/${enc(commerceId)}/google/deconnecter`, { acces }) as Promise<{ ok: boolean; revoque: boolean }>,
+    importerAvisGoogle: (commerceId: string, acces: Acces) =>
+      requete('POST', `/commerces/${enc(commerceId)}/google/import-avis`, { acces }) as Promise<ResultatImportGoogle>,
+    /** Publie la réponse validée (ou la réponse auto 5★) sur Google ; 409 si elle n'est pas validée. */
+    publierReponse: async (commerceId: string, acces: Acces, avisId: string) =>
+      ((await requete('POST', `/commerces/${enc(commerceId)}/avis/${enc(avisId)}/publier-reponse`, { acces })) as { avis: Avis }).avis,
     exportCsv: (commerceId: string, acces: Acces) => requete('GET', `/commerces/${enc(commerceId)}/export.csv`, { acces, texte: true }) as Promise<string>,
     majClient: async (commerceId: string, acces: Acces, clientId: string, champs: { anniversaire?: string; platPrefere?: string; consentementRelance?: boolean }) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}`, { acces, corps: champs })) as { client: Client }).client,
