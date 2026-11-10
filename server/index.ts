@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import pkg from '../package.json' with { type: 'json' }
-import { creerServeur } from './app.ts'
+import { creerServeur, lireOrigineCors } from './app.ts'
 import { configDepuisEnv } from './notifications/index.ts'
 import { configSupabaseDepuisEnv } from './stockage-supabase.ts'
 
@@ -46,6 +46,24 @@ if (!secretSession) {
   }
 }
 
+// CORS strict (P0-S4) : seule l'origine CORS_ORIGIN peut appeler l'API depuis un autre site. Absente : '*' comme avant,
+// sans refuser de démarrer — en production le front est servi par CE serveur (même origine), le CORS ne le concerne pas.
+let origineCors = '*'
+if (env.CORS_ORIGIN?.trim()) {
+  try {
+    origineCors = lireOrigineCors(env.CORS_ORIGIN)
+  } catch (e) {
+    arreter(e instanceof Error ? e.message : String(e))
+  }
+}
+if (origineCors === '*') {
+  console.warn(
+    production
+      ? '[serveur] CORS_ORIGIN absente : CORS ouvert à tous les sites (*). Le front servi ici n’est pas concerné (même origine) ; créez la variable sur Render (origine exacte du front) pour fermer l’API aux autres sites.'
+      : '[serveur] CORS_ORIGIN absente : CORS ouvert (*), acceptable en développement seulement.',
+  )
+}
+
 let pinInitial = env.PIN_ASIAN_HOME
 if (!pinInitial && !production) pinInitial = '1234'
 
@@ -66,7 +84,7 @@ try {
     demo: env.DEMO === '1',
     production,
     derriereProxy: env.TRUST_PROXY === '1' || !!env.RENDER,
-    origineCors: env.CORS_ORIGIN || '*',
+    origineCors,
     dossierStatique: existsSync(resolve(dossierStatique, 'index.html')) ? dossierStatique : undefined,
     version: pkg.version,
     urlPublique: env.PUBLIC_URL,

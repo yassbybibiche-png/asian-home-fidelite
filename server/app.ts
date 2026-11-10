@@ -99,7 +99,7 @@ export interface OptionsServeur {
   production?: boolean
   /** Lire l'IP cliente dans X-Forwarded-For (derrière l'équilibreur de Render, par ex.). */
   derriereProxy?: boolean
-  /** Origine autorisée en CORS (défaut : *). */
+  /** Origine autorisée en CORS, exacte (`https://hote`) ou '*' (défaut). Validée par `lireOrigineCors`. */
   origineCors?: string
   /** Dossier du front compilé à servir (ex. `dist/`) ; absent = API seule. */
   dossierStatique?: string
@@ -561,6 +561,87 @@ async function initialiser(st: Stockage, o: OptionsServeur) {
   }
 }
 
+// ---------- En-têtes HTTP de sécurité (P0-S4, faille F-08) — sur TOUTES les réponses (API, front, erreurs) ----------
+
+/**
+ * CSP calibrée sur ce que le front compilé fait réellement (vérifié le 10/11/2026 dans dist/ et src/) :
+ * - script-src 'self' : un seul `<script type="module" src="/assets/…">`, aucun script inline, ni eval / new Function ;
+ *   jsQR est un morceau du même bundle chargé par `import()` (même origine).
+ * - style-src 'self' : une seule feuille `/assets/*.css` (Tailwind compilé par Vite, aucun `<style>` injecté). Les props
+ *   React `style={…}` (roue, barres de progression, couleur du commerce) passent par le CSSOM (`el.style.x = …`), que la
+ *   CSP ne bloque pas : pas besoin de 'unsafe-inline'.
+ * - img-src 'self' data: https: — ASSOUPLISSEMENT nécessaire : photos du menu importées en base64
+ *   (`data:image/jpeg;base64,…`, src/lib/menu.ts) ; logo, bannière et photos peuvent être n'importe quelle adresse
+ *   https://… saisie par le commerçant (src/lib/apparence.ts, src/lib/menu.ts). Le QR est un `<svg>` dessiné en DOM.
+ * - connect-src 'self' : en production le front appelle l'API à la même adresse (VITE_API_URL=/, .env.api). Un front
+ *   servi par Vite en développement n'est pas concerné (il ne reçoit pas ces en-têtes).
+ * - Caméra de la caisse : `getUserMedia` + `video.srcObject` (pas d'URL chargée, rien à autoriser côté CSP) ; elle
+ *   dépend de Permissions-Policy `camera=(self)` ci-dessous.
+ * - frame-ancestors 'none' (= X-Frame-Options DENY), object-src 'none', base-uri / form-action 'self'.
+ */
+export const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self' data: https:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "media-src 'self'",
+  "manifest-src 'self'",
+  "worker-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join('; ')
+
+export const ENTETES_SECURITE: Record<string, string> = {
+  'Content-Security-Policy': CSP,
+  // Pas de `preload` : le domaine est un sous-domaine de onrender.com (décision à prendre avec un domaine à soi).
+  // Ignoré par les navigateurs en http:// (développement local).
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  // Les routes du front sont dans le fragment (#/carte/…), jamais envoyé ; on ne transmet rien d'autre aux sites tiers.
+  'Referrer-Policy': 'same-origin',
+  // camera=(self) : scan du QR client à la caisse (src/components/ScannerQr.tsx). Tout le reste est coupé.
+  'Permissions-Policy': 'camera=(self), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()',
+}
+
+/**
+ * Valeur de CORS_ORIGIN → origine exacte (`https://hote[:port]`), ou '*'. Lève une erreur si la valeur n'est pas une
+ * origine (chemin, protocole autre que http(s), texte libre) : mieux vaut refuser de démarrer qu'autoriser autre chose.
+ */
+export function lireOrigineCors(valeur: string): string {
+  const v = valeur.trim()
+  if (v === '*') return '*'
+  let origine: string | undefined
+  try {
+    const u = new URL(v)
+    if ((u.protocol === 'https:' || u.protocol === 'http:') && u.origin === v.replace(/\/$/, '')) origine = u.origin
+  } catch {
+    // traité ci-dessous
+  }
+  if (!origine) throw new Error(`CORS_ORIGIN invalide : « ${v} ». Attendu : une origine exacte, ex. https://asian-home-fidelite.onrender.com (sans chemin).`)
+  return origine
+}
+
+/**
+ * En-têtes CORS. '*' (développement, ou CORS_ORIGIN absente) : comme avant. Sinon, seule l'origine configurée (comparaison
+ * exacte) reçoit Access-Control-Allow-* ; une origine étrangère ne reçoit rien (le navigateur bloque), jamais de reflet.
+ * Les requêtes sans Origin (curl, même origine en GET) sont servies normalement.
+ */
+function entetesCors(autorisee: string, origine: string | undefined): Record<string, string> {
+  const autorisation = {
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Session, X-Commerce-PIN, X-Admin-PIN, X-Equipe-Code',
+    'Access-Control-Max-Age': '600',
+  }
+  if (autorisee === '*') return { 'Access-Control-Allow-Origin': '*', ...autorisation }
+  if (origine === autorisee) return { 'Access-Control-Allow-Origin': origine, ...autorisation, Vary: 'Origin' }
+  return { Vary: 'Origin' }
+}
+
 // ---------- Fichiers statiques (front compilé, optionnel) ----------
 
 const TYPES_MIME: Record<string, string> = {
@@ -569,12 +650,33 @@ const TYPES_MIME: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
   '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
   '.json': 'application/json',
   '.webmanifest': 'application/manifest+json',
+  '.md': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
 }
 
-function servirStatique(dossier: string, chemin: string, res: ServerResponse): boolean {
+/** Cache des fichiers statiques : voir server/README.md (« En-têtes HTTP »). */
+const CACHE_IMMUABLE = 'public, max-age=31536000, immutable'
+const CACHE_VISUELS = 'public, max-age=3600'
+
+/** ETag faible taille + date de modification (comme `serve-static`) : suffit à répondre 304 sans relire le fichier. */
+function etag(taille: number, mtimeMs: number): string {
+  return `W/"${taille.toString(16)}-${Math.floor(mtimeMs).toString(16)}"`
+}
+
+function etagCorrespond(entete: string | undefined, valeur: string): boolean {
+  if (!entete) return false
+  const sansFaible = (e: string) => e.trim().replace(/^W\//, '')
+  return entete.split(',').some((e) => e.trim() === '*' || sansFaible(e) === sansFaible(valeur))
+}
+
+function servirStatique(dossier: string, chemin: string, req: IncomingMessage, res: ServerResponse, entetes: Record<string, string>): boolean {
   const racine = resolve(dossier)
   let decode: string
   try {
@@ -584,9 +686,28 @@ function servirStatique(dossier: string, chemin: string, res: ServerResponse): b
   }
   let fichier = resolve(join(racine, normalize(decode)))
   if (fichier !== racine && !fichier.startsWith(racine + sep)) return false
-  if (!existsSync(fichier) || statSync(fichier).isDirectory()) fichier = join(racine, 'index.html')
+  // Les assets Vite (nom avec hash, dist/assets/) sont mis en cache un an : un asset absent (ancien déploiement) répond
+  // 404 plutôt que index.html, qui serait refusé de toute façon comme script (nosniff).
+  const asset = fichier.startsWith(join(racine, 'assets') + sep)
+  if (!existsSync(fichier) || statSync(fichier).isDirectory()) {
+    if (asset) return false
+    fichier = join(racine, 'index.html')
+  }
   if (!existsSync(fichier)) return false
-  res.writeHead(200, { 'Content-Type': TYPES_MIME[extname(fichier)] ?? 'application/octet-stream' })
+  const infos = statSync(fichier)
+  const balise = etag(infos.size, infos.mtimeMs)
+  const cache =
+    fichier === join(racine, 'index.html')
+      ? 'no-cache' // toujours revérifié (ETag → 304) : un nouveau déploiement est pris dès le rechargement
+      : asset
+        ? CACHE_IMMUABLE
+        : CACHE_VISUELS
+  const communs = { ...entetes, 'Cache-Control': cache, ETag: balise }
+  if (etagCorrespond(req.headers['if-none-match'], balise)) {
+    res.writeHead(304, communs).end()
+    return true
+  }
+  res.writeHead(200, { ...communs, 'Content-Type': TYPES_MIME[extname(fichier)] ?? 'application/octet-stream' })
   res.end(readFileSync(fichier))
   return true
 }
@@ -621,6 +742,7 @@ function codeGagnant(): string {
 }
 
 export async function creerServeur(o: OptionsServeur) {
+  const origineCors = lireOrigineCors(o.origineCors ?? '*')
   // Supabase seulement s'il est configuré ; sinon SQLite local (dev, tests, comportement d'avant S1).
   const st: Stockage = o.supabase ? ouvrirStockageSupabase(o.supabase) : ouvrirStockage(o.fichierDb)
   try {
@@ -1661,12 +1783,7 @@ export async function creerServeur(o: OptionsServeur) {
   }
 
   const serveur = createServer(async (req, res) => {
-    const entetes: Record<string, string> = {
-      'Access-Control-Allow-Origin': o.origineCors ?? '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Session, X-Commerce-PIN, X-Admin-PIN, X-Equipe-Code',
-      'Access-Control-Max-Age': '600',
-    }
+    const entetes: Record<string, string> = { ...ENTETES_SECURITE, ...entetesCors(origineCors, req.headers.origin) }
     const url = new URL(req.url ?? '/', 'http://localhost')
     try {
       if (req.method === 'OPTIONS') {
@@ -1675,7 +1792,7 @@ export async function creerServeur(o: OptionsServeur) {
       }
       if (!url.pathname.startsWith('/api/v1/') && url.pathname !== '/api/v1') {
         if (o.dossierStatique && (req.method === 'GET' || req.method === 'HEAD') && !url.pathname.startsWith('/api/')) {
-          if (servirStatique(o.dossierStatique, url.pathname, res)) return
+          if (servirStatique(o.dossierStatique, url.pathname, req, res, entetes)) return
         }
         throw err(404, 'Route inconnue.')
       }
@@ -1704,7 +1821,7 @@ export async function creerServeur(o: OptionsServeur) {
       const http = e instanceof ErreurHttp
       if (!http) console.error(`[serveur] ${req.method} ${url.pathname} :`, e)
       const statut = http ? e.statut : 500
-      res.writeHead(statut, { ...entetes, ...(http ? e.entetes : {}), 'Content-Type': 'application/json; charset=utf-8' })
+      res.writeHead(statut, { ...entetes, ...(http ? e.entetes : {}), 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
       res.end(JSON.stringify({ erreur: http ? e.message : 'Erreur interne du serveur.' }))
     }
   })
