@@ -273,7 +273,7 @@ export function validerProgramme(v: unknown): ConfigProgramme {
 // ---------- 1. Paliers bas ----------
 
 /** Prochain palier (seuil + libellé + visites restantes), ou null si tous atteints. */
-export function prochainPalier(client: Client, commerce: Commerce): { palier: Palier; restantes: number } | null {
+export function prochainPalier(client: Client, commerce: Pick<Commerce, 'programme' | 'seuilTampons'>): { palier: Palier; restantes: number } | null {
   const { actif, liste } = configPaliers(commerce)
   if (!actif) return null
   const offerts = new Set(client.paliersOfferts ?? [])
@@ -358,7 +358,7 @@ export interface Niveau {
 }
 
 /** Niveau du client (visites à vie). Le VIP reste rare : seuil haut, affiché comme tel. */
-export function niveauClient(client: Client, commerce: Commerce): Niveau {
+export function niveauClient(client: Client, commerce: Pick<Commerce, 'programme'>): Niveau {
   const cfg = configNiveaux(commerce)
   const visites = client.visites.length
   if (!cfg.actif) return { nom: 'Membre', seuil: 0, multiplicateur: 1, avantages: '' }
@@ -469,7 +469,7 @@ export function fenetreAnniversaire(client: Client, commerce: Commerce, maintena
 // ---------- 8. Offre hebdomadaire récurrente ----------
 
 /** Offre membres du jour (si aujourd'hui est le jour fixe), sinon null. */
-export function offreHebdoDuJour(commerce: Commerce, maintenant: Date): { libelle: string; condition: string } | null {
+export function offreHebdoDuJour(commerce: Pick<Commerce, 'programme'>, maintenant: Date): { libelle: string; condition: string } | null {
   const cfg = configOffreHebdo(commerce)
   if (!cfg.actif) return null
   return maintenant.getDay() === cfg.jour ? { libelle: cfg.libelle, condition: cfg.condition } : null

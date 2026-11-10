@@ -1,13 +1,21 @@
 // Logique pure de la roulette : tirage pondéré, anti-abus, géométrie de la roue.
 import type { Client, Lot, Tirage } from '../types'
 
+/**
+ * Lot affichable sur la roue. Vue commerçant : avec sa probabilité. Vue publique (pages client) : libellé seul,
+ * le serveur ne publiant que les lots jouables — chaque lot y compte alors pour 1 (secteurs égaux).
+ */
+export type LotRoue = Pick<Lot, 'libelle'> & { probabilite?: number }
+
+const poids = (l: LotRoue) => l.probabilite ?? 1
+
 /** Lots réellement tirables (libellé non vide, probabilité > 0). */
-export function lotsJouables(lots: Lot[]): Lot[] {
-  return lots.filter((l) => l.libelle.trim() && l.probabilite > 0)
+export function lotsJouables<T extends LotRoue>(lots: T[]): T[] {
+  return lots.filter((l) => l.libelle.trim() && poids(l) > 0)
 }
 
-export function totalProbabilites(lots: Lot[]): number {
-  return lotsJouables(lots).reduce((s, l) => s + l.probabilite, 0)
+export function totalProbabilites(lots: LotRoue[]): number {
+  return lotsJouables(lots).reduce((s, l) => s + poids(l), 0)
 }
 
 /** Tirage pondéré ; si le total ≠ 100 %, les chances sont recalculées au prorata. */
@@ -53,19 +61,22 @@ export function peutJouer(client: Client, tirages: Tirage[], commerceId: string,
 }
 
 export interface Secteur {
-  lot: Lot
+  lot: LotRoue
   debut: number
   fin: number
 }
 
-/** Secteurs de la roue en degrés (0 = en haut, sens horaire), proportionnels aux chances. */
-export function secteurs(lots: Lot[]): Secteur[] {
+/**
+ * Secteurs de la roue en degrés (0 = en haut, sens horaire), proportionnels aux chances quand elles sont connues
+ * (vue commerçant) ; égaux pour la vue publique, qui ne les publie pas (des secteurs proportionnels les révéleraient).
+ */
+export function secteurs(lots: LotRoue[]): Secteur[] {
   const jouables = lotsJouables(lots)
   const total = totalProbabilites(lots)
   let angle = 0
   return jouables.map((lot) => {
     const debut = angle
-    angle += (lot.probabilite / total) * 360
+    angle += (poids(lot) / total) * 360
     return { lot, debut, fin: angle }
   })
 }

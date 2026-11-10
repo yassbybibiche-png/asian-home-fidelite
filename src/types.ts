@@ -80,6 +80,43 @@ export interface RecompensePoints {
   description?: string
 }
 
+/**
+ * Programme vu par le client (pages publiques) : uniquement les blocs que la carte publique affiche, avec les
+ * valeurs EFFECTIVES (défauts déjà appliqués par le serveur, pour que le front n'en invente pas). Jamais les
+ * réglages internes : relance des inactifs, bienvenue, anniversaire, réserve, points du parrain, plafond annuel.
+ */
+export interface ProgrammePublic {
+  paliers: { actif: boolean; liste: Palier[] }
+  parrainage: { actif: boolean; pointsFilleul: number }
+  defi: { actif: boolean }
+  niveaux: { actif: boolean; habitueSeuil: number; habitueMultiplicateur: number; vipSeuil: number; vipMultiplicateur: number }
+  offreHebdo: { actif: boolean; jour: number; libelle: string; condition: string }
+  rattrapage: { actif: boolean; delaiJours: number }
+}
+
+/**
+ * Fiche publique d'un commerce (GET /commerces, /commerces/:id, /commerces/:id/menu, /cartes/:id), lisible sans
+ * authentification : ce que les pages client affichent, rien d'autre (voir `src/lib/vuePublique.ts`). Le commerçant
+ * reçoit le `Commerce` complet via GET /commerces/:id/etat.
+ */
+export interface CommercePublic {
+  id: string
+  nom: string
+  type: TypeCommerce
+  logo?: string
+  lienGoogle: string
+  coordonnees?: string
+  recompense: string
+  seuilTampons: number
+  /** Libellés des lots jouables, dans l'ordre de la roue — sans probabilité (le tirage est fait par le serveur). */
+  lots: Pick<Lot, 'libelle'>[]
+  actif: boolean
+  demo: boolean
+  catalogue?: Pick<RecompensePoints, 'nom' | 'cout' | 'description'>[]
+  apparence?: Apparence
+  programme: ProgrammePublic
+}
+
 export type TypeMessageAuto = 'bienvenue' | 'recompense' | 'presque' | 'inactif' | 'anniversaire' | 'avis'
 export type ReglesMessages = Record<TypeMessageAuto, boolean>
 
