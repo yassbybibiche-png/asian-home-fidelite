@@ -6,6 +6,7 @@ import { dateCourte, dateRelative } from '../lib/format'
 import { libelleDuree, type ClientAPurger } from '../lib/rgpd'
 import { analyserContact, messageRelance, recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { correspondRecherche } from '../lib/recherche'
+import { etatSaisieContact, nomAffiche } from '../lib/inscriptionJeu'
 import { MENTION_ENVOI } from '../lib/integrations'
 import { BoutonCopier, EnTete, MessageErreur, telecharger, Vide } from '../components/ui'
 
@@ -54,7 +55,7 @@ export default function Clients() {
 
       {annonce && (
         <p className="alerte-succes apparition mb-4 font-normal" role="status">
-          {annonce.existant ? `${annonce.client.prenom} était déjà inscrit(e) avec ce contact.` : `✓ ${annonce.client.prenom} est inscrit(e).`}{' '}
+          {annonce.existant ? `${nomAffiche(annonce.client.prenom)} était déjà inscrit(e) avec ce contact.` : `✓ ${nomAffiche(annonce.client.prenom)} est inscrit(e).`}{' '}
           <a href={`#/client/${annonce.client.id}`} className="font-semibold underline">
             Voir sa carte
           </a>
@@ -286,7 +287,9 @@ function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onIn
   const [essaye, setEssaye] = useState(false)
   const { executer, enCours, erreur } = useAction()
   const contact = analyserContact(contactSaisi)
-  const valide = prenom.trim().length > 0 && contact !== null
+  const saisie = etatSaisieContact(contactSaisi, essaye)
+  // Prénom optionnel, comme sur la page de jeu (P1-C1) : seul le téléphone ou l'e-mail est obligatoire.
+  const valide = contact !== null
 
   async function envoyer(e: FormEvent) {
     e.preventDefault()
@@ -300,25 +303,37 @@ function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onIn
     <form onSubmit={envoyer} className="carte mb-4 space-y-3">
       <h2 className="titre-carte">Nouveau client</h2>
       <div>
-        <label className="etiquette" htmlFor="ins-prenom">
-          Prénom
-        </label>
-        <input id="ins-prenom" className="champ" autoComplete="given-name" value={prenom} onChange={(e) => setPrenom(e.target.value)} autoFocus />
-      </div>
-      <div>
         <label className="etiquette" htmlFor="ins-contact">
           Téléphone ou e-mail (un seul suffit)
         </label>
+        {/* autocomplete off : ce sont les coordonnées du CLIENT, pas celles de l'appareil du commerce. */}
         <input
           id="ins-contact"
           className="champ"
           inputMode="email"
-          autoComplete="tel"
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
           placeholder="06 12 34 56 78 ou marie@exemple.fr"
+          aria-invalid={saisie.niveau === 'erreur'}
+          aria-describedby="ins-contact-aide"
           value={contactSaisi}
           onChange={(e) => setContactSaisi(e.target.value)}
+          autoFocus
         />
-        {essaye && !contact && <p className="mt-1 text-sm text-red-700">Saisissez un numéro (10 chiffres) ou un e-mail valide.</p>}
+        <p
+          id="ins-contact-aide"
+          aria-live="polite"
+          className={`mt-1 min-h-5 text-sm ${saisie.niveau === 'erreur' ? 'text-red-700' : saisie.niveau === 'ok' ? 'font-semibold text-green-800' : 'text-gray-600'}`}
+        >
+          {saisie.message}
+        </p>
+      </div>
+      <div>
+        <label className="etiquette" htmlFor="ins-prenom">
+          Prénom (optionnel)
+        </label>
+        <input id="ins-prenom" className="champ" autoComplete="off" value={prenom} onChange={(e) => setPrenom(e.target.value)} />
       </div>
       <label className="flex items-start gap-2 text-sm text-gray-700">
         <input type="checkbox" className="mt-0.5" checked={consentement} onChange={(e) => setConsentement(e.target.checked)} />
@@ -329,7 +344,7 @@ function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onIn
         <button type="button" className="bouton-secondaire" onClick={onFermer}>
           Annuler
         </button>
-        <button type="submit" className="bouton" disabled={!prenom.trim() || !contactSaisi.trim() || enCours}>
+        <button type="submit" className="bouton" disabled={!contactSaisi.trim() || enCours}>
           {enCours ? 'Inscription…' : 'Inscrire'}
         </button>
       </div>
@@ -350,7 +365,7 @@ function LigneClient({ client: c }: { client: Client }) {
       <div className="flex items-start justify-between gap-3">
         <a href={`#/client/${c.id}`} className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            <span className="text-lg font-semibold text-gray-900 underline decoration-gray-300 underline-offset-4">{c.prenom}</span>
+            <span className="text-lg font-semibold text-gray-900 underline decoration-gray-300 underline-offset-4">{nomAffiche(c.prenom)}</span>
             {estARelancer(c) && <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-semibold text-gray-700">inactif</span>}
             {debloquee && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">récompense</span>}
           </span>
@@ -408,7 +423,7 @@ function LigneRelance({ client: c }: { client: Client }) {
     <li className="carte">
       <div className="flex items-baseline justify-between gap-3">
         <a href={`#/client/${c.id}`} className="text-lg font-semibold underline decoration-gray-300 underline-offset-4">
-          {c.prenom}
+          {nomAffiche(c.prenom)}
         </a>
         <span className="shrink-0 text-sm text-gray-600">sans visite depuis {c.derniereVisite ? joursDepuis(c.derniereVisite) : '?'} j</span>
       </div>

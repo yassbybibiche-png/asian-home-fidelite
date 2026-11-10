@@ -22,24 +22,30 @@ export const TYPES_MESSAGES: { type: TypeMessageAuto; libelle: string; aide: str
 
 export const reglesVides = (): ReglesMessages => ({ bienvenue: false, recompense: false, presque: false, inactif: false, anniversaire: false, avis: false })
 
+// Prénom optionnel (P1-C1 : demandé après le tirage, souvent absent) : les phrases restent correctes sans lui.
+/** « Bienvenue Marie » / « Bienvenue ». */
+const suiviDuPrenom = (debut: string, prenom: string | undefined) => (prenom?.trim() ? `${debut} ${prenom.trim()}` : debut)
+/** « Marie, cela fait… » / « Cela fait… ». */
+const ouvertParPrenom = (prenom: string | undefined, suite: string) => (prenom?.trim() ? `${prenom.trim()}, ${suite}` : suite.charAt(0).toUpperCase() + suite.slice(1))
+
 export function texteMessage(type: TypeMessageAuto, client: Pick<Client, 'prenom'>, commerce: Pick<Commerce, 'nom' | 'recompense' | 'programme'>): string {
   const p = client.prenom
   switch (type) {
     case 'bienvenue': {
       const points = configBienvenue(commerce).actif ? configBienvenue(commerce).points : 0
       const amorce = points > 0 ? `${points} points de bienvenue déjà crédités, 1 tampon à chaque passage, et` : '1 tampon à chaque passage, et'
-      return `Bienvenue ${p} ! Votre carte de fidélité ${commerce.nom} est prête : ${amorce} ${commerce.recompense.toLowerCase()} à la clé.`
+      return `${suiviDuPrenom('Bienvenue', p)} ! Votre carte de fidélité ${commerce.nom} est prête : ${amorce} ${commerce.recompense.toLowerCase()} à la clé.`
     }
     case 'presque':
-      return `${p}, plus que 2 tampons avant votre récompense chez ${commerce.nom} : ${commerce.recompense}.`
+      return ouvertParPrenom(p, `plus que 2 tampons avant votre récompense chez ${commerce.nom} : ${commerce.recompense}.`)
     case 'recompense':
-      return `Bravo ${p} ! Votre carte est complète : ${commerce.recompense}. Demandez-la lors de votre prochain passage chez ${commerce.nom}.`
+      return `${suiviDuPrenom('Bravo', p)} ! Votre carte est complète : ${commerce.recompense}. Demandez-la lors de votre prochain passage chez ${commerce.nom}.`
     case 'inactif':
-      return `${p}, cela fait un moment ! Toute l’équipe de ${commerce.nom} serait ravie de vous revoir. Votre carte vous attend.`
+      return ouvertParPrenom(p, `cela fait un moment ! Toute l’équipe de ${commerce.nom} serait ravie de vous revoir. Votre carte vous attend.`)
     case 'anniversaire':
-      return `Joyeux anniversaire ${p} ! Toute l’équipe de ${commerce.nom} vous souhaite une très belle journée.`
+      return `${suiviDuPrenom('Joyeux anniversaire', p)} ! Toute l’équipe de ${commerce.nom} vous souhaite une très belle journée.`
     case 'avis':
-      return `Merci pour vos visites ${p} ! Si vous avez aimé, un avis sur Google aide beaucoup ${commerce.nom}. C’est libre et sans contrepartie.`
+      return `${suiviDuPrenom('Merci pour vos visites', p)} ! Si vous avez aimé, un avis sur Google aide beaucoup ${commerce.nom}. C’est libre et sans contrepartie.`
   }
 }
 
@@ -72,10 +78,10 @@ export function genererMessages(client: Client, commerce: Commerce, evenement: E
         const offre = configWinback(commerce).offre
         const texte =
           wb.etape === 'rappel'
-            ? `${client.prenom}, cela fait un moment qu’on ne vous a pas vu chez ${commerce.nom} ! Toute l’équipe serait ravie de vous revoir — votre carte vous attend.`
+            ? ouvertParPrenom(client.prenom, `cela fait un moment qu’on ne vous a pas vu chez ${commerce.nom} ! Toute l’équipe serait ravie de vous revoir — votre carte vous attend.`)
             : wb.etape === 'offre'
-              ? `${client.prenom}, on vous a gardé une attention : ${offre} lors de votre prochaine visite chez ${commerce.nom}. À très vite !`
-              : `${client.prenom}, dernière chance : ${offre} vous attend chez ${commerce.nom} — après quoi nous ne vous relancerons plus. À très vite !`
+              ? ouvertParPrenom(client.prenom, `on vous a gardé une attention : ${offre} lors de votre prochaine visite chez ${commerce.nom}. À très vite !`)
+              : ouvertParPrenom(client.prenom, `dernière chance : ${offre} vous attend chez ${commerce.nom} — après quoi nous ne vous relancerons plus. À très vite !`)
         ajouterTexte('inactif', `winback:${wb.etape}:${client.derniereVisite}`, texte)
       }
     }
@@ -86,10 +92,10 @@ export function genererMessages(client: Client, commerce: Commerce, evenement: E
       const cle = `${fen.type}:${fen.date.getFullYear()}`
       const texte =
         fen.type === 'anniversaire'
-          ? `Joyeux anniversaire ${client.prenom} ! Toute l’équipe de ${commerce.nom} vous souhaite une très belle journée — ${fen.libelle.toLowerCase()} à retirer au comptoir.`
+          ? `${suiviDuPrenom('Joyeux anniversaire', client.prenom)} ! Toute l’équipe de ${commerce.nom} vous souhaite une très belle journée — ${fen.libelle.toLowerCase()} à retirer au comptoir.`
           : fen.type === 'demi-anniversaire'
-            ? `${client.prenom}, c’est votre demi-anniversaire chez ${commerce.nom} ! Une boisson vous attend au comptoir.`
-            : `${client.prenom}, cela fait déjà 1 an que vous êtes membre chez ${commerce.nom} ! Une boisson vous attend au comptoir pour fêter ça.`
+            ? ouvertParPrenom(client.prenom, `c’est votre demi-anniversaire chez ${commerce.nom} ! Une boisson vous attend au comptoir.`)
+            : ouvertParPrenom(client.prenom, `cela fait déjà 1 an que vous êtes membre chez ${commerce.nom} ! Une boisson vous attend au comptoir pour fêter ça.`)
       ajouterTexte('anniversaire', cle, texte, {
         id: `anniv-${fen.type}-${fen.date.getFullYear()}`,
         libelle: fen.libelle,

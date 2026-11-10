@@ -87,5 +87,6 @@ export function messageRelance(client: Client, commerce: Commerce): string {
     restants <= 0
       ? `Bonne nouvelle : votre récompense vous attend (${commerce.recompense}).`
       : `Il ne vous manque plus que ${restants} tampon${restants > 1 ? 's' : ''} pour : ${commerce.recompense}.`
-  return `Bonjour ${client.prenom}, ça fait un moment qu’on ne vous a pas vu chez ${commerce.nom} ! ${progression} Au plaisir de vous revoir très vite.`
+  // Prénom optionnel (P1-C1) : « Bonjour, ça fait… » sans prénom.
+  return `Bonjour${client.prenom?.trim() ? ` ${client.prenom.trim()}` : ''}, ça fait un moment qu’on ne vous a pas vu chez ${commerce.nom} ! ${progression} Au plaisir de vous revoir très vite.`
 }
