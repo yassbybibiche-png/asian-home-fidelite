@@ -28,7 +28,10 @@ export const VISUELS = {
   menuMakis: '/visuels/menu-makis.jpg',
   /** Loc Lac : bœuf caramélisé, riz rouge, œuf au plat. */
   menuLocLac: '/visuels/menu-loc-lac.jpg',
-  /** Nouilles sautées aux crevettes — rattachée à « Mi Prat » (identification probable, voir docs/MENU-OFFICIEL-2026-11-10.md ; à remplacer par la photo légendée du PDF, lot B2). */
+  /**
+   * Nouilles sautées aux crevettes — rattachée à AUCUN plat depuis le lot P1-B2 : « Mi Prat » a désormais
+   * la photo légendée « MI PRAT » par le restaurant dans son PDF. Gardée au cas où le commerçant confirme le plat montré.
+   */
   menuNouillesCrevettes: '/visuels/menu-nouilles-crevettes.jpg',
   /** Mango sticky rice : mangue et riz gluant coco (Mango Stick). */
   menuMangoStickyRice: '/visuels/menu-mango-sticky-rice.jpg',
@@ -36,6 +39,25 @@ export const VISUELS = {
   menuPlatRiz: '/visuels/menu-plat-riz.jpg',
   /** Coin salon : fauteuils velours bleu nuit, rideaux violets, sans personne. */
   interieurSalon: '/visuels/interieur-salon.jpg',
+} as const
+
+/**
+ * Photos de plats recadrées du PDF officiel de la carte (assets/source/menu.pdf,
+ * scripts/extraire-photos-menu.py) : chaque photo est LÉGENDÉE du nom du plat par le
+ * restaurant lui-même. Fiche (largeur native ≤ 720 px) + vignette (≤ 192 px), en WebP.
+ * Cadres, plats écartés et raisons : public/visuels/SOURCES.md.
+ */
+const photoPdf = (slug: string) => ({ photo: `/visuels/menu-${slug}.webp`, photoVignette: `/visuels/menu-${slug}-vignette.webp` })
+export const PHOTOS_PDF = {
+  pokeBowl: photoPdf('poke-bowl'),
+  dynamite: photoPdf('dynamite'),
+  miPrat: photoPdf('mi-prat'),
+  padThai: photoPdf('pad-thai'),
+  croustiPoulet: photoPdf('crousti-poulet'),
+  khaoPrat: photoPdf('khao-prat'),
+  curryVert: photoPdf('curry-vert'),
+  tigreQuiPleure: photoPdf('tigre-qui-pleure'),
+  boBun: photoPdf('bo-bun'),
 } as const
 
 /** Identifiant stable du commerce Asian Home Paris (seed + production). */

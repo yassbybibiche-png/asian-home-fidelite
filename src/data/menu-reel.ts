@@ -11,26 +11,29 @@
 // Photos : uniquement les vraies photos du restaurant dans public/visuels/ (voir
 // public/visuels/SOURCES.md).
 //
-// - « Mi Prat » ← menu-nouilles-crevettes.jpg : identification PROBABLE
-//   (nouilles sautées aux crevettes ; conviendrait aussi au Pad Thaï crevettes).
-// - menu-plat-riz.jpg : plat thaï non identifié — photo d'ambiance uniquement,
-//   jamais rattachée à un plat nommé.
+// - 9 plats (PHOTOS_PDF, lot P1-B2) : photos recadrées du PDF de la carte, chacune
+//   légendée du nom du plat par le restaurant (fiche + vignette WebP).
+// - Loc Lac, Mango Stick, 8 Maki Tiger / Chicken Dragon : photos existantes gardées.
+// - Sans photo, faute de photo qui montre CE plat : Love Bao (légende du PDF douteuse),
+//   6 Maki Gold, Tiramisu, boissons, variantes makis / california / sashimi / sushi.
+// - menu-nouilles-crevettes.jpg (ancienne photo PROBABLE de Mi Prat) et
+//   menu-plat-riz.jpg (plat thaï non identifié) ne sont rattachées à aucun plat nommé.
 // - Ids : les plats déjà présents dans l'ancien menu gardent leur id `reel-cN-pM` ;
 //   les nouveaux plats ont un id `reel-o-…`.
 import type { Menu, Produit } from '../types'
-import { ID_ASIAN_HOME } from '../lib/visuels.ts'
+import { ID_ASIAN_HOME, PHOTOS_PDF } from '../lib/visuels.ts'
 
 /** Plats signature mis en avant (best-sellers cités dans les avis et sur Instagram). */
 export const PLATS_SIGNATURE = ['Dynamite', 'Thaï-sty Krusty', 'Love Bao', 'Loc Lac', '8 Maki Chicken Dragon', '8 Maki Tiger'] as const
 
 export const estSignature = (nom: string): boolean => (PLATS_SIGNATURE as readonly string[]).includes(nom)
 
-const plat = (id: string, nom: string, prix: number | null, description?: string, photo?: string): Produit => ({
+const plat = (id: string, nom: string, prix: number | null, description?: string, photo?: string | Pick<Produit, 'photo' | 'photoVignette'>): Produit => ({
   id,
   nom,
   prix,
   ...(description ? { description } : {}),
-  ...(photo ? { photo } : {}),
+  ...(typeof photo === 'string' ? { photo } : photo),
   allergenes: [],
 })
 
@@ -144,6 +147,7 @@ export function menuReelAsianHome(): Menu {
             'Poke Bowl',
             1450,
             'Servi avec du riz vinaigré. Base au choix : saumon mariné, saumon épicé, thon mariné, thon épicé, poulet crousti. Garnitures : salade iceberg, concombres, patate douce, salade de choux, avocat, edamame, choux rouge, mangue.',
+            PHOTOS_PDF.pokeBowl,
           ),
         ],
       },
@@ -163,6 +167,7 @@ export function menuReelAsianHome(): Menu {
             'Dynamite',
             890,
             'Dynamite Poulet ou Crevettes au choix, nos best-sellers ! Des bouchées croustillantes garnies de poulet ou de crevettes fondantes, enrobées dans une sauce dynamite maison légèrement épicée, crémeuse et addictive.',
+            PHOTOS_PDF.dynamite,
           ),
           plat('reel-c2-p3', 'Love Bao', 990, 'Duo de bao à la dynamite poulet et crevette, concombre et oignon frit.'),
         ],
@@ -171,14 +176,15 @@ export function menuReelAsianHome(): Menu {
         id: 'reel-cat-3',
         nom: 'Plats thaï',
         produits: [
-          plat('reel-c3-p7', 'Mi Prat', 1390, 'Poulet, bœuf ou crevette, nouilles sautées, légumes sautés.', '/visuels/menu-nouilles-crevettes.jpg'),
-          plat('reel-c3-p4', 'Pad Thaï', 1390, 'Poulet, bœuf ou crevette, nouilles de riz, légumes sautés.'),
-          plat('reel-c3-p8', 'Crousti Poulet', 1490, 'Poulet croustillant doré façon thaï, riz nature ou riz thaï.'),
-          plat('reel-c3-p5', 'Khao Prat', 1390, 'Poulet, bœuf ou crevette, riz thaï sauté au wok.'),
-          plat('reel-c3-p6', 'Curry Vert', 1390, 'Poulet ou crevette, riz blanc, velouté de curry, légumes croquants.'),
-          plat('reel-c3-p3', 'Tigre qui pleure', 1590, 'Bœuf tranché et sa sauce thaï, riz nature ou riz thaï.'),
+          plat('reel-c3-p7', 'Mi Prat', 1390, 'Poulet, bœuf ou crevette, nouilles sautées, légumes sautés.', PHOTOS_PDF.miPrat),
+          plat('reel-c3-p4', 'Pad Thaï', 1390, 'Poulet, bœuf ou crevette, nouilles de riz, légumes sautés.', PHOTOS_PDF.padThai),
+          plat('reel-c3-p8', 'Crousti Poulet', 1490, 'Poulet croustillant doré façon thaï, riz nature ou riz thaï.', PHOTOS_PDF.croustiPoulet),
+          plat('reel-c3-p5', 'Khao Prat', 1390, 'Poulet, bœuf ou crevette, riz thaï sauté au wok.', PHOTOS_PDF.khaoPrat),
+          plat('reel-c3-p6', 'Curry Vert', 1390, 'Poulet ou crevette, riz blanc, velouté de curry, légumes croquants.', PHOTOS_PDF.curryVert),
+          plat('reel-c3-p3', 'Tigre qui pleure', 1590, 'Bœuf tranché et sa sauce thaï, riz nature ou riz thaï.', PHOTOS_PDF.tigreQuiPleure),
+          // Photo existante (1109×720) gardée : le PDF montre le même plat en plus basse résolution.
           plat('reel-c3-p2', 'Loc Lac', 1490, 'Riz rouge, bœuf caramélisé, œuf, salade.', '/visuels/menu-loc-lac.jpg'),
-          plat('reel-c3-p1', 'Bo Bun', 1390, 'Vermicelles de riz, bœuf, nems, légumes.'),
+          plat('reel-c3-p1', 'Bo Bun', 1390, 'Vermicelles de riz, bœuf, nems, légumes.', PHOTOS_PDF.boBun),
         ],
       },
       {

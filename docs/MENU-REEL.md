@@ -133,6 +133,9 @@ ne pas afficher sans confirmation du restaurant).
 - `menu-nouilles-crevettes.jpg` → Mi Prat (nouilles sautées aux crevettes ;
   identification probable : la photo montre des nouilles aux crevettes,
   elle convient aussi au Pad Thai crevettes — rattachée à Mi Prat par défaut).
+  **Remplacée au lot P1-B2 (10/11/2026)** : Mi Prat a désormais la photo
+  légendée « MI PRAT » du PDF officiel (`menu-mi-prat.webp`) ; cette photo
+  n'est plus rattachée à aucun plat (ce JSON historique n'est pas modifié).
 - `menu-mango-sticky-rice.jpg` → Mango Stick (mangue et riz coco).
 - `menu-plat-riz.jpg` → plat thaï non identifié précisément (riz + soupe
   en grès) — photo d'ambiance, non rattachée à un plat précis dans le JSON.
