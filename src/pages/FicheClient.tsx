@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useAction, useDonneesCommerce, useStore } from '../store'
-import { useRoute } from '../router'
+import { aller, useRoute } from '../router'
 import type { Client, Commerce, ModeleRelance } from '../types'
 import { canalDuClient, libelleModele, MODELES_RELANCE, modelesSuggeres } from '../lib/relances'
 import { MENTION_ENVOI } from '../lib/integrations'
@@ -11,7 +11,8 @@ import { analyserAnniversaire, anniversaireAffiche } from '../lib/messages'
 import { nouvelIdAction } from '../lib/fileCaisse'
 import { dateCourte, dateRelative } from '../lib/format'
 import { CarteFidelite } from '../components/CarteFidelite'
-import { EncartWallet, EnTete, MessageErreur, Vide } from '../components/ui'
+import { EncartWallet, EnTete, MessageErreur, telecharger, Vide } from '../components/ui'
+import { datePurge, dureeConservationMois, libelleDuree, nomFichierExportClient, protectionPurge } from '../lib/rgpd'
 
 /** Mode serveur : points (échange contre le catalogue), historique des échanges, anniversaire, plat préféré. */
 function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: Commerce }) {
@@ -237,6 +238,96 @@ function Rattrapages({ client, commerce }: { client: Client; commerce: Commerce 
   )
 }
 
+/**
+ * Données personnelles (P1-B6, RGPD) : export CSV de ce client, exclusion de la purge de conservation, suppression
+ * définitive. La suppression demande de SAISIR « SUPPRIMER » (aucune modale dans l'app : confirmation par saisie, plus
+ * sûre qu'un simple OK) ; le serveur exige aussi cette confirmation et journalise l'opération sans données du client.
+ */
+function DonneesPersonnelles({ client, commerce }: { client: Client; commerce: Commerce }) {
+  const { avecPin } = useStore()
+  const { executer, enCours, erreur } = useAction()
+  const [annonce, setAnnonce] = useState('')
+  const [suppression, setSuppression] = useState(false)
+  const [saisie, setSaisie] = useState('')
+  const mois = dureeConservationMois(commerce)
+  const purge = datePurge(client, mois)
+  const protection = protectionPurge(client, new Date())
+
+  async function exporter() {
+    setAnnonce('')
+    const r = await executer(() => avecPin((a, api) => api.exportClient(commerce.id, a, client.id)))
+    if (r.ok) {
+      telecharger(nomFichierExportClient(client.id), r.valeur)
+      setAnnonce('✓ Export téléchargé : à transmettre au client s’il l’a demandé.')
+    }
+  }
+
+  async function basculerExclusion() {
+    setAnnonce('')
+    const r = await executer(() => avecPin((a, api) => api.majClient(commerce.id, a, client.id, { exclusPurge: !client.exclusPurge })))
+    if (r.ok) setAnnonce(client.exclusPurge ? '✓ Le client sera de nouveau purgé après la durée de conservation.' : '✓ Client exclu de la purge de conservation.')
+  }
+
+  async function supprimer() {
+    if (saisie.trim() !== 'SUPPRIMER') return
+    const r = await executer(() => avecPin((a, api) => api.supprimerClient(commerce.id, a, client.id)))
+    if (r.ok) aller('clients')
+  }
+
+  return (
+    <section className="carte space-y-3">
+      <h2 className="titre-carte">Données personnelles (RGPD)</h2>
+      {client.demandeSuppressionLe && (
+        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="status">
+          ⚠️ Le client a demandé la suppression de ses données le {dateCourte(client.demandeSuppressionLe)} (depuis sa carte). Remettez-lui d’abord une
+          éventuelle récompense en attente, puis supprimez-le ci-dessous.
+        </p>
+      )}
+      <p className="text-sm text-gray-600">
+        Conservation : {libelleDuree(mois)} après la dernière visite — {protection ? `pas de purge (${protection.toLowerCase()})` : `purge possible à partir du ${dateCourte(purge.toISOString())}`}.
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" className="bouton-secondaire min-h-11" disabled={enCours} onClick={() => void exporter()}>
+          Exporter ses données (CSV)
+        </button>
+        <button type="button" className="bouton-secondaire min-h-11" disabled={enCours} onClick={() => void basculerExclusion()}>
+          {client.exclusPurge ? 'Réinclure dans la purge' : 'Exclure de la purge'}
+        </button>
+      </div>
+      {!suppression ? (
+        <button type="button" className="bouton-secondaire w-full text-red-700" disabled={enCours} onClick={() => (setSuppression(true), setSaisie(''))}>
+          Supprimer ce client…
+        </button>
+      ) : (
+        <div className="space-y-2 rounded-xl bg-red-50 p-3 ring-1 ring-red-200">
+          <p className="text-sm text-red-900">
+            Suppression <strong>définitive</strong> de {client.prenom || 'ce client'} : sa carte, ses tampons et points, ses visites, ses gains de la roue, ses
+            messages, ses demandes, ses parrainages et ses entrées du journal. Impossible à annuler. Pensez à exporter ses données s’il les a demandées.
+          </p>
+          <label className="etiquette" htmlFor="confirmer-suppression">
+            Tapez SUPPRIMER pour confirmer
+          </label>
+          <input id="confirmer-suppression" className="champ" autoComplete="off" value={saisie} onChange={(e) => setSaisie(e.target.value)} />
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" className="bouton-secondaire min-h-11" disabled={enCours} onClick={() => setSuppression(false)}>
+              Annuler
+            </button>
+            <button type="button" className="bouton min-h-11 bg-red-700 hover:bg-red-800 active:bg-red-900" disabled={enCours || saisie.trim() !== 'SUPPRIMER'} onClick={() => void supprimer()}>
+              {enCours ? 'Suppression…' : 'Supprimer définitivement'}
+            </button>
+          </div>
+        </div>
+      )}
+      <MessageErreur>{erreur && `Rien n’a été modifié : ${erreur}`}</MessageErreur>
+      {annonce && (
+        <p className="alerte-succes" role="status">
+          {annonce}
+        </p>
+      )}
+    </section>
+  )
+}
+
 /** Fiche client côté commerçant : la carte + les actions de caisse. */
 export default function FicheClient() {
   const { param } = useRoute()
@@ -327,6 +418,7 @@ export default function FicheClient() {
       {mode === 'api' && <PointsEtAnniversaire client={client} commerce={commerce} />}
       {mode === 'api' && <Rattrapages client={client} commerce={commerce} />}
       {mode === 'api' && <Relances client={client} commerce={commerce} />}
+      {mode === 'api' && <DonneesPersonnelles client={client} commerce={commerce} />}
 
       <EncartWallet demo={estDemo} lienCarte={`#/carte/${client.id}`} />
 

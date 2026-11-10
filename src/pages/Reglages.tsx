@@ -10,6 +10,7 @@ import { reglesVides, TYPES_MESSAGES } from '../lib/messages'
 import { COULEUR_DEFAUT, FOND_DEFAUT, problemesApparence } from '../lib/apparence'
 import { JOURS_SEMAINE, PALIERS_DEFAUT } from '../lib/programme'
 import { compteurLibelle, MAX_CARACTERES_ROUE } from '../lib/roue'
+import { CONSERVATION_DEFAUT_MOIS, CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, libelleDuree } from '../lib/rgpd'
 
 /** Client fictif de l'aperçu (jamais enregistré). */
 const APERCU_CLIENT: Client = { id: 'apercu', commerceId: '', prenom: 'Aperçu', tampons: 3, points: 42, visites: [], derniereVisite: null, creeLe: '2026-01-01T00:00:00.000Z' }
@@ -81,7 +82,10 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   }
   const apparence = brouillon.apparence ?? {}
   const problemes = problemesApparence(apparence)
-  const valide = nomValide && seuilValide && lots.length >= 2 && probasValides && total > 0 && tauxValide && catalogueValide && !problemes.length
+  // Durée de conservation RGPD (P1-B6), en mois ; absente = 3 ans.
+  const conservation = brouillon.conservationMois ?? CONSERVATION_DEFAUT_MOIS
+  const conservationValide = Number.isInteger(conservation) && conservation >= CONSERVATION_MIN_MOIS && conservation <= CONSERVATION_MAX_MOIS
+  const valide = nomValide && seuilValide && lots.length >= 2 && probasValides && total > 0 && tauxValide && catalogueValide && !problemes.length && conservationValide
 
   function maj<K extends keyof Commerce>(champ: K, valeur: Commerce[K]) {
     setBrouillon((b) => ({ ...b, [champ]: valeur }))
@@ -593,6 +597,21 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
             sansQr
           />
         </div>
+      </fieldset>
+
+      <fieldset className="carte space-y-3">
+        <legend className="sr-only">Données personnelles</legend>
+        <h2 className="titre-carte">Données personnelles (RGPD)</h2>
+        <Nombre
+          id="conservationMois"
+          libelle="Durée de conservation après la dernière visite (en mois)"
+          valeur={brouillon.conservationMois}
+          defaut={CONSERVATION_DEFAUT_MOIS}
+          min={CONSERVATION_MIN_MOIS}
+          max={CONSERVATION_MAX_MOIS}
+          aide={`${conservationValide ? libelleDuree(conservation) : `entre ${CONSERVATION_MIN_MOIS} et ${CONSERVATION_MAX_MOIS} mois`} — par défaut 3 ans (36 mois). Au-delà, la carte apparaît dans « Clients » comme à purger ; rien n’est supprimé sans votre confirmation. Durée reprise dans la politique de confidentialité.`}
+          onChange={(v) => maj('conservationMois', v)}
+        />
       </fieldset>
 
       <fieldset className="carte divide-y divide-gray-100">
