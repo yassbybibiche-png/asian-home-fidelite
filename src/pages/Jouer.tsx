@@ -261,7 +261,7 @@ function JouerLocal() {
 }
 
 function PartieLocale({ commerce }: { commerce: Commerce }) {
-  const { etat, enregistrerTirage, inscrireClient, nommerClient } = useStore()
+  const { etat, enregistrerTirage, inscrireClient, nommerClient, laisserMessagePrive } = useStore()
   const [joueurId, setJoueurId] = useState<string | null>(null)
   const [memoriseId, setMemoriseId] = useState(() => lireJoueurMemorise(commerce.id))
   const [etape, setEtape] = useState<Etape>('pret')
@@ -281,6 +281,12 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
   function choisirJoueur(client: Client) {
     setJoueurId(client.id)
     memoriserJoueur(commerce.id, client.id)
+  }
+
+  // Après le jeu seulement (P1-C4) : note basse → message privé proposé avant Google ; rien n'est expédié.
+  const carte = joueur ? `#/carte/${joueur.id}` : ''
+  async function messagePrive(note: number, texte: string) {
+    if (joueur) await laisserMessagePrive(joueur.id, note, texte)
   }
 
   function tourner() {
@@ -342,7 +348,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
 
       {joueur && (etape === 'resultat' || dejaJoue) && (
         <>
-          <InvitationAvis commerce={commerce} />
+          <InvitationAvis commerce={commerce} onMessagePrive={messagePrive} lienCarte={carte} />
           <DemandePrenom prenom={joueur.prenom} onEnregistrer={async (p) => nommerClient(joueur.id, p)} />
           <a href={`#/carte/${joueur.id}`} className="bouton-secondaire w-full">
             Voir ma carte de fidélité
@@ -474,6 +480,12 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
     memoire.memoriser(j)
   }
 
+  // Après le jeu seulement (P1-C4) : identité = carte + contact donné à l'inscription, comme pour le prénom.
+  const carte = joueur ? `#/carte/${joueur.clientId}` : ''
+  async function messagePrive(note: number, texte: string) {
+    if (joueur) await api.messagePrive(commerce.id, joueur.clientId, joueur.contact, note, texte)
+  }
+
   async function tourner() {
     if (!joueur || etape !== 'pret' || enCours) return
     setEnCours(true)
@@ -574,7 +586,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
 
       {joueur && (etape === 'resultat' || jeu?.statut === 'dejaJoue') && (
         <>
-          <InvitationAvis commerce={commerce} />
+          <InvitationAvis commerce={commerce} onMessagePrive={messagePrive} lienCarte={carte} />
           <DemandePrenom
             prenom={joueur.prenom}
             onEnregistrer={async (p) => {

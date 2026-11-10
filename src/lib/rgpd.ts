@@ -147,6 +147,7 @@ export function exportClientCsv(client: Client, tirages: Tirage[], envois: Envoi
   }
   for (const d of client.demandesRattrapage ?? []) l('rattrapage', d.date, 'Visite oubliée signalée', `${d.statut} · ${d.montantCentimes} centimes${d.ticket ? ` · ticket ${d.ticket}` : ''}`)
   for (const m of client.messages ?? []) l('message', m.date, 'Message reçu sur la carte', m.texte)
+  for (const m of client.messagesPrives ?? []) l('message', m.creeLe, `Message privé au restaurant (${m.note}★)`, m.texte)
   for (const e of envois.filter((x) => x.clientId === client.id)) l('relance', e.date, `Relance ${e.canal === 'sms' ? 'SMS' : 'e-mail'} (${e.modele})`, e.statut)
 
   const entete = ['rubrique', 'date', 'libelle', 'valeur']

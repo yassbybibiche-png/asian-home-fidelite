@@ -1,5 +1,15 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import type { Commerce } from '../types'
+import { MESSAGE_HORS_LIGNE } from '../data/api'
+import {
+  proposerMessagePrive,
+  TEXTE_GOOGLE_APRES_PRIVE,
+  TEXTE_MAX,
+  TEXTE_MESSAGE_ENVOYE,
+  TEXTE_MESSAGE_PRIVE,
+  TITRE_MESSAGE_PRIVE,
+} from '../lib/messagePrive'
+import { MessageErreur } from './ui'
 import {
   NOTE_PAR_DEFAUT,
   TEXTE_CONFIRMATION_GOOGLE,
@@ -41,13 +51,73 @@ export function SelecteurEtoiles({ note, onChange }: { note: number; onChange(n:
 }
 
 /**
+ * Message privé au restaurant (P1-C4), proposé AVANT Google quand la note choisie est basse. Sans `onEnvoyer`
+ * (aperçu de la page Avis), le formulaire est affiché mais ne peut pas être envoyé.
+ */
+function MessagePriveRestaurant({ note, onEnvoyer }: { note: number; onEnvoyer?(note: number, texte: string): Promise<void> }) {
+  const [texte, setTexte] = useState('')
+  const [envoye, setEnvoye] = useState(false)
+  const [enCours, setEnCours] = useState(false)
+  const [erreur, setErreur] = useState<string | null>(null)
+
+  if (envoye)
+    return (
+      <p className="alerte-succes" role="status" data-message-prive="envoye">
+        ✓ {TEXTE_MESSAGE_ENVOYE}
+      </p>
+    )
+
+  async function envoyer(e: FormEvent) {
+    e.preventDefault()
+    if (!onEnvoyer || !texte.trim() || enCours) return
+    setEnCours(true)
+    setErreur(null)
+    try {
+      await onEnvoyer(note, texte.trim())
+      setEnvoye(true)
+    } catch (err) {
+      setErreur(err instanceof Error ? err.message : MESSAGE_HORS_LIGNE)
+    } finally {
+      setEnCours(false)
+    }
+  }
+
+  return (
+    <form onSubmit={envoyer} className="space-y-2 rounded-xl bg-fond p-3 text-left" aria-label="Message privé au restaurant" data-message-prive="formulaire">
+      <label className="etiquette" htmlFor="avis-message-prive">
+        {TITRE_MESSAGE_PRIVE}
+      </label>
+      <p className="text-sm text-gray-600">{TEXTE_MESSAGE_PRIVE}</p>
+      <textarea id="avis-message-prive" className="champ min-h-24" maxLength={TEXTE_MAX} value={texte} onChange={(e) => setTexte(e.target.value)} />
+      <MessageErreur>{erreur}</MessageErreur>
+      <button type="submit" className="bouton w-full" disabled={!onEnvoyer || !texte.trim() || enCours}>
+        {enCours ? 'Envoi…' : 'Envoyer au restaurant'}
+      </button>
+      {!onEnvoyer && <p className="text-xs text-gray-500">Aperçu : le client écrit ici depuis la page de jeu.</p>}
+    </form>
+  )
+}
+
+/**
  * Invitation à l'avis Google, toujours APRÈS le jeu et jamais en condition du lot.
  * Les étoiles ne sont pré-remplies que dans l'app : Google ne permet pas de pré-sélectionner une note.
+ * Note basse (≤ SEUIL_NOTE_BASSE) : le message privé au restaurant est proposé d'abord, le lien Google reste juste en
+ * dessous. Le clic vers Google n'est pas compté : aucune mesure d'événements n'existe encore (prévue au lot P2-Q3).
  */
-export function InvitationAvis({ commerce }: { commerce: Pick<Commerce, 'lienGoogle'> }) {
+export function InvitationAvis({
+  commerce,
+  onMessagePrive,
+  lienCarte,
+}: {
+  commerce: Pick<Commerce, 'lienGoogle'>
+  onMessagePrive?(note: number, texte: string): Promise<void>
+  /** Après l'ouverture de Google (nouvel onglet) : lien de retour vers la carte du client. */
+  lienCarte?: string
+}) {
   const [note, setNote] = useState(NOTE_PAR_DEFAUT)
   const [ouvert, setOuvert] = useState(false)
   const lien = lienAvisGoogle(commerce)
+  const prive = proposerMessagePrive(note)
   return (
     <section className="carte space-y-3 text-center">
       <div>
@@ -58,12 +128,14 @@ export function InvitationAvis({ commerce }: { commerce: Pick<Commerce, 'lienGoo
       <p className="text-sm font-semibold text-amber-800" aria-live="polite">
         {note}/5 · {libelleNote(note)}
       </p>
+      {prive && <MessagePriveRestaurant note={note} onEnvoyer={onMessagePrive} />}
+      {prive && lien && <p className="text-sm text-gray-600">{TEXTE_GOOGLE_APRES_PRIVE}</p>}
       {lien ? (
         <a
           href={lien}
           target="_blank"
           rel="noopener noreferrer"
-          className="bouton w-full"
+          className={`${prive ? 'bouton-secondaire' : 'bouton'} w-full`}
           onClick={() => setOuvert(true)}
         >
           {libelleBoutonAvis(note)} ↗
@@ -72,6 +144,11 @@ export function InvitationAvis({ commerce }: { commerce: Pick<Commerce, 'lienGoo
         <p className="text-sm text-gray-500">(Le commerce n’a pas encore renseigné son lien Google.)</p>
       )}
       <p className="text-xs text-gray-500">{ouvert ? TEXTE_CONFIRMATION_GOOGLE : 'Sur Google, vous confirmez vous-même vos étoiles avant de publier.'}</p>
+      {ouvert && lienCarte && (
+        <a href={lienCarte} className="lien block text-sm" data-retour-carte>
+          Avis publié ? Revenir à ma carte de fidélité
+        </a>
+      )}
       <p className="text-xs text-gray-500">Le lot n’est pas conditionné à l’avis — gagnez d’abord, avis libre ensuite.</p>
     </section>
   )

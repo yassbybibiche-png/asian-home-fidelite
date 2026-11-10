@@ -13,6 +13,7 @@ import { analyserContact, cleContact, nouveauClient, offrirRecompense, recompens
 import { canalDuClient, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
 import { estPerdant, lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
+import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePrive.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
 import { actionDejaTraitee, avecAction, echangerPoints, formaterPrix, soldePoints } from '../src/lib/points.ts'
 import { analyserAnniversaire, clientsCibles, deposerMessage, genererMessages, marquerLus, TYPES_MESSAGES, type Cible, type Evenement } from '../src/lib/messages.ts'
@@ -81,7 +82,7 @@ export const LIMITES_PUBLIQUES = {
   /** POST /commerces/:id/tirages — par IP, et par contact dans ce commerce. */
   tirageParIp: 20,
   tirageParContact: 5,
-  /** POST /commerces/:id/clients/:clientId/profil et …/rattrapage (demande du client) — par IP. */
+  /** POST /commerces/:id/clients/:clientId/profil, …/rattrapage (demande du client) et …/message-prive — par IP. */
   ficheClientParIp: 10,
   /**
    * POST /sessions (échange PIN → jeton) — par IP, en plus du blocage sur PIN faux ci-dessous. Borne le coût scrypt ;
@@ -552,7 +553,8 @@ function contactOuErreur(v: unknown) {
 
 /** Carte vue par le client lui-même (page publique) : sans téléphone, e-mail ni données techniques. */
 function cartePublique(c: Client) {
-  const { telephone: _t, email: _e, actionsTraitees: _a, clesMessages: _k, ...reste } = c
+  // Messages privés (P1-C4) : destinés au commerce seul, jamais renvoyés sur le lien de la carte.
+  const { telephone: _t, email: _e, actionsTraitees: _a, clesMessages: _k, messagesPrives: _p, ...reste } = c
   return reste
 }
 
@@ -2113,6 +2115,34 @@ export async function creerServeur(o: OptionsServeur) {
         return apres
       })
       return { json: { client: cartePublique(client) } }
+    }
+
+    // ---------- Message privé au restaurant (P1-C4) ----------
+    // PUBLIC — proposé après le jeu quand le client choisit une note basse dans l'app, AVANT le lien Google (qui reste
+    // accessible). Identité : lien de la carte + contact donné à l'inscription (403 sinon, comme …/prenom). Limité par IP
+    // et par carte, plus MESSAGES_PAR_JOUR par carte. Stocké sur la fiche (visible dans #/avis), jamais expédié. La
+    // réponse ne renvoie que l'identifiant et la date du message : ni la carte, ni le contact.
+
+    if (sous === 'clients' && sousId && action === 'message-prive' && !extra && m === 'POST') {
+      exigerActif(commerce)
+      limiterIp(req, 'fiche', limites.ficheClientParIp)
+      compteurs.consommer(`message-prive:${sousId}`, limites.ficheClientParIp, TROP)
+      const corps = await lireCorps(req)
+      const valide = validerMessagePrive(corps)
+      if (typeof valide === 'string') throw err(400, valide)
+      const message = await st.transaction(async () => {
+        const avant = await clientOu404(id, sousId)
+        if (!contactDuClient(avant, corps.contact)) {
+          throw err(403, 'Ce téléphone ou cet e-mail ne correspond pas à cette carte : indiquez celui donné à l’inscription.')
+        }
+        const t = maintenant()
+        const nouveau = { id: `mp-${randomUUID()}`, note: valide.note, texte: valide.texte, creeLe: t.toISOString() }
+        const apres = ajouterMessagePrive(avant, nouveau, t)
+        if (typeof apres === 'string') throw err(429, apres)
+        await st.majClient(apres)
+        return nouveau
+      })
+      return { statut: 201, json: { ok: true, message: { id: message.id, creeLe: message.creeLe } } }
     }
 
     // ---------- Profil progressif (client) : anniversaire + plat préféré, après la 2e visite ----------
