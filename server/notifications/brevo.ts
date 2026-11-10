@@ -29,6 +29,9 @@ export function adaptateurBrevo(c: ConfigBrevo | undefined, f: typeof fetch): Ad
           to: [{ email: m.destinataire }],
           subject: m.sujet ?? 'Votre carte de fidélité',
           textContent: m.texte,
+          // List-Unsubscribe (+ One-Click, RFC 8058) : bouton « Se désabonner » natif des messageries. Brevo n'ajoute pas
+          // de lien de désinscription aux e-mails transactionnels : c'est la route de l'app qui retire le consentement.
+          ...(m.entetes && Object.keys(m.entetes).length ? { headers: m.entetes } : {}),
         }),
       })
       if (!r.ok) throw new Error(`Brevo a refusé l’envoi (HTTP ${r.status}).`)

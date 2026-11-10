@@ -25,7 +25,8 @@ const PIN = { 'X-Commerce-PIN': '1234' }
 // ---------- Faux PostgREST (mémoire) ----------
 
 type Ligne = Record<string, unknown>
-type Unicite = { nom: string; cle: (l: Ligne) => string }
+/** `cle` renvoie null pour une ligne hors du champ de l'index (index unique partiel, ex. `envois` … where statut in …). */
+type Unicite = { nom: string; cle: (l: Ligne) => string | null }
 
 /** Jour calendaire à Paris, comme `((date at time zone 'Europe/Paris')::date)` dans l'index unique des tirages. */
 const jourParis = (iso: unknown) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date(String(iso)))
@@ -58,6 +59,12 @@ const SCHEMA: Record<string, { pk: string; uniques: Unicite[]; fk?: [string, str
   sessions_revoquees: { pk: 'jti', uniques: [] },
   // 0006_tentatives_auth.sql
   tentatives_auth: { pk: 'cle', uniques: [] },
+  // 0007_relances.sql
+  envois: {
+    pk: 'id',
+    uniques: [{ nom: 'envois_un_par_jour', cle: (l) => (l.statut === 'en_cours' || l.statut === 'envoye' ? `${l.commerce_id}|${l.client_id}|${l.modele}|${l.jour}` : null) }],
+    fk: [['commerce_id', 'commerces']],
+  },
 }
 
 interface Requete {
@@ -68,13 +75,14 @@ interface Requete {
   corps: unknown
 }
 
-/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` à `sans0006` : idem pour 0004 à 0006. */
-function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, sans0006 = false } = {}) {
+/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` à `sans0007` : idem pour 0004 à 0007. */
+function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, sans0006 = false, sans0007 = false } = {}) {
   const absentes = new Set([
     ...(sans0003 ? ['equipe', 'journal', 'menus'] : []),
     ...(sans0004 ? ['parrainages', 'demandes_rattrapage'] : []),
     ...(sans0005 ? ['sessions_revoquees'] : []),
     ...(sans0006 ? ['tentatives_auth'] : []),
+    ...(sans0007 ? ['envois'] : []),
   ])
   const tables: Record<string, Ligne[]> = Object.fromEntries(Object.keys(SCHEMA).map((t) => [t, []]))
   const requetes: Requete[] = []
@@ -129,7 +137,10 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
     const s = SCHEMA[table]
     const autres = tables[table].filter((x) => x !== soi)
     if (autres.some((x) => x[s.pk] === l[s.pk])) return [409, '23505', `duplicate key value violates unique constraint "${table}_pkey"`]
-    for (const u of s.uniques) if (autres.some((x) => u.cle(x) === u.cle(l))) return [409, '23505', `duplicate key value violates unique constraint "${u.nom}"`]
+    for (const u of s.uniques) {
+      const cle = u.cle(l)
+      if (cle !== null && autres.some((x) => u.cle(x) === cle)) return [409, '23505', `duplicate key value violates unique constraint "${u.nom}"`]
+    }
     for (const [col, cible] of s.fk ?? []) {
       if (!tables[cible].some((x) => x.id === l[col])) return [409, '23503', `insert or update on table "${table}" violates foreign key constraint`]
     }
@@ -752,7 +763,7 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.equal((await api('DELETE', '/sessions', undefined, entete)).statut, 200)
       assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, entete)).statut, 401, 'révoquée en mémoire')
       assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).statut, 200, 'le PIN en en-tête marche toujours')
-      assert.deepEqual(Object.keys((await api('GET', '/sante')).contenu.migrations), ['cartiz', 'programme'], '/sante inchangé')
+      assert.deepEqual(Object.keys((await api('GET', '/sante')).contenu.migrations), ['cartiz', 'programme', 'relances'], '/sante : 0005 / 0006 n’y figurent pas (P1-B3 ajoute `relances`, migration 0007)')
     } finally {
       await app.fermer()
     }
@@ -788,6 +799,80 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       for (let i = 0; i < 10; i++) assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, { 'X-Commerce-PIN': '9999' })).statut, 401)
       assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).statut, 429)
       assert.equal((await api('GET', '/sante')).statut, 200)
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  // ---------- P1-B3 : relances SMS / e-mail sous Supabase (table `envois`, migration 0007) ----------
+
+  /** Twilio simulé (aucune vraie clé, aucun appel réseau) : compte les SMS « envoyés ». */
+  function twilioSimule() {
+    const sms: URLSearchParams[] = []
+    const fetch = (async (_url: string, init: RequestInit) => {
+      sms.push(new URLSearchParams(String(init.body)))
+      return new Response(JSON.stringify({ sid: `SM${sms.length}` }), { status: 201 })
+    }) as unknown as typeof globalThis.fetch
+    return { sms, notifications: { twilio: { accountSid: 'ACtest', authToken: 'jeton-test', expediteur: '+33700000000' }, fetch } }
+  }
+
+  test('P1-B3 : chaque tentative tracée dans `envois` (501, 409, envoyé) ; anti-doublon tenu par l’index unique, même simultané', async () => {
+    const f = fauxPostgrest()
+    const tw = twilioSimule()
+    const { app, api } = await demarrer(f, { notifications: tw.notifications })
+    try {
+      const avec = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678', consentementRelance: true }, PIN)).contenu.client as Client
+      const sans = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Marc', contact: '0698765432' }, PIN)).contenu.client as Client
+      assert.equal((f.tables.clients.find((c) => c.id === avec.id)!.donnees as Client).consentementRelance, true)
+      assert.equal((f.tables.clients.find((c) => c.id === sans.id)!.donnees as Client).consentementRelance, undefined)
+
+      assert.equal((await api('POST', `/commerces/${AH}/clients/${avec.id}/relance`, { modele: 'bienvenue', canal: 'email' }, PIN)).statut, 501, 'Brevo non configuré')
+      assert.equal((await api('POST', `/commerces/${AH}/clients/${sans.id}/relance`, { modele: 'bienvenue' }, PIN)).statut, 409, 'sans consentement')
+      // Deux clics simultanés : la base n'accepte qu'une réservation (index unique partiel) → un seul SMS.
+      f.barriere('POST', 'envois')
+      const deux = await Promise.all([1, 2].map(() => api('POST', `/commerces/${AH}/clients/${avec.id}/relance`, { modele: 'bienvenue' }, PIN)))
+      assert.deepEqual(deux.map((r) => r.statut).sort(), [200, 409])
+      assert.match(deux.find((r) => r.statut === 409)!.contenu.erreur, /déjà été envoyée à ce client aujourd’hui/)
+      assert.equal(tw.sms.length, 1)
+      assert.ok(f.rejets.includes('envois:23505'))
+
+      const lignes = f.tables.envois.map((l) => [l.client_id, l.modele, l.canal, l.statut])
+      assert.deepEqual(lignes.sort(), [
+        [avec.id, 'bienvenue', 'email', 'non_branche'],
+        [avec.id, 'bienvenue', 'sms', 'envoye'],
+        [avec.id, 'bienvenue', 'sms', 'refuse'],
+        [sans.id, 'bienvenue', 'sms', 'refuse'],
+      ].sort())
+      assert.ok(f.tables.envois.every((l) => l.jour === '2026-11-09'))
+      assert.doesNotMatch(JSON.stringify(f.tables.envois), /0612345678|0698765432|\+336/, 'jamais le contact dans le journal')
+      const journal = (await api('GET', `/commerces/${AH}/envois`, undefined, PIN)).contenu
+      assert.equal(journal.migration, true)
+      assert.equal(journal.envois.length, 4)
+      assert.equal((await api('GET', '/sante')).contenu.migrations.relances, true)
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P1-B3 : production AVANT la migration 0007 — journal vide, refus répondus, AUCUN envoi réel (503), jamais de 500', async () => {
+    const f = fauxPostgrest({ sans0007: true })
+    const tw = twilioSimule()
+    const { app, api } = await demarrer(f, { notifications: tw.notifications })
+    try {
+      const avec = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678', consentementRelance: true }, PIN)).contenu.client as Client
+      const sans = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Marc', contact: '0698765432' }, PIN)).contenu.client as Client
+      assert.equal((await api('POST', `/commerces/${AH}/clients/${sans.id}/relance`, { modele: 'inactif' }, PIN)).statut, 409)
+      const r = await api('POST', `/commerces/${AH}/clients/${avec.id}/relance`, { modele: 'inactif' }, PIN)
+      assert.equal(r.statut, 503)
+      assert.match(r.contenu.erreur, /0007_relances\.sql/)
+      assert.equal(tw.sms.length, 0, 'rien ne part sans anti-doublon')
+      assert.deepEqual((await api('GET', `/commerces/${AH}/envois`, undefined, PIN)).contenu, { envois: [], migration: false })
+      const etat = await api('GET', `/commerces/${AH}/etat`, undefined, PIN)
+      assert.equal(etat.statut, 200)
+      assert.deepEqual(etat.contenu.envois, [])
+      assert.equal((await api('GET', '/sante')).contenu.migrations.relances, false)
+      // Le consentement, lui, est dans `clients.donnees` : modifiable sans la migration.
+      assert.equal((await api('PATCH', `/commerces/${AH}/clients/${avec.id}`, { consentementRelance: false }, PIN)).statut, 200)
     } finally {
       await app.fermer()
     }

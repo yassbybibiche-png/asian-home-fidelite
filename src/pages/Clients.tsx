@@ -96,7 +96,7 @@ export default function Clients() {
 
       {filtre === 'relancer' && (
         <p className="mb-3 text-sm text-gray-600">
-          Clients déjà venus, mais sans visite depuis plus de 30 jours. Copiez le message et envoyez-le vous-même (SMS, WhatsApp, e-mail) : l’app n’envoie rien.{' '}
+          Clients déjà venus, mais sans visite depuis plus de 30 jours. Copiez le message et envoyez-le vous-même (SMS, WhatsApp, e-mail).{' '}
           <span className="font-semibold">{MENTION_ENVOI}.</span>
         </p>
       )}
@@ -142,6 +142,8 @@ function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onIn
   const { commerce, inscrireClient } = useStore()
   const [prenom, setPrenom] = useState('')
   const [contactSaisi, setContactSaisi] = useState('')
+  // Relances SMS / e-mail (P1-B3) : à cocher seulement si le client l'accepte de vive voix — jamais pré-cochée.
+  const [consentement, setConsentement] = useState(false)
   const [essaye, setEssaye] = useState(false)
   const { executer, enCours, erreur } = useAction()
   const contact = analyserContact(contactSaisi)
@@ -151,7 +153,7 @@ function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onIn
     e.preventDefault()
     setEssaye(true)
     if (!valide || enCours) return
-    const r = await executer(() => inscrireClient(commerce.id, prenom, contactSaisi))
+    const r = await executer(() => inscrireClient(commerce.id, prenom, contactSaisi, consentement))
     if (r.ok) onInscrit(r.valeur)
   }
 
@@ -179,6 +181,10 @@ function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onIn
         />
         {essaye && !contact && <p className="mt-1 text-sm text-red-700">Saisissez un numéro (10 chiffres) ou un e-mail valide.</p>}
       </div>
+      <label className="flex items-start gap-2 text-sm text-gray-700">
+        <input type="checkbox" className="mt-0.5" checked={consentement} onChange={(e) => setConsentement(e.target.checked)} />
+        <span>Le client accepte de recevoir nos offres par SMS ou e-mail (désinscription à tout moment).</span>
+      </label>
       <MessageErreur>{erreur && `Inscription non enregistrée : ${erreur}`}</MessageErreur>
       <div className="grid grid-cols-2 gap-2">
         <button type="button" className="bouton-secondaire" onClick={onFermer}>

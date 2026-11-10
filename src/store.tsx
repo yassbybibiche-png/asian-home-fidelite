@@ -76,8 +76,11 @@ interface Store {
   basculerActif(id: string): Promise<void>
   changerPin(commerceId: string, pin: string): Promise<void>
   reinitialiserDemo(): void
-  /** Inscrit un client, ou retrouve celui qui a déjà ce téléphone / e-mail dans ce commerce. */
-  inscrireClient(commerceId: string, prenom: string, contactSaisi: string): Promise<{ client: Client; existant: boolean }>
+  /**
+   * Inscrit un client, ou retrouve celui qui a déjà ce téléphone / e-mail dans ce commerce. `consentementRelance` :
+   * case « relances SMS / e-mail » cochée (jamais par défaut) ; ignorée pour un client déjà inscrit.
+   */
+  inscrireClient(commerceId: string, prenom: string, contactSaisi: string, consentementRelance?: boolean): Promise<{ client: Client; existant: boolean }>
   validerVisite(clientId: string): Promise<void>
   offrirRecompense(clientId: string): Promise<void>
   /** Mode local uniquement : en mode API, le tirage est fait par le serveur. */
@@ -218,13 +221,14 @@ function StoreLocal({ children, depot }: { children: ReactNode; depot: Depot }) 
   )
 
   const inscrireClient = useCallback(
-    async (commerceId: string, prenom: string, contactSaisi: string) => {
+    async (commerceId: string, prenom: string, contactSaisi: string, consentementRelance = false) => {
       const contact = analyserContact(contactSaisi)
       if (!contact) throw new Error('Saisissez un numéro (10 chiffres) ou un e-mail valide.')
       const existant = trouverClientParContact(etat.clients, commerceId, contact)
       if (existant) return { client: existant, existant: true }
       const commerce = etat.commerces.find((c) => c.id === commerceId)
-      const client = commerce ? appliquerInscription(nouveauClient(commerceId, prenom, contact), commerce) : nouveauClient(commerceId, prenom, contact)
+      let client = commerce ? appliquerInscription(nouveauClient(commerceId, prenom, contact), commerce) : nouveauClient(commerceId, prenom, contact)
+      if (consentementRelance) client = { ...client, consentementRelance: true, consentementRelanceLe: new Date().toISOString(), consentementRelanceOrigine: 'inscription' }
       setEtat((e) => ({ ...e, clients: [...e.clients, client] }))
       return { client, existant: false }
     },
@@ -485,6 +489,7 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
             ...(c.messagesAuto ? { messagesAuto: c.messagesAuto } : {}),
             ...(c.apparence ? { apparence: c.apparence } : {}),
             ...(c.programme ? { programme: c.programme } : {}),
+            ...(c.relancesAuto ? { relancesAuto: c.relancesAuto } : {}),
           })
         }),
       creerCommerce: (n: NouveauCommerce) =>
@@ -501,8 +506,8 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
         }),
       changerPin: (commerceId: string, pin: string) => avecPin((a) => api.majPin(commerceId, a, pin).then(() => undefined)),
       reinitialiserDemo: () => {},
-      inscrireClient: (commerceId: string, prenom: string, contactSaisi: string) =>
-        avecPin((a) => api.inscrire(commerceId, a, prenom, contactSaisi)),
+      inscrireClient: (commerceId: string, prenom: string, contactSaisi: string, consentementRelance = false) =>
+        avecPin((a) => api.inscrire(commerceId, a, prenom, contactSaisi, undefined, consentementRelance)),
       validerVisite: (clientId: string) => avecPin((a) => api.visite(commerceDe(clientId), a, clientId).then(() => undefined)),
       offrirRecompense: (clientId: string) => avecPin((a) => api.recompense(commerceDe(clientId), a, clientId).then(() => undefined)),
       enregistrerTirage: () => {
@@ -565,6 +570,7 @@ export function useDonneesCommerce() {
       avis: etat.avis.filter((a) => a.commerceId === commerce.id).sort((a, b) => b.date.localeCompare(a.date)),
       membres: (etat.membres ?? []).filter((m) => m.commerceId === commerce.id),
       journal: (etat.journal ?? []).filter((j) => j.commerceId === commerce.id).sort((a, b) => b.date.localeCompare(a.date)),
+      envois: (etat.envois ?? []).filter((e) => e.commerceId === commerce.id).sort((a, b) => b.date.localeCompare(a.date)),
     }),
     [etat, commerce],
   )

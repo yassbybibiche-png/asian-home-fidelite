@@ -20,25 +20,49 @@ export type Page =
   | 'equipe'
   | 'messages'
   | 'menuCarte'
+  | 'desinscription'
 
-const PAGES: Page[] = ['accueil', 'clients', 'client', 'roulette', 'qr', 'avis', 'reglages', 'offre', 'admin', 'plus', 'jouer', 'carte', 'caisse', 'menu', 'equipe', 'messages', 'menuCarte']
+const PAGES: Page[] = [
+  'accueil',
+  'clients',
+  'client',
+  'roulette',
+  'qr',
+  'avis',
+  'reglages',
+  'offre',
+  'admin',
+  'plus',
+  'jouer',
+  'carte',
+  'caisse',
+  'menu',
+  'equipe',
+  'messages',
+  'menuCarte',
+  'desinscription',
+]
 
 /**
- * Pages sans en-tête ni navigation commerçant : pages du client final (jeu, carte, menu) et la caisse
- * (tablette du comptoir, déverrouillée par le code équipe et non par le PIN du gérant).
+ * Pages sans en-tête ni navigation commerçant : pages du client final (jeu, carte, menu, désinscription des relances)
+ * et la caisse (tablette du comptoir, déverrouillée par le code équipe et non par le PIN du gérant).
  */
-export const PAGES_PUBLIQUES: Page[] = ['jouer', 'carte', 'menu', 'caisse']
+export const PAGES_PUBLIQUES: Page[] = ['jouer', 'carte', 'menu', 'caisse', 'desinscription']
 
 export interface Route {
   page: Page
   /** Identifiant passé dans l'URL (client ou commerce). */
   param?: string
+  /** Second segment (#/desinscription/<clientId>/<jeton>). */
+  param2?: string
 }
 
-function lireRoute(): Route {
-  const [p, param] = window.location.hash.replace(/^#\/?/, '').split('/')
+export function lireRoute(hash = window.location.hash): Route {
+  const [p, param, param2] = hash.replace(/^#\/?/, '').split('/')
   const page = p as Page
-  return PAGES.includes(page) ? { page, param: param ? decodeURIComponent(param) : undefined } : { page: 'accueil' }
+  return PAGES.includes(page)
+    ? { page, param: param ? decodeURIComponent(param) : undefined, ...(param2 ? { param2: decodeURIComponent(param2) } : {}) }
+    : { page: 'accueil' }
 }
 
 export function aller(page: Page, param?: string) {

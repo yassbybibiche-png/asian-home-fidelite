@@ -5,11 +5,12 @@ import { createHash, createHmac, randomBytes, randomInt, randomUUID, scrypt, tim
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, DemandeRattrapage, EntreeJournal, Lot, MembreEquipe, Parrainage, RecompensePoints, ReglesMessages, Tirage, TypeCommerce } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, Tirage, TypeCommerce } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
-import { analyserContact, cleContact, messageRelance, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
+import { analyserContact, cleContact, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
+import { canalDuClient, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
 import { estPerdant, lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles } from '../src/lib/avis.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
@@ -36,7 +37,7 @@ import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
-import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications } from './notifications/index.ts'
+import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
 
 // ---------- Seuils anti-abus (P0-S2) — à ajuster ici ; justification dans server/README.md ----------
 
@@ -429,7 +430,7 @@ function apparence(v: unknown): Apparence {
   return a
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme']
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto']
 
 /** Fusion d'une configuration de programme partielle (PATCH) : chaque bloc est fusionné, pas remplacé. */
 function fusionnerProgramme(existant: Commerce['programme'], patch: NonNullable<Commerce['programme']>): NonNullable<Commerce['programme']> {
@@ -486,7 +487,18 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
     }
     r.programme = fusionnerProgramme(c.programme, programme)
   }
+  if ('relancesAuto' in corps) {
+    const o = (corps.relancesAuto ?? {}) as Corps
+    const inconnus = Object.keys(o).filter((k) => k !== 'inactif' && k !== 'anniversaire')
+    if (inconnus.length) throw err(400, `« relancesAuto » : champ inconnu (${inconnus.join(', ')}).`)
+    r.relancesAuto = { inactif: booleen(o.inactif ?? false, 'inactif'), anniversaire: booleen(o.anniversaire ?? false, 'anniversaire') }
+  }
   return r
+}
+
+/** Consentement aux relances posé ou retiré, avec sa date et son origine (preuve RGPD). */
+function avecConsentement(c: Client, valeur: boolean, origine: NonNullable<Client['consentementRelanceOrigine']>, t: Date): Client {
+  return { ...c, consentementRelance: valeur, consentementRelanceLe: t.toISOString(), consentementRelanceOrigine: origine }
 }
 
 const CODE_EQUIPE = /^\d{4}$/
@@ -730,7 +742,7 @@ const TAILLE_MAX_CORPS = 64 * 1024
 /** Le menu peut contenir des photos compressées (60 Ko chacune au plus). */
 const TAILLE_MAX_MENU = 3 * 1024 * 1024
 
-async function lireCorps(req: IncomingMessage, max = TAILLE_MAX_CORPS): Promise<Corps> {
+async function lireBrut(req: IncomingMessage, max: number): Promise<string> {
   let taille = 0
   const morceaux: Buffer[] = []
   for await (const m of req) {
@@ -738,9 +750,19 @@ async function lireCorps(req: IncomingMessage, max = TAILLE_MAX_CORPS): Promise<
     if (taille > max) throw err(413, 'Requête trop volumineuse.')
     morceaux.push(m as Buffer)
   }
-  if (!taille) return {}
+  return Buffer.concat(morceaux).toString('utf8')
+}
+
+/** Corps `application/x-www-form-urlencoded` (webhooks Twilio). */
+async function lireFormulaire(req: IncomingMessage): Promise<URLSearchParams> {
+  return new URLSearchParams(await lireBrut(req, TAILLE_MAX_CORPS))
+}
+
+async function lireCorps(req: IncomingMessage, max = TAILLE_MAX_CORPS): Promise<Corps> {
+  const brut = await lireBrut(req, max)
+  if (!brut) return {}
   try {
-    const v: unknown = JSON.parse(Buffer.concat(morceaux).toString('utf8'))
+    const v: unknown = JSON.parse(brut)
     if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error()
     return v as Corps
   } catch {
@@ -1052,6 +1074,169 @@ export async function creerServeur(o: OptionsServeur) {
     return programmePresent
   }
 
+  // Même principe pour la migration 0007 (journal des envois de relances).
+  let relancesPresent = false
+  let relancesVerifieLe = 0
+  async function schemaRelances(): Promise<boolean> {
+    if (relancesPresent || Date.now() - relancesVerifieLe < 60_000) return relancesPresent
+    relancesVerifieLe = Date.now()
+    try {
+      relancesPresent = await st.schemaRelances()
+    } catch {
+      relancesPresent = false
+    }
+    return relancesPresent
+  }
+
+  // ---- Relances SMS / e-mail (P1-B3) ----
+
+  /** Adresse publique du site (liens des SMS / e-mails, URL signée par Twilio) : PUBLIC_URL, sinon Host (+ X-Forwarded-Proto). */
+  function sitePublic(req: IncomingMessage): string {
+    if (o.urlPublique) return o.urlPublique.replace(/\/+$/, '')
+    const proto = (o.derriereProxy && String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim()) || 'http'
+    return `${proto}://${enTete(req, 'host') ?? 'localhost'}`
+  }
+
+  // Secret des liens de désinscription : tiré au hasard une fois, gardé dans `meta` (stable aux redémarrages, aucune
+  // variable d'environnement à créer). Un lien = HMAC(commerce, client) : il ne sert qu'à retirer CE consentement.
+  let secretDesinscription: Promise<string> | undefined
+  function lireSecretDesinscription(): Promise<string> {
+    secretDesinscription ??= (async () => {
+      const lu = await st.meta('secret_desinscription')
+      if (lu) return lu
+      const s = randomBytes(32).toString('hex')
+      await st.majMeta('secret_desinscription', s)
+      return s
+    })().catch((e) => {
+      secretDesinscription = undefined
+      throw e
+    })
+    return secretDesinscription
+  }
+  async function jetonDesinscription(commerceId: string, clientId: string): Promise<string> {
+    return createHmac('sha256', await lireSecretDesinscription()).update(`desinscription:${commerceId}:${clientId}`).digest('base64url').slice(0, 32)
+  }
+
+  interface Tentative {
+    http: number
+    message: string
+    envoi: EnvoiRelance
+  }
+
+  /**
+   * Une tentative de relance, tracée dans `envois` quel qu'en soit le résultat :
+   * 501 sans prestataire pour ce canal · 409 sans consentement, sans contact, ou déjà envoyée aujourd'hui (même modèle)
+   * · 503 migration 0007 absente (rien ne part sans anti-doublon) · 502 prestataire en erreur · 200 envoyée.
+   * L'envoi est RÉSERVÉ en base (`en_cours`) avant l'appel au prestataire : l'index unique empêche tout doublon.
+   */
+  async function relancer(
+    commerce: Commerce,
+    client: Client,
+    demande: { modele: ModeleRelance | 'libre'; canal?: Canal; libre?: string; declencheur: EnvoiRelance['declencheur']; auteur: string },
+    site: string,
+  ): Promise<Tentative> {
+    const t = maintenant()
+    const canal: Canal = demande.canal ?? canalDuClient(client) ?? 'sms'
+    const envoi: EnvoiRelance = {
+      id: `en-${randomUUID()}`,
+      commerceId: commerce.id,
+      clientId: client.id,
+      clientPrenom: client.prenom,
+      date: t.toISOString(),
+      jour: jourParis(t),
+      modele: demande.modele,
+      canal,
+      statut: 'en_cours',
+      declencheur: demande.declencheur,
+      auteur: demande.auteur,
+    }
+    async function consigner(statut: StatutEnvoi, http: number, message: string): Promise<Tentative> {
+      const e: EnvoiRelance = { ...envoi, statut, raison: message }
+      try {
+        await st.ajouterEnvoi(e)
+      } catch (err) {
+        // Migration 0007 pas appliquée : le refus est répondu quand même, seule la trace manque.
+        if (!(err instanceof ErreurMigrationManquante)) throw err
+        console.warn(`[relances] tentative non tracée (${statut}) : ${err.message}`)
+      }
+      return { http, message, envoi: e }
+    }
+
+    if (!notifications.statut()[canal]) return consigner('non_branche', 501, new ErreurNonBranche(canal).message)
+    if (client.consentementRelance !== true) return consigner('refuse', 409, 'Ce client n’a pas donné son consentement aux relances : rien n’a été envoyé.')
+    // SMS : format international (06… → +336…, autres numéros : chiffres précédés de +).
+    const cle = client.telephone ? cleContact({ telephone: client.telephone }) : ''
+    const destinataire = canal === 'sms' ? cle && (/^0\d{9}$/.test(cle) ? `+33${cle.slice(1)}` : `+${cle}`) : client.email
+    if (!destinataire) return consigner('refuse', 409, `Ce client n’a pas ${canal === 'sms' ? 'de téléphone' : 'd’e-mail'} : rien n’a été envoyé.`)
+    if (!(await schemaRelances())) throw new ErreurMigrationManquante('envois', '0007_relances.sql')
+    try {
+      await st.ajouterEnvoi(envoi)
+    } catch (e) {
+      if (e instanceof ErreurConflit) return consigner('refuse', 409, 'Cette relance a déjà été envoyée à ce client aujourd’hui : rien n’a été renvoyé.')
+      throw e
+    }
+
+    const d = { client, commerce }
+    let message: Message
+    if (canal === 'sms') {
+      message = { destinataire, texte: smsRelance(demande.modele, d, lienCourtCarte(site, client.id), demande.libre) }
+    } else {
+      const jeton = await jetonDesinscription(commerce.id, client.id)
+      const e = emailRelance(demande.modele, d, { carte: lienCarte(site, client.id), desinscription: `${site}/#/desinscription/${client.id}/${jeton}` }, demande.libre)
+      message = {
+        destinataire,
+        sujet: e.sujet,
+        texte: e.texte,
+        entetes: { 'List-Unsubscribe': `<${site}/api/v1/desinscription/${client.id}/${jeton}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+      }
+    }
+    let fin: Tentative
+    try {
+      const r = await notifications.envoyer(canal, message)
+      fin = { http: 200, message: 'Relance envoyée.', envoi: { ...envoi, statut: 'envoye', ...(r.id ? { idPrestataire: r.id } : {}) } }
+    } catch (e) {
+      const raison = e instanceof Error && e.message ? e.message : 'Le prestataire n’a pas répondu.'
+      fin = { http: 502, message: `Relance non envoyée : ${raison}`, envoi: { ...envoi, statut: 'erreur', raison } }
+    }
+    try {
+      await st.majEnvoi(fin.envoi)
+    } catch (e) {
+      // La ligne reste « en_cours » : elle bloque toujours un doublon le même jour, rien n'est perdu côté client.
+      console.warn(`[relances] statut final non écrit (${fin.envoi.statut}) : ${e instanceof Error ? e.message : e}`)
+    }
+    return fin
+  }
+
+  // Relances automatiques (réglage `relancesAuto` du commerce) : une tournée par commerce et par jour, lancée à
+  // l'ouverture du tableau de bord (GET /etat), en arrière-plan. Pas à l'ouverture de la carte par le client : il est
+  // justement là (« vous nous manquez » n'aurait aucun sens), et l'anniversaire y est déjà fêté dans sa boîte de réception.
+  const tournees = new Map<string, string>()
+  const tourneesEnCours = new Set<Promise<void>>()
+  function lancerRelancesAuto(commerce: Commerce, site: string) {
+    const regles = commerce.relancesAuto
+    if (!regles?.inactif && !regles?.anniversaire) return
+    const t = maintenant()
+    const jour = jourParis(t)
+    if (tournees.get(commerce.id) === jour) return
+    tournees.set(commerce.id, jour)
+    const p = (async () => {
+      const branche = notifications.statut()
+      // Rien de branché, ou migration 0007 absente : pas de tournée (et pas de 501 en série dans le journal).
+      if ((!branche.sms && !branche.email) || !(await schemaRelances())) return
+      for (const client of await st.clients(commerce.id)) {
+        const canal = canalDuClient(client)
+        if (client.consentementRelance !== true || !canal || !branche[canal]) continue
+        const deja = await st.envois(commerce.id, 50, client.id)
+        // Une seule relance automatique par client et par tournée : l'anniversaire passe avant.
+        const modele = (['anniversaire', 'inactif'] as const).find((x) => regles[x] && relanceAutoDue(x, client, deja, t))
+        if (modele) await relancer(commerce, client, { modele, declencheur: 'auto', auteur: 'Automatique' }, site)
+      }
+    })()
+      .catch((e) => console.warn(`[relances] tournée automatique interrompue : ${e instanceof Error ? e.message : e}`))
+      .finally(() => tourneesEnCours.delete(p))
+    tourneesEnCours.add(p)
+  }
+
   /** Messages automatiques dus pour cet événement (règles du commerce). */
   const avecMessages = (client: Client, commerce: Commerce, evenement: Evenement, t = maintenant()) =>
     genererMessages(client, commerce, evenement, t, nouvelIdMessage).client
@@ -1129,7 +1314,12 @@ export async function creerServeur(o: OptionsServeur) {
   }
 
   /** Inscrit le client, ou retrouve celui qui a déjà ce téléphone / e-mail dans ce commerce. */
-  async function inscrireOuRetrouver(commerce: Commerce, prenom: string, contactSaisi: unknown, parrainCode?: string) {
+  /**
+   * `consentement` : case « relances » cochée à l'inscription. Seulement pour un NOUVEAU client : un client retrouvé
+   * garde son choix (sinon n'importe qui connaissant son numéro pourrait le réabonner après un STOP) — le gérant peut le
+   * modifier sur la fiche.
+   */
+  async function inscrireOuRetrouver(commerce: Commerce, prenom: string, contactSaisi: unknown, parrainCode?: string, consentement = false) {
     const commerceId = commerce.id
     const contact = contactOuErreur(contactSaisi)
     const existant = await st.clientParContact(commerceId, contact)
@@ -1143,6 +1333,7 @@ export async function creerServeur(o: OptionsServeur) {
     // Code unique dans le commerce (collision quasi impossible, mais vérifiée).
     const codesPris = new Set(clientsConnus.map((c) => c.codeParrainage).filter(Boolean))
     for (let i = 0; i < 10 && codesPris.has(client.codeParrainage); i++) client = { ...client, codeParrainage: genererCodeParrainage() }
+    if (consentement) client = avecConsentement(client, true, 'inscription', maintenant())
     client = avecMessages(client, commerce, 'inscription')
     try {
       await st.ajouterClient(client)
@@ -1155,7 +1346,7 @@ export async function creerServeur(o: OptionsServeur) {
     return { client, existant: false }
   }
 
-  type Reponse = { statut?: number; json?: unknown; csv?: { nom: string; contenu: string } }
+  type Reponse = { statut?: number; json?: unknown; csv?: { nom: string; contenu: string }; xml?: string }
 
   async function router(req: IncomingMessage, chemin: string[]): Promise<Reponse> {
     const m = req.method
@@ -1172,7 +1363,8 @@ export async function creerServeur(o: OptionsServeur) {
           integrations: integrations(),
           // Migration 0003 (équipe, journal, menu) appliquée sur la base ?
           // Migration 0004 (parrainages, demandes de rattrapage) appliquée sur la base ?
-          migrations: { cartiz: await schemaCartiz(), programme: await schemaProgramme() },
+          // Migration 0007 (journal des envois de relances) appliquée ? Sans elle, aucun envoi réel ne part.
+          migrations: { cartiz: await schemaCartiz(), programme: await schemaProgramme(), relances: await schemaRelances() },
         },
       }
     }
@@ -1245,6 +1437,27 @@ export async function creerServeur(o: OptionsServeur) {
       if (m === 'DELETE') return fermerSession(req)
       throw err(405, 'Méthode non autorisée.')
     }
+    if (ressource === 'desinscription' && id && sous && !sousId && m === 'POST') {
+      // PUBLIC — lien de désinscription des e-mails de relance (page #/desinscription/…, et bouton « Se désabonner » des
+      // messageries via List-Unsubscribe-Post). Le corps n'est pas lu (formulaire One-Click ou vide). Idempotent.
+      limiterIp(req, 'fiche', limites.ficheClientParIp)
+      for (const c of await st.commerces()) {
+        if (!(await st.client(c.id, id))) continue
+        const attendu = Buffer.from(await jetonDesinscription(c.id, id))
+        const recu = Buffer.from(sous)
+        if (attendu.length !== recu.length || !timingSafeEqual(attendu, recu)) break
+        await st.transaction(async () => {
+          const avant = await clientOu404(c.id, id)
+          if (avant.consentementRelance === false) return
+          const apres = avecConsentement(avant, false, 'lien-email', maintenant())
+          await st.majClient(apres)
+          await journaliser(c.id, { type: 'client', nom: 'Client (lien de désinscription)' }, 'consentement', 'Consentement aux relances retiré : lien de désinscription (e-mail)', apres)
+        })
+        return { json: { ok: true, commerce: c.nom } }
+      }
+      throw err(404, 'Lien de désinscription invalide.')
+    }
+
     if (ressource !== 'commerces') throw err(404, 'Route inconnue.')
 
     // Lectures publiques d'un commerce (liste, fiche, menu) : par IP, avant toute lecture en base.
@@ -1288,6 +1501,8 @@ export async function creerServeur(o: OptionsServeur) {
 
     if (sous === 'etat' && m === 'GET') {
       await exigerCommercant(req, id)
+      // Ouverture du tableau de bord : relances automatiques du jour, si le commerce les a activées (arrière-plan).
+      lancerRelancesAuto(commerce, sitePublic(req))
       return {
         json: {
           commerce,
@@ -1296,6 +1511,7 @@ export async function creerServeur(o: OptionsServeur) {
           avis: await st.avis(id),
           membres: (await st.membres(id)).map((m) => m.membre),
           journal: await st.journal(id, 200),
+          envois: await st.envois(id, 200),
         },
       }
     }
@@ -1324,7 +1540,9 @@ export async function creerServeur(o: OptionsServeur) {
       const corps = await lireCorps(req)
       if (!commercant) limiterContact('inscription', id, corps.contact, limites.inscriptionParContact)
       const prenom = texte(corps.prenom ?? '', 'prenom', 40)
-      const { client, existant } = await st.transaction(() => inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain))
+      // Consentement aux relances : case séparée, jamais pré-cochée ; absent = pas de consentement.
+      const consentement = corps.consentementRelance == null ? false : booleen(corps.consentementRelance, 'consentementRelance')
+      const { client, existant } = await st.transaction(() => inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain, consentement))
       return { statut: existant ? 200 : 201, json: { client: commercant ? client : cartePublique(client), existant } }
     }
 
@@ -1487,16 +1705,23 @@ export async function creerServeur(o: OptionsServeur) {
     // ---------- Fiche client (gérant) : anniversaire, plat préféré ----------
 
     if (sous === 'clients' && sousId && !action && m === 'PATCH') {
-      await exigerCommercant(req, id)
+      const nom = await exigerCommercant(req, id)
       const corps = await lireCorps(req)
-      const inconnus = Object.keys(corps).filter((k) => k !== 'anniversaire' && k !== 'platPrefere')
+      const inconnus = Object.keys(corps).filter((k) => k !== 'anniversaire' && k !== 'platPrefere' && k !== 'consentementRelance')
       if (inconnus.length) throw err(400, `Champ non modifiable : ${inconnus.join(', ')}.`)
       const a = corps.anniversaire == null ? '' : texte(corps.anniversaire, 'anniversaire', 5)
       if (a && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(a)) throw err(400, '« anniversaire » : format MM-JJ attendu (ex. 03-21).')
       const plat = corps.platPrefere == null ? '' : texte(corps.platPrefere, 'platPrefere', 80)
+      const consentement = 'consentementRelance' in corps ? booleen(corps.consentementRelance, 'consentementRelance') : undefined
       const client = await st.transaction(async () => {
         const avant = await clientOu404(id, sousId)
-        const apres: Client = { ...avant }
+        let apres: Client = { ...avant }
+        // Consentement aux relances : posé (le client l'a donné au gérant) ou retiré (« retirer le consentement »).
+        if (consentement !== undefined && consentement !== (avant.consentementRelance === true)) {
+          apres = avecConsentement(apres, consentement, 'commercant', maintenant())
+          const texteJournal = consentement ? 'Consentement aux relances SMS / e-mail enregistré par le commerce' : 'Consentement aux relances SMS / e-mail retiré par le commerce'
+          await journaliser(id, { type: 'gerant', nom }, 'consentement', texteJournal, apres)
+        }
         if ('anniversaire' in corps) {
           if (a) apres.anniversaire = a
           else delete apres.anniversaire
@@ -1725,22 +1950,51 @@ export async function creerServeur(o: OptionsServeur) {
     }
 
     if (sous === 'clients' && sousId && action === 'relance' && m === 'POST') {
-      // V3 — envoi SMS / e-mail préparé : 501 sans prestataire, et jamais sans consentement explicite du client.
-      await exigerCommercant(req, id)
+      // P1-B3 — relance SMS / e-mail d'un client, de bout en bout : modèle (ou message libre), canal (défaut : selon le
+      // contact du client), consentement exigé, anti-doublon du jour, tentative tracée dans `envois` (même refusée).
+      // Envoi réel UNIQUEMENT si le prestataire du canal est configuré ; sinon 501, rien n'est envoyé.
+      const auteur = await exigerCommercant(req, id)
       const client = await clientOu404(id, sousId)
       const corps = await lireCorps(req)
-      if (corps.canal !== 'sms' && corps.canal !== 'email') throw err(400, '« canal » doit valoir "sms" ou "email".')
-      const canal = corps.canal as Canal
-      if (!notifications.statut()[canal]) throw err(501, new ErreurNonBranche(canal).message)
-      if (client.consentementRelance !== true) throw err(409, 'Ce client n’a pas donné son consentement aux relances : rien n’a été envoyé.')
-      // SMS : format international (06… → +336…, autres numéros : chiffres précédés de +).
-      const cle = client.telephone ? cleContact({ telephone: client.telephone }) : ''
-      const destinataire = canal === 'sms' ? (cle && (/^0\d{9}$/.test(cle) ? `+33${cle.slice(1)}` : `+${cle}`)) : client.email
-      if (!destinataire) throw err(409, `Ce client n’a pas ${canal === 'sms' ? 'de téléphone' : 'd’e-mail'} : rien n’a été envoyé.`)
-      const texteMessage = corps.message == null ? messageRelance(client, commerce) : texte(corps.message, 'message', 600, { requis: true })
-      const desinscription = canal === 'sms' ? ' STOP pour ne plus recevoir de messages.' : '\n\nPour ne plus recevoir ces messages, répondez « désinscription ».'
-      const r = await notifications.envoyer(canal, { destinataire, texte: texteMessage + desinscription, sujet: commerce.nom })
-      return { json: { envoye: true, canal, id: r.id } }
+      if (corps.canal != null && corps.canal !== 'sms' && corps.canal !== 'email') throw err(400, '« canal » doit valoir "sms" ou "email".')
+      if (corps.modele != null && !estModeleRelance(corps.modele)) throw err(400, `« modele » doit valoir : ${MODELES_RELANCE.map((x) => x.modele).join(', ')}.`)
+      const libre = corps.message == null ? '' : texte(corps.message, 'message', 600, { requis: true })
+      if (libre && corps.modele != null) throw err(400, 'Choisissez un modèle ou un message libre, pas les deux.')
+      const modele: ModeleRelance | 'libre' = libre ? 'libre' : ((corps.modele as ModeleRelance | undefined) ?? 'inactif')
+      const r = await relancer(commerce, client, { modele, canal: corps.canal as Canal | undefined, libre, declencheur: 'manuel', auteur }, sitePublic(req))
+      if (r.http !== 200) throw err(r.http, r.message)
+      return { json: { envoye: true, canal: r.envoi.canal, modele, id: r.envoi.idPrestataire ?? '', envoi: r.envoi } }
+    }
+
+    if (sous === 'envois' && !sousId && m === 'GET') {
+      // Journal des envois de relances (gérant) : les 200 plus récents, ou ceux d'un client (?client=<id>).
+      await exigerCommercant(req, id)
+      const clientId = new URL(req.url ?? '/', 'http://localhost').searchParams.get('client') || undefined
+      return { json: { envois: await st.envois(id, 200, clientId), migration: await schemaRelances() } }
+    }
+
+    if (sous === 'stop-sms' && !sousId && m === 'POST') {
+      // PUBLIC — webhook Twilio « A message comes in » (à régler sur le numéro expéditeur, voir server/README.md) :
+      // une réponse STOP (ou ARRET, DESINSCRIPTION…) retire le consentement du client qui a ce numéro dans ce commerce.
+      // Twilio non configuré → 501 ; signature X-Twilio-Signature fausse → 403 (personne d'autre ne peut désinscrire).
+      limiterIp(req, 'stop', limites.lectureParIp)
+      if (!notifications.statut().sms) throw err(501, 'Réception des réponses STOP à brancher : Twilio n’est pas configuré sur ce serveur. Aucun consentement n’a été modifié.')
+      const params = await lireFormulaire(req)
+      if (!notifications.signatureSmsValide(`${sitePublic(req)}${req.url ?? ''}`, params, enTete(req, 'x-twilio-signature'))) {
+        throw err(403, 'Signature Twilio invalide : requête ignorée.')
+      }
+      const de = params.get('From') ?? ''
+      if (estMotStop(params.get('Body') ?? '') && analyserContact(de)) {
+        await st.transaction(async () => {
+          const avant = await st.clientParContact(id, { telephone: de })
+          if (!avant || avant.consentementRelance === false) return
+          const apres = avecConsentement(avant, false, 'stop-sms', maintenant())
+          await st.majClient(apres)
+          await journaliser(id, { type: 'client', nom: 'Client (réponse STOP)' }, 'consentement', 'Consentement aux relances retiré : réponse STOP par SMS', apres)
+        })
+      }
+      // TwiML vide : Twilio n'envoie aucune réponse automatique de plus.
+      return { xml: '<?xml version="1.0" encoding="UTF-8"?><Response></Response>' }
     }
 
     if (sous === 'tirages' && !sousId && m === 'POST') {
@@ -1841,6 +2095,12 @@ export async function creerServeur(o: OptionsServeur) {
         res.writeHead(204, entetes).end()
         return
       }
+      // Lien court des SMS de relance (P1-B3) : /c/<clientId> → la carte du client (#/carte/<clientId>).
+      const court = /^\/c\/([\w-]{1,80})$/.exec(url.pathname)
+      if (court && (req.method === 'GET' || req.method === 'HEAD')) {
+        res.writeHead(302, { ...entetes, Location: `/#/carte/${court[1]}`, 'Cache-Control': 'no-store' }).end()
+        return
+      }
       if (!url.pathname.startsWith('/api/v1/') && url.pathname !== '/api/v1') {
         if (o.dossierStatique && (req.method === 'GET' || req.method === 'HEAD') && !url.pathname.startsWith('/api/')) {
           if (servirStatique(o.dossierStatique, url.pathname, req, res, entetes)) return
@@ -1857,6 +2117,11 @@ export async function creerServeur(o: OptionsServeur) {
           'Cache-Control': 'no-store',
         })
         res.end(r.csv.contenu)
+        return
+      }
+      if (r.xml != null) {
+        res.writeHead(r.statut ?? 200, { ...entetes, 'Content-Type': 'text/xml; charset=utf-8', 'Cache-Control': 'no-store' })
+        res.end(r.xml)
         return
       }
       res.writeHead(r.statut ?? 200, { ...entetes, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
@@ -1879,8 +2144,11 @@ export async function creerServeur(o: OptionsServeur) {
 
   return {
     serveur,
+    /** Attend la fin des tournées de relances automatiques en cours (tests). */
+    relancesEnCours: () => Promise.all([...tourneesEnCours]).then(() => undefined),
     async fermer() {
       clearInterval(nettoyage)
+      await Promise.all([...tourneesEnCours])
       serveur.closeAllConnections()
       await new Promise<void>((ok) => serveur.close(() => ok()))
       await st.fermer()

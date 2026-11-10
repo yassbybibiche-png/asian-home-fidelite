@@ -23,6 +23,7 @@ import MenuPublic from './pages/MenuPublic'
 import Equipe from './pages/Equipe'
 import Messages from './pages/Messages'
 import MenuCarte from './pages/MenuCarte'
+import Desinscription from './pages/Desinscription'
 
 const ONGLETS: { page: Page; libelle: string }[] = [
   { page: 'accueil', libelle: 'Tableau de bord' },
@@ -65,6 +66,7 @@ const COMPOSANTS: Record<Page, ComponentType> = {
   equipe: Equipe,
   messages: Messages,
   menuCarte: MenuCarte,
+  desinscription: Desinscription,
 }
 
 /** Onglet surligné pour les sous-pages (fiche client → Clients, QR vitrine → Roulette). */

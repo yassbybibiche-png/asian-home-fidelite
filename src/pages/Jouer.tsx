@@ -292,8 +292,9 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
           <Continuer prenom={memorise.prenom} onContinuer={() => choisirJoueur(memorise)} onOublier={() => (memoriserJoueur(commerce.id, null), setMemoriseId(null))} />
         ) : (
           <Identification
-            onEnvoyer={async (prenom, contactSaisi) => {
-              choisirJoueur((await inscrireClient(commerce.id, prenom, contactSaisi)).client)
+            nomCommerce={commerce.nom}
+            onEnvoyer={async (prenom, contactSaisi, consentementRelance) => {
+              choisirJoueur((await inscrireClient(commerce.id, prenom, contactSaisi, consentementRelance)).client)
             }}
           />
         )
@@ -485,8 +486,9 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
         ) : (
           <Identification
             parrain={parrain}
-            onEnvoyer={async (prenom, contactSaisi) => {
-              const { client } = await api.inscrirePublic(commerce.id, prenom, contactSaisi, parrain)
+            nomCommerce={commerce.nom}
+            onEnvoyer={async (prenom, contactSaisi, consentementRelance) => {
+              const { client } = await api.inscrirePublic(commerce.id, prenom, contactSaisi, parrain, consentementRelance)
               choisirJoueur({ clientId: client.id, prenom: client.prenom, contact: contactSaisi.trim() })
             }}
           />
@@ -554,9 +556,19 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
 
 // ---------------------------------------------------------------------------------------------
 
-function Identification({ onEnvoyer, parrain }: { onEnvoyer(prenom: string, contactSaisi: string): Promise<void>; parrain?: string }) {
+function Identification({
+  onEnvoyer,
+  parrain,
+  nomCommerce,
+}: {
+  onEnvoyer(prenom: string, contactSaisi: string, consentementRelance: boolean): Promise<void>
+  parrain?: string
+  nomCommerce: string
+}) {
   const [prenom, setPrenom] = useState('')
   const [contactSaisi, setContactSaisi] = useState('')
+  // Relances SMS / e-mail (P1-B3) : case séparée, jamais pré-cochée.
+  const [consentement, setConsentement] = useState(false)
   const [essaye, setEssaye] = useState(false)
   const [enCours, setEnCours] = useState(false)
   const [erreur, setErreur] = useState<string | null>(null)
@@ -569,7 +581,7 @@ function Identification({ onEnvoyer, parrain }: { onEnvoyer(prenom: string, cont
     setEnCours(true)
     setErreur(null)
     try {
-      await onEnvoyer(prenom.trim(), contactSaisi)
+      await onEnvoyer(prenom.trim(), contactSaisi, consentement)
     } catch (err) {
       setErreur(err instanceof Error ? err.message : MESSAGE_HORS_LIGNE)
     } finally {
@@ -606,6 +618,10 @@ function Identification({ onEnvoyer, parrain }: { onEnvoyer(prenom: string, cont
         {essaye && !contact && <p className="mt-1 text-sm text-red-700">Saisissez un numéro (10 chiffres) ou un e-mail valide.</p>}
         <p className="mt-1 text-xs text-gray-600">Déjà client ? Le même numéro ou e-mail retrouve votre carte de fidélité.</p>
       </div>
+      <label className="flex items-start gap-2 text-sm text-gray-700">
+        <input type="checkbox" className="mt-0.5" checked={consentement} onChange={(e) => setConsentement(e.target.checked)} />
+        <span>J’accepte de recevoir les offres de {nomCommerce} par SMS ou e-mail (désinscription à tout moment).</span>
+      </label>
       <MessageErreur>{erreur}</MessageErreur>
       <button type="submit" className="bouton w-full" disabled={!contactSaisi.trim() || enCours}>
         {enCours ? 'Un instant…' : 'C’est parti'}

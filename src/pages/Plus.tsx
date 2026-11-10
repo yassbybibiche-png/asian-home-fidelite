@@ -23,7 +23,8 @@ const SIMULE_LOCAL = [
 const SIMULE_API = [
   'Données partagées sur le serveur : le comptoir et le téléphone du client voient les mêmes cartes et tirages.',
   'Avis Google : pas de connexion à Google (à brancher) ; avis saisis à la main, aucune réponse n’est publiée sur Google.',
-  'Messages : affichés dans l’espace client (sur sa carte) et à copier-coller ; aucun SMS ni e-mail n’est envoyé (envoi à brancher).',
+  'Messages ciblés : affichés dans l’espace client (sur sa carte) et à copier-coller, sans SMS ni e-mail.',
+  'Relances SMS / e-mail : envoyées seulement si Twilio (SMS) ou Brevo (e-mail) est configuré sur le serveur et que le client a consenti ; sinon refusées, rien n’est envoyé (voir Messages).',
   'Caisse : fonctionne hors ligne sur l’appareil du comptoir ; les actions sont envoyées au retour du réseau, sans double comptage.',
   'Wallet : bientôt — Apple Wallet en suspens, Google Wallet sans compte émetteur ; aucun pass créé.',
   'Aucun paiement ni souscription réelle.',

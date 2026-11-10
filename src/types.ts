@@ -71,6 +71,48 @@ export interface Commerce {
   apparence?: Apparence
   /** Programme de fidélité (paliers, parrainage, niveaux, défis…) : absent = défauts (voir `src/lib/programme.ts`). */
   programme?: ConfigProgramme
+  /**
+   * Relances SMS / e-mail automatiques (P1-B3), lancées à l'ouverture du tableau de bord du gérant, une fois par jour.
+   * Absent = désactivées. Ne part que vers les clients qui ont consenti, et seulement si un prestataire est configuré.
+   */
+  relancesAuto?: ReglesRelancesAuto
+}
+
+/** Relances automatiques (P1-B3) : « inactif 30 jours » et « anniversaire ». */
+export interface ReglesRelancesAuto {
+  inactif: boolean
+  anniversaire: boolean
+}
+
+/** Modèles de relance SMS / e-mail (P1-B3, `src/lib/relances.ts`) ; « libre » = texte saisi par le gérant. */
+export type ModeleRelance = 'bienvenue' | 'proche' | 'inactif' | 'anniversaire'
+
+/**
+ * Statut d'une tentative de relance : `en_cours` (réservée, envoi en cours), `envoye` (accepté par le prestataire),
+ * `refuse` (rien envoyé : pas de consentement, pas de contact, déjà envoyée aujourd'hui), `erreur` (le prestataire a
+ * refusé ou ne répond pas), `non_branche` (aucun prestataire configuré : 501, rien envoyé).
+ */
+export type StatutEnvoi = 'en_cours' | 'envoye' | 'refuse' | 'erreur' | 'non_branche'
+
+/** Journal des envois (migration 0007 : table `envois`). Jamais le téléphone ni l'e-mail, jamais le texte complet. */
+export interface EnvoiRelance {
+  id: string
+  commerceId: string
+  clientId: string
+  clientPrenom: string
+  date: string
+  /** Jour à Paris (AAAA-MM-JJ) : une même relance part au plus une fois par client et par jour. */
+  jour: string
+  modele: ModeleRelance | 'libre'
+  canal: 'sms' | 'email'
+  statut: StatutEnvoi
+  declencheur: 'manuel' | 'auto'
+  /** « Gérant », « Admin » ou « Automatique ». */
+  auteur: string
+  /** Raison d'un refus / d'une erreur (texte affichable, sans secret). */
+  raison?: string
+  /** Identifiant du message chez le prestataire (Twilio SID, Brevo messageId). */
+  idPrestataire?: string
 }
 
 export interface RecompensePoints {
@@ -156,7 +198,7 @@ export interface MembreEquipe {
   creeLe: string
 }
 
-export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi' | 'gain'
+export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi' | 'gain' | 'consentement'
 
 /** Parrainage réussi (trace d'audit ; les points sont sur les cartes des deux clients). */
 export interface Parrainage {
@@ -216,7 +258,8 @@ export interface EntreeJournal {
   commerceId: string
   date: string
   action: ActionJournal
-  auteur: { type: 'membre' | 'gerant'; id?: string; nom: string }
+  /** `client` : action du client lui-même (réponse STOP, lien de désinscription). */
+  auteur: { type: 'membre' | 'gerant' | 'client'; id?: string; nom: string }
   clientId?: string
   clientPrenom?: string
   details: string
@@ -266,10 +309,15 @@ export interface Client {
   /** Récompenses fidélité déjà remises au client. */
   recompensesOffertes?: RecompenseOfferte[]
   /**
-   * Consentement explicite aux relances SMS / e-mail (RGPD). Aucun écran ne le recueille encore (V3) :
-   * tant qu'il n'est pas vrai, le serveur refuse tout envoi de relance, même avec un prestataire configuré.
+   * Consentement explicite aux relances SMS / e-mail (RGPD) : case NON pré-cochée à l'inscription (page de jeu, caisse,
+   * écran Clients), modifiable ensuite par le gérant ; retiré par une réponse STOP ou le lien de désinscription.
+   * Tant qu'il n'est pas vrai, le serveur refuse tout envoi de relance, même avec un prestataire configuré.
    */
   consentementRelance?: boolean
+  /** Date (ISO) du dernier changement de `consentementRelance` (preuve du consentement / du retrait). */
+  consentementRelanceLe?: string
+  /** Origine de ce dernier changement. */
+  consentementRelanceOrigine?: 'inscription' | 'commercant' | 'stop-sms' | 'lien-email'
   /** Solde de points (calculé et stocké par le serveur). */
   points?: number
   /** Total dépensé déclaré en caisse, en centimes. */
@@ -356,4 +404,6 @@ export interface Etat extends Donnees {
   /** Mode serveur uniquement : équipe et journal d'audit des commerces déverrouillés. */
   membres?: MembreEquipe[]
   journal?: EntreeJournal[]
+  /** Mode serveur uniquement : journal des envois de relances SMS / e-mail (P1-B3). */
+  envois?: EnvoiRelance[]
 }
