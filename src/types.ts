@@ -76,6 +76,11 @@ export interface Commerce {
    * Absent = désactivées. Ne part que vers les clients qui ont consenti, et seulement si un prestataire est configuré.
    */
   relancesAuto?: ReglesRelancesAuto
+  /**
+   * Durée de conservation des données d'un client inactif (P1-B6, RGPD), en mois après sa dernière activité (dernière
+   * visite, à défaut l'inscription). Absent = 36 mois (3 ans). Voir `src/lib/rgpd.ts`.
+   */
+  conservationMois?: number
 }
 
 /** Relances automatiques (P1-B3) : « inactif 30 jours » et « anniversaire ». */
@@ -157,6 +162,8 @@ export interface CommercePublic {
   catalogue?: Pick<RecompensePoints, 'nom' | 'cout' | 'description'>[]
   apparence?: Apparence
   programme: ProgrammePublic
+  /** Durée de conservation EFFECTIVE en mois (défaut appliqué), affichée sur la page de confidentialité (P1-B6). */
+  conservationMois: number
 }
 
 export type TypeMessageAuto = 'bienvenue' | 'recompense' | 'presque' | 'inactif' | 'anniversaire' | 'avis'
@@ -198,7 +205,7 @@ export interface MembreEquipe {
   creeLe: string
 }
 
-export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi' | 'gain' | 'consentement' | 'avisGoogle'
+export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi' | 'gain' | 'consentement' | 'avisGoogle' | 'rgpd'
 
 /** Parrainage réussi (trace d'audit ; les points sont sur les cartes des deux clients). */
 export interface Parrainage {
@@ -356,6 +363,11 @@ export interface Client {
   demandesRattrapage?: DemandeRattrapage[]
   /** Plat préféré, collecté après la 2e visite (profiling progressif, jamais à l'inscription). */
   platPrefere?: string
+  // ---- RGPD (P1-B6) ----
+  /** Exclu de la purge de conservation par le commerce (ex. client connu qui ne passe plus au comptoir). */
+  exclusPurge?: boolean
+  /** Date (ISO) de la demande de suppression faite par le client depuis sa carte ; la suppression est faite par le commerce. */
+  demandeSuppressionLe?: string
 }
 
 export interface RecompenseOfferte {

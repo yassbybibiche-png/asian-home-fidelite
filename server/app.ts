@@ -35,7 +35,8 @@ import { problemesApparence } from '../src/lib/apparence.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
 import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurLogo, LIMITES_LOGO, messageTropLourd, urlLogo, validerLogo, type FormatLogo } from '../src/lib/logo.ts'
-import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
+import { CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, dureeConservationMois, estPurgeable, exportClientCsv, libelleDuree, listePurge, nomFichierExportClient } from '../src/lib/rgpd.ts'
+import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSuppression, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
@@ -454,7 +455,7 @@ function apparence(v: unknown): Apparence {
   return a
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto']
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois']
 
 /** Fusion d'une configuration de programme partielle (PATCH) : chaque bloc est fusionné, pas remplacé. */
 function fusionnerProgramme(existant: Commerce['programme'], patch: NonNullable<Commerce['programme']>): NonNullable<Commerce['programme']> {
@@ -516,6 +517,13 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
     const inconnus = Object.keys(o).filter((k) => k !== 'inactif' && k !== 'anniversaire')
     if (inconnus.length) throw err(400, `« relancesAuto » : champ inconnu (${inconnus.join(', ')}).`)
     r.relancesAuto = { inactif: booleen(o.inactif ?? false, 'inactif'), anniversaire: booleen(o.anniversaire ?? false, 'anniversaire') }
+  }
+  if ('conservationMois' in corps) {
+    const n = corps.conservationMois
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < CONSERVATION_MIN_MOIS || n > CONSERVATION_MAX_MOIS) {
+      throw err(400, `« conservationMois » : nombre entier de mois entre ${CONSERVATION_MIN_MOIS} et ${CONSERVATION_MAX_MOIS}.`)
+    }
+    r.conservationMois = n
   }
   return r
 }
@@ -1426,6 +1434,48 @@ export async function creerServeur(o: OptionsServeur) {
     return { client, existant: false }
   }
 
+  // ---- RGPD (P1-B6) ----
+
+  /**
+   * Preuve d'identité du client sur les routes publiques RGPD (export, demande de suppression) : le lien de sa carte
+   * (identifiant) ET son téléphone ou son e-mail, comparés avec la même normalisation que l'inscription.
+   */
+  function contactDuClient(client: Client, saisi: unknown): boolean {
+    const contact = typeof saisi === 'string' ? analyserContact(saisi) : null
+    if (!contact) return false
+    const cle = cleContact(contact)
+    return (!!client.telephone && cleContact({ telephone: client.telephone }) === cle) || (!!client.email && cleContact({ email: client.email }) === cle)
+  }
+
+  /** Client d'une carte (route publique /cartes/:id/…), tous commerces confondus ; 404 sinon. */
+  async function clientDeCarte(clientId: string): Promise<{ commerce: Commerce; client: Client }> {
+    for (const c of await st.commerces()) {
+      const client = await st.client(c.id, clientId)
+      if (client) return { commerce: c, client }
+    }
+    throw err(404, 'Carte de fidélité introuvable.')
+  }
+
+  /**
+   * Suppression d'un client et de sa cascade (voir `Stockage.supprimerClient`). Avant : les filleuls de ce client
+   * perdent leur lien `parrainId` vers lui (plus aucune donnée ne pointe vers la carte supprimée). Aucune entrée de
+   * journal ici : l'appelant journalise l'opération SANS prénom ni contact (sinon la trace garderait la donnée effacée).
+   */
+  async function supprimerClientCascade(commerceId: string, clientId: string): Promise<BilanSuppression> {
+    for (const filleul of (await st.clients(commerceId)).filter((c) => c.parrainId === clientId)) {
+      await st.transaction(async () => {
+        const avant = await st.client(commerceId, filleul.id)
+        if (!avant || avant.parrainId !== clientId) return
+        const { parrainId: _p, ...apres } = avant
+        await st.majClient(apres)
+      })
+    }
+    return st.transaction(() => st.supprimerClient(commerceId, clientId))
+  }
+
+  const resumeBilan = (b: BilanSuppression) =>
+    `${b.tirages} tirage(s), ${b.journal} entrée(s) de journal, ${b.parrainages} parrainage(s), ${b.rattrapages} demande(s) de rattrapage, ${b.envois} relance(s)`
+
   // ---- Logo téléversé (P1-B5) ----
   // Rangé dans `meta` (clé `logo:<commerce>`, valeur JSON { type, version, donnees base64 } ; vide = aucun) : pas de
   // migration, et la ligne JSONB du commerce ne garde que l'adresse versionnée. Gardé en mémoire après la 1re lecture
@@ -1540,6 +1590,34 @@ export async function creerServeur(o: OptionsServeur) {
         return { json: { ok: true } }
       }
       throw err(404, 'Carte de fidélité introuvable.')
+    }
+    if (ressource === 'cartes' && id && (sous === 'donnees' || sous === 'suppression') && !sousId && m === 'POST') {
+      // PUBLIC (P1-B6, RGPD) — depuis la carte du client : « Recevoir mes données » (CSV de SES données) et « Demander
+      // la suppression » (demande enregistrée ; la suppression elle-même est faite par le commerce, fiche client).
+      // Identité : lien de la carte + téléphone ou e-mail du client (403 sinon). Le commerce inactif n'empêche pas ces
+      // droits. Limité par IP et par carte (même seuil que les autres formulaires de la carte).
+      limiterIp(req, 'fiche', limites.ficheClientParIp)
+      compteurs.consommer(`rgpd:${id}`, limites.ficheClientParIp, TROP)
+      const corps = await lireCorps(req)
+      const { commerce: c, client } = await clientDeCarte(id)
+      if (!contactDuClient(client, corps.contact)) {
+        throw err(403, 'Ce téléphone ou cet e-mail ne correspond pas à cette carte : indiquez celui donné à l’inscription.')
+      }
+      const auteur: Auteur = { type: 'client', nom: 'Client (depuis sa carte)' }
+      if (sous === 'donnees') {
+        const csv = exportClientCsv(client, await st.tiragesClient(c.id, client.id), await st.envois(c.id, 500, client.id))
+        await journaliser(c.id, auteur, 'rgpd', 'Export de ses données téléchargé par le client', client)
+        return { csv: { nom: nomFichierExportClient(client.id), contenu: csv } }
+      }
+      const apres = await st.transaction(async () => {
+        const avant = await clientOu404(c.id, client.id)
+        if (avant.demandeSuppressionLe) return avant
+        const maj: Client = { ...avant, demandeSuppressionLe: maintenant().toISOString() }
+        await st.majClient(maj)
+        await journaliser(c.id, auteur, 'rgpd', 'Demande de suppression des données reçue depuis la carte', maj)
+        return maj
+      })
+      return { json: { ok: true, demandeSuppressionLe: apres.demandeSuppressionLe, commerce: c.nom } }
     }
     if (ressource === 'sessions' && !id) {
       if (m === 'POST') {
@@ -1854,17 +1932,85 @@ export async function creerServeur(o: OptionsServeur) {
       return { json: { gain: gainCaisse(remis, client, t) } }
     }
 
-    // ---------- Fiche client (gérant) : anniversaire, plat préféré ----------
+    // ---------- RGPD (P1-B6) : export individuel, suppression, purge de conservation — gérant / admin seulement ----------
+
+    if (sous === 'clients' && sousId && action === 'export.csv' && !extra && m === 'GET') {
+      // Toutes les données de CE client (profil, tampons, points, visites, tirages, consentement, messages, relances),
+      // rien d'un autre client, jamais de PIN / hash / code équipe.
+      const nom = await exigerCommercant(req, id)
+      const client = await clientOu404(id, sousId)
+      const csv = exportClientCsv(client, await st.tiragesClient(id, client.id), await st.envois(id, 500, client.id))
+      await journaliser(id, { type: 'gerant', nom }, 'rgpd', 'Export des données du client (CSV)', client)
+      return { csv: { nom: nomFichierExportClient(client.id), contenu: csv } }
+    }
+
+    if (sous === 'clients' && sousId && !action && m === 'DELETE') {
+      // Suppression définitive, sur demande du client ou décision du commerce. Garde-fou serveur en plus de la
+      // confirmation saisie à l'écran : le corps doit contenir { "confirmation": "SUPPRIMER" }.
+      const nom = await exigerCommercant(req, id)
+      const corps = await lireCorps(req)
+      if (corps.confirmation !== 'SUPPRIMER') throw err(400, 'Suppression non confirmée : envoyez { "confirmation": "SUPPRIMER" }.')
+      const client = await clientOu404(id, sousId)
+      const bilan = await supprimerClientCascade(id, client.id)
+      const motif = client.demandeSuppressionLe ? 'à la demande du client' : 'décision du commerce'
+      // Trace SANS prénom ni contact ni identifiant : seulement qui, quand, pourquoi et combien.
+      await journaliser(id, { type: 'gerant', nom }, 'rgpd', `Client supprimé (${motif}) avec ${resumeBilan(bilan)}`)
+      return { json: { ok: true, bilan } }
+    }
+
+    if (sous === 'purge' && !sousId) {
+      // Durée de conservation (P1-B6). GET = avertissement : clients dont la date de purge est passée (« due ») ou
+      // proche (« bientot », 30 jours), avec la date prévue et ce qui les protège. POST { clientIds } = exécution, pour
+      // les seuls clients listés ET encore purgeables au moment de l'appel (revérifiés ici). Jamais lancée seule : le
+      // gérant voit la liste puis confirme (aucune tâche planifiée sur Render Free).
+      const nom = await exigerCommercant(req, id)
+      const t = maintenant()
+      const mois = dureeConservationMois(commerce)
+      if (m === 'GET') return { json: { conservationMois: mois, maintenant: t.toISOString(), clients: listePurge(await st.clients(id), commerce, t) } }
+      if (m === 'POST') {
+        const corps = await lireCorps(req)
+        const ids = corps.clientIds
+        if (!Array.isArray(ids) || !ids.length || ids.length > 1000 || ids.some((x) => typeof x !== 'string')) {
+          throw err(400, '« clientIds » : liste des clients à purger (ceux affichés par GET …/purge).')
+        }
+        const supprimes: string[] = []
+        const ignores: string[] = []
+        const total: BilanSuppression = { client: true, tirages: 0, journal: 0, parrainages: 0, rattrapages: 0, envois: 0 }
+        for (const cid of new Set(ids as string[])) {
+          const client = await st.client(id, cid)
+          if (!client || !estPurgeable(client, commerce, t)) {
+            ignores.push(cid)
+            continue
+          }
+          const b = await supprimerClientCascade(id, cid)
+          for (const k of ['tirages', 'journal', 'parrainages', 'rattrapages', 'envois'] as const) total[k] += b[k]
+          supprimes.push(cid)
+        }
+        if (supprimes.length) {
+          await journaliser(
+            id,
+            { type: 'gerant', nom },
+            'rgpd',
+            `Purge de conservation (${libelleDuree(mois)} sans visite) : ${supprimes.length} client(s) supprimé(s) avec ${resumeBilan(total)}${ignores.length ? ` · ${ignores.length} ignoré(s) (plus purgeables)` : ''}`,
+          )
+        }
+        return { json: { supprimes: supprimes.length, ignores: ignores.length, clientsSupprimes: supprimes } }
+      }
+      throw err(405, 'Méthode non autorisée.')
+    }
+
+    // ---------- Fiche client (gérant) : anniversaire, plat préféré, consentement, exclusion de la purge ----------
 
     if (sous === 'clients' && sousId && !action && m === 'PATCH') {
       const nom = await exigerCommercant(req, id)
       const corps = await lireCorps(req)
-      const inconnus = Object.keys(corps).filter((k) => k !== 'anniversaire' && k !== 'platPrefere' && k !== 'consentementRelance')
+      const inconnus = Object.keys(corps).filter((k) => k !== 'anniversaire' && k !== 'platPrefere' && k !== 'consentementRelance' && k !== 'exclusPurge')
       if (inconnus.length) throw err(400, `Champ non modifiable : ${inconnus.join(', ')}.`)
       const a = corps.anniversaire == null ? '' : texte(corps.anniversaire, 'anniversaire', 5)
       if (a && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(a)) throw err(400, '« anniversaire » : format MM-JJ attendu (ex. 03-21).')
       const plat = corps.platPrefere == null ? '' : texte(corps.platPrefere, 'platPrefere', 80)
       const consentement = 'consentementRelance' in corps ? booleen(corps.consentementRelance, 'consentementRelance') : undefined
+      const exclusPurge = 'exclusPurge' in corps ? booleen(corps.exclusPurge, 'exclusPurge') : undefined
       const client = await st.transaction(async () => {
         const avant = await clientOu404(id, sousId)
         let apres: Client = { ...avant }
@@ -1881,6 +2027,11 @@ export async function creerServeur(o: OptionsServeur) {
         if ('platPrefere' in corps) {
           if (plat) apres.platPrefere = plat
           else delete apres.platPrefere
+        }
+        if (exclusPurge !== undefined && exclusPurge !== !!avant.exclusPurge) {
+          if (exclusPurge) apres.exclusPurge = true
+          else delete apres.exclusPurge
+          await journaliser(id, { type: 'gerant', nom }, 'rgpd', exclusPurge ? 'Client exclu de la purge de conservation' : 'Client de nouveau soumis à la purge de conservation', apres)
         }
         await st.majClient(apres)
         return apres
