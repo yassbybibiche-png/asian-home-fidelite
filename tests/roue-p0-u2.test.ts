@@ -182,7 +182,7 @@ describe('P0-U2 : compteur dans Réglages', () => {
     assert.match(reglages, /import \{ compteurLibelle, MAX_CARACTERES_ROUE \} from '\.\.\/lib\/roue'/)
     assert.match(reglages, /aria-describedby=\{`lot-\$\{i\}-compteur`\}/)
     assert.match(reglages, /<CompteurLibelle id=\{`lot-\$\{i\}-compteur`\} libelle=\{lot\.libelle\} \/>/)
-    assert.match(reglages, /c\.depasse \? 'font-medium text-red-700' : 'text-gray-500'/)
+    assert.match(reglages, /c\.depasse \? 'font-medium text-red-700' : 'text-gray-600'/)
     assert.match(reglages, /raccourcissez pour un affichage complet sur la roue/)
   })
 })
@@ -202,10 +202,10 @@ describe('P0-U2 : roue et légende (source des composants)', () => {
 
   test('légende : libellé complet + pastille couleur/numéro du secteur, police ≥ 14 px', () => {
     assert.match(roue, /export function LegendeRoue\(\{ lots \}: \{ lots: LotRoue\[\] \}\)/)
-    assert.match(roue, /<ol className="mt-2 grid gap-2 text-base text-white" aria-label="Lots de la roue">/)
+    assert.match(roue, /<ol className="mt-2 grid gap-2 text-base text-white" aria-label=\{t\('Lots de la roue'\)\}>/)
     assert.match(roue, /style=\{\{ backgroundColor: s\.couleur, color: s\.couleurTexte \}\}/)
     assert.match(roue, /<span className="min-w-0 break-words">\{s\.libelle\}<\/span>/)
-    // html { font-size: 17px } : text-base = 17 px, text-sm = 14,9 px.
+    // html { font-size: 17px } : text-base = 17 px, text-sm = 16 px (P2-Q1).
     assert.match(lire('src/index.css'), /font-size: 17px/)
   })
 

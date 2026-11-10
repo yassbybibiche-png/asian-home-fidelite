@@ -34,8 +34,8 @@ export default function QrVitrine() {
         <a href={`#/jouer/${commerce.id}`} className="bouton-secondaire">
           Tester la page client
         </a>
-        <p className="text-center text-xs break-all text-gray-600">{url}</p>
-        <p className="text-center text-xs text-gray-600">
+        <p className="text-center text-sm break-all text-gray-600">{url}</p>
+        <p className="text-center text-sm text-gray-600">
           {mode === 'local'
             ? 'Démo : le QR pointe vers l’adresse actuelle de l’app. Hébergée en ligne, la même page servira telle quelle.'
             : 'Le QR pointe vers l’adresse actuelle de l’app : imprimez-le depuis l’adresse publique définitive (pas depuis localhost).'}

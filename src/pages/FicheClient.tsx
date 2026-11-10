@@ -163,11 +163,11 @@ function Relances({ client, commerce }: { client: Client; commerce: Commerce }) 
               </option>
             ))}
           </select>
-          <p className="text-xs text-gray-600">{MODELES_RELANCE.find((m) => m.modele === modele)!.aide}</p>
+          <p className="text-sm text-gray-600">{MODELES_RELANCE.find((m) => m.modele === modele)!.aide}</p>
           <button className="bouton w-full" disabled={enCours} onClick={() => void relancer()}>
             {enCours ? 'Envoi…' : 'Envoyer la relance'}
           </button>
-          <p className="text-xs text-gray-600">{MENTION_ENVOI}. Une même relance part au plus une fois par jour.</p>
+          <p className="text-sm text-gray-600">{MENTION_ENVOI}. Une même relance part au plus une fois par jour.</p>
         </div>
       )}
       <MessageErreur>{erreur && `Rien n’a été envoyé ni modifié : ${erreur}`}</MessageErreur>
@@ -202,7 +202,7 @@ function Rattrapages({ client, commerce }: { client: Client; commerce: Commerce 
               {new Date(d.date).toLocaleDateString('fr-FR')} · {formaterPrix(d.montantCentimes)}
               {d.ticket ? ` · ticket ${d.ticket}` : ''}
             </p>
-            <p className="text-xs text-gray-600">Signalée {dateRelative(d.creeLe)}</p>
+            <p className="text-sm text-gray-600">Signalée {dateRelative(d.creeLe)}</p>
             <div className="mt-2 flex gap-2">
               <button
                 className="bouton min-h-11 flex-1"
@@ -407,7 +407,7 @@ export default function FicheClient() {
             {annonce}
           </p>
         )}
-        <p className="text-xs text-gray-600">
+        <p className="text-sm text-gray-600">
           {debloquee
             ? 'Tant que la récompense n’est pas offerte, les visites sont enregistrées mais la carte reste pleine.'
             : mode === 'local'
@@ -431,15 +431,15 @@ export default function FicheClient() {
         <h2 className="titre-carte">Historique</h2>
         <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
           <div className="rounded-xl bg-gray-50 py-2">
-            <dt className="text-xs text-gray-600">Visites</dt>
+            <dt className="text-sm text-gray-600">Visites</dt>
             <dd className="text-xl font-bold tabular-nums">{client.visites.length}</dd>
           </div>
           <div className="rounded-xl bg-gray-50 py-2">
-            <dt className="text-xs text-gray-600">Récompenses</dt>
+            <dt className="text-sm text-gray-600">Récompenses</dt>
             <dd className="text-xl font-bold tabular-nums">{client.recompensesOffertes?.length ?? 0}</dd>
           </div>
           <div className="rounded-xl bg-gray-50 py-2">
-            <dt className="text-xs text-gray-600">Gains roulette</dt>
+            <dt className="text-sm text-gray-600">Gains roulette</dt>
             <dd className="text-xl font-bold tabular-nums">{gains.length}</dd>
           </div>
         </dl>

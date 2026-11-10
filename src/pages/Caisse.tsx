@@ -339,7 +339,7 @@ function Deverrouillage({ commerce, erreur, onCode, attente }: { commerce?: Comm
           {enCours ? 'Vérification…' : 'Ouvrir la caisse'}
         </button>
         {attente > 0 && <p className="text-sm text-amber-900">{attente} action{attente > 1 ? 's' : ''} en attente sur cet appareil : elles seront envoyées après le déverrouillage.</p>}
-        <p className="text-xs text-gray-600">Le code identifie l’auteur de chaque passage dans le journal. Il est créé par le gérant (Plus → Équipe).</p>
+        <p className="text-sm text-gray-600">Le code identifie l’auteur de chaque passage dans le journal. Il est créé par le gérant (Plus → Équipe).</p>
       </form>
     </div>
   )
@@ -626,7 +626,7 @@ function Comptoir({
                 >
                   🎁 Valider une récompense
                 </button>
-                {!aide.debloquee && <p className="text-xs text-gray-600">Bouton actif au {commerce.seuilTampons}e tampon.</p>}
+                {!aide.debloquee && <p className="text-sm text-gray-600">Bouton actif au {commerce.seuilTampons}e tampon.</p>}
               </div>
             )
           })()}
@@ -663,7 +663,7 @@ function Comptoir({
         </section>
       )}
       {!choisi && annonce && <MessageErreur>{annonce.texte}</MessageErreur>}
-      <p className="text-center text-xs text-gray-600">Données du {new Date(donnees.synchroLe).toLocaleString('fr-FR')} · chaque action est tracée au nom de {auteur.nom}.</p>
+      <p className="text-center text-sm text-gray-600">Données du {new Date(donnees.synchroLe).toLocaleString('fr-FR')} · chaque action est tracée au nom de {auteur.nom}.</p>
     </div>
   )
 }
@@ -731,7 +731,7 @@ function CodeGagnantCaisse({ onGain }: { onGain(quoi: 'verifier' | 'remettre', c
           {enCours ? '…' : 'Vérifier'}
         </button>
       </form>
-      <p id="caisse-code-aide" className="text-xs text-gray-600">
+      <p id="caisse-code-aide" className="text-sm text-gray-600">
         6 lettres ou chiffres, affichés sur le téléphone du client. Majuscules et espaces sans importance. Valable le jour du tirage seulement.
       </p>
       <MessageErreur>{erreur}</MessageErreur>

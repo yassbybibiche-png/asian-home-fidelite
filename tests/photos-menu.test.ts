@@ -207,7 +207,7 @@ describe('Affichage (source) : vignette dans la liste, photo dans la fiche', () 
 
   test('#/menu : liste → photoVignette ?? photo ; fiche dépliée → photo', () => {
     assert.match(publicTsx, /<img src=\{p\.photoVignette \?\? p\.photo\} alt="" loading="lazy" className="h-16 w-16/)
-    assert.match(publicTsx, /<img src=\{p\.photo\} alt=\{`Photo du plat : \$\{p\.nom\}`\}/)
+    assert.match(publicTsx, /<img src=\{p\.photo\} alt=\{t\('Photo du plat : \{nom\}', \{ nom: p\.nom \}\)\}/)
   })
   test('#/menuCarte : champ vignette optionnel ; changer ou retirer la photo efface la vignette', () => {
     assert.match(carteTsx, /Vignette \(optionnelle — sinon la photo est utilisée\)/)

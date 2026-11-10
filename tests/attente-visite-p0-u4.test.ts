@@ -44,7 +44,7 @@ describe('P0-U4 : textes', () => {
     const jouer = lire('src/pages/Jouer.tsx')
     assert.doesNotMatch(jouer, /validez d’abord/)
     assert.match(jouer, /\{ETAPES_VALIDATION\.map\(\(etape, i\) =>/)
-    assert.match(jouer, /<ol className="space-y-2" aria-label="Pour débloquer la roue">/)
+    assert.match(jouer, /<ol className="space-y-2" aria-label=\{t\('Pour débloquer la roue'\)\}>/)
     assert.match(jouer, /\{i \+ 1\}/)
   })
 })
@@ -108,7 +108,7 @@ describe('P0-U4 : écran d’attente (source)', () => {
   test('état d’attente animé et annoncé : role=status, aria-live, aria-busy, point pulsé', () => {
     assert.match(
       jouer,
-      /<div className="hero-sombre flex items-center justify-center gap-3 rounded-xl px-4 py-3" role="status" aria-live="polite" aria-busy="true" data-attente="en-cours">\n\s*<span className="attente-pulse" aria-hidden \/>\n\s*<span className="font-semibold text-or-300">\{TEXTE_ATTENTE\}<\/span>/,
+      /<div className="hero-sombre flex items-center justify-center gap-3 rounded-xl px-4 py-3" role="status" aria-live="polite" aria-busy="true" data-attente="en-cours">\n\s*<span className="attente-pulse" aria-hidden \/>\n\s*<span className="font-semibold text-or-300">\{t\(TEXTE_ATTENTE\)\}<\/span>/,
     )
     assert.match(css, /@keyframes attente-halo/)
     assert.match(css, /@keyframes attente-point/)
@@ -119,7 +119,7 @@ describe('P0-U4 : écran d’attente (source)', () => {
   })
 
   test('hors ligne : l’animation laisse place à une alerte claire + « Réessayer maintenant »', () => {
-    assert.match(jouer, /\{horsLigne \? \(\n\s*<div className="[^"]*" role="alert" data-attente="hors-ligne">\n\s*<p>\{MESSAGE_ATTENTE_HORS_LIGNE\}<\/p>/)
+    assert.match(jouer, /\{horsLigne \? \(\n\s*<div className="[^"]*" role="alert" data-attente="hors-ligne">\n\s*<p>\{t\(MESSAGE_ATTENTE_HORS_LIGNE\)\}<\/p>/)
     assert.match(jouer, /Réessayer maintenant/)
     // Seule une erreur réseau (statut 0 ou exception hors ErreurApi) passe en mode hors ligne.
     assert.match(jouer, /setHorsLigne\(!\(e instanceof ErreurApi\) \|\| e\.horsLigne\)/)
@@ -127,12 +127,12 @@ describe('P0-U4 : écran d’attente (source)', () => {
   })
 
   test('chargement initial en échec : message + bouton Réessayer (jamais d’écran figé)', () => {
-    assert.match(jouer, /<MessageErreur>\{message\}<\/MessageErreur>\n\s*<button className="bouton-secondaire w-full" onClick=\{\(\) => verifierMaintenant\.current\(\)\}>\n\s*Réessayer/)
+    assert.match(jouer, /<MessageErreur>\{message\}<\/MessageErreur>\n\s*<button className="bouton-secondaire w-full" onClick=\{\(\) => verifierMaintenant\.current\(\)\}>\n\s*\{t\('Réessayer'\)\}/)
   })
 
   test('CTA pendant l’attente : Voir ma carte (primaire), Voir le menu, Vérifier maintenant', () => {
-    assert.match(jouer, /<a href=\{lienCarte\} className="bouton w-full">\n\s*Voir ma carte de fidélité/)
-    assert.match(jouer, /<a href=\{lienMenu\} className="bouton-secondaire w-full">\n\s*📖 Voir le menu en attendant/)
+    assert.match(jouer, /<a href=\{lienCarte\} className="bouton w-full">\n\s*\{t\('Voir ma carte de fidélité'\)\}/)
+    assert.match(jouer, /<a href=\{lienMenu\} className="bouton-secondaire w-full">\n\s*\{t\('📖 Voir le menu en attendant'\)\}/)
     assert.match(jouer, /C’est validé \? Vérifier maintenant/)
     assert.match(jouer, /lienMenu=\{menuDisponible \? `#\/menu\/\$\{commerce\.id\}` : undefined\}/)
     // Menu toujours là chez Asian Home (vraie carte en repli), sinon selon la réponse du serveur.
@@ -141,7 +141,7 @@ describe('P0-U4 : écran d’attente (source)', () => {
   })
 
   test('transition visible : « Visite validée » au-dessus du bouton de la roue (mode API et démo)', () => {
-    assert.match(jouer, /<p className="alerte-succes apparition text-center text-base" role="status" aria-live="polite" data-attente="validee">\n\s*✓ \{MESSAGE_VISITE_VALIDEE\}/)
+    assert.match(jouer, /<p className="alerte-succes apparition text-center text-base" role="status" aria-live="polite" data-attente="validee">\n\s*✓ \{t\(MESSAGE_VISITE_VALIDEE\)\}/)
     assert.match(jouer, /\{visiteValidee && <VisiteValidee \/>\}\n\s*<MessageErreur>\{message\}<\/MessageErreur>\n\s*<button className="bouton w-full py-4 text-lg" onClick=\{\(\) => void tourner\(\)\}/)
     assert.match(jouer, /\{visiteValidee && etape === 'pret' && <VisiteValidee \/>\}/)
     assert.equal(jouer.match(/useVisiteValidee\(/g)?.length, 3) // définition + 2 modes

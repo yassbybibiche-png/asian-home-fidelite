@@ -36,7 +36,7 @@ function Nombre({ id, libelle, valeur, defaut, min, max, step = 1, aide, onChang
           if (!Number.isNaN(v)) onChange(v)
         }}
       />
-      {aide && <p className="mt-1 text-sm text-gray-500">{aide}</p>}
+      {aide && <p className="mt-1 text-sm text-gray-600">{aide}</p>}
     </div>
   )
 }
@@ -45,7 +45,7 @@ function Nombre({ id, libelle, valeur, defaut, min, max, step = 1, aide, onChang
 function CompteurLibelle({ id, libelle }: { id: string; libelle: string }) {
   const c = compteurLibelle(libelle)
   return (
-    <p id={id} className={`mt-1 text-sm ${c.depasse ? 'font-medium text-red-700' : 'text-gray-500'}`} data-compteur-lot>
+    <p id={id} className={`mt-1 text-sm ${c.depasse ? 'font-medium text-red-700' : 'text-gray-600'}`} data-compteur-lot>
       {c.texte}
       {c.depasse && ' — raccourcissez pour un affichage complet sur la roue (il sera abrégé, mais reste complet dans la liste sous la roue).'}
     </p>
@@ -174,7 +174,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
             value={brouillon.coordonnees ?? ''}
             onChange={(e) => maj('coordonnees', e.target.value)}
           />
-          <p className="mt-1 text-sm text-gray-500">Affiché aux clients sur la page de jeu et sur leur carte.</p>
+          <p className="mt-1 text-sm text-gray-600">Affiché aux clients sur la page de jeu et sur leur carte.</p>
         </div>
         {/* Liens de commande (P1-C5) : bouton « Commander » du menu public, affiché seulement si le lien est renseigné. */}
         <div>
@@ -205,7 +205,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
             onChange={(e) => maj('lienUberEats', e.target.value)}
           />
           {liensCommandeValides ? (
-            <p className="mt-1 text-sm text-gray-500">Vide = pas de bouton « Commander » sur le menu client.</p>
+            <p className="mt-1 text-sm text-gray-600">Vide = pas de bouton « Commander » sur le menu client.</p>
           ) : (
             <p className="mt-1 text-sm font-semibold text-red-700">Les liens de commande doivent commencer par https://</p>
           )}
@@ -309,7 +309,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
               + Ajouter un palier
             </button>
           )}
-          <p className="text-sm text-gray-500">Un palier égal au seuil de la carte principale n’est pas ajouté : la récompense principale le couvre déjà.</p>
+          <p className="text-sm text-gray-600">Un palier égal au seuil de la carte principale n’est pas ajouté : la récompense principale le couvre déjà.</p>
         </div>
 
         <div className="space-y-3 border-t border-gray-100 pt-3">
@@ -420,7 +420,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
       <fieldset className="carte space-y-2">
         <legend className="sr-only">Roulette</legend>
         <h2 className="titre-carte">Lots de la roulette</h2>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-600">
           Texte libre + chance de sortir (en %). Un lot « Dommage ! » (perdant) est possible. Visez {MAX_CARACTERES_ROUE} caractères au plus : le libellé tient alors en entier sur la roue ; la liste des lots sous la roue l’affiche toujours en entier.
         </p>
         <ul className="space-y-2">
@@ -455,7 +455,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                   value={Number.isNaN(lot.probabilite) ? '' : lot.probabilite}
                   onChange={(e) => majLot(i, { ...lot, probabilite: e.target.valueAsNumber })}
                 />
-                <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-gray-500">%</span>
+                <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-gray-600">%</span>
               </div>
               <button
                 type="button"
@@ -475,7 +475,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
         >
           + Ajouter un lot
         </button>
-        <p className={`text-sm ${lots.length >= 2 && probasValides && total > 0 ? 'text-gray-500' : 'text-red-700'}`}>
+        <p className={`text-sm ${lots.length >= 2 && probasValides && total > 0 ? 'text-gray-600' : 'text-red-700'}`}>
           {lots.length} lot{lots.length > 1 ? 's' : ''} · total {total} %
           {lots.length < 2
             ? ' — il en faut au moins 2'
@@ -574,12 +574,14 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
         <p className="pb-1 text-sm text-gray-600">Affichés dans l’espace client (sur sa carte) et proposés à copier dans Messages. Aucun SMS ni e-mail n’est envoyé.</p>
         {TYPES_MESSAGES.map((t) => (
           <label key={t.type} className="flex min-h-12 cursor-pointer items-start gap-3 py-1.5">
-            <input
-              type="checkbox"
-              className="mt-0.5 h-6 w-6 shrink-0"
-              checked={!!brouillon.messagesAuto?.[t.type]}
-              onChange={(e) => maj('messagesAuto', { ...(brouillon.messagesAuto ?? reglesVides()), [t.type]: e.target.checked })}
-            />
+            <span className="zone-case">
+              <input
+                type="checkbox"
+                className="case-a-cocher"
+                checked={!!brouillon.messagesAuto?.[t.type]}
+                onChange={(e) => maj('messagesAuto', { ...(brouillon.messagesAuto ?? reglesVides()), [t.type]: e.target.checked })}
+              />
+            </span>
             <span>
               <span className="block font-medium">{t.libelle}</span>
               <span className="block text-sm text-gray-600">{t.aide}</span>
@@ -672,7 +674,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           actif={brouillon.reglesReponseAuto.brouillonAutres}
           onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, brouillonAutres: v })}
         />
-        <p className="pt-2 text-sm text-gray-500">
+        <p className="pt-2 text-sm text-gray-600">
           Les règles s’appliquent aux nouveaux avis et, à l’enregistrement, aux avis encore sans réponse ni brouillon (un brouillon existant n’est jamais remplacé). {estDemo ? 'Démo : a' : 'A'}ucune réponse n’est réellement
           publiée sur Google.
         </p>

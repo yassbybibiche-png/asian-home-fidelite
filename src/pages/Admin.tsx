@@ -262,11 +262,11 @@ function FormulaireAjout({ onFermer }: { onFermer: () => void }) {
           {essaye && !PIN_COMMERCE.test(pin) ? (
             <p className="mt-1 text-sm text-red-700">Le PIN doit contenir 4 à 6 chiffres.</p>
           ) : (
-            <p className="mt-1 text-sm text-gray-500">À donner au commerçant : il lui ouvre son tableau de bord (et seulement le sien).</p>
+            <p className="mt-1 text-sm text-gray-600">À donner au commerçant : il lui ouvre son tableau de bord (et seulement le sien).</p>
           )}
         </div>
       )}
-      <p className="text-sm text-gray-500">
+      <p className="text-sm text-gray-600">
         Récompense (10 tampons), lots de la roulette et réponses auto sont pré-remplis : vous pourrez les ajuster ensuite dans Réglages.
       </p>
       <MessageErreur>{erreur && `Commerce non créé : ${erreur}`}</MessageErreur>

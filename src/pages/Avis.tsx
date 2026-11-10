@@ -177,7 +177,7 @@ function MessagesPrives({ messages }: { messages: MessagePriveCommerce[] }) {
         sont pas publiés.
       </p>
       {messages.length === 0 ? (
-        <p className="mt-2 text-sm text-gray-500">Aucun message privé pour le moment.</p>
+        <p className="mt-2 text-sm text-gray-600">Aucun message privé pour le moment.</p>
       ) : (
         <ul className="mt-3 space-y-3">
           {messages.map((m) => (
@@ -188,7 +188,7 @@ function MessagesPrives({ messages }: { messages: MessagePriveCommerce[] }) {
                 </a>
                 <Etoiles note={m.note} />
               </div>
-              <p className="mt-1 text-xs text-gray-600">{dateRelative(m.creeLe)}</p>
+              <p className="mt-1 text-sm text-gray-600">{dateRelative(m.creeLe)}</p>
               <p className="mt-2 whitespace-pre-line break-words text-gray-800">{m.texte}</p>
             </li>
           ))}
@@ -301,7 +301,7 @@ function ConnecterGoogle() {
           </li>
         ))}
       </ol>
-      <p className="mt-2 text-xs text-gray-600">{GUIDE_GOOGLE_BUSINESS}</p>
+      <p className="mt-2 text-sm text-gray-600">{GUIDE_GOOGLE_BUSINESS}</p>
       {commerce.lienGoogle && (
         <p className="mt-3 text-sm text-gray-700">
           En attendant, le moyen réel de recevoir des avis est le lien « laisser un avis » (QR de la roulette) :{' '}
@@ -357,13 +357,13 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
         <span className="min-w-0 truncate font-semibold">{a.auteur}</span>
         <Etoiles note={a.note} />
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
         <span>{dateRelative(a.date)}</span>
         <span className={`rounded-full px-2 py-0.5 font-semibold ring-1 ${STATUTS[statut].classe}`}>{STATUTS[statut].libelle}</span>
         {a.reponseAuto && <span className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold text-gray-600">auto</span>}
         <span className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold text-gray-600">{LIBELLE_SOURCE[source]}</span>
       </div>
-      <p className="mt-2 text-gray-800">{a.texte || <em className="text-gray-500">Note sans commentaire</em>}</p>
+      <p className="mt-2 text-gray-800">{a.texte || <em className="text-gray-600">Note sans commentaire</em>}</p>
 
       {edition ? (
         <div className="mt-3 space-y-2">

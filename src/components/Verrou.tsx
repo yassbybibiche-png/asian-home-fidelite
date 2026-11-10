@@ -151,7 +151,7 @@ export function Verrou() {
                 </select>
               </div>
               {choisi?.demo && (
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="mt-1 text-sm text-gray-600">
                   <BadgeDemo /> Commerce de démonstration : données fictives.
                 </p>
               )}
@@ -192,14 +192,14 @@ export function Verrou() {
             {MESSAGE_REVEIL_EN_COURS}
           </p>
         )}
-        <p className="text-xs text-gray-500">
+        <p className="text-sm text-gray-600">
           Le PIN est vérifié une fois puis remplacé par une session de 8 h, gardée chiffrée tant que cet onglet est ouvert. « Verrouiller » ferme la
           session et efface les données clients gardées sur cet appareil.
         </p>
       </form>
 
       {journal.length > 0 && (
-        <details className="text-xs text-gray-500">
+        <details className="text-sm text-gray-600">
           <summary className="min-h-11 cursor-pointer py-3">Détails pour l’assistance ({journal.length})</summary>
           <p className="mb-1">Derniers échecs de connexion sur cet appareil (aucun PIN n’y figure). Une capture d’écran suffit.</p>
           <ul className="space-y-1 break-words">

@@ -8,6 +8,8 @@ import { dateRelative } from '../lib/format'
 import { urlAbsolue } from '../router'
 import { cleTamponsVus, lotsEnAttente, tamponsNouveaux, texteExpiration, texteProgression, type GainDuJour } from '../lib/carte'
 import { LogoCommerce, QrCode } from './ui'
+import { useLangue } from './Langue'
+import { texteProgressionLangue } from '../lib/langue'
 import { useEffect, useState } from 'react'
 
 /**
@@ -93,6 +95,8 @@ export function CarteFidelite({
   const parrainage = configParrainage(commerce)
   const lienParrainage = client.codeParrainage ? `${urlAbsolue('jouer', commerce.id)}?parrain=${client.codeParrainage}` : ''
   const [copie, setCopie] = useState(false)
+  // Langue : anglais possible sur #/carte seulement ; la fiche commerçant reste en français (useLangue y renvoie 'fr').
+  const { langue, t } = useLangue()
   async function copierLien() {
     try {
       await navigator.clipboard.writeText(lienParrainage)
@@ -122,12 +126,13 @@ export function CarteFidelite({
           <LogoCommerce commerce={commerce} taille="md" />
           <div className="min-w-0">
             <div className="truncate font-titre text-lg font-bold tracking-[0.08em] uppercase">{commerce.nom}</div>
-            <div className="text-sm text-or-300">Carte de fidélité</div>
+            <div className="text-sm text-or-300">{t('Carte de fidélité')}</div>
           </div>
         </div>
         <div className="relative mt-5 flex items-end justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-xs tracking-[0.14em] text-white uppercase">Titulaire</div>
+            {/* Étiquettes de la carte (Titulaire, tampons, points) : text-xs conservé, micro-texte décoratif (P2-Q1). */}
+            <div className="text-xs tracking-[0.14em] text-white uppercase">{t('Titulaire')}</div>
             <div className="truncate text-xl font-semibold">{client.prenom}</div>
           </div>
           <div className="flex shrink-0 gap-4 text-right">
@@ -136,18 +141,24 @@ export function CarteFidelite({
                 {tampons}
                 <span className="text-lg font-semibold text-white">/{commerce.seuilTampons}</span>
               </div>
-              <div className="text-xs text-white">tampons</div>
+              <div className="text-xs text-white">{t('tampons')}</div>
             </div>
             <div>
               <div className="text-3xl leading-none font-extrabold tabular-nums">{points}</div>
-              <div className="text-xs text-white">point{points > 1 ? 's' : ''}</div>
+              <div className="text-xs text-white">{t(points > 1 ? 'points' : 'point')}</div>
             </div>
           </div>
         </div>
       </div>
 
       <div className="p-5">
-        <ul className={`grid ${colonnes(commerce.seuilTampons)} justify-items-center gap-2.5`} aria-hidden>
+        {/* Tampons lisibles au lecteur d'écran : liste nommée (« Tampons : 4 sur 10 »), chaque tampon dit son état. */}
+        <ul
+          className={`grid ${colonnes(commerce.seuilTampons)} justify-items-center gap-2.5`}
+          role="list"
+          aria-label={t('Tampons : {n} sur {total}', { n: tampons, total: commerce.seuilTampons })}
+          data-tampons
+        >
           {Array.from({ length: commerce.seuilTampons }, (_, i) => {
             const plein = i < tampons
             const dernier = i === commerce.seuilTampons - 1
@@ -161,10 +172,11 @@ export function CarteFidelite({
                     ? 'bg-marque-500 text-white shadow-[inset_0_-2px_0_rgb(0_0_0/0.15)]'
                     : dernier
                       ? 'border-2 border-dashed border-or-500 bg-amber-50 text-amber-800'
-                      : 'border-2 border-dashed border-gray-300 text-gray-500'
+                      : 'border-2 border-dashed border-gray-400 text-gray-600'
                 }`}
               >
-                {plein ? '✓' : dernier ? '🎁' : i + 1}
+                <span aria-hidden>{plein ? '✓' : dernier ? '🎁' : i + 1}</span>
+                <span className="sr-only">{t(plein ? 'Tampon {i} : obtenu' : dernier ? 'Tampon {i} : récompense' : 'Tampon {i} : à obtenir', { i: i + 1 })}</span>
               </li>
             )
           })}
@@ -176,12 +188,12 @@ export function CarteFidelite({
           aria-valuemin={0}
           aria-valuemax={commerce.seuilTampons}
           aria-valuenow={tampons}
-          aria-label="Progression vers la récompense"
+          aria-label={t('Progression vers la récompense')}
         >
           <div className="h-full rounded-full bg-gradient-to-r from-marque-500 via-marque-600 to-or-400 transition-all duration-500" style={{ width: `${pct}%` }} />
         </div>
         <p className="mt-1.5 flex justify-between text-sm text-gray-600">
-          <span>{debloquee ? 'Carte complète' : texteProgression(restants, commerce)}</span>
+          <span>{debloquee ? t('Carte complète') : texteProgressionLangue(restants, commerce, langue, texteProgression)}</span>
           <span className="font-semibold text-marque-600">{pct} %</span>
         </p>
         {nouveaux.length > 0 && (
@@ -192,13 +204,13 @@ export function CarteFidelite({
 
         {debloquee ? (
           <div className="apparition mt-4 rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100 p-4 text-amber-900 ring-2 ring-or-500" role="status">
-            <p className="surtitre text-amber-800">Récompense en attente</p>
+            <p className="surtitre text-amber-800">{t('Récompense en attente')}</p>
             <p className="mt-1 text-lg font-bold">🎉 {commerce.recompense}</p>
-            <p className="mt-1 text-sm">À demander au comptoir.</p>
+            <p className="mt-1 text-sm">{t('À demander au comptoir.')}</p>
           </div>
         ) : (
           <p className="mt-4 rounded-xl bg-gray-50 p-3 text-sm text-gray-700 ring-1 ring-gray-900/5">
-            <span className="font-semibold">Objectif :</span> {commerce.recompense}
+            <span className="font-semibold">{t('Objectif :')}</span> {commerce.recompense}
           </p>
         )}
 
@@ -206,7 +218,7 @@ export function CarteFidelite({
         {niveau.nom !== 'Membre' && (
           <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
             <span className="font-bold">{niveau.nom === 'VIP' ? '👑 VIP — nos clients les plus fidèles' : `⭐ ${niveau.nom}`}</span>
-            <span className="block text-xs">{niveau.avantages}</span>
+            <span className="block text-sm">{niveau.avantages}</span>
           </p>
         )}
         {palier && (
@@ -230,7 +242,7 @@ export function CarteFidelite({
         )}
         {enAttente.length > 0 && (
           <div className="mt-4 rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100 p-4 text-amber-900 ring-2 ring-or-500" role="status">
-            <p className="surtitre text-amber-800">À retirer au comptoir</p>
+            <p className="surtitre text-amber-800">{t('À retirer au comptoir')}</p>
             <ul className="mt-1 space-y-1.5">
               {enAttente.map((r) => (
                 <li key={r.id} className="text-sm">
@@ -238,11 +250,11 @@ export function CarteFidelite({
                     {r.origine === 'roue' ? '🎡' : '🎁'} {r.libelle}
                   </span>
                   {r.code && (
-                    <span className="block text-xs">
-                      Code à montrer : <span className="font-mono font-bold tracking-widest">{r.code}</span>
+                    <span className="block text-sm">
+                      {t('Code à montrer :')} <span className="font-mono font-bold tracking-widest">{r.code}</span>
                     </span>
                   )}
-                  <span className="block text-xs">{texteExpiration(r.expireLe, maintenant)}</span>
+                  <span className="block text-sm">{t(texteExpiration(r.expireLe, maintenant))}</span>
                 </li>
               ))}
             </ul>
@@ -284,7 +296,7 @@ export function CarteFidelite({
 
         {!!commerce.catalogue?.length && (
           <div className="mt-4">
-            <p className="surtitre">Vos points</p>
+            <p className="surtitre">{t('Vos points')}</p>
             <ul className="mt-1.5 space-y-1.5">
               {commerce.catalogue.map((r, i) => {
                 const ok = points >= r.cout
@@ -292,7 +304,7 @@ export function CarteFidelite({
                   <li key={i} className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm ring-1 ${ok ? 'bg-green-50 text-green-900 ring-green-200' : 'bg-gray-50 text-gray-700 ring-gray-900/5'}`}>
                     <span className="min-w-0">
                       <span className="font-semibold">{r.nom}</span>
-                      {r.description && <span className="block text-xs">{r.description}</span>}
+                      {r.description && <span className="block text-sm">{r.description}</span>}
                     </span>
                     <span className="shrink-0 font-semibold tabular-nums">{ok ? '✓ ' : ''}{r.cout} pts</span>
                   </li>
@@ -307,9 +319,9 @@ export function CarteFidelite({
             <div className="rounded-2xl bg-white p-2 ring-1 ring-gray-200">
               <QrCode texte={urlAbsolue('carte', client.id)} className="h-40 w-40" titre={`QR code personnel de ${client.prenom}`} />
             </div>
-            <p className="mt-2 text-center text-sm text-gray-600">À présenter en caisse pour valider votre visite</p>
-            <p className="mt-1 text-xs text-gray-600">
-              Dernière visite : {client.derniereVisite ? dateRelative(client.derniereVisite) : 'aucune pour l’instant'}
+            <p className="mt-2 text-center text-sm text-gray-600">{t('À présenter en caisse pour valider votre visite')}</p>
+            <p className="mt-1 text-sm text-gray-600">
+              {t('Dernière visite :')} {client.derniereVisite ? dateRelative(client.derniereVisite) : t('aucune pour l’instant')}
             </p>
           </div>
         )}

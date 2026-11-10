@@ -87,12 +87,12 @@ describe('P0-U1 : squelettes sur les 4 écrans, textes d’erreur inchangés', (
   const ECRANS = [
     {
       fichier: 'src/pages/Jouer.tsx',
-      squelette: '<SqueletteJeu libelle="Un instant, la roue arrive." />',
+      squelette: "<SqueletteJeu libelle={t('Un instant, la roue arrive.')} />",
       erreurs: ['<MessagePublic titre="QR code inconnu">Ce QR code ne correspond à aucun commerce.</MessagePublic>', '<HorsLignePublic onReessayer={charger} />'],
     },
     {
       fichier: 'src/pages/CartePublique.tsx',
-      squelette: '<SqueletteCarte libelle="Un instant, votre carte arrive." />',
+      squelette: "<SqueletteCarte libelle={t('Un instant, votre carte arrive.')} />",
       erreurs: [
         '<MessagePublic titre="Carte introuvable">Ce lien ne correspond à aucune carte de fidélité.</MessagePublic>',
         '<MessagePublic titre="Carte indisponible">La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>',
@@ -101,7 +101,7 @@ describe('P0-U1 : squelettes sur les 4 écrans, textes d’erreur inchangés', (
     },
     {
       fichier: 'src/pages/MenuPublic.tsx',
-      squelette: '<SqueletteMenu libelle="Un instant, le menu arrive." />',
+      squelette: "<SqueletteMenu libelle={t('Un instant, le menu arrive.')} />",
       erreurs: [
         '<MessagePublic titre="Menu introuvable">Ce lien ne correspond à aucun commerce.</MessagePublic>',
         '<MessagePublic titre="Menu indisponible">Le menu de ce commerce n’est plus disponible.</MessagePublic>',

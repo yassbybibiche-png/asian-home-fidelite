@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { LONGUEUR_TEXTE_MAX, POLICE_ROUE, RAYON_LIBELLE, largeurEstimee, secteursAffiches } from '../lib/roue'
 import type { LotRoue } from '../lib/roulette'
 import { prefereMouvementReduit, REQUETE_MOUVEMENT_REDUIT, transitionRoue } from '../lib/animationRoue'
+import { useLangue } from './Langue'
 
 /** Réglage « réduire les animations » du téléphone, suivi en direct. */
 export function useMouvementReduit(): boolean {
@@ -31,8 +32,10 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
   const parts = secteursAffiches(lots)
   const R = 88
   const reduit = useMouvementReduit()
+  const { t } = useLangue()
+  // Lecteur d'écran : la roue est une image nommée (nombre de lots) ; le détail des lots est dans LegendeRoue.
   return (
-    <div className="relative mx-auto aspect-square w-full max-w-80">
+    <div className="relative mx-auto aspect-square w-full max-w-80" role="img" aria-label={t('Roue de la chance : {n} lots à gagner, détaillés ci-dessous', { n: parts.length })} data-roue>
       {/* Pointeur fixe en haut */}
       <div className="absolute top-0 left-1/2 z-10 -translate-x-1/2 -translate-y-2 drop-shadow-md" aria-hidden>
         <svg viewBox="0 0 32 40" className="h-10 w-8">
@@ -114,10 +117,11 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
  */
 export function LegendeRoue({ lots }: { lots: LotRoue[] }) {
   const parts = secteursAffiches(lots)
+  const { t } = useLangue()
   return (
     <div className="mt-4 px-2">
-      <h2 className="text-center text-base font-semibold text-or-300">À gagner</h2>
-      <ol className="mt-2 grid gap-2 text-base text-white" aria-label="Lots de la roue">
+      <h2 className="text-center text-base font-semibold text-or-300">{t('À gagner')}</h2>
+      <ol className="mt-2 grid gap-2 text-base text-white" aria-label={t('Lots de la roue')}>
         {parts.map((s) => (
           <li key={s.numero} className="flex items-center gap-3" data-legende-lot>
             <span

@@ -22,7 +22,7 @@ export default function Roulette() {
         </a>
         <div className="w-full min-w-0 space-y-2">
           <p className="text-sm text-gray-600">Ce QR code est unique à votre commerce. Il ouvre la page de jeu :</p>
-          <p className="truncate rounded-lg bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700">{url}</p>
+          <p className="truncate rounded-lg bg-gray-50 px-3 py-2 font-mono text-sm text-gray-700">{url}</p>
           <div className="grid gap-2 sm:grid-cols-2">
             <a href="#/qr" className="bouton">
               QR vitrine à imprimer

@@ -42,7 +42,7 @@ export function JournalEnvois({ envois, avecClient = true }: { envois: EnvoiRela
               {dateRelative(e.date)}
             </span>
           </p>
-          <p className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+          <p className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
             <span className={`rounded-full px-2 py-0.5 font-semibold ${COULEUR_STATUT[e.statut]}`}>{libelleStatutEnvoi(e.statut)}</span>
             <span>{e.declencheur === 'auto' ? 'Automatique' : e.auteur}</span>
             {e.raison && e.statut !== 'envoye' && <span>— {e.raison}</span>}
@@ -80,20 +80,24 @@ function RelancesSmsEmail() {
           <li key={l}>{l}</li>
         ))}
       </ul>
-      <p className="text-xs text-gray-600">
+      <p className="text-sm text-gray-600">
         {MENTION_ENVOI}. Le client se désinscrit en répondant STOP (SMS) ou par le lien de l’e-mail ; vous pouvez aussi retirer son consentement sur sa fiche.
       </p>
       <fieldset className="space-y-2 border-t border-gray-100 pt-3">
         <legend className="etiquette">Relances automatiques (à l’ouverture du tableau de bord, une fois par jour)</legend>
-        <label className="flex items-start gap-2 text-sm text-gray-700">
-          <input type="checkbox" className="mt-0.5" checked={regles.inactif} disabled={enCours} onChange={(e) => void basculer('inactif', e.target.checked)} />
+        <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-gray-700">
+          <span className="zone-case">
+            <input type="checkbox" className="case-a-cocher" checked={regles.inactif} disabled={enCours} onChange={(e) => void basculer('inactif', e.target.checked)} />
+          </span>
           <span>« Vous nous manquez » aux clients inactifs depuis 30 jours</span>
         </label>
-        <label className="flex items-start gap-2 text-sm text-gray-700">
-          <input type="checkbox" className="mt-0.5" checked={regles.anniversaire} disabled={enCours} onChange={(e) => void basculer('anniversaire', e.target.checked)} />
+        <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-gray-700">
+          <span className="zone-case">
+            <input type="checkbox" className="case-a-cocher" checked={regles.anniversaire} disabled={enCours} onChange={(e) => void basculer('anniversaire', e.target.checked)} />
+          </span>
           <span>Message d’anniversaire (si la date est renseignée)</span>
         </label>
-        <p className="text-xs text-gray-600">Seulement vers les clients qui ont consenti, et seulement si le prestataire du canal est configuré.</p>
+        <p className="text-sm text-gray-600">Seulement vers les clients qui ont consenti, et seulement si le prestataire du canal est configuré.</p>
       </fieldset>
       <MessageErreur>{erreur}</MessageErreur>
       <div className="border-t border-gray-100 pt-3">
@@ -203,7 +207,7 @@ export default function Messages() {
         </div>
         {/* Un seul tap : le texte puis la liste des contacts, à coller dans votre messagerie. */}
         <BoutonCopier texte={texteEtContacts(texte, contacts)} libelle={`Copier le texte + ${cibles.length} contact(s)`} className="bouton-secondaire w-full" />
-        <p className="rounded-xl bg-gray-50 p-2 text-xs text-gray-700 ring-1 ring-gray-200" data-rien-envoye>
+        <p className="rounded-xl bg-gray-50 p-2 text-sm text-gray-700 ring-1 ring-gray-200" data-rien-envoye>
           Rien n’est envoyé par SMS ni par e-mail depuis cet écran : sans les clés des prestataires configurées sur le serveur, SMS et e-mail ne sont pas branchés. Collez
           le texte dans votre messagerie et envoyez-le vous-même.
         </p>
@@ -216,7 +220,7 @@ export default function Messages() {
             {annonce}
           </p>
         )}
-        <p className="text-xs text-gray-600">Le dépôt dans l’espace client n’envoie aucun SMS ni e-mail. Copiez le texte dans votre messagerie si vous le souhaitez.</p>
+        <p className="text-sm text-gray-600">Le dépôt dans l’espace client n’envoie aucun SMS ni e-mail. Copiez le texte dans votre messagerie si vous le souhaitez.</p>
       </section>
 
       <RelancesSmsEmail />

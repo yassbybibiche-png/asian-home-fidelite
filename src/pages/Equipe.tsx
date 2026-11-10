@@ -115,7 +115,7 @@ export default function Equipe() {
         <button className="bouton w-full" disabled={enCours || !nom.trim() || !CODE.test(code)}>
           {enCours ? 'Ajout…' : 'Ajouter'}
         </button>
-        <p className="text-xs text-gray-600">Les codes sont enregistrés chiffrés (hachés) : personne ne peut les relire, ni dans l’app ni dans le journal.</p>
+        <p className="text-sm text-gray-600">Les codes sont enregistrés chiffrés (hachés) : personne ne peut les relire, ni dans l’app ni dans le journal.</p>
       </form>
     </div>
   )

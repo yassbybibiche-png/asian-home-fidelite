@@ -246,13 +246,13 @@ function ConservationDonnees() {
                     <a href={`#/client/${c.id}`} className="font-semibold underline">
                       {c.prenom || 'Sans prénom'}
                     </a>
-                    <span className="block text-xs text-gray-600">
+                    <span className="block text-sm text-gray-600">
                       Dernière activité {dateCourte(c.derniereActivite)} · purge {c.statut === 'due' ? 'possible depuis' : 'prévue le'} {dateCourte(c.purgeLe)}
                       {c.protection ? ` · conservé : ${c.protection.toLowerCase()}` : ''}
                     </span>
                   </span>
                   {!c.protection && (
-                    <button type="button" className="bouton-secondaire min-h-11 shrink-0 px-3 text-xs" disabled={enCours} onClick={() => void exclure(c.id)}>
+                    <button type="button" className="bouton-secondaire min-h-11 shrink-0 px-3 text-sm" disabled={enCours} onClick={() => void exclure(c.id)}>
                       Exclure
                     </button>
                   )}
@@ -353,8 +353,10 @@ function FormulaireInscription({ onFermer, onInscrit }: { onFermer(): void; onIn
         </label>
         <input id="ins-prenom" className="champ" autoComplete="off" value={prenom} onChange={(e) => setPrenom(e.target.value)} />
       </div>
-      <label className="flex items-start gap-2 text-sm text-gray-700">
-        <input type="checkbox" className="mt-0.5" checked={consentement} onChange={(e) => setConsentement(e.target.checked)} />
+      <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-gray-700">
+        <span className="zone-case">
+          <input type="checkbox" className="case-a-cocher" checked={consentement} onChange={(e) => setConsentement(e.target.checked)} />
+        </span>
         <span>Le client accepte de recevoir nos offres par SMS ou e-mail (désinscription à tout moment).</span>
       </label>
       <MessageErreur>{erreur && `Inscription non enregistrée : ${erreur}`}</MessageErreur>
@@ -400,7 +402,7 @@ function LigneClient({ client: c }: { client: Client }) {
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100" aria-hidden>
         <div className={`h-full rounded-full transition-all duration-500 ${debloquee ? 'bg-or-500' : 'bg-marque-500'}`} style={{ width: `${pct}%` }} />
       </div>
-      <div className="mt-2 flex justify-between gap-3 text-xs text-gray-600">
+      <div className="mt-2 flex justify-between gap-3 text-sm text-gray-600">
         <span>Dernière visite : {c.derniereVisite ? dateRelative(c.derniereVisite) : 'aucune'}</span>
         <span>
           {c.visites.length} visite{c.visites.length > 1 ? 's' : ''}
