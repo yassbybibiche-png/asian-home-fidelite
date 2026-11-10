@@ -1,5 +1,9 @@
 // Menu digital : validation partagée (le serveur refuse tout menu invalide, le front affiche les mêmes erreurs).
 import type { CategorieMenu, Menu, Produit } from '../types'
+import { sansAccents } from './recherche.ts'
+
+/** Prix non vérifié : affiché tel quel, jamais remplacé par un montant inventé. */
+export const LIBELLE_PRIX_ABSENT = 'Prix sur place'
 
 /** Les 14 allergènes à déclarer (règlement UE 1169/2011). */
 export const ALLERGENES = [
@@ -21,7 +25,7 @@ export const ALLERGENES = [
 
 export const LIMITES_MENU = { categories: 20, produits: 60, photoOctets: 60_000 }
 
-const PHOTO = /^(https:\/\/\S{1,500}|data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+)$/
+const PHOTO = /^(https:\/\/\S{1,500}|data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+|\/visuels\/[\w\-]+\.(?:jpg|jpeg|png|webp))$/
 
 export class ErreurMenu extends Error {}
 
@@ -55,11 +59,14 @@ export function validerMenu(brut: unknown, commerceId: string, maintenant: Date)
     const produits: Produit[] = cat.produits.map((p: unknown, j) => {
       const pr = (p ?? {}) as Record<string, unknown>
       const nom = chaine(pr.nom, `produit n° ${j + 1} de « ${nomCat} »`, 80, true)
-      const prix = pr.prix
-      if (typeof prix !== 'number' || !Number.isInteger(prix) || prix < 0 || prix > 1_000_000) throw new ErreurMenu(`« ${nom} » : prix invalide.`)
+      const prixBrut = pr.prix
+      // Prix absent (null / absent) = prix non vérifié, affiché « Prix sur place » — jamais 0 € inventé.
+      const prix = prixBrut == null ? null : prixBrut
+      if (prix !== null && (typeof prix !== 'number' || !Number.isInteger(prix) || prix < 0 || prix > 1_000_000)) throw new ErreurMenu(`« ${nom} » : prix invalide.`)
       const photo = chaine(pr.photo, `photo de « ${nom} »`, LIMITES_MENU.photoOctets * 1.4)
-      if (photo && !PHOTO.test(photo)) throw new ErreurMenu(`« ${nom} » : photo = adresse https://… ou image JPEG / PNG / WebP.`)
+      if (photo && !PHOTO.test(photo)) throw new ErreurMenu(`« ${nom} » : photo = adresse https://…, image JPEG / PNG / WebP, ou visuel local /visuels/…`)
       if (photo.startsWith('data:') && photo.length > LIMITES_MENU.photoOctets * 1.37) throw new ErreurMenu(`« ${nom} » : photo trop lourde (60 Ko maximum après compression).`)
+      // Visuel local : doit exister dans public/visuels/ (vérifié par les tests, pas ici — le serveur n'a pas accès au bundle front).
       const allergenes = Array.isArray(pr.allergenes) ? pr.allergenes : []
       if (!allergenes.every((a) => ALLERGENES.includes(a as string))) throw new ErreurMenu(`« ${nom} » : allergène inconnu.`)
       const produit: Produit = { id: id(pr.id, 'p', j), nom, prix, allergenes: ALLERGENES.filter((a) => allergenes.includes(a)) }
@@ -74,3 +81,23 @@ export function validerMenu(brut: unknown, commerceId: string, maintenant: Date)
 }
 
 export const menuVide = (commerceId: string): Menu => ({ commerceId, categories: [], majLe: '' })
+
+/** Vrai si le plat correspond à la recherche (nom ou description, insensible aux accents et à la casse). */
+export function correspondPlat(produit: Pick<Produit, 'nom' | 'description'>, saisie: string): boolean {
+  const q = sansAccents(saisie.trim())
+  if (!q) return true
+  return sansAccents(produit.nom).includes(q) || sansAccents(produit.description ?? '').includes(q)
+}
+
+/** Catégories filtrées par recherche : seules les catégories avec au moins un plat correspondant restent. */
+export function filtrerMenu(categories: CategorieMenu[], saisie: string): CategorieMenu[] {
+  if (!saisie.trim()) return categories
+  return categories
+    .map((c) => ({ ...c, produits: c.produits.filter((p) => correspondPlat(p, saisie)) }))
+    .filter((c) => c.produits.length > 0)
+}
+
+/** Nombre de plats d'un menu. */
+export function compterPlats(menu: Pick<Menu, 'categories'>): number {
+  return menu.categories.reduce((s, c) => s + c.produits.length, 0)
+}

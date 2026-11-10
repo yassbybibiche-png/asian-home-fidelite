@@ -73,14 +73,14 @@ function SelecteurCommerce() {
   // Mode API avec le PIN d'un seul commerce : pas de liste (les autres commerces restent verrouillés).
   const choix = mode === 'local' || acces?.role === 'admin'
   return (
-    <label className={`relative flex min-w-0 flex-1 items-center gap-3 rounded-xl py-1 pr-2 ${choix ? 'active:bg-gray-100' : ''}`}>
+    <label className={`relative flex min-w-0 flex-1 items-center gap-3 rounded-xl py-1 pr-2 ${choix ? 'active:bg-white/10' : ''}`}>
       <LogoCommerce commerce={commerce} taille="sm" />
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-bold leading-tight">{commerce.nom}</span>
+          <span className="truncate font-bold leading-tight text-white">{commerce.nom}</span>
           {mode === 'api' && commerce.demo && <BadgeDemo />}
         </span>
-        <span className="block text-xs text-gray-600">
+        <span className="block text-xs text-white/70">
           {libelleType(commerce.type)}
           {choix ? ' · changer de commerce ▾' : ''}
         </span>
@@ -152,13 +152,13 @@ export default function App() {
 
   return (
     <div className="min-h-dvh pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8">
-      <header className="sticky top-0 z-20 border-b border-gray-900/5 bg-white/90 shadow-[0_1px_8px_-4px_rgb(17_24_39/0.12)] backdrop-blur-md print:hidden">
+      <header className="hero-sombre sticky top-0 z-20 border-b border-white/10 shadow-[0_1px_8px_-4px_rgb(0_0_0/0.5)] print:hidden">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2">
           <SelecteurCommerce />
-          <span className="hidden shrink-0 font-titre text-lg font-bold text-marque-600 sm:block">{NOM_APP}</span>
+          <span className="titre-or hidden shrink-0 text-lg sm:block">{NOM_APP}</span>
           {mode === 'api' && (
             <button
-              className="min-h-11 shrink-0 rounded-xl px-3 text-sm font-semibold text-gray-700 ring-1 ring-gray-300 active:bg-gray-100"
+              className="min-h-11 shrink-0 rounded-xl px-3 text-sm font-semibold text-white ring-1 ring-white/30 active:bg-white/10"
               onClick={() => void verrouiller()}
               title="Verrouiller / changer de commerce"
             >
@@ -173,7 +173,7 @@ export default function App() {
               href={`#/${o.page}`}
               aria-current={onglet === o.page ? 'page' : undefined}
               className={`border-b-2 px-3 py-2.5 font-medium whitespace-nowrap transition-colors ${
-                onglet === o.page ? 'border-marque-500 text-marque-600' : 'border-transparent text-gray-600 hover:text-gray-900'
+                onglet === o.page ? 'border-or-400 text-or-300' : 'border-transparent text-white/70 hover:text-white'
               }`}
             >
               {o.libelle}

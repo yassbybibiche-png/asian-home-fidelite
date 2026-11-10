@@ -24,6 +24,18 @@ export const VISUELS = {
   interieur: '/visuels/interieur.jpg',
   /** Rouleau de sushis sur ardoise. */
   sushisArdoise: '/visuels/sushis-ardoise.jpg',
+  /** Makis sur ardoise, filigrane ASIAN HOME (8 Maki Dragon / 8 Maki Tiger). */
+  menuMakis: '/visuels/menu-makis.jpg',
+  /** Loc Lac : bœuf caramélisé, riz rouge, œuf au plat. */
+  menuLocLac: '/visuels/menu-loc-lac.jpg',
+  /** Nouilles sautées aux crevettes — rattachée à « Mi Prat » (identification probable, voir docs/MENU-REEL.md). */
+  menuNouillesCrevettes: '/visuels/menu-nouilles-crevettes.jpg',
+  /** Mango sticky rice : mangue et riz gluant coco (Mango Stick). */
+  menuMangoStickyRice: '/visuels/menu-mango-sticky-rice.jpg',
+  /** Plat thaï non identifié précisément (riz + soupe en grès) : photo d'ambiance de catégorie uniquement, jamais d'un plat nommé. */
+  menuPlatRiz: '/visuels/menu-plat-riz.jpg',
+  /** Coin salon : fauteuils velours bleu nuit, rideaux violets, sans personne. */
+  interieurSalon: '/visuels/interieur-salon.jpg',
 } as const
 
 /** Identifiant stable du commerce Asian Home Paris (seed + production). */
@@ -64,11 +76,19 @@ export interface PhotoCategorie {
  */
 export function photoCategorie(nom: string): PhotoCategorie | null {
   const n = nom.toLowerCase()
-  if (n.includes('sushi') || n.includes('maki') || n.includes('sashimi')) {
+  if (n.includes('sushi') || n.includes('maki') || n.includes('sashimi') || n.includes('jap')) {
     return { src: VISUELS.sushisArdoise, alt: 'Rouleau de sushis sur ardoise' }
   }
   if (n.includes('boisson') || n.includes('cocktail')) {
     return { src: VISUELS.cocktails, alt: 'Cocktails signature : Koh Samui, Tokyo et Piña Colada' }
+  }
+  if (n.includes('thaï') || n.includes('thai')) {
+    // Plat thaï non identifié précisément : illustre la catégorie, jamais un plat nommé.
+    return { src: VISUELS.menuPlatRiz, alt: 'Plat thaï : riz et soupe en grès' }
+  }
+  if (n.includes('dessert')) {
+    // Le Mango Stick, dessert photographié du restaurant : illustre la catégorie.
+    return { src: VISUELS.menuMangoStickyRice, alt: 'Mango sticky rice : mangue et riz gluant coco' }
   }
   return null
 }

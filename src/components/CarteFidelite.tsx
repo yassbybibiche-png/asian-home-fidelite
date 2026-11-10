@@ -68,17 +68,17 @@ export function CarteFidelite({ client, commerce, sansQr = false }: { client: Cl
           className="h-24 w-full object-cover"
         />
       )}
-      {/* Recto : bandeau laque façon carte physique. */}
+      {/* Recto : bandeau nocturne (noir + laque profonde, filet doré) façon carte physique. */}
       <div
-        className={`relative overflow-hidden px-5 pt-5 pb-6 text-white ${styleBandeau ? '' : 'bg-gradient-to-br from-marque-500 via-marque-600 to-marque-800'}`}
+        className={`relative overflow-hidden px-5 pt-5 pb-6 text-white ${styleBandeau ? '' : 'bg-gradient-to-br from-nuit-950 via-[#2a1216] to-marque-800 ring-1 ring-or-400/40 ring-inset'}`}
         style={styleBandeau}
       >
-        <div className="pointer-events-none absolute -top-16 -right-12 h-44 w-44 rounded-full border-[18px] border-white/10" aria-hidden />
+        <div className="pointer-events-none absolute -top-16 -right-12 h-44 w-44 rounded-full border-[18px] border-or-400/20" aria-hidden />
         <div className="relative flex items-center gap-3">
           <LogoCommerce commerce={commerce} taille="md" />
           <div className="min-w-0">
-            <div className="truncate font-titre text-lg font-bold">{commerce.nom}</div>
-            <div className="text-sm text-white">Carte de fidélité</div>
+            <div className="truncate font-titre text-lg font-bold tracking-[0.08em] uppercase">{commerce.nom}</div>
+            <div className="text-sm text-or-300">Carte de fidélité</div>
           </div>
         </div>
         <div className="relative mt-5 flex items-end justify-between gap-3">
@@ -132,7 +132,7 @@ export function CarteFidelite({ client, commerce, sansQr = false }: { client: Cl
           aria-valuenow={tampons}
           aria-label="Progression vers la récompense"
         >
-          <div className="h-full rounded-full bg-gradient-to-r from-marque-500 to-marque-600 transition-all duration-500" style={{ width: `${pct}%` }} />
+          <div className="h-full rounded-full bg-gradient-to-r from-marque-500 via-marque-600 to-or-400 transition-all duration-500" style={{ width: `${pct}%` }} />
         </div>
         <p className="mt-1.5 flex justify-between text-sm text-gray-600">
           <span>{debloquee ? 'Carte complète' : `Encore ${restants} tampon${restants > 1 ? 's' : ''}`}</span>

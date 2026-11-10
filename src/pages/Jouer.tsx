@@ -51,16 +51,16 @@ type Etape = 'pret' | 'rotation' | 'resultat'
 function Cadre({ commerce, rotation, children, pied }: { commerce: Commerce; rotation: number; children: ReactNode; pied: ReactNode }) {
   return (
     <div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
-      <header className="text-center">
+      <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-6 pb-8 text-center shadow-relief">
         <div className="flex justify-center">
           <LogoCommerce commerce={commerce} taille="lg" />
         </div>
-        <h1 className="mt-3 font-titre text-2xl font-bold tracking-tight">{commerce.nom}</h1>
-        <p className="mt-1 font-semibold text-marque-600">Tournez la roue et gagnez un cadeau !</p>
-        {commerce.coordonnees && <p className="mt-1 text-sm text-gray-600">{commerce.coordonnees}</p>}
+        <h1 className="titre-or mt-3 text-2xl">{commerce.nom}</h1>
+        <p className="mt-1 font-semibold text-or-300">Tournez la roue et gagnez un cadeau !</p>
+        {commerce.coordonnees && <p className="mt-1 text-sm text-white/70">{commerce.coordonnees}</p>}
       </header>
 
-      <div className="py-2">
+      <div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-or-400/30">
         <Roue lots={commerce.lots} rotation={rotation} />
       </div>
 

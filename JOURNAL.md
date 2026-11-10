@@ -700,3 +700,55 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
 - **Non vérifié** : rendu réel à 390 px sur un vrai téléphone (aucun navigateur sur la VM) ; le menu de
   production est vide (0 catégorie via GET /menu) donc les illustrations de catégories ne sont visibles que
   quand le commerçant remplira le menu ; le tableau de bord commerçant n'a pas de visuel hero (outil interne).
+
+## 10/11/2026 — DA Instagram + vrai menu + interactivité (refonte sombre, menu réel, recherche/filtres)
+- **DA (docs/DA-INSTAGRAM.md, relevé 10/11)** : registre nocturne du lieu — noir + doré + lumières rose/violet — introduit
+  en en-têtes, héros et carte de fidélité, rouge laque #b3262d conservé comme accent. Codes hex hors #b3262d = ESTIMÉS
+  (aucune charte publiée) : noir #111111, doré #c9a227, rose #ff4d6d, bleu-violet #3b2d8f — marqués [ESTIMÉ] dans
+  `src/index.css` et utilisés comme directions, jamais comme valeurs certifiées. Nouvelles classes `.hero-sombre`
+  (dégradé noir + halos rose/violet), `.titre-or` (serif, capitales espacées, doré — façon logo ASIAN HOUSE),
+  `.surtitre-sombre`, `.puce-sombre`. Contrastes vérifiés par tests (WCAG, voir ci-dessous).
+- **Où** : en-tête commerçant sombre (`src/App.tsx`, nom doré, onglet actif souligné or) ; héros sombres des pages
+  publiques `#/jouer` (logo + titre or + panneau roue sombre) et `#/menu` ; `CarteFidelite` : bandeau dégradé
+  noir → laque profonde, filet doré, « Carte de fidélité » en or clair, progression des tampons laque → or.
+  Corps ivoire inchangé (lisibilité), navigation mobile inchangée, aucune régression des modules existants.
+- **Vrai menu (`src/data/menu-reel.ts`, généré depuis `docs/menu-reel.json` par `/tmp/generer-menu-reel.mjs`)** :
+  7 catégories, 39 plats, noms et descriptions exacts (Uber Eats, crawls 01/09 et 21/10/2026).
+  **AUCUN PRIX VÉRIFIÉ** : les 39 plats sont à `prix: null` et s'affichent « Prix sur place » — jamais de montant
+  inventé. Modèle changé en ce sens : `Produit.prix: number | null` (`src/types.ts`), `validerMenu` accepte null
+  (et les photos locales `/visuels/…`, regex étendue), `formaterPrix(null)` = « Prix sur place »,
+  éditeur commerçant : prix optionnel (vide = sur place). Aucun allergène indiqué nulle part (listes vides).
+  Tiramisu : cité dans des avis, absent de la carte Uber Eats — affiché sans description inventée, à confirmer
+  sur place. Mi Prat ← `menu-nouilles-crevettes.jpg` : identification PROBABLE (notée dans le code et la doc).
+- **Mise en production du menu** : deux voies, sans PIN touché (PIN commerçant/admin inconnus de l'agent, jamais
+  dans le dépôt). (1) **Repli public** : tant que le menu enregistré est vide, `#/menu` affiche la vraie carte
+  (avec la mention honnête « les prix ne sont pas encore renseignés : ils sont affichés sur place ») ; dès que
+  le commerçant enregistre son menu, c'est le sien qui s'affiche. (2) **Adoption commerçant** : bouton
+  « Charger la vraie carte d'Asian Home (39 plats) » dans Menu → pré-remplit l'éditeur (photos incluses),
+  le commerçant complète les prix et Enregistre (PIN habituel). Le menu reste modifiable depuis le dashboard.
+  **Reste à faire côté utilisateur/parent** : ouvrir le Menu commerçant (PIN), charger la vraie carte, renseigner
+  les prix relevés sur place, Enregistrer — ou laisser le repli public en place. Les prix ne peuvent pas être
+  remplis par l'agent (aucun prix vérifié en ligne ; cf. docs/MENU-REEL.md).
+- **Photos** : 6 nouvelles dans `public/visuels/` (commitées ici ; sources dans `SOURCES.md`, galerie lacarte.menu).
+  Rattachements : `menu-makis.jpg` → 8 Maki Dragon / 8 Maki Tiger ; `menu-loc-lac.jpg` → Loc Lac ;
+  `menu-nouilles-crevettes.jpg` → Mi Prat (probable) ; `menu-mango-sticky-rice.jpg` → Mango Stick ;
+  `menu-plat-riz.jpg` → photo d'ambiance de la catégorie « Côté thaï » uniquement, jamais d'un plat nommé ;
+  `interieur-salon.jpg` → section « Le restaurant » de `#/carte`. Catégories « Desserts » → mango sticky rice.
+  `CartePublique` : lien « Voir le menu » visible pour Asian Home même sans menu enregistré (repli réel).
+- **Interactivité (`src/pages/MenuPublic.tsx`)** : recherche de plat (nom + description, insensible aux accents/casse),
+  filtres par catégorie (pilules, « Toutes » + 7), compteur de résultats, fiche plat au tap (photo grande,
+  description, prix ou « Prix sur place », allergènes quand ils existent, badge ★ Signature sur Dynamite,
+  Thaï-sty Krusty, Duo Love Bao, Loc Lac, 8 Maki Dragon, 8 Maki Tiger), animations sobres existantes conservées
+  (apparition, progression des tampons, rotation de la roue). Touch targets ≥ 44 px, pas de débordement (max-w-md).
+- **Tests** : `tests/menu-reel.test.ts` (+13) — exactitude vs JSON (7/39, noms, descriptions, Tiramisu sans
+  description), aucun prix (39 × null, « Prix sur place »), photos existantes ≤ 250 Ko et bien rattachées,
+  menu-plat-riz jamais sur un plat nommé, signatures, recherche/filtres, contrastes ≥ 4,5:1
+  (blanc/noir, or/noir, or clair/noir, blanc/laque, laque foncée/ivoire, encre/or clair, amber-800/blanc et /amber-100) ;
+  `tests/cartiz.test.ts` (+1) : PUT menu à prix null → GET public relit null + photo locale, URL hors /visuels/ refusée ;
+  `tests/visuels.test.ts` : catégories thaï/desserts illustrées. `npm test` **235/235**, `npm run build` OK.
+- **Vérification locale avant push** : `vite preview` : accueil 200, 12/12 photos 200 ; serveur local SQLite
+  (base temporaire, PIN dev 1234) : PUT menu réel 200 → GET public 7 catégories / 39 plats, prix tous null,
+  5 photos rattachées, front servi 200, photo 200. Le rendu 390 px réel sur téléphone reste non vérifié
+  (aucun navigateur sur la VM).
+- **Déploiement** : push master → Render auto-déploie ; vérification en ligne après le push : /sante, accueil 200,
+  #/menu avec les vrais plats (repli), photos 200.

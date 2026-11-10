@@ -189,8 +189,11 @@ export interface Produit {
   id: string
   nom: string
   description?: string
-  /** Prix en centimes. */
-  prix: number
+  /**
+   * Prix en centimes. `null` = prix non vérifié : jamais inventé, affiché
+   * « Prix sur place » (carte réelle d'Asian Home, relevée sans prix le 10/11/2026).
+   */
+  prix: number | null
   /** https://… ou image compressée (data:image/jpeg;base64,…). */
   photo?: string
   allergenes: string[]

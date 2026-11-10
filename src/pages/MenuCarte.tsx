@@ -5,13 +5,15 @@ import type { CategorieMenu, Produit } from '../types'
 import { ALLERGENES, LIMITES_MENU } from '../lib/menu'
 import { analyserMontant } from '../lib/points'
 import { BoutonCopier, EnTete, MessageErreur, QrCode, Vide } from '../components/ui'
+import { estAsianHome } from '../lib/visuels'
+import { COMPTE_PLATS_REELS, menuReelAsianHome } from '../data/menu-reel'
 
 type ProduitEdite = Omit<Produit, 'prix'> & { prix: string }
 type CategorieEditee = Omit<CategorieMenu, 'produits'> & { produits: ProduitEdite[] }
 
 const idLocal = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 const versEdition = (cats: CategorieMenu[]): CategorieEditee[] =>
-  cats.map((c) => ({ ...c, produits: c.produits.map((p) => ({ ...p, prix: (p.prix / 100).toFixed(2).replace('.', ',') })) }))
+  cats.map((c) => ({ ...c, produits: c.produits.map((p) => ({ ...p, prix: p.prix == null ? '' : (p.prix / 100).toFixed(2).replace('.', ',') })) }))
 
 /** Photo choisie sur l'appareil → JPEG redimensionné (≤ 480 px) et compressé sous 60 Ko. */
 async function compresserPhoto(fichier: File): Promise<string> {
@@ -59,11 +61,11 @@ export default function MenuCarte() {
     setEnregistre(false)
     setCategories((cs) => (c ? cs!.map((x, j) => (j === i ? c : x)) : cs!.filter((_, j) => j !== i)))
   }
-  const prixInvalide = categories.some((c) => c.produits.some((p) => !p.prix.trim() || analyserMontant(p.prix) === null))
+  const prixInvalide = categories.some((c) => c.produits.some((p) => p.prix.trim() && analyserMontant(p.prix) === null))
 
   async function enregistrer() {
     const menu = {
-      categories: categories!.map((c) => ({ ...c, produits: c.produits.map((p) => ({ ...p, prix: analyserMontant(p.prix) ?? 0 })) })),
+      categories: categories!.map((c) => ({ ...c, produits: c.produits.map((p) => ({ ...p, prix: p.prix.trim() ? (analyserMontant(p.prix) ?? 0) : null })) })),
     }
     const r = await executer(() => avecPin((a, cli) => cli.majMenu(commerce.id, a, menu)))
     if (r.ok) {
@@ -91,6 +93,29 @@ export default function MenuCarte() {
         </div>
       </section>
 
+      {estAsianHome(commerce) && (
+        <section className="carte space-y-2">
+          <h2 className="titre-carte">Vraie carte du restaurant</h2>
+          <p className="text-sm text-gray-700">
+            Charge les {COMPTE_PLATS_REELS} plats réels d’Asian Home (relevés sur Uber Eats) dans l’éditeur ci-dessous, avec leurs photos. Les prix
+            n’ont pas pu être vérifiés : ils restent vides et s’affichent « Prix sur place » tant que vous ne les renseignez pas.
+          </p>
+          <button
+            type="button"
+            className="bouton-secondaire w-full"
+            onClick={() => {
+              const existants = categories.some((c) => c.produits.length > 0)
+              if (existants && !window.confirm('Remplacer le menu actuel par la vraie carte du restaurant (39 plats) ? Les modifications non enregistrées seront perdues.')) return
+              setEnregistre(false)
+              setCategories(versEdition(menuReelAsianHome().categories))
+            }}
+          >
+            📖 Charger la vraie carte d’Asian Home ({COMPTE_PLATS_REELS} plats)
+          </button>
+          <p className="text-xs text-gray-600">Pensez à « Enregistrer le menu » ensuite : la carte devient votre menu publié, modifiable à tout moment.</p>
+        </section>
+      )}
+
       {categories.map((c, i) => (
         <EditeurCategorie key={c.id} categorie={c} onChange={(x) => majCat(i, x)} />
       ))}
@@ -106,7 +131,7 @@ export default function MenuCarte() {
 
       <div className="sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-10 space-y-2 md:bottom-4">
         <MessageErreur>{erreur && `Menu non enregistré : ${erreur}`}</MessageErreur>
-        {prixInvalide && <MessageErreur>Chaque produit doit avoir un prix valide (ex : 6,50).</MessageErreur>}
+        {prixInvalide && <MessageErreur>Chaque prix renseigné doit être valide (ex : 6,50). Un prix vide s’affiche « Prix sur place ».</MessageErreur>}
         <button className="bouton w-full shadow-lg" disabled={enCours || prixInvalide} onClick={() => void enregistrer()}>
           {enCours ? 'Enregistrement…' : enregistre ? '✓ Menu enregistré' : 'Enregistrer le menu'}
         </button>
@@ -167,7 +192,7 @@ function EditeurProduit({ produit, onChange }: { produit: ProduitEdite; onChange
         </div>
         <div className="w-28 shrink-0">
           <label className="etiquette" htmlFor={`prix-${id}`}>
-            Prix (€)
+            Prix (€) — vide = sur place
           </label>
           <input id={`prix-${id}`} className="champ text-right" inputMode="decimal" placeholder="6,50" value={produit.prix} onChange={(e) => maj('prix', e.target.value)} />
         </div>

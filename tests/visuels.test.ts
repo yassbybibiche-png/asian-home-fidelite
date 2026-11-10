@@ -66,13 +66,17 @@ describe('Association des visuels au commerce', () => {
 })
 
 describe('Photo de catégorie de menu', () => {
-  test('Sushis → rouleau sur ardoise ; Boissons / Cocktails → cocktails signature', () => {
+  test('Sushis → rouleau sur ardoise ; Boissons / Cocktails → cocktails signature ; Thaï et Desserts illustrés', () => {
     assert.deepEqual(photoCategorie('Sushis & Makis'), { src: VISUELS.sushisArdoise, alt: 'Rouleau de sushis sur ardoise' })
     assert.deepEqual(photoCategorie('Boissons'), { src: VISUELS.cocktails, alt: 'Cocktails signature : Koh Samui, Tokyo et Piña Colada' })
     assert.equal(photoCategorie('Cocktails signature')?.src, VISUELS.cocktails)
+    // Plat thaï non identifié : illustre la catégorie, jamais un plat nommé.
+    assert.equal(photoCategorie('Côté thaï')?.src, VISUELS.menuPlatRiz)
+    // Le Mango Stick photographié illustre la catégorie desserts.
+    assert.equal(photoCategorie('Desserts')?.src, VISUELS.menuMangoStickyRice)
   })
   test('aucune photo inventée pour les autres catégories', () => {
-    for (const nom of ['Entrées', 'Plats', 'Desserts', 'Formules', 'Woks', 'Nouilles']) {
+    for (const nom of ['Entrées', 'Plats', 'Formules', 'Woks', 'Nouilles', 'Asian Street Food', 'Nos Poke Bowl']) {
       assert.equal(photoCategorie(nom), null, nom)
     }
   })

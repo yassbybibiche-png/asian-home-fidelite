@@ -28,7 +28,11 @@ export function analyserMontant(saisie: string): number | null {
   return Math.round(Number(s) * 100)
 }
 
-export function formaterPrix(centimes: number): string {
+/** Prix non vérifié : affiché tel quel, jamais remplacé par un montant inventé. */
+export const LIBELLE_PRIX_ABSENT = 'Prix sur place'
+
+export function formaterPrix(centimes: number | null): string {
+  if (centimes == null) return LIBELLE_PRIX_ABSENT
   return (centimes / 100).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })
 }
 

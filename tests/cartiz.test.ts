@@ -362,6 +362,16 @@ describe('Messages, menu, apparence (serveur)', () => {
     assert.equal((await srv.api('GET', `/cartes/${c.id}`)).contenu.menuDisponible, true)
   })
 
+  test('menu : prix null accepté (prix non vérifié, jamais 0 € inventé) et relu tel quel en public', async () => {
+    const menu = { categories: [{ nom: 'Côté thaï', produits: [{ nom: 'Loc Lac', prix: null, description: 'Riz rouge, poulet ou bœuf caramélisé, œuf, salade.', allergenes: [], photo: '/visuels/menu-loc-lac.jpg' }] }] }
+    assert.equal((await srv.api('PUT', `/commerces/${AH}/menu`, menu, PIN)).statut, 200)
+    const pub = await srv.api('GET', `/commerces/${AH}/menu`)
+    assert.equal(pub.contenu.menu.categories[0].produits[0].prix, null)
+    assert.equal(pub.contenu.menu.categories[0].produits[0].photo, '/visuels/menu-loc-lac.jpg')
+    // Photo locale hors /visuels/ ou URL non https refusée.
+    assert.equal((await srv.api('PUT', `/commerces/${AH}/menu`, { categories: [{ nom: 'E', produits: [{ nom: 'N', prix: 100, allergenes: [], photo: '/autre/n.jpg' }] }] }, PIN)).statut, 400)
+  })
+
   test('apparence : couleur illisible refusée (contraste), couleur conforme acceptée et publique', async () => {
     assert.equal((await srv.api('PATCH', `/commerces/${AH}`, { apparence: { couleur: '#ffee00' } }, PIN)).statut, 400)
     assert.equal((await srv.api('PATCH', `/commerces/${AH}`, { apparence: { couleur: '#1d4ed8', banniere: 'https://exemple.fr/b.jpg' } }, PIN)).statut, 200)

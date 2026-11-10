@@ -77,6 +77,12 @@ function Carte({ client, commerce, demo, pied, menu, actions }: { client: Client
             loading="lazy"
             className="h-64 w-full rounded-2xl object-cover"
           />
+          <img
+            src={VISUELS.interieurSalon}
+            alt="Coin salon d’Asian Home Paris : fauteuils velours bleu nuit et rideaux violets"
+            loading="lazy"
+            className="h-48 w-full rounded-2xl object-cover"
+          />
           <p className="text-sm text-gray-700">Restaurant asiatique halal, au Pré-Saint-Gervais.</p>
         </section>
       )}
@@ -118,7 +124,9 @@ function CarteApi({ api }: { api: ClientApi }) {
     if (!param) return setErreur('introuvable')
     api.carte(param).then(
       (r) => {
-        setDonnees({ client: r.client, commerce: r.commerce, menu: !!r.menuDisponible })
+        // Asian Home : le menu public affiche la vraie carte en repli tant que le
+        // commerçant n'a pas enregistré son propre menu — le lien est donc visible.
+        setDonnees({ client: r.client, commerce: r.commerce, menu: !!r.menuDisponible || estAsianHome(r.commerce) })
         setErreur(null)
         // Messages affichés = lus (le badge « nouveau » reste visible pendant cette ouverture).
         if (r.client.messages?.some((m) => !m.lu)) api.marquerLus(param).catch(() => {})

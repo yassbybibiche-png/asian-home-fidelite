@@ -12,7 +12,13 @@
   --color-marque-800: #5e1317;
   /* Or des étoiles et des récompenses (décor ; le texte doré utilise amber-800, contraste ≥ 4,5:1). */
   --color-or-300: #f2d48a;
+  --color-or-400: #c9a227; /* [ESTIMÉ — DA Instagram @asianhomeparis, relevé 10/11/2026 : doré des coupes et du nom TOKYO ; texte doré sur fond sombre uniquement, contraste ≈ 8,9:1 sur #111111] */
   --color-or-500: #d4a73c;
+  /* Registre nocturne Instagram (10/11/2026) : noir profond [ESTIMÉ] + lumières rose/violet. */
+  --color-nuit-950: #111111; /* [ESTIMÉ] noir du logo et des ardoises ; blanc dessus : contraste ≈ 18,9:1 */
+  --color-nuit-900: #1b1b22;
+  --color-neon-500: #ff4d6d; /* [ESTIMÉ] lumière rose/magenta du soir — décor uniquement, jamais en texte */
+  --color-violet-nuit: #3b2d8f; /* [ESTIMÉ] lumière bleu-violet du soir — décor uniquement */
   /* Fond chaud, légèrement ivoire, plus doux qu'un gris froid. */
   --color-fond: #f7f5f2;
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -93,6 +99,25 @@ h3 {
   }
   .surtitre {
     @apply text-xs font-semibold tracking-[0.12em] text-gray-600 uppercase;
+  }
+  /* Registre nocturne Instagram : en-têtes et héros sombres (noir + doré, rouge laque en accent). */
+  .hero-sombre {
+    background:
+      radial-gradient(120% 90% at 85% 0%, rgb(255 77 109 / 0.22), transparent 55%),
+      radial-gradient(120% 100% at 0% 0%, rgb(59 45 143 / 0.35), transparent 55%),
+      linear-gradient(160deg, #111111 0%, #1b1b22 60%, #2a1216 100%);
+    color: #fff;
+  }
+  /* Titre façon logo : serif, capitales espacées, doré sur fond sombre (contraste ≈ 8,9:1). */
+  .titre-or {
+    @apply font-titre font-bold tracking-[0.14em] text-or-400 uppercase;
+  }
+  .surtitre-sombre {
+    @apply text-xs font-semibold tracking-[0.18em] text-or-300 uppercase;
+  }
+  /* Pilule de filtre sur fond sombre (menu public, roue). */
+  .puce-sombre {
+    @apply min-h-11 shrink-0 rounded-full bg-white/10 px-4 text-sm font-semibold text-white ring-1 ring-white/30 transition hover:bg-white/20 aria-pressed:bg-or-400 aria-pressed:text-nuit-950 aria-pressed:ring-or-400 aria-selected:bg-or-400 aria-selected:text-nuit-950 aria-selected:ring-or-400;
   }
   /* Filtres en pilules (listes clients, avis, accès). */
   .puce {
