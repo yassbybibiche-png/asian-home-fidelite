@@ -70,6 +70,9 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` | — | **V3, non configuré.** Chemin du fichier JSON de la clé du compte de service Google. Les deux variables Google Wallet sont nécessaires, sinon `pass.json` répond 501. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | — | **P1-B3, non configuré.** SMS via Twilio (`TWILIO_FROM` = numéro expéditeur `+33…` ou identifiant de Messaging Service `MG…`). Les trois sont nécessaires, sinon 501. |
 | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | — | **P1-B3, non configuré.** E-mail via Brevo (adresse expéditrice à valider chez Brevo ; nom optionnel). Clé + adresse nécessaires, sinon 501. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | **P1-B4, non configuré. `GOOGLE_CLIENT_SECRET` = secret serveur.** Identifiants OAuth 2.0 (application Web) du projet Google Cloud approuvé pour les API Business Profile. Les deux sont nécessaires, sinon les routes Google répondent 501. Voir `docs/GOOGLE-BUSINESS.md`. |
+| `GOOGLE_REDIRECT_URI` | `PUBLIC_URL` (ou adresse du serveur) + `/api/v1/commerces/<id>/google/callback` | **P1-B4.** URI de redirection déclarée chez Google, à l'identique. |
+| `GOOGLE_BUSINESS_LOCATION` | — (fiche trouvée à l'import) | **P1-B4, facultatif.** `accounts/<n°>/locations/<n°>` si le compte gère plusieurs fiches et que l'app ne trouve pas la bonne. |
 
 ## Supabase (phases S1 + S2) — prêt, projet PAS encore créé
 
@@ -221,6 +224,12 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `PATCH /commerces/:id/avis/:avisId` | commerçant | `{ reponse?: texte \| null, brouillon?: texte \| null }` puis `appliquerRegles` (un brouillon supprimé peut donc être reproposé si la règle « brouillon » est active). |
 | `GET /commerces/:id/export.csv` | commerçant | Clients en CSV (UTF-8 avec BOM, séparateur `;` pour Excel FR) : `prenom;telephone;email;tampons;visites;derniereVisite;creeLe`. |
 | `GET /commerces/:id/clients/:clientId/pass.json` | commerçant | **Google Wallet, à brancher.** **501** tant que `GOOGLE_WALLET_ISSUER_ID` + `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` sont absents (cas actuel, aucun pass généré). Clé illisible : 503. Configuré : `{ signe: true, urlEnregistrement }` (JWT signé, voir plus bas). |
+| `GET /commerces/:id/google` | commerçant | **P1-B4.** `{ configure, connecte, connecteLe?, fiche? }` — jamais de jeton. `configure: false` tant que `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` manquent. |
+| `GET /commerces/:id/google/auth` | commerçant | **P1-B4.** 302 vers l'écran de consentement Google (scope `business.manage`, `access_type=offline`, `prompt=consent`, `state` signé à usage unique, 10 min) ; `?format=json` → `{ url }` (utilisé par le front). **501** sans configuration. |
+| `GET /commerces/:id/google/callback` | public (retour de Google) | **P1-B4.** Vérifie le `state`, échange le `code` contre les jetons (rangés chiffrés dans `meta`, jamais renvoyés), puis 302 vers `/#/avis/google-connecte` (refus sur Google : `/#/avis/google-refuse`). 400 state absent / falsifié / déjà utilisé / d'un autre commerce. **501** sans configuration. |
+| `POST /commerces/:id/google/deconnecter` | commerçant | **P1-B4.** Révocation chez Google (best-effort) + jetons effacés → `{ ok, revoque }`. **501** sans configuration. |
+| `POST /commerces/:id/google/import-avis` | commerçant | **P1-B4.** Importe les avis de la fiche (déduplication par identifiant Google ; avis manuels et brouillons préservés ; règles appliquées) et publie d'office la seule réponse auto 5★ des avis postés après la connexion (règle active) → `{ importes, misAJour, ignores, publiees, echecsPublication, avis }`. **501** sans configuration, 409 non connecté / fiche introuvable, 502 refus de Google. Journalisé (action `avisGoogle`). |
+| `POST /commerces/:id/avis/:avisId/publier-reponse` | commerçant | **P1-B4.** Publie `reponse` sur Google (`PUT …/reviews/{r}/reply`) → `{ avis }` avec `reponsePublieeLe`. **409** si l'avis est saisi à la main, n'a qu'un brouillon (non validé), ou a une réponse auto hors règle 5★ active : rien n'est envoyé. **501** sans configuration. Journalisé. |
 | `GET /cartes/:clientId` (complément) | public | Génère à l'ouverture les messages dus (relance 30 j, anniversaire) si ces règles sont actives ; renvoie aussi `menuDisponible`. Jamais `actionsTraitees` ni `clesMessages`. |
 | `POST /cartes/:clientId/lus` | public | Marque les messages de la carte comme lus. |
 | `PATCH /commerces/:id` (complément) | commerçant | Aussi : `eurosParPoint` (0,10 à 1 000), `catalogue` (`[{ id?, nom, cout, description? }]`, 30 max), `messagesAuto` (`{ bienvenue, recompense, presque, inactif, anniversaire, avis }`), `apparence` (`{ couleur?, fond?, banniere? }`, refus si contraste < 4,5:1 ou bannière non https). |
@@ -633,13 +642,18 @@ Pour activer :
    bientôt ») et mise à jour de l'objet à chaque tampon (non écrite). Noms de champs à revérifier dans la doc au moment
    de l'activation.
 
-### Google Business Profile (avis) — à brancher
+### Google Business Profile (avis) — développé (P1-B4), à brancher
 
-Aucun appel à Google. Il faudra : le compte Google qui gère la fiche du commerce ; un projet Google Cloud **approuvé** par
-Google pour les API Business Profile (formulaire de demande d'accès) ; activer les API (dont *Google My Business API*) ;
-un identifiant OAuth 2.0 avec le scope `https://www.googleapis.com/auth/business.manage` (doc Google « Basic setup »,
-vérifiée le 09/11/2026) ; le consentement du commerce ; puis lire les avis
-(`GET https://mybusiness.googleapis.com/v4/accounts/*/locations/*/reviews`) et publier les réponses — non développé.
+OAuth, import des avis et publication des réponses sont écrits (`server/google-business.ts`) et testés contre un Google
+**simulé** ; ils n'ont **jamais** été exécutés contre Google (aucun projet Cloud, aucune approbation, aucune clé). Sans
+`GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`, toutes les routes `…/google/*` et `publier-reponse` répondent **501** et
+aucun appel n'est fait. Démarche complète (projet Cloud, formulaire « Application for Basic API Access », API à activer,
+identifiants OAuth, variables Render, test) : **`docs/GOOGLE-BUSINESS.md`**.
+
+Choix de stockage des jetons : table `meta` (clé `google_business:<commerce>`), comme `secret_desinscription` — aucune
+migration à appliquer, table déjà fermée à `anon` / `authenticated` (RLS, 0002). Valeur chiffrée en AES-256-GCM avec une
+clé dérivée de `GOOGLE_CLIENT_SECRET` : une copie de la base seule ne livre pas le refresh token. Le client secret reste
+dans la variable d'environnement et ne transite jamais par le front.
 
 ### SMS / e-mail — relances branchées (P1-B3), en attente des clés
 

@@ -19,6 +19,7 @@ const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
   defi: 'Défi',
   gain: 'Gain de la roue remis',
   consentement: 'Consentement relances',
+  avisGoogle: 'Avis Google',
 }
 
 function Chiffre({ valeur, libelle, aide }: { valeur: string | number; libelle: string; aide: string }) {

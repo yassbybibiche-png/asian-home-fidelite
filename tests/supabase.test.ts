@@ -877,6 +877,50 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       await app.fermer()
     }
   })
+
+  test('P1-B4 : jetons Google chiffrés dans `meta` (aucune migration), import dédupliqué, publication validée (Google simulé)', async () => {
+    const f = fauxPostgrest()
+    const secret = 'secret-client-google-de-test'
+    const publies: string[] = []
+    const google = (async (url: string, init: RequestInit = {}) => {
+      const json = (o: unknown) => new Response(JSON.stringify(o), { headers: { 'Content-Type': 'application/json' } })
+      if (url === 'https://oauth2.googleapis.com/token') return json({ access_token: 'at-sb', expires_in: 3599, refresh_token: 'rt-sb' })
+      if (url.includes('/reviews?')) {
+        return json({
+          reviews: [
+            { name: 'accounts/1/locations/2/reviews/a', starRating: 'FOUR', comment: 'Bien', reviewer: { displayName: 'Léa' }, createTime: '2026-11-01T12:00:00Z' },
+            { name: 'accounts/1/locations/2/reviews/b', starRating: 'FIVE', comment: 'Top', reviewer: { displayName: 'Tom' }, createTime: '2026-11-02T12:00:00Z' },
+          ],
+        })
+      }
+      if (url.endsWith('/reply') && init.method === 'PUT') {
+        publies.push(url)
+        return json({})
+      }
+      return new Response('{}', { status: 404 })
+    }) as typeof fetch
+    const { app, api } = await demarrer(f, { googleBusiness: { clientId: 'id', clientSecret: secret, emplacement: 'accounts/1/locations/2', fetch: google } })
+    try {
+      const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+      const url = new URL((await api('GET', `/commerces/${AH}/google/auth?format=json`, undefined, PIN)).contenu.url)
+      const retour = await fetch(`${base}/commerces/${AH}/google/callback?code=c&state=${encodeURIComponent(url.searchParams.get('state')!)}`, { redirect: 'manual' })
+      assert.equal(retour.status, 302)
+      const ligne = f.tables.meta.find((m) => m.cle === `google_business:${AH}`)!
+      assert.ok(String(ligne.valeur).startsWith('v1.') && !String(ligne.valeur).includes('rt-sb'), 'chiffré en base')
+
+      for (let i = 0; i < 2; i++) assert.equal((await api('POST', `/commerces/${AH}/google/import-avis`, undefined, PIN)).statut, 200)
+      const avis = (await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.avis as { id: string; note: number; source: string; brouillon?: string }[]
+      assert.equal(avis.length, 2, 'deux imports, aucun doublon')
+      assert.ok(avis.every((a) => a.source === 'google'))
+      const quatre = avis.find((a) => a.note === 4)!
+      assert.equal((await api('POST', `/commerces/${AH}/avis/${quatre.id}/publier-reponse`, undefined, PIN)).statut, 409)
+      await api('PATCH', `/commerces/${AH}/avis/${quatre.id}`, { reponse: 'Merci Léa !' }, PIN)
+      assert.equal((await api('POST', `/commerces/${AH}/avis/${quatre.id}/publier-reponse`, undefined, PIN)).statut, 200)
+      assert.deepEqual(publies, ['https://mybusiness.googleapis.com/v4/accounts/1/locations/2/reviews/a/reply'], '5★ d’avant la connexion : pas publiée d’office')
+    } finally {
+      await app.fermer()
+    }
+  })
 })
 
 // ---------- Secrets et configuration ----------

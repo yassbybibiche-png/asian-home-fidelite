@@ -1,12 +1,39 @@
-import { useState, type FormEvent } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type FormEvent } from 'react'
 import { useAction, useDonneesCommerce, useStore } from '../store'
+import { useRoute } from '../router'
 import type { Avis, StatutAvis } from '../types'
+import type { EtatGoogle } from '../data/api'
 import { noteMoyenne } from '../lib/stats'
 import { dateRelative } from '../lib/format'
-import { MODELES, appliquerRegles, modeleSuggere, statutAvis, texteModele } from '../lib/avis'
-import { ETAPES_CONNEXION_GOOGLE, TEXTE_AVIS_DEMO, TEXTE_AVIS_VIDE_PRODUCTION } from '../lib/integrations'
+import { LIBELLE_SOURCE, MODELES, appliquerRegles, modeleSuggere, refusPublication, sourceAvis, statutAvis, texteModele } from '../lib/avis'
+import { ETAPES_CONNEXION_GOOGLE, GUIDE_GOOGLE_BUSINESS, TEXTE_AVIS_DEMO, TEXTE_AVIS_VIDE_PRODUCTION, etatGoogleBusiness } from '../lib/integrations'
 import { BadgeDemo, EnTete, Etoiles, MessageErreur, Vide } from '../components/ui'
 import { InvitationAvis } from '../components/InvitationAvis'
+
+/** État Google Business Profile (P1-B4) : null = non configuré sur le serveur, mode local ou état inconnu. */
+const ContexteGoogle = createContext<{ etat: EtatGoogle | null; relire(): void }>({ etat: null, relire: () => {} })
+
+/** `configure` d'abord lu dans /sante (sans PIN) ; l'état de connexion n'est demandé que si Google est configuré. */
+function useEtatGoogle(commerceId: string) {
+  const { api, avecPin, estDemo } = useStore()
+  const [etat, setEtat] = useState<EtatGoogle | null>(null)
+  const [tour, setTour] = useState(0)
+  useEffect(() => {
+    if (!api || estDemo) return
+    let actif = true
+    api
+      .sante()
+      .then((s) => (s.integrations?.googleBusinessProfile ? avecPin((a, x) => x.etatGoogle(commerceId, a)) : null))
+      .then(
+        (e) => actif && setEtat(e),
+        () => actif && setEtat(null),
+      )
+    return () => {
+      actif = false
+    }
+  }, [api, avecPin, estDemo, commerceId, tour])
+  return { etat, relire: useCallback(() => setTour((t) => t + 1), []) }
+}
 
 type Filtre = 'tous' | 'aTraiter' | 'negatifs'
 
@@ -20,6 +47,8 @@ export default function AvisPage() {
   const { commerce, avis } = useDonneesCommerce()
   const { appliquerReglesAvis, mode, estDemo } = useStore()
   const regles = useAction()
+  const google = useEtatGoogle(commerce.id)
+  const { param } = useRoute()
   const [filtre, setFiltre] = useState<Filtre>('tous')
   const [simulation, setSimulation] = useState(false)
   const moyenne = noteMoyenne(avis)
@@ -30,7 +59,7 @@ export default function AvisPage() {
   const liste = avis.filter((a) => (filtre === 'aTraiter' ? !a.reponse : filtre === 'negatifs' ? a.note <= 3 : true))
 
   return (
-    <div>
+    <ContexteGoogle.Provider value={google}>
       <EnTete
         titre="Avis Google"
         sousTitre={moyenne === null ? 'Aucun avis' : `${moyenne.toLocaleString('fr-FR')} ★ de moyenne · ${avis.length} avis · ${nbATraiter} sans réponse`}
@@ -40,12 +69,13 @@ export default function AvisPage() {
         {estDemo ? (
           <BadgeDemo>{TEXTE_AVIS_DEMO}</BadgeDemo>
         ) : (
-          <span className="text-sm text-gray-600">
-            Connexion à Google : à brancher. En attendant, aucun avis n’est importé : vous pouvez recopier un avis reçu à la main, et aucune réponse n’est
-            publiée sur Google (copiez-la vous-même).
-          </span>
+          <span className="text-sm text-gray-600">{etatGoogleBusiness(google.etat).texte}</span>
         )}
       </p>
+
+      {/* Retour de l'écran de consentement Google (redirection du serveur vers #/avis/google-connecte ou google-refuse). */}
+      {param === 'google-connecte' && <p className="carte mb-4 text-sm font-semibold text-green-800">Google est connecté. Vous pouvez importer vos avis.</p>}
+      {param === 'google-refuse' && <p className="carte mb-4 text-sm font-semibold text-amber-800">Connexion Google annulée : aucun accès n’a été donné.</p>}
 
       {!estDemo && <ConnecterGoogle />}
 
@@ -123,7 +153,7 @@ export default function AvisPage() {
           ))}
         </ul>
       )}
-    </div>
+    </ContexteGoogle.Provider>
   )
 }
 
@@ -146,18 +176,77 @@ function ApercuInvitation() {
   )
 }
 
-/** Étapes exactes pour connecter Google Business Profile — rien n'est appelé chez Google sans identifiants. */
+/**
+ * Google Business Profile : étapes à suivre tant que le serveur n'est pas configuré (rien n'est appelé chez Google),
+ * puis connexion (consentement sur l'écran Google), import des avis et déconnexion une fois configuré.
+ */
 function ConnecterGoogle() {
-  const { commerce } = useStore()
+  const { commerce, avecPin } = useStore()
+  const { etat, relire } = useContext(ContexteGoogle)
+  const { executer, enCours, erreur } = useAction()
+  const [bilan, setBilan] = useState<string | null>(null)
+  const { badge } = etatGoogleBusiness(etat)
+  const branche = !!etat?.configure
+
+  async function connecter() {
+    const r = await executer(() => avecPin((a, api) => api.lienConnexionGoogle(commerce.id, a)))
+    if (r.ok) window.location.assign(r.valeur)
+  }
+  async function importer() {
+    setBilan(null)
+    const r = await executer(() => avecPin((a, api) => api.importerAvisGoogle(commerce.id, a)))
+    if (r.ok) {
+      const v = r.valeur
+      setBilan(
+        `${v.importes} nouvel(s) avis, ${v.misAJour} mis à jour, ${v.publiees} réponse(s) auto 5★ publiée(s)` +
+          (v.echecsPublication ? ` — ${v.echecsPublication} publication(s) en échec : ${v.erreurPublication ?? ''}` : '') +
+          '.',
+      )
+      relire()
+    }
+  }
+  async function deconnecter() {
+    if (!window.confirm('Déconnecter Google ? Les avis déjà importés restent dans l’app.')) return
+    if ((await executer(() => avecPin((a, api) => api.deconnecterGoogle(commerce.id, a)))).ok) relire()
+  }
+
   return (
-    <details className="carte mb-4">
+    <details className="carte mb-4" open={branche}>
       <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 font-bold">
-        Connecter Google <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">à brancher</span>
+        Connecter Google <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{badge}</span>
       </summary>
-      <p className="mt-2 text-sm text-gray-600">
-        Aucun identifiant Google n’est configuré : rien n’est importé et aucun appel n’est fait à Google. Pour importer vos avis et publier vos réponses, il
-        faudra :
-      </p>
+      {branche ? (
+        <div className="mt-2 space-y-2">
+          {etat?.connecte ? (
+            <>
+              <p className="text-sm text-gray-600">
+                Connecté{etat.connecteLe ? ` ${dateRelative(etat.connecteLe)}` : ''}. L’import applique vos règles : réponse auto publiée d’office seulement pour les
+                nouveaux avis 5★ (postés après la connexion) et si la règle est active ; brouillon à valider pour les autres.
+              </p>
+              <button className="bouton w-full" disabled={enCours} onClick={() => void importer()}>
+                {enCours ? 'Import…' : 'Importer les avis Google'}
+              </button>
+              <button className="bouton-secondaire w-full" disabled={enCours} onClick={() => void deconnecter()}>
+                Déconnecter Google
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-gray-600">Connectez le compte Google propriétaire ou gestionnaire de la fiche : Google vous demandera votre accord.</p>
+              <button className="bouton w-full" disabled={enCours} onClick={() => void connecter()}>
+                Connecter Google
+              </button>
+            </>
+          )}
+          {bilan && <p className="text-sm font-semibold text-gray-700">{bilan}</p>}
+          <MessageErreur>{erreur}</MessageErreur>
+        </div>
+      ) : (
+        <p className="mt-2 text-sm text-gray-600">
+          Aucun identifiant Google n’est configuré : rien n’est importé et aucun appel n’est fait à Google. Pour importer vos avis et publier vos réponses, il
+          faudra :
+        </p>
+      )}
       <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-gray-600">
         {ETAPES_CONNEXION_GOOGLE.map((e) => (
           <li key={e} className="break-words">
@@ -165,6 +254,7 @@ function ConnecterGoogle() {
           </li>
         ))}
       </ol>
+      <p className="mt-2 text-xs text-gray-600">{GUIDE_GOOGLE_BUSINESS}</p>
       {commerce.lienGoogle && (
         <p className="mt-3 text-sm text-gray-700">
           En attendant, le moyen réel de recevoir des avis est le lien « laisser un avis » (QR de la roulette) :{' '}
@@ -178,11 +268,18 @@ function ConnecterGoogle() {
 }
 
 function CarteAvis({ avis: a }: { avis: Avis }) {
-  const { commerce, majAvis, estDemo } = useStore()
+  const { commerce, majAvis, estDemo, avecPin } = useStore()
+  const { etat: google } = useContext(ContexteGoogle)
   const statut = statutAvis(a)
   const [edition, setEdition] = useState(false)
   const [texte, setTexte] = useState('')
   const { executer, enCours, erreur } = useAction()
+  const source = sourceAvis(a)
+  // Publication sur Google : avis importé, Google connecté, réponse validée (ou auto 5★ de la règle active), pas déjà publiée.
+  const publiable = !!google?.connecte && !a.reponsePublieeLe && refusPublication(a, commerce) === null
+  const aValider = source === 'google' && !!google?.connecte && !a.reponsePublieeLe && !!a.reponse && !publiable
+
+  const publier = () => executer(() => avecPin((acc, api) => api.publierReponse(a.commerceId, acc, a.id)))
 
   async function enregistrer(maj: { reponse?: string; brouillon?: string | null }) {
     // L'éditeur ne se ferme qu'une fois la réponse réellement enregistrée.
@@ -204,6 +301,7 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
         <span>{dateRelative(a.date)}</span>
         <span className={`rounded-full px-2 py-0.5 font-semibold ring-1 ${STATUTS[statut].classe}`}>{STATUTS[statut].libelle}</span>
         {a.reponseAuto && <span className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold text-gray-600">auto</span>}
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold text-gray-600">{LIBELLE_SOURCE[source]}</span>
       </div>
       <p className="mt-2 text-gray-800">{a.texte || <em className="text-gray-500">Note sans commentaire</em>}</p>
 
@@ -252,13 +350,22 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
           {(a.reponse || a.brouillon) && (
             <div className={`mt-3 rounded-xl p-3 text-sm ${a.reponse ? 'bg-gray-50' : 'bg-amber-50'}`}>
               <span className="font-semibold text-gray-700">{a.reponse
-                  ? a.reponseAuto
-                    ? `Réponse automatique préparée (${estDemo ? 'démo — ' : ''}rien n’est publié sur Google)`
-                    : 'Votre réponse'
-                  : 'Brouillon proposé'}</span>
+                  ? a.reponsePublieeLe
+                    ? `Réponse publiée sur Google ${dateRelative(a.reponsePublieeLe)}`
+                    : a.reponseAuto
+                      ? `Réponse automatique préparée (${estDemo ? 'démo — ' : ''}${publiable ? 'pas encore publiée' : 'rien n’est publié sur Google'})`
+                      : 'Votre réponse'
+                  : 'Brouillon proposé (à valider avant toute publication)'}</span>
               <p className="mt-1 text-gray-700">{a.reponse ?? a.brouillon}</p>
             </div>
           )}
+          {publiable && (
+            <button className="bouton mt-3 w-full" disabled={enCours} onClick={() => void publier()}>
+              {enCours ? 'Publication…' : 'Publier sur Google'}
+            </button>
+          )}
+          {aValider && <p className="mt-2 text-sm text-amber-800">{refusPublication(a, commerce)}</p>}
+          <MessageErreur>{erreur && `Non publié : ${erreur}`}</MessageErreur>
           <button className={`${a.reponse ? 'bouton-secondaire' : 'bouton'} mt-3 w-full`} onClick={ouvrir}>
             {a.reponse ? 'Modifier la réponse' : a.brouillon ? 'Relire et valider le brouillon' : 'Répondre'}
           </button>
