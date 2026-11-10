@@ -921,6 +921,37 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       await app.fermer()
     }
   })
+
+  test('P1-B5 : logo téléversé rangé dans `meta` (aucune migration), relu après redémarrage, supprimé par « logo par défaut »', async () => {
+    const f = fauxPostgrest()
+    const png = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'logo.png'))
+    const a = await demarrer(f)
+    let adresse: string
+    try {
+      const base = `http://127.0.0.1:${(a.app.serveur.address() as AddressInfo).port}/api/v1`
+      const r = await fetch(`${base}/commerces/${AH}/logo`, { method: 'PUT', headers: { 'Content-Type': 'image/png', ...PIN }, body: png })
+      assert.equal(r.status, 200)
+      adresse = ((await r.json()) as { commerce: Commerce }).commerce.logo!
+      const ligne = f.tables.meta.find((m) => m.cle === `logo:${AH}`)!
+      assert.equal(JSON.parse(String(ligne.valeur)).type, 'image/png')
+      assert.equal((f.tables.commerces.find((c) => c.id === AH)!.donnees as Commerce).logo, adresse, 'le JSONB du commerce ne garde que l’adresse')
+      assert.ok(String(JSON.stringify(f.tables.commerces)).length < 20_000, 'pas d’image dans la ligne commerce')
+    } finally {
+      await a.app.fermer()
+    }
+    const b = await demarrer(f)
+    try {
+      const base = `http://127.0.0.1:${(b.app.serveur.address() as AddressInfo).port}`
+      const img = await fetch(base + adresse)
+      assert.equal(img.status, 200)
+      assert.ok(Buffer.from(await img.arrayBuffer()).equals(png))
+      assert.equal((await b.api('DELETE', `/commerces/${AH}/logo`, undefined, PIN)).statut, 200)
+      assert.equal(f.tables.meta.find((m) => m.cle === `logo:${AH}`)!.valeur, '')
+      assert.equal((await fetch(base + adresse)).status, 404)
+    } finally {
+      await b.app.fermer()
+    }
+  })
 })
 
 // ---------- Secrets et configuration ----------
