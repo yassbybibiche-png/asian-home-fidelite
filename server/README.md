@@ -432,6 +432,7 @@ personnalisé le jour où il existe).
 | `index.html` (et toute route du front) | `no-cache` (revérifié à chaque fois : un déploiement est pris au rechargement) |
 | `sw.js`, `manifest.webmanifest` (PWA, P1-C3) | `no-cache` (un nouveau service worker est pris au prochain chargement) |
 | autres fichiers (`/visuels/*.jpg`…) | `public, max-age=3600` |
+| `robots.txt`, `sitemap.xml` (`application/xml`), `favicon.ico` (P2-Q4, `docs/SEO.md`) | `public, max-age=3600` (comme les autres fichiers ; absents, ces adresses renvoyaient `index.html`) |
 
 Tous les fichiers statiques ont un `ETag` faible (taille + date de modification) : `If-None-Match` correspondant → 304.
 

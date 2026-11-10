@@ -22,7 +22,8 @@ describe('P0-U1 : écran de chargement inline (index.html)', () => {
   })
 
   test('aucun <script> inline ajouté : un seul script, le module de l’application', () => {
-    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)]
+    // P2-Q4 : le bloc JSON-LD (données, jamais exécuté) n'est pas un script ; vérifié dans securite-s4 et seo-p2-q4.
+    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)].filter((m) => m[1].trim() !== 'type="application/ld+json"')
     assert.equal(scripts.length, 1)
     assert.match(scripts[0][1], /type="module" src="\/src\/main\.tsx"/)
     assert.equal(scripts[0][2].trim(), '')
