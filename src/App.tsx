@@ -81,7 +81,8 @@ function SquelettePage() {
 
 /** Pages publiques différées : squelette du menu pour #/menu, forme simple pour les pages de texte. */
 function SquelettePublique({ page }: { page: Page }) {
-  if (page === 'menu') return <SqueletteMenu libelle="Un instant, le menu arrive." />
+  const { t } = useLangue()
+  if (page === 'menu') return <SqueletteMenu libelle={t('Un instant, le menu arrive.')} />
   return (
     <Squelette libelle="Chargement de la page…" className="mx-auto max-w-md space-y-4 px-4 pt-6 pb-10">
       <Bloc className="h-8 w-2/3 rounded-lg" />
