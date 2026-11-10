@@ -197,7 +197,8 @@ PostgREST). À confirmer à l'étape b de la procédure ci-dessous.
 ## API (`/api/v1`, JSON)
 
 Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 401 PIN manquant / faux,
-404 inconnu, 409 règle métier refusée, 413 corps trop gros, 429 trop de PIN faux.
+404 inconnu, 409 règle métier refusée, 413 corps trop gros, 429 trop de PIN faux ou trop de requêtes publiques
+(avec `Retry-After`, voir « Anti-abus »).
 
 | Méthode et chemin | Accès | Effet |
 |---|---|---|
@@ -297,8 +298,59 @@ curl -s -X POST localhost:3001/api/v1/commerces/c-asian-home-paris/tirages -H 'C
   utilisé reste en SHA-256 jusqu'à son prochain usage. `v1` permettra de changer les paramètres plus tard sans ambiguïté.
 - **Sessions** : le PIN n'est plus envoyé à chaque requête par le front, seulement échangé une fois contre un jeton
   court (voir « Jetons de session » plus haut).
-- **Anti-bruteforce** (en mémoire) : 10 PIN faux en 10 minutes depuis la même IP → 429 pendant 10 minutes,
-  même avec le bon PIN (en-têtes et `POST /sessions` confondus). Remis à zéro à chaque redémarrage du serveur. Les routes publiques ne sont pas bloquées.
+- **Anti-bruteforce des PIN / codes** (P0-S2, persistant) : voir « Anti-abus » juste après.
+- **Routes publiques limitées** (P0-S2) : voir « Anti-abus » juste après.
+
+### Anti-abus (P0-S2, audit F-04 / F-06)
+
+**PIN et codes faux** — chaque échec (PIN admin, PIN commerce, code équipe ; en-têtes et `POST /sessions` confondus)
+compte sur deux compteurs, rangés dans la table `tentatives_auth` (migration 0006) :
+
+| Compteur | Seuil | Effet |
+|---|---|---|
+| `ip:<ip>` (tous secrets confondus) | 10 échecs sans pause de 10 min | cette IP : 429 + `Retry-After` sur tout PIN / code, même bon |
+| `cible:<commerceId>` / `cible:admin` (toutes IP) | 50 échecs sans pause de 10 min | plus aucun PIN / code accepté pour ce commerce (ou l'admin), d'où qu'il vienne |
+
+- Blocage de 10 min, **doublé à chaque nouvelle série** sans pause (20, 40 min…), plafonné à 24 h. Un accès réussi remet
+  à zéro le compteur de l'IP, pas celui de la cible (une attaque distribuée en cours reste comptée).
+- **Persistant** : la base fait foi, le blocage survit à un redémarrage ou un réveil Render. Le serveur garde un cache
+  en mémoire devant (1 instance). Les lignes inactives depuis 7 jours sont supprimées au passage.
+- Pourquoi un compteur par cible : 10 essais / IP ne suffisent pas contre un PIN à 4 chiffres attaqué depuis beaucoup
+  d'IP. Avec 50 essais puis 10, 20, 40 min… de blocage, le nombre d'essais par jour reste très faible. **Contrepartie
+  assumée** : un attaquant peut empêcher un commerce d'ouvrir une *nouvelle* session pendant le blocage ; les sessions
+  déjà ouvertes (tablette, caisse) continuent de marcher.
+- **Journal** : la table (clé, type de secret visé, nombre d'échecs, fin de blocage, dernier échec) et les logs Render :
+  `[securite] échec <portée> : ip:… n/10, cible:… n/50` à chaque échec, `[securite] BLOCAGE …` à chaque blocage. **Jamais
+  de PIN, de code ni de contact.** L'IP est journalisée (nécessaire pour l'enquête) ; elle disparaît de la table après 7 jours.
+- Table absente (0006 pas appliquée sous Supabase) ou base indisponible : comptage **en mémoire** (comme avant P0-S2, perdu
+  au redémarrage), un avertissement dans les logs, jamais de 500.
+
+**Routes publiques** — compteurs en mémoire par fenêtre fixe d'une minute (perdus au redémarrage, sans gravité à cette
+échelle) ; au-delà : 429 + `Retry-After` (secondes). Seuils dans `LIMITES_PUBLIQUES` (`server/app.ts`) :
+
+| Seuil | Valeur / min | Routes | Pourquoi cette valeur |
+|---|---|---|---|
+| `lectureParIp` | 120 | `GET /cartes/:id`, `POST /cartes/:id/lus`, `GET /commerces`, `GET /commerces/:id`, `GET /commerces/:id/menu` | plusieurs clients sur le wifi du restaurant (même IP), pages qui se rafraîchissent |
+| `lectureParCarte` | 30 | `GET /cartes/:id` + `POST /cartes/:id/lus` | une carte ouverte se recharge toutes les 10 s (6 / min) ; marge ×5 |
+| `inscriptionParIp` | 10 | `POST /commerces/:id/clients` sans PIN | une tablée qui s'inscrit d'un coup ; bloque l'inscription en masse |
+| `inscriptionParContact` | 5 | idem, par numéro / e-mail normalisé dans ce commerce | une personne ne s'inscrit qu'une fois ; freine l'énumération (F-12) |
+| `tirageParIp` | 20 | `POST /commerces/:id/tirages` | 1 tirage / jour / client ; laisse une salle pleine jouer |
+| `tirageParContact` | 5 | idem, par contact | réessais légitimes (réseau), pas plus |
+| `ficheClientParIp` | 10 | `POST …/clients/:id/profil`, `POST …/clients/:id/rattrapage` (demande du client) | rares par nature |
+| `sessionParIp` | 30 | `POST /sessions` | borne le coût scrypt ; toute l'équipe ouvre sa session depuis le même wifi en début de service |
+
+Les routes authentifiées (gérant, caisse, admin) ne sont **pas** limitées : la file hors ligne de la caisse doit pouvoir
+tout rejouer d'un coup. L'IP est celle de `X-Forwarded-For` derrière Render (`TRUST_PROXY`) ; si Render ne réécrit pas
+cet en-tête, un attaquant peut la falsifier (non vérifié, audit F-06) : les compteurs par carte, par contact et par
+cible tiennent quand même.
+
+### Migration 0006 (anti-bruteforce persistant) — à appliquer en production
+
+Facultative pour que tout marche (le serveur tolère son absence), nécessaire pour que les blocages survivent à un
+redémarrage. Supabase → **SQL Editor** → coller `supabase/migrations/0006_tentatives_auth.sql` → **Run** (rejouable).
+Vérifier : `select relname, relrowsecurity from pg_class where relname = 'tentatives_auth';` → 1 ligne, `true`.
+Aucun redéploiement nécessaire. Annulation : `0006_tentatives_auth.down.sql` (supprime la table : blocages en cours levés,
+sans effet sur les données métier).
 - Limite honnête : scrypt coûte ≈ 46 ms par essai (mesuré le 10/11/2026 sur la machine de dev) contre quelques µs pour
   l'ancien SHA-256, mais un PIN de 4 chiffres n'a que 10 000 valeurs : **si la base fuit**, il reste trouvable (≈ 8 min
   de calcul par PIN sur un cœur, au lieu d'une fraction de seconde). La protection principale reste que la base n'est
@@ -468,9 +520,9 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
 
 ## Limites honnêtes
 
-- SQLite : 1 seule instance (fichier local). Sous Supabase, plusieurs instances partagent la base, mais l'anti-bruteforce
-  reste en mémoire par instance.
-- Anti-bruteforce et blocages en mémoire : remis à zéro au redémarrage.
+- SQLite : 1 seule instance (fichier local). Sous Supabase, plusieurs instances partagent la base ; l'anti-bruteforce
+  y est relu au premier usage de chaque clé puis gardé en cache par instance (prévu pour 1 instance Render).
+- Limitation des routes publiques : en mémoire, remise à zéro au redémarrage (fenêtres d'une minute). Pas de CAPTCHA.
 - Pas de comptes utilisateurs : un PIN par commerce, partagé par l'équipe ; pas de journal « qui a fait quoi ».
 - Le client se reconnaît par son téléphone / e-mail sans vérification (pas de SMS de confirmation) : quelqu'un qui
   connaît le numéro d'un client voit son prénom et ses tampons, et peut jouer à sa place s'il a une visite validée ce jour-là.

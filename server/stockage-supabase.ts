@@ -18,11 +18,12 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createClient, type PostgrestError } from '@supabase/supabase-js'
 import type { Avis, Client, Commerce, EntreeJournal, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
 import { cleContact } from '../src/lib/fidelite.ts'
-import { ErreurConflit, ErreurMigrationManquante, type DemandeRattrapageTrace, type Pin, type Stockage } from './stockage.ts'
+import { ErreurConflit, ErreurMigrationManquante, type DemandeRattrapageTrace, type Pin, type Stockage, type TentativesAuth } from './stockage.ts'
 
 const TABLES_0003 = ['equipe', 'journal', 'menus']
 const TABLES_0004 = ['parrainages', 'demandes_rattrapage']
 const TABLES_0005 = ['sessions_revoquees']
+const TABLES_0006 = ['tentatives_auth']
 
 /** Lecture d'une table de la migration 0003 : vide tant que la migration n'est pas appliquée (l'existant continue de marcher). */
 async function ouVide<T>(lecture: Promise<T>, vide: T): Promise<T> {
@@ -78,6 +79,7 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
         if (TABLES_0003.includes(table)) throw new ErreurMigrationManquante(table)
         if (TABLES_0004.includes(table)) throw new ErreurMigrationManquante(table, '0004_programme.sql')
         if (TABLES_0005.includes(table)) throw new ErreurMigrationManquante(table, '0005_sessions_revoquees.sql')
+        if (TABLES_0006.includes(table)) throw new ErreurMigrationManquante(table, '0006_tentatives_auth.sql')
       }
       throw new Error(`Supabase (${table}) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
     }
@@ -229,6 +231,33 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     },
     sessionRevoquee: async (jti) =>
       (await ouVide(ok<unknown[]>('sessions_revoquees', sb.from('sessions_revoquees').select('jti').eq('jti', jti)), [])).length > 0,
+
+    // ---- Anti-bruteforce (0006_tentatives_auth.sql) : tant que la migration manque, le serveur compte en mémoire ----
+    tentativesAuth: async (cle) => {
+      const [l] = await ok<{ cle: string; portee: TentativesAuth['portee']; echecs: number; bloque_jusqu_a: string | null; derniere_tentative: string }[]>(
+        'tentatives_auth',
+        sb.from('tentatives_auth').select('cle,portee,echecs,bloque_jusqu_a,derniere_tentative').eq('cle', cle),
+      )
+      return l && { cle: l.cle, portee: l.portee, echecs: l.echecs, bloqueJusqua: l.bloque_jusqu_a, derniereTentative: l.derniere_tentative }
+    },
+    enregistrerTentativesAuth: async (t, purgerAvant) => {
+      try {
+        // Lignes inactives depuis `purgerAvant` (dernière tentative ET fin de blocage) : plus utiles, supprimées.
+        await ok('tentatives_auth', sb.from('tentatives_auth').delete().lt('derniere_tentative', purgerAvant).is('bloque_jusqu_a', null))
+        await ok('tentatives_auth', sb.from('tentatives_auth').delete().lt('derniere_tentative', purgerAvant).lt('bloque_jusqu_a', purgerAvant))
+      } catch (err) {
+        if (err instanceof ErreurMigrationManquante) throw err
+        console.warn(`[stockage] nettoyage des tentatives d’accès reporté : ${err instanceof Error ? err.message : err}`)
+      }
+      await ok(
+        'tentatives_auth',
+        sb.from('tentatives_auth').upsert(
+          { cle: t.cle, portee: t.portee, echecs: t.echecs, bloque_jusqu_a: t.bloqueJusqua, derniere_tentative: t.derniereTentative },
+          { onConflict: 'cle' },
+        ),
+      )
+    },
+    effacerTentativesAuth: async (cle) => void (await ok('tentatives_auth', sb.from('tentatives_auth').delete().eq('cle', cle))),
 
     /** PAS de « tout ou rien » (voir l'en-tête du fichier) : verrou optimiste sur les lignes lues pendant `fn`. */
     transaction: (fn) => versions.run(new Map(), async () => fn()),

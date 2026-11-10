@@ -32,10 +32,57 @@ import {
 } from '../src/lib/programme.ts'
 import { problemesApparence } from '../src/lib/apparence.ts'
 import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
-import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type Pin, type Stockage } from './stockage.ts'
+import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications } from './notifications/index.ts'
+
+// ---------- Seuils anti-abus (P0-S2) — à ajuster ici ; justification dans server/README.md ----------
+
+/**
+ * Routes publiques : nombre maximal de requêtes par fenêtre de FENETRE_PUBLIQUE_MS (au-delà : 429 + Retry-After).
+ * Généreux exprès : plusieurs clients partagent souvent la même IP (wifi du restaurant, 4G), la page de jeu et la
+ * tablette du gérant interrogent le serveur toutes les 10 s. Les routes authentifiées (caisse, gérant) ne sont pas
+ * concernées : la file hors ligne de la caisse peut rejouer autant d'actions qu'il faut.
+ */
+export const LIMITES_PUBLIQUES = {
+  /** GET /cartes/:id, POST /cartes/:id/lus, GET /commerces, GET /commerces/:id, GET /commerces/:id/menu — par IP. */
+  lectureParIp: 120,
+  /** GET /cartes/:id + POST /cartes/:id/lus — par carte (une page de jeu ouverte = 6 lectures / min). */
+  lectureParCarte: 30,
+  /** POST /commerces/:id/clients sans PIN — par IP, et par contact (téléphone / e-mail normalisé) dans ce commerce. */
+  inscriptionParIp: 10,
+  inscriptionParContact: 5,
+  /** POST /commerces/:id/tirages — par IP, et par contact dans ce commerce. */
+  tirageParIp: 20,
+  tirageParContact: 5,
+  /** POST /commerces/:id/clients/:clientId/profil et …/rattrapage (demande du client) — par IP. */
+  ficheClientParIp: 10,
+  /**
+   * POST /sessions (échange PIN → jeton) — par IP, en plus du blocage sur PIN faux ci-dessous. Borne le coût scrypt ;
+   * large car toute l'équipe ouvre sa session depuis le même wifi en début de service.
+   */
+  sessionParIp: 30,
+}
+export type LimitesPubliques = typeof LIMITES_PUBLIQUES
+const FENETRE_PUBLIQUE_MS = 60_000
+
+/**
+ * PIN / codes faux (anti-bruteforce, persistant en base : table `tentatives_auth`). Deux compteurs par échec :
+ * - `ip:<ip>` (tous secrets confondus) : MAX_ECHECS_IP échecs sans pause de FENETRE_ECHECS_MS → cette IP est bloquée ;
+ * - `cible:<commerceId>` ou `cible:admin` (toutes IP confondues, contre l'attaque distribuée) : MAX_ECHECS_CIBLE échecs
+ *   → plus aucun PIN / code accepté pour cette cible pendant le blocage (les sessions déjà ouvertes continuent).
+ * Blocage de BLOCAGE_INITIAL_MS, doublé à chaque nouvelle série d'échecs (progressif), plafonné à BLOCAGE_MAX_MS.
+ * Un accès réussi remet à zéro le compteur de son IP (pas celui de la cible : une attaque distribuée en cours continue
+ * d'être comptée même si le gérant se connecte entre-temps).
+ */
+const MAX_ECHECS_IP = 10
+const MAX_ECHECS_CIBLE = 50
+const FENETRE_ECHECS_MS = 10 * 60_000
+const BLOCAGE_INITIAL_MS = 10 * 60_000
+const BLOCAGE_MAX_MS = 24 * 3600_000
+/** Lignes de `tentatives_auth` sans activité depuis ce délai (ni échec, ni blocage en cours) : supprimées au passage. */
+const CONSERVATION_TENTATIVES_MS = 7 * 24 * 3600_000
 
 export interface OptionsServeur {
   /** Fichier SQLite (créé au besoin) : stockage utilisé quand Supabase n'est pas configuré. */
@@ -64,6 +111,8 @@ export interface OptionsServeur {
   notifications?: ConfigNotifications
   /** Secret de signature des jetons de session (SESSION_SECRET) ; absent = POST /sessions répond 503, le PIN en en-tête reste accepté. */
   secretSession?: string
+  /** Seuils des routes publiques, si différents de LIMITES_PUBLIQUES (tests). */
+  limitesPubliques?: Partial<LimitesPubliques>
   /** Horloge injectable (tests). */
   maintenant?: () => Date
 }
@@ -161,38 +210,141 @@ export function lireJeton(secret: string, jeton: string): ChargeSession | null {
   }
 }
 
-// ---------- Anti-bruteforce (en mémoire) ----------
+// ---------- Anti-abus des routes publiques (en mémoire, fenêtres fixes d'une minute) ----------
 
-const FENETRE = 10 * 60 * 1000
-const MAX_ECHECS = 10
-
-function creerLimiteur() {
-  const echecs = new Map<string, number[]>()
-  const bloques = new Map<string, number>()
-  const nettoyage = setInterval(() => {
-    const t = Date.now()
-    for (const [ip, fin] of bloques) if (fin <= t) bloques.delete(ip)
-    for (const [ip, liste] of echecs) if (liste.every((x) => t - x > FENETRE)) echecs.delete(ip)
-  }, FENETRE)
-  nettoyage.unref()
+/** Compteurs par clé (`<catégorie>:<ip>`, `carte:<id>`, `inscription:<commerce>:<contact>`…) ; perdus au redémarrage, sans gravité à la minute. */
+function creerCompteursPublics(maintenant: () => Date) {
+  const fenetres = new Map<string, { debut: number; n: number }>()
   return {
-    verifier(ip: string) {
-      const fin = bloques.get(ip)
-      if (fin && fin > Date.now()) {
-        const s = Math.ceil((fin - Date.now()) / 1000)
+    /** Compte une requête ; au-delà de `max` dans la fenêtre en cours → 429 avec Retry-After (secondes restantes). */
+    consommer(cle: string, max: number, motif: string) {
+      const t = maintenant().getTime()
+      let f = fenetres.get(cle)
+      if (!f || t - f.debut >= FENETRE_PUBLIQUE_MS || t < f.debut) {
+        f = { debut: t, n: 0 }
+        fenetres.set(cle, f)
+      }
+      f.n++
+      if (f.n > max) {
+        const s = Math.max(1, Math.ceil((f.debut + FENETRE_PUBLIQUE_MS - t) / 1000))
+        throw new ErreurHttp(429, `${motif} Réessayez dans ${s} s.`, { 'Retry-After': String(s) })
+      }
+    },
+    purger() {
+      const t = maintenant().getTime()
+      for (const [cle, f] of fenetres) if (t - f.debut >= FENETRE_PUBLIQUE_MS || t < f.debut) fenetres.delete(cle)
+    },
+  }
+}
+
+// ---------- Anti-bruteforce des PIN / codes (persistant : table `tentatives_auth`, cache en mémoire devant) ----------
+
+interface EtatAuth {
+  echecs: number
+  /** ms epoch ; 0 = jamais. */
+  bloqueJusqua: number
+  derniere: number
+}
+
+/**
+ * La base fait foi : à la 1re vérification d'une clé, son état est relu en base (un redémarrage ou un réveil Render ne
+ * remet donc pas le blocage à zéro), puis gardé en mémoire — Render ne fait tourner qu'une instance, et tout échec passe
+ * par ici. Base indisponible ou table absente (migration 0006 pas appliquée sous Supabase) : repli sur la mémoire seule,
+ * jamais de 500.
+ */
+function creerLimiteurAuth(st: Stockage, maintenant: () => Date) {
+  const etats = new Map<string, EtatAuth>()
+  let averti = false
+
+  function avertir(e: unknown) {
+    if (averti) return
+    averti = true
+    console.warn(`[securite] tentatives d’accès comptées en mémoire seulement (perdues au redémarrage) : ${e instanceof Error ? e.message : e}`)
+  }
+
+  async function charger(cle: string): Promise<EtatAuth> {
+    const connu = etats.get(cle)
+    if (connu) return connu
+    let lu: EtatAuth = { echecs: 0, bloqueJusqua: 0, derniere: 0 }
+    try {
+      const t = await st.tentativesAuth(cle)
+      if (t) lu = { echecs: t.echecs, bloqueJusqua: t.bloqueJusqua ? Date.parse(t.bloqueJusqua) || 0 : 0, derniere: Date.parse(t.derniereTentative) || 0 }
+    } catch (e) {
+      avertir(e)
+    }
+    // Deux chargements simultanés de la même clé : le premier arrivé fait foi.
+    if (!etats.has(cle)) etats.set(cle, lu)
+    return etats.get(cle)!
+  }
+
+  async function enregistrerEchec(cle: string, max: number, portee: PorteeAuth): Promise<EtatAuth> {
+    const e = await charger(cle)
+    const t = maintenant().getTime()
+    // Pause de FENETRE_ECHECS_MS depuis le dernier échec (ou la fin du dernier blocage) : on repart de zéro.
+    if (t - Math.max(e.derniere, e.bloqueJusqua) > FENETRE_ECHECS_MS) e.echecs = 0
+    e.echecs++
+    e.derniere = t
+    if (e.echecs % max === 0) {
+      const duree = Math.min(BLOCAGE_MAX_MS, BLOCAGE_INITIAL_MS * 2 ** (e.echecs / max - 1))
+      e.bloqueJusqua = t + duree
+      console.warn(`[securite] BLOCAGE ${cle} (portée ${portee}) : ${e.echecs} échecs → ${Math.round(duree / 60_000)} min`)
+    }
+    try {
+      await st.enregistrerTentativesAuth(
+        {
+          cle,
+          portee,
+          echecs: e.echecs,
+          bloqueJusqua: e.bloqueJusqua ? new Date(e.bloqueJusqua).toISOString() : null,
+          derniereTentative: new Date(t).toISOString(),
+        },
+        new Date(t - CONSERVATION_TENTATIVES_MS).toISOString(),
+      )
+    } catch (err) {
+      avertir(err)
+    }
+    return e
+  }
+
+  return {
+    /** 429 si l'une des clés est bloquée (Retry-After = secondes restantes du plus long blocage). */
+    async verifier(cles: string[]) {
+      const t = maintenant().getTime()
+      let fin = 0
+      for (const cle of cles) fin = Math.max(fin, (await charger(cle)).bloqueJusqua)
+      if (fin > t) {
+        const s = Math.ceil((fin - t) / 1000)
         throw new ErreurHttp(429, `Trop de PIN incorrects. Réessayez dans ${Math.ceil(s / 60)} min.`, { 'Retry-After': String(s) })
       }
     },
-    echec(ip: string) {
-      const t = Date.now()
-      const liste = (echecs.get(ip) ?? []).filter((x) => t - x <= FENETRE)
-      liste.push(t)
-      if (liste.length >= MAX_ECHECS) {
-        bloques.set(ip, t + FENETRE)
-        echecs.delete(ip)
-      } else echecs.set(ip, liste)
+    /**
+     * Un échec de plus sur chaque clé ; bloque à chaque série de `max` (durée doublée à chaque série). Journal serveur :
+     * une ligne par échec, une par blocage — jamais de PIN, de code ni de contact (clés, portée, compteurs).
+     */
+    async echec(cles: [cle: string, max: number][], portee: PorteeAuth) {
+      const compteurs: string[] = []
+      for (const [cle, max] of cles) {
+        const e = await enregistrerEchec(cle, max, portee)
+        compteurs.push(`${cle} ${e.echecs}/${max}`)
+      }
+      console.info(`[securite] échec ${portee} : ${compteurs.join(', ')}`)
     },
-    arreter: () => clearInterval(nettoyage),
+    /** Accès réussi : compteur de cette clé remis à zéro (rien à écrire s'il l'était déjà). */
+    async succes(cle: string) {
+      const e = await charger(cle)
+      if (!e.echecs && !e.bloqueJusqua) return
+      etats.set(cle, { echecs: 0, bloqueJusqua: 0, derniere: 0 })
+      try {
+        await st.effacerTentativesAuth(cle)
+      } catch (err) {
+        avertir(err)
+      }
+    },
+    /** Oublie de la mémoire les clés sans blocage en cours ni échec récent (relues en base au besoin). */
+    purger() {
+      const t = maintenant().getTime()
+      for (const [cle, e] of etats) if (e.bloqueJusqua <= t && t - e.derniere > FENETRE_ECHECS_MS) etats.delete(cle)
+    },
   }
 }
 
@@ -480,8 +632,15 @@ export async function creerServeur(o: OptionsServeur) {
     await st.fermer()
     throw e
   }
-  const limiteur = creerLimiteur()
   const maintenant = o.maintenant ?? (() => new Date())
+  const limiteur = creerLimiteurAuth(st, maintenant)
+  const compteurs = creerCompteursPublics(maintenant)
+  const limites: LimitesPubliques = { ...LIMITES_PUBLIQUES, ...o.limitesPubliques }
+  const nettoyage = setInterval(() => {
+    compteurs.purger()
+    limiteur.purger()
+  }, FENETRE_PUBLIQUE_MS)
+  nettoyage.unref()
   // En mémoire seulement : haché directement en scrypt à chaque démarrage.
   const adminPin = await hacherPin(o.adminPin)
   const notifications = creerNotifications(o.notifications)
@@ -494,6 +653,15 @@ export async function creerServeur(o: OptionsServeur) {
 
   const ipDe = (req: IncomingMessage) =>
     (o.derriereProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()) || req.socket.remoteAddress || '?'
+
+  // ---- Anti-abus des routes publiques (seuils : LIMITES_PUBLIQUES) ----
+  const TROP = 'Trop de requêtes.'
+  const limiterIp = (req: IncomingMessage, categorie: string, max: number) => compteurs.consommer(`${categorie}:${ipDe(req)}`, max, TROP)
+  /** Par contact (téléphone / e-mail normalisé) dans un commerce ; contact illisible : rien à compter (la route répondra 400). */
+  function limiterContact(categorie: string, commerceId: string, contactSaisi: unknown, max: number) {
+    const contact = typeof contactSaisi === 'string' ? analyserContact(contactSaisi) : null
+    if (contact) compteurs.consommer(`${categorie}:${commerceId}:${cleContact(contact)}`, max, 'Trop de tentatives pour ce contact.')
+  }
 
   const enTete = (req: IncomingMessage, nom: string) => {
     const v = req.headers[nom]
@@ -511,26 +679,37 @@ export async function creerServeur(o: OptionsServeur) {
 
   // ---- Vérification des secrets (PIN admin, PIN commerce, code équipe) : limiteur anti-bruteforce + re-hachage ----
 
+  // Clés du limiteur : l'IP (tous secrets confondus) et la cible (commerce ou admin, toutes IP confondues).
+  const cleIp = (ip: string) => `ip:${ip}`
+  const cleCible = (commerceId?: string) => `cible:${commerceId ?? 'admin'}`
+  const cles = (ip: string, commerceId?: string) => [cleIp(ip), cleCible(commerceId)]
+  const echecs = (ip: string, commerceId?: string): [string, number][] => [
+    [cleIp(ip), MAX_ECHECS_IP],
+    [cleCible(commerceId), MAX_ECHECS_CIBLE],
+  ]
+
   async function verifierPinAdmin(ip: string, pin: string) {
-    limiteur.verifier(ip)
+    await limiteur.verifier(cles(ip))
     if (!(await pinCorrect(pin, adminPin)).ok) {
-      limiteur.echec(ip)
+      await limiteur.echec(echecs(ip), 'admin')
       throw err(401, 'PIN admin incorrect.')
     }
+    await limiteur.succes(cleIp(ip))
   }
 
   async function verifierPinCommerce(ip: string, commerceId: string, pin: string) {
-    limiteur.verifier(ip)
+    await limiteur.verifier(cles(ip, commerceId))
     const r = await pinCorrect(pin, await st.pin(commerceId))
     if (!r.ok) {
-      limiteur.echec(ip)
+      await limiteur.echec(echecs(ip, commerceId), 'commerce')
       throw err(401, 'PIN commerçant incorrect.')
     }
+    await limiteur.succes(cleIp(ip))
     if (r.rehacher) await rehacher(pin, (p) => st.majPin(commerceId, p))
   }
 
   async function verifierCodeEquipe(ip: string, commerceId: string, code: string): Promise<MembreEquipe> {
-    limiteur.verifier(ip)
+    await limiteur.verifier(cles(ip, commerceId))
     let trouve: { membre: MembreEquipe; rehacher: boolean } | undefined
     if (CODE_EQUIPE.test(code)) {
       const membres = await st.membres(commerceId)
@@ -540,9 +719,10 @@ export async function creerServeur(o: OptionsServeur) {
     }
     if (!trouve) {
       if (!(await schemaCartiz())) throw new ErreurMigrationManquante('equipe')
-      limiteur.echec(ip)
+      await limiteur.echec(echecs(ip, commerceId), 'equipe')
       throw err(401, 'Code équipe incorrect.')
     }
+    await limiteur.succes(cleIp(ip))
     if (trouve.rehacher) await rehacher(code, (p) => st.majMembre(trouve.membre, p))
     return trouve.membre
   }
@@ -868,6 +1048,8 @@ export async function creerServeur(o: OptionsServeur) {
     if (ressource === 'cartes' && id && !sous && m === 'GET') {
       // PUBLIC (ajout V2) : la carte vue par le client (#/carte/<clientId>) et l'état de son jeu du jour.
       // Mêmes informations que POST /clients en public : jamais de téléphone, d'e-mail ni de code gagnant.
+      limiterIp(req, 'lecture', limites.lectureParIp)
+      compteurs.consommer(`carte:${id}`, limites.lectureParCarte, TROP)
       for (const c of await st.commerces()) {
         let client = await st.client(c.id, id)
         if (!client) continue
@@ -904,6 +1086,8 @@ export async function creerServeur(o: OptionsServeur) {
     }
     if (ressource === 'cartes' && id && sous === 'lus' && m === 'POST') {
       // PUBLIC : le client marque ses messages comme lus (même niveau d'accès que la lecture de sa carte).
+      limiterIp(req, 'lecture', limites.lectureParIp)
+      compteurs.consommer(`carte:${id}`, limites.lectureParCarte, TROP)
       for (const c of await st.commerces()) {
         if (!(await st.client(c.id, id))) continue
         exigerActif(c)
@@ -917,11 +1101,17 @@ export async function creerServeur(o: OptionsServeur) {
       throw err(404, 'Carte de fidélité introuvable.')
     }
     if (ressource === 'sessions' && !id) {
-      if (m === 'POST') return ouvrirSession(req)
+      if (m === 'POST') {
+        limiterIp(req, 'session', limites.sessionParIp)
+        return ouvrirSession(req)
+      }
       if (m === 'DELETE') return fermerSession(req)
       throw err(405, 'Méthode non autorisée.')
     }
     if (ressource !== 'commerces') throw err(404, 'Route inconnue.')
+
+    // Lectures publiques d'un commerce (liste, fiche, menu) : par IP, avant toute lecture en base.
+    if (m === 'GET' && (!sous || (sous === 'menu' && !sousId))) limiterIp(req, 'lecture', limites.lectureParIp)
 
     if (!id) {
       if (m === 'GET') return { json: { commerces: (await st.commerces()).map(commercePublic) } }
@@ -989,8 +1179,12 @@ export async function creerServeur(o: OptionsServeur) {
       // Inscription simplifiée (recherche CX §1) : téléphone seul obligatoire, prénom optionnel, aucun mot de passe.
       const commercant = aUnPin(req)
       if (commercant) await exigerCommercant(req, id)
-      else exigerActif(commerce)
+      else {
+        exigerActif(commerce)
+        limiterIp(req, 'inscription', limites.inscriptionParIp)
+      }
       const corps = await lireCorps(req)
+      if (!commercant) limiterContact('inscription', id, corps.contact, limites.inscriptionParContact)
       const prenom = texte(corps.prenom ?? '', 'prenom', 40)
       const { client, existant } = await st.transaction(() => inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain))
       return { statut: existant ? 200 : 201, json: { client: commercant ? client : cartePublique(client), existant } }
@@ -1151,6 +1345,7 @@ export async function creerServeur(o: OptionsServeur) {
 
     if (sous === 'clients' && sousId && action === 'profil' && m === 'POST') {
       exigerActif(commerce)
+      limiterIp(req, 'fiche', limites.ficheClientParIp)
       const corps = await lireCorps(req)
       const inconnus = Object.keys(corps).filter((k) => k !== 'anniversaire' && k !== 'platPrefere')
       if (inconnus.length) throw err(400, `Champ non modifiable : ${inconnus.join(', ')}.`)
@@ -1175,6 +1370,7 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'clients' && sousId && action === 'rattrapage' && !extra && m === 'POST') {
       // Public (depuis la carte du client) : le commerçant valide ou refuse ensuite.
       exigerActif(commerce)
+      limiterIp(req, 'fiche', limites.ficheClientParIp)
       const corps = await lireCorps(req)
       const dateVisite = new Date(typeof corps.date === 'string' ? corps.date : '')
       const montant = typeof corps.montantCentimes === 'number' ? corps.montantCentimes : NaN
@@ -1379,7 +1575,9 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'tirages' && !sousId && m === 'POST') {
       // PUBLIC : tout est décidé ici (visite du jour, 1 tirage par jour, lot tiré) — rien ne vient du navigateur.
       exigerActif(commerce)
+      limiterIp(req, 'tirage', limites.tirageParIp)
       const corps = await lireCorps(req)
+      limiterContact('tirage', id, corps.contact, limites.tirageParContact)
       const prenom = corps.prenom == null ? '' : texte(corps.prenom, 'prenom', 40)
       const dejaJoue = 'Vous avez déjà tourné la roue aujourd’hui. Revenez lors de votre prochaine visite !'
       const resultat = await st.transaction(async () => {
@@ -1516,7 +1714,7 @@ export async function creerServeur(o: OptionsServeur) {
   return {
     serveur,
     async fermer() {
-      limiteur.arreter()
+      clearInterval(nettoyage)
       serveur.closeAllConnections()
       await new Promise<void>((ok) => serveur.close(() => ok()))
       await st.fermer()
