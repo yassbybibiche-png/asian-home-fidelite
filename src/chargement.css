@@ -1,0 +1,66 @@
+/*
+ * Écran de chargement initial (P0-U1), affiché par index.html avant que le JS ne charge.
+ * CSS pur, sans JS : React remplace le contenu de #root au montage. Feuille liée, pas de bloc de style inline (CSP style-src 'self').
+ * DA nocturne : noir #111111, doré #c9a227.
+ */
+.chargement-initial {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem 1.5rem;
+  background: #111111;
+  color: #c9a227;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  text-align: center;
+}
+
+.chargement-initial__logo {
+  width: 96px;
+  height: 96px;
+  border-radius: 1rem;
+  object-fit: cover;
+  animation: chargement-pulse 1.6s ease-in-out infinite;
+}
+
+.chargement-initial__texte {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+/* Message rassurant si le chargement dure (réseau lent) : apparaît après 6 s, sans JS. */
+.chargement-initial__lent {
+  margin: 0;
+  max-width: 20rem;
+  font-size: 0.9rem;
+  color: rgb(255 255 255 / 0.75);
+  opacity: 0;
+  animation: chargement-apparition 0.4s ease-out 6s forwards;
+}
+
+@keyframes chargement-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes chargement-apparition {
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chargement-initial__logo {
+    animation: none;
+  }
+}
