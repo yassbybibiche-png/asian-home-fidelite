@@ -29,7 +29,7 @@ export default function Confidentialite() {
       ([commerce, sante]) => {
         if (annule) return
         const i = sante?.integrations
-        setDonnees({ commerce, prestataires: sante ? { sms: !!i?.sms, email: !!i?.email, googleWallet: !!i?.googleWallet } : null })
+        setDonnees({ commerce, prestataires: sante ? { sms: !!i?.sms, email: !!i?.email, googleWallet: !!i?.googleWallet, smsPrestataire: i?.smsPrestataire } : null })
         setErreur(null)
       },
       (e) => !annule && setErreur(e instanceof ErreurApi && e.statut === 404 ? 'introuvable' : 'horsLigne'),

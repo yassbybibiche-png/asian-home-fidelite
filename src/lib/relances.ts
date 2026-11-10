@@ -33,6 +33,8 @@ export function libelleStatutEnvoi(s: EnvoiRelance['statut']): string {
       return 'Erreur du prestataire — non envoyé'
     case 'non_branche':
       return 'Non branché (501) — rien envoyé'
+    case 'test':
+      return 'Test — rien envoyé'
   }
 }
 

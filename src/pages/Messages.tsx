@@ -17,6 +17,7 @@ const COULEUR_STATUT: Record<EnvoiRelance['statut'], string> = {
   refuse: 'bg-gray-200 text-gray-800',
   erreur: 'bg-red-100 text-red-900',
   non_branche: 'bg-gray-200 text-gray-800',
+  test: 'bg-violet-100 text-violet-900',
 }
 
 /** Journal des envois de relances (qui, quand, modèle, canal, statut) — partagé avec la fiche client. */
@@ -58,13 +59,13 @@ function RelancesSmsEmail() {
   const { api, avecPin } = useStore()
   const { commerce, envois } = useDonneesCommerce()
   const { executer, enCours, erreur } = useAction()
-  const [statut, setStatut] = useState<{ sms?: boolean; email?: boolean; migration?: boolean } | null>(null)
+  const [statut, setStatut] = useState<{ sms?: boolean; email?: boolean; migration?: boolean; modeTest?: boolean } | null>(null)
   const regles = commerce.relancesAuto ?? { inactif: false, anniversaire: false }
 
   useEffect(() => {
     if (!api) return
     api.sante().then(
-      (s) => setStatut({ sms: !!s.integrations?.sms, email: !!s.integrations?.email, migration: s.migrations?.relances }),
+      (s) => setStatut({ sms: !!s.integrations?.sms, email: !!s.integrations?.email, migration: s.migrations?.relances, modeTest: !!s.integrations?.modeTest }),
       () => setStatut(null),
     )
   }, [api])
@@ -81,7 +82,7 @@ function RelancesSmsEmail() {
         ))}
       </ul>
       <p className="text-sm text-gray-600">
-        {MENTION_ENVOI}. Le client se désinscrit en répondant STOP (SMS) ou par le lien de l’e-mail ; vous pouvez aussi retirer son consentement sur sa fiche.
+        {MENTION_ENVOI}. Le client se désinscrit par le lien de l’e-mail, en répondant STOP au SMS quand il vient d’un numéro, ou auprès du commerçant ; vous pouvez aussi retirer son consentement sur sa fiche.
       </p>
       <fieldset className="space-y-2 border-t border-gray-100 pt-3">
         <legend className="etiquette">Relances automatiques (à l’ouverture du tableau de bord, une fois par jour)</legend>

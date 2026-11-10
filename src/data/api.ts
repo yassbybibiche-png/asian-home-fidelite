@@ -242,7 +242,7 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
         ok: boolean
         version: string
         demo: boolean
-        integrations?: { sms?: boolean; email?: boolean; googleBusinessProfile?: boolean; googleWallet?: boolean }
+        integrations?: { sms?: boolean; email?: boolean; googleBusinessProfile?: boolean; googleWallet?: boolean; smsPrestataire?: string; modeTest?: boolean }
         migrations?: { relances?: boolean }
       }>,
 
@@ -359,7 +359,7 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
       requete('POST', `/commerces/${enc(commerceId)}/purge`, { acces, corps: { clientIds } }) as Promise<{ supprimes: number; ignores: number }>,
     /** Relance SMS / e-mail (P1-B3) : 501 sans prestataire, 409 sans consentement / déjà envoyée aujourd'hui. */
     relancer: (commerceId: string, acces: Acces, clientId: string, demande: { modele: ModeleRelance; canal?: 'sms' | 'email' }) =>
-      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/relance`, { acces, corps: demande }) as Promise<{ envoye: boolean; canal: 'sms' | 'email'; envoi: EnvoiRelance }>,
+      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/relance`, { acces, corps: demande }) as Promise<{ envoye: boolean; test?: boolean; canal: 'sms' | 'email'; envoi: EnvoiRelance }>,
     /** Décision du commerçant sur une visite oubliée : validation = 1 visite + points ; refus = demande classée. */
     deciderRattrapage: async (commerceId: string, acces: Acces, clientId: string, demandeId: string, decision: 'valider' | 'refuser') =>
       ((await requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/rattrapage/${enc(demandeId)}`, { acces, corps: { decision } })) as { client: Client }).client,

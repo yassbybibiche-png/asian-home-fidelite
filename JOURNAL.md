@@ -757,3 +757,63 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   0 catégorie) — c'est le repli public qui affiche les 39 plats sur #/menu en attendant que le commerçant
   enregistre son menu avec les prix. Rendu visuel réel à 390 px sur téléphone non vérifié (pas de navigateur
   sur la VM) : le repli et l'interactivité sont couverts par les tests + le serveur local, pas par un rendu.
+
+## 10/11/2026 — Brancher Brevo (SMS + e-mail, lot « Brancher Brevo »)
+- **Fournisseur choisi : Brevo** (SMS + e-mail, une seule clé API). L'adaptateur e-mail existait déjà
+  (`server/notifications/brevo.ts`, `v3/smtp/email`) et était bien branché de bout en bout (route relance →
+  journal `envois` → `/sante email`) : vérifié, rien à corriger de ce côté.
+- **SMS via Brevo (nouveau)** : `adaptateurBrevoSms` (`server/notifications/brevo.ts`) —
+  `POST https://api.brevo.com/v3/transactionalSMS/send` (route actuelle de la doc Brevo, lue le 10/11/2026 ;
+  l'ancienne `/v3/transactionalSMS/sms` nommée dans le brief est dépréciée), corps
+  `{ sender, recipient, content, type: 'transactional', tag: 'fidelite' }`, réponse `{ messageId: <nombre> }`.
+  Variables : `BREVO_API_KEY` (même clé que l'e-mail) + `BREVO_SMS_SENDER` (ex. `ASIANHOME`, alphanumérique
+  1–11 car. ou numérique 12–15 chiffres, validé par `expediteurSmsValide` ; invalide = SMS non configuré, 501).
+- **Priorité SMS** (`server/notifications/index.ts`) : Brevo SMS si configuré, sinon Twilio en repli, sinon 501.
+  `configDepuisEnv` lit les 4 variables Brevo. Nouveau `prestataire(canal)` ; `/sante` renvoie en plus
+  `smsPrestataire: 'Brevo' | 'Twilio'` quand le SMS est configuré (la page de confidentialité nomme ainsi le
+  bon sous-traitant : `src/lib/rgpd.ts`, `src/pages/Confidentialite.tsx`).
+- **STOP** : la mention STOP en fin de SMS fait basculer le message en `marketing` côté Brevo (doc Brevo) ;
+  avec un expéditeur alphanumérique le client ne peut pas répondre au SMS — pas de webhook Brevo branché,
+  la route `stop-sms` répond 501 explicite quand les SMS partent via Brevo (Twilio inchangé). Le consentement
+  de l'app reste la source de vérité (retrait sur la fiche client, lien de désinscription des e-mails, ou
+  auprès du commerçant). Limite documentée dans `docs/BREVO.md` §6 et `server/README.md`.
+- **Textes du front mis à jour** (`src/lib/integrations.ts` : `MENTION_ENVOI`, `etatRelances`,
+  `MENTIONS_RGPD` ; `src/lib/rgpd.ts` : page de confidentialité ; `src/pages/Messages.tsx`,
+  `src/pages/Plus.tsx`) : Brevo nommé pour les SMS, Twilio en repli ; désinscription par « réponse STOP au SMS
+  quand il vient d'un numéro ».
+- **Docs** : `docs/BREVO.md` (compte gratuit, clé API, validation de l'expéditeur e-mail, expéditeur SMS,
+  coûts relevés le 10/11/2026 — e-mail gratuit 300/j, SMS France ~0,045 € HT à confirmer sur la page tarifs —,
+  4 variables Render exactes, procédure de test : e-mail de bienvenue vers yassbybibiche@gmail.com, journal des
+  envois, `/sante`, dépannage) ; `server/README.md` (§ « SMS / e-mail », variables, routes `/cartes/retrouver`,
+  `/stop-sms`, `/sante`) ; `.env.example` (bloc Brevo commenté). `render.yaml` **non touché** (secrets posés à
+  la main dans Render).
+- **Mode test (consigne du 10/11/2026 ~22h14 : AUCUN envoi réel pendant le développement)** : `BREVO_MODE_TEST=1`
+  — e-mail en sandbox Brevo (`X-Sib-Sandbox: drop`, doc « Using sandbox mode » lue le 10/11/2026 : 201 +
+  `messageId`, rien livré, rien journalisé chez Brevo), SMS simulé (Brevo ne propose pas de sandbox SMS :
+  aucun appel réseau), Twilio simulé lui aussi (aucun vrai SMS par la porte de derrière). Journal des envois
+  avec le nouveau statut `test` (« Test — rien envoyé », `src/types.ts`, `libelleStatutEnvoi`), route relance →
+  200 `{ envoye: false, test: true }`, `/sante` → `integrations.modeTest: true`, écran Messages : ligne
+  « Mode test Brevo actif », fiche client : annonce « ✓ Mode test — rien envoyé », avertissement au démarrage
+  du serveur. La simulation n'occupe pas le créneau anti-doublon du jour (index partiel sur `en_cours` /
+  `envoye`, vérifié par un test qui a d'abord échoué sur l'hypothèse inverse) : un vrai envoi reste possible
+  le même jour une fois le mode test coupé. Tests : `tests/brevo-sms.test.ts` (sandbox, simulation, config),
+  `tests/relances-p1-b3.test.ts` (describe « Mode test Brevo » : SMS simulé, e-mail sandbox, repli Twilio
+  simulé, tournée auto simulée, `/sante`), `tests/relances-ui-p1-b3.test.ts` (ligne mode test, libellé).
+- **Règles dures respectées** : aucun envoi sans consentement, **aucun envoi réel du tout (ni SMS, ni e-mail,
+  même pas l'e-mail de test à yassbybibiche@gmail.com)**, aucun secret dans le code ni dans Git, aucun appel
+  réseau réel dans les tests (`fetch` injecté), tirage serveur et « 1 tirage/jour après visite validée » intacts
+  (suite complète verte).
+- **Tests** : `tests/brevo-sms.test.ts` (nouveau, 7 tests : config, expéditeur, requête, `messageId` numérique,
+  erreurs, priorité Brevo > Twilio) + 4 tests de bout en bout dans `tests/relances-p1-b3.test.ts` (relance SMS
+  Brevo, priorité, repli Twilio, erreur 502, `stop-sms` 501 Brevo, `/sante`) + mises à jour
+  (`integrations-v3`, `relances-ui-p1-b3`, `rgpd-p1-b6`). `npm test` **798/798** (788 avant, +10),
+  `npx tsc -p .` propre, `npm run build` OK.
+- **Vérification locale avant push** : serveur local avec fausses variables Brevo → `/sante`
+  `integrations { sms: true, email: true, smsPrestataire: 'Brevo' }`, migrations toutes `true`.
+- **Non vérifié** : aucun envoi réel (aucun compte Brevo, aucune clé) ; appel direct à `api.brevo.com`
+  depuis la VM impossible (timeout réseau sortant, 60 s) — la route `/transactionalSMS/send` et le sandbox
+  e-mail viennent de la doc officielle Brevo lue le 10/11/2026, pas d'un appel réel. **Reste à faire côté
+  navigateur** : compte Brevo, clé API, validation de l'expéditeur e-mail, achat de crédits SMS,
+  5 variables Render (dont `BREVO_MODE_TEST=1` tant que la consigne « mode test uniquement » s'applique),
+  vérification en mode test (voir `docs/BREVO.md` §5 A). Le test d'envoi réel se fera plus tard, hors
+  développement, avec l'accord explicite de l'utilisateur (`docs/BREVO.md` §5 B).

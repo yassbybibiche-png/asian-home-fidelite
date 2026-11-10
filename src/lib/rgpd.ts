@@ -169,6 +169,8 @@ export interface Prestataires {
   sms?: boolean
   email?: boolean
   googleWallet?: boolean
+  /** Nom du prestataire SMS effectif (`Brevo` / `Twilio`), envoyé par `/sante` quand le SMS est configuré. */
+  smsPrestataire?: string
 }
 
 export interface SectionPolitique {
@@ -187,7 +189,8 @@ export function politiqueConfidentialite(
   const duree = libelleDuree(dureeConservationMois(commerce))
   const nommes = prestataires
     ? [
-        ...(prestataires.sms ? ['Twilio (envoi des SMS de relance)'] : []),
+        // Le serveur envoie toujours le nom quand le SMS est configuré ; repli = le prestataire choisi (Brevo).
+        ...(prestataires.sms ? [`${prestataires.smsPrestataire ?? 'Brevo'} (envoi des SMS de relance)`] : []),
         ...(prestataires.email ? ['Brevo (envoi des e-mails de relance)'] : []),
         ...(prestataires.googleWallet ? ['Google (carte Google Wallet, si vous l’ajoutez)'] : []),
       ]
@@ -215,7 +218,7 @@ export function politiqueConfidentialite(
       titre: 'Finalité',
       lignes: [
         'La carte de fidélité du commerce et la roue du jour.',
-        'Les relances par SMS ou e-mail, uniquement avec votre consentement (case non pré-cochée), retirable à tout moment : réponse STOP par SMS, lien dans chaque e-mail, ou auprès du commerce.',
+        'Les relances par SMS ou e-mail, uniquement avec votre consentement (case non pré-cochée), retirable à tout moment : lien dans chaque e-mail, réponse STOP au SMS quand il vient d’un numéro, ou auprès du commerce.',
       ],
     },
     {

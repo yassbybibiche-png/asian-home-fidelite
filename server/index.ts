@@ -104,6 +104,7 @@ app.serveur.listen(port, () => {
   console.log(`[serveur] Asian Home Fidélité ${pkg.version} — http://localhost:${port}/api/v1/sante`)
   console.log(`[serveur] mode ${production ? 'production' : 'développement'} · base ${supabase ? `Supabase ${new URL(supabase.url).host}` : fichierDb} · démo ${env.DEMO === '1' ? 'oui' : 'non'} · fuseau ${env.TZ}`)
   console.log('[serveur] intégrations : voir /api/v1/sante (Apple Wallet en suspens ; Google Wallet, Google Business Profile, SMS, e-mail actifs seulement si leurs variables sont définies)')
+  if (env.BREVO_MODE_TEST === '1') console.log('[serveur] MODE TEST Brevo actif (BREVO_MODE_TEST=1) : aucun SMS / e-mail réel ne part — e-mail en sandbox Brevo, SMS simulé.')
 })
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

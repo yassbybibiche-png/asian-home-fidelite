@@ -18,12 +18,19 @@ export interface ConfigTwilio {
   authToken: string
   /** Numéro expéditeur Twilio (+33…) ou identifiant d'un Messaging Service (MG…). */
   expediteur: string
+  /**
+   * Mode test Brevo (`BREVO_MODE_TEST=1`) : même sans sandbox Twilio, un vrai SMS ne doit jamais partir quand le
+   * mode test est actif — l'envoi est simulé (aucun appel réseau) et tracé avec le statut `test` (« rien envoyé »).
+   */
+  modeTest?: boolean
 }
 
 /** TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM, tous obligatoires. */
 export function configTwilio(env: Record<string, string | undefined>): ConfigTwilio | undefined {
   const { TWILIO_ACCOUNT_SID: accountSid, TWILIO_AUTH_TOKEN: authToken, TWILIO_FROM: expediteur } = env
-  return accountSid && authToken && expediteur ? { accountSid, authToken, expediteur } : undefined
+  return accountSid && authToken && expediteur
+    ? { accountSid, authToken, expediteur, ...(env.BREVO_MODE_TEST === '1' ? { modeTest: true } : {}) }
+    : undefined
 }
 
 export function adaptateurTwilio(c: ConfigTwilio | undefined, f: typeof fetch): Adaptateur {
@@ -33,6 +40,8 @@ export function adaptateurTwilio(c: ConfigTwilio | undefined, f: typeof fetch): 
     configure: !!c,
     async envoyer(m: Message) {
       if (!c) throw new Error('Twilio non configuré.')
+      // Mode test : simulation pure, aucun appel réseau (voir `brevo.ts` — même règle pour tous les prestataires).
+      if (c.modeTest) return { id: 'test', test: true }
       const corps = new URLSearchParams({ To: m.destinataire, Body: m.texte })
       corps.set(c.expediteur.startsWith('MG') ? 'MessagingServiceSid' : 'From', c.expediteur)
       const r = await f(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(c.accountSid)}/Messages.json`, {

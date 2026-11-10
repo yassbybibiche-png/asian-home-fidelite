@@ -3,7 +3,7 @@
 // Avec les variables d'environnement (server/README.md), le code d'appel est prêt et testé contre des prestataires
 // SIMULÉS (fetch injecté) ; il n'a JAMAIS été exécuté contre le vrai Twilio ni le vrai Brevo : aucune clé n'a été créée.
 import { adaptateurTwilio, configTwilio, signatureTwilio, type ConfigTwilio } from './twilio.ts'
-import { adaptateurBrevo, configBrevo, type ConfigBrevo } from './brevo.ts'
+import { adaptateurBrevo, adaptateurBrevoSms, configBrevo, configBrevoSms, type ConfigBrevo, type ConfigBrevoSms } from './brevo.ts'
 import { timingSafeEqual } from 'node:crypto'
 
 export type Canal = 'sms' | 'email'
@@ -22,7 +22,11 @@ export interface Adaptateur {
   canal: Canal
   prestataire: string
   configure: boolean
-  envoyer(m: Message): Promise<{ id: string }>
+  /**
+   * Envoi. `test: true` = mode test : rien n'a été livré (e-mail en sandbox Brevo, SMS simulé) — l'appelant trace
+   * le statut `test` (« rien envoyé »), jamais `envoye`.
+   */
+  envoyer(m: Message): Promise<{ id: string; test?: boolean }>
 }
 
 export class ErreurNonBranche extends Error {
@@ -35,23 +39,32 @@ export class ErreurNonBranche extends Error {
 export interface ConfigNotifications {
   twilio?: ConfigTwilio
   brevo?: ConfigBrevo
+  /** SMS via Brevo (même clé API que l'e-mail) : prioritaire sur Twilio quand il est configuré. */
+  brevoSms?: ConfigBrevoSms
+  /** Mode test Brevo (`BREVO_MODE_TEST=1`) : aucun SMS / e-mail réel ne part (voir `brevo.ts`). */
+  modeTest?: boolean
   /** Injectable pour les tests (aucun appel réseau réel dans les tests). */
   fetch?: typeof fetch
 }
 
 /** Lit la configuration dans les variables d'environnement (absente = rien n'est envoyé). */
 export function configDepuisEnv(env: Record<string, string | undefined>): ConfigNotifications {
-  return { twilio: configTwilio(env), brevo: configBrevo(env) }
+  return { twilio: configTwilio(env), brevo: configBrevo(env), brevoSms: configBrevoSms(env), modeTest: env.BREVO_MODE_TEST === '1' }
 }
 
 export function creerNotifications(c: ConfigNotifications = {}) {
   const f = c.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a))
   const adaptateurs: Record<Canal, Adaptateur> = {
-    sms: adaptateurTwilio(c.twilio, f),
+    // SMS : Brevo d'abord (fournisseur choisi), Twilio en repli s'il est configuré seul. Aucun des deux : 501.
+    sms: c.brevoSms ? adaptateurBrevoSms(c.brevoSms, f) : adaptateurTwilio(c.twilio, f),
     email: adaptateurBrevo(c.brevo, f),
   }
   return {
     statut: () => ({ sms: adaptateurs.sms.configure, email: adaptateurs.email.configure }),
+    /** Mode test actif (`BREVO_MODE_TEST=1`) : aucun envoi réel, même si les prestataires sont configurés. */
+    modeTest: !!c.modeTest,
+    /** Nom du prestataire du canal (`Brevo` / `Twilio`), ou `undefined` si rien n'est configuré. */
+    prestataire: (canal: Canal) => (adaptateurs[canal].configure ? adaptateurs[canal].prestataire : undefined),
     async envoyer(canal: Canal, m: Message) {
       const a = adaptateurs[canal]
       if (!a.configure) throw new ErreurNonBranche(canal)
