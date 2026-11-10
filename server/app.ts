@@ -404,6 +404,13 @@ function lien(v: unknown): string {
   return s
 }
 
+/** Lien de commande en ligne (P1-C5) : https uniquement ; vide = bouton masqué sur le menu public. */
+function lienCommande(v: unknown, champ: string): string {
+  const s = texte(v, champ, 500)
+  if (s && !/^https:\/\/\S+$/i.test(s)) throw err(400, `« ${champ} » doit être une adresse web sécurisée (https://…).`)
+  return s
+}
+
 function typeCommerce(v: unknown): TypeCommerce {
   const t = TYPES_COMMERCE.find((x) => x.valeur === v)
   if (!t) throw err(400, `« type » doit valoir : ${TYPES_COMMERCE.map((x) => x.valeur).join(', ')}.`)
@@ -456,7 +463,7 @@ function apparence(v: unknown): Apparence {
   return a
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois']
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois']
 
 /** Fusion d'une configuration de programme partielle (PATCH) : chaque bloc est fusionné, pas remplacé. */
 function fusionnerProgramme(existant: Commerce['programme'], patch: NonNullable<Commerce['programme']>): NonNullable<Commerce['programme']> {
@@ -478,6 +485,8 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
   if ('logo' in corps) r.logo = texte(corps.logo, 'logo', 500)
   if ('lienGoogle' in corps) r.lienGoogle = lien(corps.lienGoogle)
   if ('coordonnees' in corps) r.coordonnees = texte(corps.coordonnees, 'coordonnees', 300)
+  if ('lienDeliveroo' in corps) r.lienDeliveroo = lienCommande(corps.lienDeliveroo, 'lienDeliveroo')
+  if ('lienUberEats' in corps) r.lienUberEats = lienCommande(corps.lienUberEats, 'lienUberEats')
   if ('recompense' in corps) r.recompense = texte(corps.recompense, 'recompense', 120, { requis: true })
   if ('seuilTampons' in corps) {
     const s = corps.seuilTampons
