@@ -8,6 +8,7 @@ import { EUROS_PAR_POINT_DEFAUT } from '../lib/points'
 import { reglesVides, TYPES_MESSAGES } from '../lib/messages'
 import { COULEUR_DEFAUT, FOND_DEFAUT, problemesApparence } from '../lib/apparence'
 import { JOURS_SEMAINE, PALIERS_DEFAUT } from '../lib/programme'
+import { compteurLibelle, MAX_CARACTERES_ROUE } from '../lib/roue'
 
 /** Client fictif de l'aperçu (jamais enregistré). */
 const APERCU_CLIENT: Client = { id: 'apercu', commerceId: '', prenom: 'Aperçu', tampons: 3, points: 42, visites: [], derniereVisite: null, creeLe: '2026-01-01T00:00:00.000Z' }
@@ -35,6 +36,17 @@ function Nombre({ id, libelle, valeur, defaut, min, max, step = 1, aide, onChang
       />
       {aide && <p className="mt-1 text-sm text-gray-500">{aide}</p>}
     </div>
+  )
+}
+
+/** Sous chaque libellé de lot : place disponible sur la roue (alerte douce au-delà, le libellé sera abrégé). */
+function CompteurLibelle({ id, libelle }: { id: string; libelle: string }) {
+  const c = compteurLibelle(libelle)
+  return (
+    <p id={id} className={`mt-1 text-sm ${c.depasse ? 'font-medium text-red-700' : 'text-gray-500'}`} data-compteur-lot>
+      {c.texte}
+      {c.depasse && ' — raccourcissez pour un affichage complet sur la roue (il sera abrégé, mais reste complet dans la liste sous la roue).'}
+    </p>
   )
 }
 
@@ -380,21 +392,27 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
       <fieldset className="carte space-y-2">
         <legend className="sr-only">Roulette</legend>
         <h2 className="titre-carte">Lots de la roulette</h2>
-        <p className="text-sm text-gray-500">Texte libre + chance de sortir (en %). Un lot « Pas de chance » est possible.</p>
+        <p className="text-sm text-gray-500">
+          Texte libre + chance de sortir (en %). Un lot « Dommage ! » (perdant) est possible. Visez {MAX_CARACTERES_ROUE} caractères au plus : le libellé tient alors en entier sur la roue ; la liste des lots sous la roue l’affiche toujours en entier.
+        </p>
         <ul className="space-y-2">
           {lotsEdites.map((lot, i) => (
             // Téléphone : libellé sur toute la largeur, chance et suppression en dessous.
-            <li key={i} className="flex flex-wrap items-center gap-2 border-b border-gray-100 pb-2 last:border-0 sm:flex-nowrap sm:border-0 sm:pb-0">
-              <label className="sr-only" htmlFor={`lot-${i}`}>
-                Lot {i + 1}
-              </label>
-              <input
-                id={`lot-${i}`}
-                className="champ w-full min-w-0 sm:w-auto sm:flex-1"
-                placeholder="ex : Café offert"
-                value={lot.libelle}
-                onChange={(e) => majLot(i, { ...lot, libelle: e.target.value })}
-              />
+            <li key={i} className="flex flex-wrap items-center gap-2 border-b border-gray-100 pb-2 last:border-0 sm:flex-nowrap sm:items-start sm:border-0 sm:pb-0">
+              <div className="w-full min-w-0 sm:w-auto sm:flex-1">
+                <label className="sr-only" htmlFor={`lot-${i}`}>
+                  Lot {i + 1}
+                </label>
+                <input
+                  id={`lot-${i}`}
+                  className="champ w-full min-w-0"
+                  placeholder="ex : Café offert"
+                  value={lot.libelle}
+                  aria-describedby={`lot-${i}-compteur`}
+                  onChange={(e) => majLot(i, { ...lot, libelle: e.target.value })}
+                />
+                <CompteurLibelle id={`lot-${i}-compteur`} libelle={lot.libelle} />
+              </div>
               <label className="sr-only" htmlFor={`proba-${i}`}>
                 Chance du lot {i + 1} en %
               </label>
