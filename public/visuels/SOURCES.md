@@ -45,9 +45,11 @@ Notes :
 - `menu-loc-lac.jpg` (207 Ko) et `menu-nouilles-crevettes.jpg` (303 Ko)
   ont été recompressées avec PIL (qualité 88 / 80) : 157 Ko et 187 Ko.
   Les autres sont servies telles que téléchargées (toutes ≤ 250 Ko).
-- `menu-nouilles-crevettes.jpg` est rattachée à « Mi Prat » dans
+- `menu-nouilles-crevettes.jpg` était rattachée à « Mi Prat » dans
   `docs/menu-reel.json` (identification probable : nouilles sautées aux
-  crevettes) — elle conviendrait aussi au Pad Thai crevettes.
+  crevettes) — elle conviendrait aussi au Pad Thai crevettes. **Depuis le
+  lot P1-B2, elle n'est rattachée à AUCUN plat** (voir plus bas) ; le fichier
+  est gardé au cas où le commerçant confirme le plat qu'elle montre.
 - Le QR code de la carte sur lacarte.menu a été décodé (zxing-cpp) : il
   renvoie simplement vers la page lacarte.menu du restaurant, pas vers
   une carte avec prix.
@@ -67,3 +69,66 @@ Notes :
   avec la salle actuelle — provenance incertaine — non utilisée.
 - Galerie lacarte.menu, photo 59286319 : sushis sur table, 320×240,
   redondante avec `menu-makis.jpg` et `sushis-ardoise.jpg` — non retenue.
+
+---
+
+## Ajout du 10/11/2026 (lot P1-B2) — photos du PDF officiel de la carte
+
+**Source** : carte officielle du restaurant publiée sur Heyzine —
+`https://cdnm.heyzine.com/files/uploaded/64e5dc5d723c717e149bb6d08eb6fee86589eb69.pdf`,
+récupérée le **10/11/2026** (HTTP 200, 709 Ko, PDF 1.7), versionnée dans
+`assets/source/menu.pdf`. **6 pages scannées** : chaque page est une seule image
+JPEG 887×1241 px (150 ppp ; la page 3 fait 886 px de large), sans texte extractible.
+
+**Méthode** : `pdfimages -j` (images de pages telles quelles, sans
+rééchantillonnage) puis recadrage PIL à **4 px à l'intérieur** du cadre blanc de
+chaque photo — script rejouable `python3 scripts/extraire-photos-menu.py`.
+Chaque recadrage a été vérifié à l'œil : il montre le plat **légendé par le
+restaurant lui-même** sous la photo. Formats : fiche `menu-<slug>.webp` (largeur
+native, jamais agrandie, ≤ 720 px, WebP q80) + vignette `menu-<slug>-vignette.webp`
+(192 px de large, WebP q75).
+
+Cadres en pixels de la page (bords extérieurs du cadre blanc, x0,y0 → x1,y1) :
+
+| Plat | Fiche | Vignette | Page | Cadre |
+|---|---|---|---|---|
+| Poke Bowl | `menu-poke-bowl.webp` (203×132, 4 Ko) | `menu-poke-bowl-vignette.webp` (192×125) | 2 | 626,1054 → 837,1194 — petite photo dans le PDF, qualité limitée |
+| Dynamite | `menu-dynamite.webp` (341×225, 24 Ko) | `menu-dynamite-vignette.webp` | 3 | 64,332 → 413,565 |
+| Mi Prat | `menu-mi-prat.webp` (340×223, 21 Ko) | `menu-mi-prat-vignette.webp` | 3 | 64,759 → 412,990 |
+| Pad Thaï | `menu-pad-thai.webp` (340×223, 22 Ko) | `menu-pad-thai-vignette.webp` | 3 | 472,759 → 820,990 |
+| Crousti Poulet | `menu-crousti-poulet.webp` (340×224, 19 Ko) | `menu-crousti-poulet-vignette.webp` | 4 | 65,88 → 413,320 |
+| Khao Prat | `menu-khao-prat.webp` (339×223, 14 Ko) | `menu-khao-prat-vignette.webp` | 4 | 473,89 → 820,320 |
+| Curry Vert | `menu-curry-vert.webp` (340×223, 14 Ko) | `menu-curry-vert-vignette.webp` | 4 | 66,452 → 414,683 |
+| Tigre qui pleure | `menu-tigre-qui-pleure.webp` (339×223, 23 Ko) | `menu-tigre-qui-pleure-vignette.webp` | 4 | 473,453 → 820,684 |
+| Bo Bun | `menu-bo-bun.webp` (341×224, 13 Ko) | `menu-bo-bun-vignette.webp` | 4 | 472,818 → 821,1050 |
+
+**Mi Prat** : la photo légendée « MI PRAT » du PDF **remplace**
+`menu-nouilles-crevettes.jpg` (identification seulement probable). Ce dernier
+fichier reste ici, rattaché à aucun plat.
+
+### Photos existantes conservées (et pourquoi)
+- **Loc Lac** → `menu-loc-lac.jpg` (1109×720, vraie photo déjà vérifiée) : le PDF
+  (p. 4, 65,818 → 413,1049) montre le même plat en plus basse résolution — non extrait.
+- **Mango Stick** → `menu-mango-sticky-rice.jpg` (vérifiée) : le PDF (p. 6,
+  160,683 → 426,860) montre aussi le plat mais n'apporte rien — non extrait.
+- **8 Maki Tiger / 8 Maki Chicken Dragon** → `menu-makis.jpg` partagée, comme avant.
+
+### Photos du PDF NON rattachées (et pourquoi)
+- **Love Bao** (p. 3, en haut à droite) : la photo montre un bol de
+  brochettes/fritures avec fleurs, **pas des bao buns** — légende douteuse du PDF
+  lui-même : aucune photo.
+- **Spécialités** (p. 6, 144,237 → 432,428 et 451,236 → 739,427) : impossible de
+  distinguer 8 Maki Tiger de 8 Maki Chicken Dragon : aucune des deux n'est rattachée.
+- **Tiramisu** (p. 6, 443,683 → 709,860) : **deux** bocaux (tiramisu probable + dessert
+  à la fraise), impossible de dire lequel est le tiramisu : aucune photo.
+- **Boissons** (p. 6, cocktails + tumbler) : boisson précise non identifiable :
+  aucune photo sur un plat nommé (la catégorie garde `cocktails.jpg`).
+- **Variantes makis / california / sashimi / sushi** (p. 2) : icônes minuscules,
+  inexploitables : aucune photo.
+- **Couverture** (p. 1, table dressée) : ambiance, déjà couverte par
+  `hero-plats.jpg` / `table-sushis.jpg` : non extraite.
+- **6 Maki Gold** : aucune photo dans le PDF.
+
+Rappel : **aucune photo prise par des clients sur Google** n'est utilisée. Les
+photos futures du commerçant se déposent dans `assets/source/photos/`
+(voir son README) et se rattachent à la main après vérification visuelle.

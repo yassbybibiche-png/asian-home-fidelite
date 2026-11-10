@@ -209,11 +209,12 @@ describe('Photos rattachées aux bons plats (vraies photos du restaurant uniquem
     assert.equal(photoDe('Loc Lac'), VISUELS.menuLocLac)
     assert.equal(photoDe('Mango Stick'), VISUELS.menuMangoStickyRice)
   })
-  test('Mi Prat → menu-nouilles-crevettes.jpg (identification probable, notée dans le code et la doc) ; aucune autre photo', () => {
-    assert.equal(photoDe('Mi Prat'), VISUELS.menuNouillesCrevettes)
+  test('Mi Prat → photo légendée du PDF (P1-B2), plus menu-nouilles-crevettes.jpg ; 13 plats photographiés, pas un de plus', () => {
+    assert.equal(photoDe('Mi Prat'), '/visuels/menu-mi-prat.webp')
+    for (const p of plats()) assert.notEqual(p.photo, VISUELS.menuNouillesCrevettes, p.nom)
     assert.deepEqual(
       plats().filter((p) => p.photo).map((p) => p.nom).sort(),
-      ['8 Maki Chicken Dragon', '8 Maki Tiger', 'Loc Lac', 'Mango Stick', 'Mi Prat'],
+      ['8 Maki Chicken Dragon', '8 Maki Tiger', 'Bo Bun', 'Crousti Poulet', 'Curry Vert', 'Dynamite', 'Khao Prat', 'Loc Lac', 'Mango Stick', 'Mi Prat', 'Pad Thaï', 'Poke Bowl', 'Tigre qui pleure'],
     )
   })
   test('menu-plat-riz.jpg n’est rattachée à aucun plat nommé (photo d’ambiance seulement)', () => {

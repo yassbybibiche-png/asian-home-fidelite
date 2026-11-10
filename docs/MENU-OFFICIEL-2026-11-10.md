@@ -82,9 +82,30 @@ de doute. ») reste affiché. À compléter par le commerçant (éditeur ou CSV)
 
 ## Photos
 
-Inchangées dans ce lot (les photos du PDF arrivent avec le lot B2) : Loc Lac → `menu-loc-lac.jpg`,
-Mango Stick → `menu-mango-sticky-rice.jpg`, 8 Maki Tiger et 8 Maki Chicken Dragon → `menu-makis.jpg`,
-Mi Prat → `menu-nouilles-crevettes.jpg` (identification probable, à remplacer en B2).
+Lot P1-B2 (10/11/2026) — détail des sources et des cadres : `public/visuels/SOURCES.md`.
+
+**13 plats photographiés** (vraies photos du restaurant uniquement, aucune photo client Google) :
+
+- **9 plats, photo recadrée du PDF officiel** (`assets/source/menu.pdf`, script `scripts/extraire-photos-menu.py`),
+  chacune **légendée du nom du plat par le restaurant** : Poke Bowl, Dynamite, Mi Prat, Pad Thaï,
+  Crousti Poulet, Khao Prat, Curry Vert, Tigre qui pleure, Bo Bun → `menu-<slug>.webp` (fiche, largeur native
+  ~340 px, ≤ 720 px, WebP q80) + `menu-<slug>-vignette.webp` (192 px, WebP q75). Poke Bowl : petite photo dans
+  le PDF (203×132 natifs), qualité limitée en fiche.
+- **Mi Prat** : l'ancienne photo `menu-nouilles-crevettes.jpg` (identification seulement « probable ») est
+  remplacée par la photo légendée « MI PRAT » du PDF ; l'ancien fichier reste dans `public/visuels/`, rattaché à aucun plat.
+- **Photos existantes gardées** : Loc Lac → `menu-loc-lac.jpg` (meilleure résolution que le PDF),
+  Mango Stick → `menu-mango-sticky-rice.jpg`, 8 Maki Tiger et 8 Maki Chicken Dragon → `menu-makis.jpg` (partagée).
+
+**Sans photo, et pourquoi** (règle : jamais une photo sur un plat qu'elle ne montre pas) :
+Love Bao (la photo du PDF montre un bol de brochettes/fritures, pas des bao : légende douteuse) ·
+6 Maki Gold (aucune photo) · Tiramisu (la photo du PDF montre deux bocaux, impossible de dire lequel) ·
+Boissons (photos du PDF non attribuables à une boisson précise ; la catégorie garde `cocktails.jpg`) ·
+variantes makis / california / sashimi / sushi (icônes minuscules seulement) · tous les autres plats
+(entrées, salades, menu midi, desserts du jour, hors carte) : aucune photo dans le PDF.
+
+Modèle : champ optionnel `photoVignette` (liste du menu → `photoVignette ?? photo` ; fiche dépliée → `photo`),
+validé comme `photo`. Changer ou retirer la photo dans l'éditeur efface la vignette (jamais une vignette
+d'un autre plat). Photos futures du commerçant : `assets/source/photos/README.md`.
 
 ## Import / export CSV (`#/menuCarte`)
 
@@ -96,8 +117,9 @@ Format « à la française » (s'ouvre tel quel dans Excel) : séparateur `;`, B
 | `nom` | nom du plat (obligatoire) |
 | `prix` | euros : `6,50` ou `6.50` (aussi `6`, `6,50 €`) ; **vide = « Prix sur place »** ; 0 à 10 000 € |
 | `description` | texte libre (300 caractères max) |
-| `photo` | `https://…`, `/visuels/….jpg` ou vide |
+| `photo` | `https://…`, `/visuels/….jpg` / `.webp` ou vide |
 | `allergenes` | parmi les 14 allergènes UE, séparés par `\|` (ex. `Gluten\|Soja`) |
+| `photo_vignette` | **optionnelle** (lot P1-B2), dernière colonne : même format que `photo`. Exportée seulement si un plat a une vignette (sinon le format ci-dessus reste identique) ; absente à l'import = pas de vignette |
 
 Exemple :
 
