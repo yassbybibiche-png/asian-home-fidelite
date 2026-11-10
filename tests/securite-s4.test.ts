@@ -309,11 +309,18 @@ describe('P0-S4 : garde-fou — le front reste compatible avec la CSP', () => {
   test('index.html : aucun script ni style inline, aucune ressource externe', () => {
     const html = readFileSync(join(RACINE, 'index.html'), 'utf8')
     for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)) {
+      // P2-Q4 : seule exception, le bloc de données JSON-LD (type non JavaScript → jamais exécuté, hors script-src).
+      // Il doit rester du JSON pur : un `</script>` ou du code dedans ferait échouer JSON.parse.
+      if (m[1].trim() === 'type="application/ld+json"') {
+        assert.doesNotThrow(() => JSON.parse(m[2]), 'JSON-LD : JSON valide')
+        continue
+      }
       assert.match(m[1], /\bsrc="\/[^/]/, 'script externe à la même origine uniquement')
       assert.equal(m[2].trim(), '', 'aucun script inline')
     }
     assert.doesNotMatch(html, /<style\b|\sstyle=|\son\w+=/i)
-    assert.doesNotMatch(html, /(src|href)="https?:/)
+    // P2-Q4 : l'adresse canonique est absolue (recommandation Google) mais n'est pas une ressource chargée.
+    assert.doesNotMatch(html.replace(/<link rel="canonical" href="https:\/\/[^"]+" \/>/, ''), /(src|href)="https?:/)
   })
 
   test('src/ : rien que la CSP bloquerait (style/script inline, eval, polices ou CSS distants, iframes)', () => {

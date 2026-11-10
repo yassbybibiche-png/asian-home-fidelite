@@ -5,8 +5,69 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#111111" />
     <title>Asian Home Fidélité — carte de fidélité, roulette et avis Google</title>
+    <!--
+      SEO (P2-Q4, voir docs/SEO.md) : une seule page HTML pour tout le front (routes dans le fragment #/…, jamais envoyé
+      au serveur) → ces balises valent pour #/menu, #/jouer et #/carte à la fois. Adresse absolue du site écrite ici,
+      dans public/robots.txt et public/sitemap.xml : à changer aux trois endroits avec un domaine à soi (docs/DOMAINE.md).
+    -->
+    <meta name="description" content="Asian Home Paris, restaurant asiatique halal au Pré-Saint-Gervais (11 rue André Joineau) : menu en ligne, carte de fidélité et roulette des cadeaux. Ouvert tous les jours 11h30-14h30 et 18h30-23h30." />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://asian-home-fidelite.onrender.com/" />
+    <meta property="og:type" content="restaurant.restaurant" />
+    <meta property="og:site_name" content="Asian Home Paris" />
+    <meta property="og:locale" content="fr_FR" />
+    <meta property="og:title" content="Asian Home Paris — menu, carte de fidélité et roulette" />
+    <meta property="og:description" content="Restaurant asiatique halal au Pré-Saint-Gervais : consultez le menu, cumulez vos tampons et tentez la roulette des cadeaux." />
+    <meta property="og:url" content="https://asian-home-fidelite.onrender.com/" />
+    <meta property="og:image" content="https://asian-home-fidelite.onrender.com/visuels/hero-plats.jpg" />
+    <meta property="og:image:width" content="1024" />
+    <meta property="og:image:height" content="683" />
+    <meta property="og:image:alt" content="Plateau de plats Asian Home : sushis, makis, nouilles, riz et dessert à la mangue" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Asian Home Paris — menu, carte de fidélité et roulette" />
+    <meta name="twitter:description" content="Restaurant asiatique halal au Pré-Saint-Gervais : menu, carte de fidélité et roulette des cadeaux." />
+    <meta name="twitter:image" content="https://asian-home-fidelite.onrender.com/visuels/hero-plats.jpg" />
+    <!-- Données structurées : bloc de données (type non JavaScript), jamais exécuté donc hors CSP script-src. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Restaurant",
+        "name": "Asian Home Paris",
+        "url": "https://asian-home-fidelite.onrender.com/",
+        "logo": "https://asian-home-fidelite.onrender.com/visuels/logo.png",
+        "image": "https://asian-home-fidelite.onrender.com/visuels/hero-plats.jpg",
+        "telephone": "+33782974801",
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "11 rue André Joineau",
+          "postalCode": "93310",
+          "addressLocality": "Le Pré-Saint-Gervais",
+          "addressCountry": "FR"
+        },
+        "servesCuisine": ["Asiatique", "Thaï", "Japonaise", "Vietnamienne", "Chinoise", "Halal"],
+        "description": "Restaurant asiatique halal : cuisine thaï, japonaise, vietnamienne et chinoise.",
+        "openingHoursSpecification": [
+          {
+            "@type": "OpeningHoursSpecification",
+            "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+            "opens": "11:30",
+            "closes": "14:30"
+          },
+          {
+            "@type": "OpeningHoursSpecification",
+            "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+            "opens": "18:30",
+            "closes": "23:30"
+          }
+        ],
+        "hasMenu": "https://asian-home-fidelite.onrender.com/#/menu",
+        "sameAs": ["https://www.instagram.com/asianhomeparis/"]
+      }
+    </script>
     <!-- PWA (P1-C3) : manifest + icônes ; le service worker est enregistré par src/lib/pwa.ts. -->
     <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icones/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icones/icone-192.png" />
     <link rel="apple-touch-icon" href="/icones/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />

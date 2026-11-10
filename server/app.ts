@@ -755,6 +755,7 @@ const TYPES_MIME: Record<string, string> = {
   '.webmanifest': 'application/manifest+json',
   '.md': 'text/markdown; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8',
 }
 
 /** Cache des fichiers statiques : voir server/README.md (« En-têtes HTTP »). */
