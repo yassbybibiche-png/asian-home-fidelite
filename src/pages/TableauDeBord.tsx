@@ -17,6 +17,7 @@ const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
   palier: 'Palier',
   reserve: 'Plat en réserve',
   defi: 'Défi',
+  gain: 'Gain de la roue remis',
 }
 
 function Chiffre({ valeur, libelle, aide }: { valeur: string | number; libelle: string; aide: string }) {

@@ -63,6 +63,14 @@ export interface Stockage {
   tirages(commerceId: string): P<Tirage[]>
   tiragesClient(commerceId: string, clientId: string): P<Tirage[]>
   ajouterTirage(t: Tirage): P<void>
+  /** Tirages d'un commerce portant ce code gagnant (déjà normalisé), du plus récent au plus ancien. */
+  tiragesParCode(commerceId: string, code: string): P<Tirage[]>
+  /**
+   * Remise d'un gain (P0-U3) : écrit `t` (avec `remis`) seulement si le tirage en base n'est PAS déjà remis — une seule
+   * requête conditionnelle, atomique pour la base (UPDATE … WHERE remis IS NULL). false = déjà remis, y compris par une
+   * requête simultanée : un code ne peut jamais être remis deux fois.
+   */
+  marquerTirageRemis(t: Tirage): P<boolean>
   avis(commerceId: string): P<Avis[]>
   unAvis(commerceId: string, id: string): P<Avis | undefined>
   ajouterAvis(a: Avis): P<void>
@@ -199,6 +207,8 @@ export function ouvrirStockage(fichier: string) {
     tirages: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? ORDER BY date DESC'),
     tiragesClient: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? AND client_id = ?'),
     ajoutTirage: db.prepare('INSERT INTO tirages (id, commerce_id, client_id, date, donnees) VALUES (?, ?, ?, ?, ?)'),
+    tiragesParCode: db.prepare("SELECT donnees FROM tirages WHERE commerce_id = ? AND json_extract(donnees, '$.code') = ? ORDER BY date DESC"),
+    remettreTirage: db.prepare("UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL"),
     avis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? ORDER BY date DESC'),
     unAvis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? AND id = ?'),
     ajoutAvis: db.prepare('INSERT INTO avis (id, commerce_id, date, donnees) VALUES (?, ?, ?, ?)'),
@@ -255,6 +265,8 @@ export function ouvrirStockage(fichier: string) {
     tirages: (commerceId: string) => lire<Tirage>(q.tirages.all(commerceId)),
     tiragesClient: (commerceId: string, clientId: string) => lire<Tirage>(q.tiragesClient.all(commerceId, clientId)),
     ajouterTirage: (t: Tirage) => inserer(q.ajoutTirage, t.id, t.commerceId, t.clientId, t.date, JSON.stringify(t)),
+    tiragesParCode: (commerceId: string, code: string) => lire<Tirage>(q.tiragesParCode.all(commerceId, code)),
+    marquerTirageRemis: (t: Tirage) => Number(q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId).changes) > 0,
 
     avis: (commerceId: string) => lire<Avis>(q.avis.all(commerceId)),
     unAvis: (commerceId: string, id: string) => lire<Avis>(q.unAvis.all(commerceId, id))[0],

@@ -1,7 +1,7 @@
 // Client HTTP de l'API /api/v1 (server/). Aucune règle métier ici : le serveur décide de tout
 // (tampons, récompense, tirage). `fetch` est injectable pour les tests (aucun vrai serveur dans `npm test`).
 import type { Avis, Client, Commerce, CommercePublic, EntreeJournal, MembreEquipe, Menu, MessageClient, Tirage, TypeCommerce } from '../types'
-import type { StatutJeu } from '../lib/roulette'
+import type { StatutGain, StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
 
 export const MESSAGE_HORS_LIGNE = 'Serveur injoignable — vérifiez la connexion.'
@@ -79,8 +79,19 @@ export interface ReponseCarte {
   client: CartePublique
   /** Vue publique (sans probabilités, règles d'avis, taux de points ni réglages internes du programme). */
   commerce: CommercePublic
-  jeu: { statut: StatutJeu; lotDuJour: string | null }
+  /** codeDuJour / remisDuJour : absents sur un serveur d'avant P0-U3. */
+  jeu: { statut: StatutJeu; lotDuJour: string | null; codeDuJour?: string | null; remisDuJour?: boolean }
   menuDisponible?: boolean
+}
+
+/** Gain de la roue vu en caisse (GET / POST …/caisse/gains/:code). */
+export interface GainCaisse {
+  code: string
+  lot: string
+  date: string
+  statut: StatutGain
+  client: { id: string; prenom: string } | null
+  remis: { le: string; par: string } | null
 }
 
 export type ChampsReglages = Partial<
@@ -224,6 +235,11 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
       type: 'passage' | 'recompense' | 'echange' | 'attente' | 'reserve',
       corps: { clientId: string; actionId: string; faitLe?: string; montantCentimes?: number; recompenseId?: string },
     ) => requete('POST', `/commerces/${enc(commerceId)}/caisse/${type}`, { acces, corps }) as Promise<{ client: Client; dejaTraite: boolean }>,
+    /** Code gagnant de la roue (6 caractères, déjà normalisé) : vérification, puis remise du lot (une seule fois). */
+    verifierGain: async (commerceId: string, acces: AccesCaisse, code: string) =>
+      ((await requete('GET', `/commerces/${enc(commerceId)}/caisse/gains/${enc(code)}`, { acces })) as { gain: GainCaisse }).gain,
+    remettreGain: async (commerceId: string, acces: AccesCaisse, code: string) =>
+      ((await requete('POST', `/commerces/${enc(commerceId)}/caisse/gains/${enc(code)}/remise`, { acces })) as { gain: GainCaisse }).gain,
 
     // ---- Équipe, messages, menu (gérant) ----
     equipe: async (commerceId: string, acces: Acces) => ((await requete('GET', `/commerces/${enc(commerceId)}/equipe`, { acces })) as { membres: MembreEquipe[] }).membres,

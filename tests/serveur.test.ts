@@ -330,8 +330,11 @@ describe('V2 : front ↔ serveur (contrat) et carte publique', () => {
     assert.ok(gagne.ok)
     assert.equal(gagne.secteur?.lot.libelle, gagne.resultat.lot, 'le lot du serveur existe sur la roue')
     const apres = await api.carte(client.id)
-    assert.deepEqual(apres.jeu, { statut: 'dejaJoue', lotDuJour: gagne.resultat.lot })
-    assert.doesNotMatch(JSON.stringify(apres), new RegExp(`${gagne.resultat.code}|0612|telephone|email`), 'ni code gagnant ni contact en public')
+    // P0-U3 : le code gagnant du jour est re-servi au titulaire de la carte (jamais celui d'un tirage perdant).
+    const codeDuJour = gagne.resultat.perdant ? null : gagne.resultat.code
+    assert.deepEqual(apres.jeu, { statut: 'dejaJoue', lotDuJour: gagne.resultat.lot, codeDuJour, remisDuJour: false })
+    assert.doesNotMatch(JSON.stringify(apres), /0612|telephone|email/, 'aucun contact en public')
+    if (gagne.resultat.perdant) assert.ok(!JSON.stringify(apres).includes(gagne.resultat.code), 'code d’un tirage perdant jamais publié')
 
     const encore = await lancerTirage(api, commerce, '0033612345678', 'Linh')
     assert.ok(!encore.ok && encore.refus)

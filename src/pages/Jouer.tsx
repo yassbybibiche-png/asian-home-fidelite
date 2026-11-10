@@ -3,8 +3,8 @@ import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, CommercePublic, Tirage } from '../types'
 import { analyserContact } from '../lib/fidelite'
-import { estPerdant, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
-import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ResultatTirage } from '../data/api'
+import { estPerdant, jourEnClair, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot } from '../lib/roulette'
+import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ReponseCarte, type ResultatTirage } from '../data/api'
 import { lancerTirage, memoireJoueur, type JoueurMemorise } from '../data/jeuApi'
 import { DUREE_ROTATION_MS, LegendeRoue, Roue } from '../components/Roue'
 import { InvitationAvis } from '../components/InvitationAvis'
@@ -89,7 +89,7 @@ function MessageSansVisite({ prenom, lienCarte }: { prenom: string; lienCarte: s
   )
 }
 
-function MessageDejaJoue({ prenom, lot, code }: { prenom: string; lot: string | null; code?: string }) {
+function MessageDejaJoue({ prenom, lot, code, remis }: { prenom: string; lot: string | null; code?: string; remis?: boolean }) {
   return (
     <section className="carte text-center" role="status">
       <p className="titre-carte">Vous avez déjà joué aujourd’hui, {prenom} !</p>
@@ -98,7 +98,7 @@ function MessageDejaJoue({ prenom, lot, code }: { prenom: string; lot: string | 
           Résultat du jour : <strong className="text-gray-900">{lot}</strong>
         </p>
       )}
-      {code && <CodeGagnant code={code} />}
+      {remis ? <p className="mt-2 font-semibold text-green-800">✓ Lot déjà remis au comptoir. Bon appétit !</p> : code && <CodeGagnant code={code} />}
       <p className="mt-2 text-sm text-gray-600">1 tirage par personne et par jour. Revenez lors de votre prochaine visite !</p>
     </section>
   )
@@ -272,7 +272,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
   const parrain = useMemo(() => /[?&]parrain=([A-Za-z0-9-]+)/.exec(window.location.hash)?.[1], [])
   const [joueur, setJoueur] = useState<JoueurMemorise | null>(null)
   const [memorise, setMemorise] = useState(() => memoire.joueur())
-  const [jeu, setJeu] = useState<{ statut: StatutJeu; lotDuJour: string | null } | null>(null)
+  const [jeu, setJeu] = useState<ReponseCarte['jeu'] | null>(null)
   const [etape, setEtape] = useState<Etape>('pret')
   const [rotation, setRotation] = useState(0)
   const [gain, setGain] = useState<ResultatTirage | null>(null)
@@ -379,7 +379,13 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
       ) : !jeu ? (
         message ? <MessageErreur>{message}</MessageErreur> : <p className="text-center text-gray-500">Vérification de votre carte…</p>
       ) : jeu.statut === 'dejaJoue' ? (
-        <MessageDejaJoue prenom={joueur.prenom} lot={jeu.lotDuJour} code={codeDuJour && !codeDuJour.perdant ? codeDuJour.code : undefined} />
+        <MessageDejaJoue
+          prenom={joueur.prenom}
+          lot={jeu.lotDuJour}
+          // Code re-servi par le serveur (autre téléphone, cache vidé) ; mémoire du téléphone en repli (serveur d'avant P0-U3).
+          code={jeu.codeDuJour ?? (codeDuJour && !codeDuJour.perdant ? codeDuJour.code : undefined)}
+          remis={jeu.remisDuJour}
+        />
       ) : jeu.statut === 'sansVisite' ? (
         <>
           <MessageSansVisite prenom={joueur.prenom} lienCarte={`#/carte/${joueur.clientId}`} />
@@ -475,6 +481,8 @@ function CodeGagnant({ code }: { code: string }) {
       <p className="rounded-xl border-2 border-dashed border-or-500 bg-amber-50 py-3 font-mono text-3xl font-extrabold tracking-[0.3em] text-gray-900 select-all">
         {code}
       </p>
+      {/* Le code n'est accepté en caisse que le jour du tirage (P0-U3). */}
+      <p className="text-sm font-semibold text-gray-800">Valable aujourd’hui, {jourEnClair(new Date())}</p>
       <BoutonCopier texte={code} libelle="Copier le code" className="bouton-secondaire w-full" />
     </div>
   )

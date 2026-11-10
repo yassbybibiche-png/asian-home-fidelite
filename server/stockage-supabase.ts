@@ -8,6 +8,7 @@
 // • inscription : contrainte unique (commerce_id, cle_contact) → une double inscription simultanée est rejetée
 //   (ErreurConflit), le serveur relit alors le client existant ;
 // • tirage : index unique (commerce_id, client_id, jour à Paris) → un 2e tirage le même jour est rejeté par la base ;
+// • remise d'un gain de la roue (P0-U3) : UPDATE conditionnel « … AND donnees->remis IS NULL » → une seule remise par code ;
 // • visite / récompense / avis : verrou optimiste. Dans une `transaction`, chaque client ou avis lu garde sa `version` ;
 //   l'écriture se fait « WHERE id = ? AND version = <lue> » (la base incrémente `version` à chaque UPDATE). Si une
 //   autre requête a écrit entre-temps → 0 ligne → ErreurConflit (409 « réessayez ») : aucun tampon n'est perdu ni compté
@@ -140,6 +141,13 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       lire<Tirage>('tirages', sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('client_id', clientId)),
     ajouterTirage: async (t) =>
       void (await ok('tirages', sb.from('tirages').insert({ id: t.id, commerce_id: t.commerceId, client_id: t.clientId, date: t.date, donnees: t }))),
+    // Code gagnant et remise (P0-U3) : dans le JSONB `donnees`, sans migration. La table `tirages` n'a pas de colonne
+    // `version` : la garde est la condition « donnees->remis IS NULL » de l'UPDATE lui-même. Postgres verrouille la ligne,
+    // et une 2e requête simultanée réévalue la condition après la 1re → 0 ligne → false (jamais deux remises).
+    tiragesParCode: (commerceId, code) =>
+      lire<Tirage>('tirages', sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('donnees->>code', code).order('date', { ascending: false })),
+    marquerTirageRemis: async (t) =>
+      (await ok<unknown[]>('tirages', sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->remis', null).select('id'))).length > 0,
 
     avis: (commerceId) => lire<Avis>('avis', sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).order('date', { ascending: false })),
     unAvis: async (commerceId, id) => (await lire<Avis>('avis', sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).eq('id', id)))[0],

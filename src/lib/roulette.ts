@@ -92,3 +92,43 @@ export function rotationCible(rotationActuelle: number, secteur: Secteur, alea =
 export function estPerdant(lot: string): boolean {
   return /pas de chance|perdu|dommage|rejouez/i.test(lot)
 }
+
+// ---- Code gagnant vérifié en caisse (P0-U3) ----
+
+/** Saisie du code en caisse : casse, espaces et tirets ignorés. null = pas un code à 6 caractères. */
+export function normaliserCodeGagnant(saisi: string): string | null {
+  const c = saisi.replace(/[\s-]/g, '').toUpperCase()
+  return /^[A-Z0-9]{6}$/.test(c) ? c : null
+}
+
+/** valable = gain du jour pas encore remis ; expire = gain d'un autre jour (le code ne vaut que le jour du tirage). */
+export type StatutGain = 'valable' | 'remis' | 'perdant' | 'expire'
+
+export function statutGain(t: Tirage, maintenant = new Date()): StatutGain {
+  if (estPerdant(t.lot)) return 'perdant'
+  if (t.remis) return 'remis'
+  return memeJour(new Date(t.date), maintenant) ? 'valable' : 'expire'
+}
+
+/** Parmi les tirages portant ce code (collision possible d'un jour à l'autre), celui du jour d'abord. */
+export function tirageDuCode(tirages: Tirage[], maintenant = new Date()): Tirage | undefined {
+  const duJour = tirages.filter((t) => memeJour(new Date(t.date), maintenant))
+  return duJour.find((t) => !t.remis && !estPerdant(t.lot)) ?? duJour[0] ?? tirages[0]
+}
+
+/** « mar. 10 nov. 2026 » : jour de validité affiché à côté du code gagnant. */
+export function jourEnClair(d: Date): string {
+  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+/** Message de la caisse pour un code vérifié (`remis.par` = nom de qui l'a remis). */
+export function messageGain(g: { statut: StatutGain; lot: string; date: string; remis: { le: string; par: string } | null }): string {
+  if (g.statut === 'perdant') return `Tirage perdant (« ${g.lot} ») : aucun lot à remettre.`
+  if (g.statut === 'expire') return `Code expiré : il n’était valable que le ${jourEnClair(new Date(g.date))}, jour du tirage. Rien à remettre.`
+  if (g.statut === 'remis') {
+    const le = g.remis ? new Date(g.remis.le) : null
+    const quand = le ? ` le ${le.toLocaleDateString('fr-FR')} à ${le.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} par ${g.remis!.par}` : ''
+    return `Lot déjà remis${quand} : un code ne sert qu’une fois.`
+  }
+  return `Gain du jour à remettre : ${g.lot}.`
+}
