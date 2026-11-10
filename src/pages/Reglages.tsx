@@ -2,7 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { useAction, useStore } from '../store'
 import type { Client, Commerce, ConfigProgramme, Lot, Palier, RecompensePoints, TypeCommerce } from '../types'
 import { TYPES_COMMERCE } from '../data/defaults'
-import { EnTete, Interrupteur, LogoCommerce, MessageErreur } from '../components/ui'
+import { EnTete, Interrupteur, MessageErreur } from '../components/ui'
+import { ChampLogo } from '../components/ChampLogo'
 import { CarteFidelite, libelleTaux } from '../components/CarteFidelite'
 import { EUROS_PAR_POINT_DEFAUT } from '../lib/points'
 import { reglesVides, TYPES_MESSAGES } from '../lib/messages'
@@ -100,7 +101,6 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
       ...brouillon,
       nom: brouillon.nom.trim(),
       lienGoogle: brouillon.lienGoogle.trim(),
-      logo: brouillon.logo?.trim(),
       coordonnees: brouillon.coordonnees?.trim() || undefined,
       lots,
       eurosParPoint: taux,
@@ -139,22 +139,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
             ))}
           </select>
         </div>
-        <div>
-          <label className="etiquette" htmlFor="logo">
-            Logo (optionnel)
-          </label>
-          <div className="flex items-center gap-3">
-            <LogoCommerce commerce={brouillon} />
-            <input
-              id="logo"
-              className="champ"
-              placeholder="URL d’image (https://…) ou initiales"
-              value={brouillon.logo ?? ''}
-              onChange={(e) => maj('logo', e.target.value)}
-            />
-          </div>
-          <p className="mt-1 text-sm text-gray-500">Laissez vide pour utiliser les initiales du nom.</p>
-        </div>
+        {/* Logo (P1-B5) : envoyé à part, tout de suite ; le brouillon suit sans être marqué « à enregistrer ». */}
+        <ChampLogo commerce={brouillon} onChange={(logo) => setBrouillon((b) => ({ ...b, logo }))} />
         <div>
           <label className="etiquette" htmlFor="google">
             Lien vers la fiche Google (avis)
@@ -590,7 +576,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           </label>
           <input id="app-banniere" className="champ" inputMode="url" placeholder="https://…" value={apparence.banniere ?? ''} onChange={(e) => maj('apparence', { ...apparence, banniere: e.target.value.trim() })} />
         </div>
-        <p className="text-sm text-gray-600">Logo : champ « Logo » plus haut. Les couleurs trop claires ou trop foncées sont refusées (lisibilité ≥ 4,5:1).</p>
+        <p className="text-sm text-gray-600">Logo : section « Le commerce » plus haut (envoi d’une image PNG, JPEG ou WebP). Les couleurs trop claires ou trop foncées sont refusées (lisibilité ≥ 4,5:1).</p>
         {problemes.map((p) => (
           <MessageErreur key={p}>{p}</MessageErreur>
         ))}
