@@ -31,6 +31,7 @@ import {
   type EvenementPassage,
 } from '../src/lib/programme.ts'
 import { problemesApparence } from '../src/lib/apparence.ts'
+import { commercePublic } from '../src/lib/vuePublique.ts'
 import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
@@ -502,12 +503,8 @@ function contactOuErreur(v: unknown) {
 }
 
 // ---------- Représentations ----------
-
-/** Fiche publique d'un commerce (le PIN est stocké à part et n'en fait jamais partie). */
-function commercePublic(c: Commerce) {
-  const { id, nom, type, logo, actif, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, demo, eurosParPoint, catalogue, apparence, programme } = c
-  return { id, nom, type, logo, actif, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, demo: !!demo, eurosParPoint, catalogue, apparence, programme }
-}
+// Fiche publique d'un commerce : `commercePublic` (src/lib/vuePublique.ts), liste blanche sans probabilités,
+// règles de réponse, taux de points ni réglages internes du programme. Le PIN est stocké à part.
 
 /** Carte vue par le client lui-même (page publique) : sans téléphone, e-mail ni données techniques. */
 function cartePublique(c: Client) {
@@ -1123,7 +1120,8 @@ export async function creerServeur(o: OptionsServeur) {
         const base = nouveauCommerce(texte(nom, 'nom', 80, { requis: true }), typeCommerce(type ?? 'autre'), lien(lienGoogle ?? ''))
         const commerce = appliquerReglages(base, reglages, CHAMPS_REGLAGES.filter((k) => !['nom', 'type', 'lienGoogle'].includes(k)))
         await st.ajouterCommerce(commerce, await hacherPin(pinClair))
-        return { statut: 201, json: { commerce: commercePublic(commerce) } }
+        // Réponse à l'admin authentifié : fiche complète, comme PATCH et /etat (le PIN est stocké à part).
+        return { statut: 201, json: { commerce } }
       }
       throw err(405, 'Méthode non autorisée.')
     }

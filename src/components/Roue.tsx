@@ -1,5 +1,4 @@
-import type { Lot } from '../types'
-import { secteurs } from '../lib/roulette'
+import { secteurs, type LotRoue } from '../lib/roulette'
 
 // Palette laque / encre / ivoire / or ; texte choisi pour un contraste ≥ 4,5:1 sur chaque secteur.
 const COULEURS = ['#b3262d', '#fbf3e4', '#1f2937', '#f2d48a', '#7f1a1f', '#fdf3f2']
@@ -16,8 +15,11 @@ function abreger(texte: string, max = 17): string {
   return texte.length > max ? `${texte.slice(0, max - 1)}…` : texte
 }
 
-/** Roue en SVG : la taille de chaque secteur est proportionnelle à la chance du lot. */
-export function Roue({ lots, rotation }: { lots: Lot[]; rotation: number }) {
+/**
+ * Roue en SVG : secteurs proportionnels aux chances quand elles sont connues (aperçu commerçant, démo locale) ;
+ * égaux sur la page publique, qui ne reçoit que les libellés (le tirage est fait par le serveur).
+ */
+export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) {
   const parts = secteurs(lots)
   const R = 88
   // Une couleur jamais identique à sa voisine, même quand le dernier secteur rejoint le premier.

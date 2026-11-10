@@ -46,11 +46,11 @@ export function nouveauClient(commerceId: string, prenom: string, contact: Conta
   }
 }
 
-export function tamponsAffiches(client: Client, commerce: Commerce): number {
+export function tamponsAffiches(client: Client, commerce: Pick<Commerce, 'seuilTampons'>): number {
   return Math.min(client.tampons, commerce.seuilTampons)
 }
 
-export function recompenseDebloquee(client: Client, commerce: Commerce): boolean {
+export function recompenseDebloquee(client: Client, commerce: Pick<Commerce, 'seuilTampons'>): boolean {
   return client.tampons >= commerce.seuilTampons
 }
 

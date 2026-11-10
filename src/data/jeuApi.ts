@@ -1,6 +1,6 @@
 // Page de jeu en mode API : le tirage est fait par le SERVEUR (POST /tirages). Le navigateur n'envoie
 // qu'un contact et se contente d'animer la roue jusqu'au lot reçu. Logique pure, testée avec une API simulée.
-import type { Commerce } from '../types'
+import type { CommercePublic } from '../types'
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ResultatTirage } from './api.ts'
 import { secteurs, type Secteur } from '../lib/roulette.ts'
 
@@ -8,7 +8,7 @@ export type IssueTirage =
   | { ok: true; resultat: ResultatTirage; /** Secteur de la roue à amener sous le pointeur (null si les lots ont changé entre-temps). */ secteur: Secteur | null }
   | { ok: false; message: string; /** Serveur injoignable : rien n'a été joué. */ horsLigne: boolean; /** Refus d'une règle (409) : sans visite du jour, déjà joué… */ refus: boolean }
 
-export async function lancerTirage(api: Pick<ClientApi, 'tirer'>, commerce: Commerce, contact: string, prenom?: string): Promise<IssueTirage> {
+export async function lancerTirage(api: Pick<ClientApi, 'tirer'>, commerce: Pick<CommercePublic, 'id' | 'lots'>, contact: string, prenom?: string): Promise<IssueTirage> {
   try {
     const resultat = await api.tirer(commerce.id, contact, prenom)
     return { ok: true, resultat, secteur: secteurs(commerce.lots).find((s) => s.lot.libelle === resultat.lot) ?? null }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { useRoute } from '../router'
-import type { Client, Commerce, MessageClient } from '../types'
+import type { Client, Commerce, CommercePublic, MessageClient } from '../types'
 import { ErreurApi, type ClientApi } from '../data/api'
 import { CarteFidelite } from '../components/CarteFidelite'
 import { InvitationAvis } from '../components/InvitationAvis'
@@ -17,8 +17,11 @@ export default function CartePublique() {
   return api ? <CarteApi api={api} /> : <CarteLocale />
 }
 
+/** Démo locale : commerce complet ; mode API : fiche publique du serveur. */
+type CommerceCarte = Commerce | CommercePublic
+
 /** Boîte de réception du client : messages automatiques et messages du commerce (les plus récents d'abord). */
-function BoiteReception({ messages, commerce }: { messages: MessageClient[]; commerce: Commerce }) {
+function BoiteReception({ messages, commerce }: { messages: MessageClient[]; commerce: CommerceCarte }) {
   if (!messages.length) return null
   const tries = [...messages].sort((a, b) => b.date.localeCompare(a.date))
   const nonLus = messages.filter((m) => !m.lu).length
@@ -46,7 +49,7 @@ function BoiteReception({ messages, commerce }: { messages: MessageClient[]; com
   )
 }
 
-function Carte({ client, commerce, demo, pied, menu, actions }: { client: Client; commerce: Commerce; demo: boolean; pied: ReactNode; menu?: boolean; actions?: ReactNode }) {
+function Carte({ client, commerce, demo, pied, menu, actions }: { client: Client; commerce: CommerceCarte; demo: boolean; pied: ReactNode; menu?: boolean; actions?: ReactNode }) {
   if (!commerce.actif) return <MessagePublic titre={commerce.nom}>La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
   return (
     <div className="mx-auto max-w-md space-y-4 px-4 pt-6 pb-10">
@@ -117,7 +120,7 @@ function CarteLocale() {
 /** Mode API : la carte vient du serveur (sans téléphone ni e-mail), rafraîchie au retour sur la page. */
 function CarteApi({ api }: { api: ClientApi }) {
   const { param } = useRoute()
-  const [donnees, setDonnees] = useState<{ client: Client; commerce: Commerce; menu: boolean } | null>(null)
+  const [donnees, setDonnees] = useState<{ client: Client; commerce: CommercePublic; menu: boolean } | null>(null)
   const [erreur, setErreur] = useState<'introuvable' | 'inactif' | 'horsLigne' | null>(null)
 
   const charger = useCallback(() => {
@@ -169,7 +172,7 @@ function CarteApi({ api }: { api: ClientApi }) {
 }
 
 /** Rattrapage d'une visite oubliée + profil progressif (après la 2e visite). */
-function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi; client: Client; commerce: Commerce; onMaj(): void }) {
+function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi; client: Client; commerce: CommercePublic; onMaj(): void }) {
   const [anniversaire, setAnniversaire] = useState('')
   const [plat, setPlat] = useState('')
   const [date, setDate] = useState('')

@@ -1,4 +1,4 @@
-import type { Client, Commerce } from '../types'
+import type { Client, Commerce, CommercePublic } from '../types'
 import { recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { eurosParPoint, soldePoints } from '../lib/points'
 import { configDefi, configOffreHebdo, configParrainage, niveauClient, offreHebdoDuJour, prochainPalier, recompensesEnAttenteValables, reserveUtilisable, JOURS_SEMAINE } from '../lib/programme'
@@ -24,8 +24,12 @@ export function libelleTaux(commerce: Pick<Commerce, 'eurosParPoint'>): string {
   return e === 1 ? '1 point par euro dépensé' : `1 point tous les ${e.toLocaleString('fr-FR')} € dépensés`
 }
 
-/** La carte telle que le client la voit sur son téléphone (aussi affichée dans la fiche commerçant). */
-export function CarteFidelite({ client, commerce, sansQr = false }: { client: Client; commerce: Commerce; sansQr?: boolean }) {
+/**
+ * La carte telle que le client la voit sur son téléphone (aussi affichée dans la fiche commerçant).
+ * Ne lit que des champs de la vue publique (`CommercePublic`) : le taux de points (`eurosParPoint`) n'en fait plus
+ * partie (P0-S3) et n'est donc plus affiché ici — le commerçant le voit dans Réglages et en caisse.
+ */
+export function CarteFidelite({ client, commerce, sansQr = false }: { client: Client; commerce: Commerce | CommercePublic; sansQr?: boolean }) {
   const tampons = tamponsAffiches(client, commerce)
   const pct = Math.round((tampons / commerce.seuilTampons) * 100)
   const debloquee = recompenseDebloquee(client, commerce)
@@ -226,12 +230,12 @@ export function CarteFidelite({ client, commerce, sansQr = false }: { client: Cl
 
         {!!commerce.catalogue?.length && (
           <div className="mt-4">
-            <p className="surtitre">Vos points · {libelleTaux(commerce)}</p>
+            <p className="surtitre">Vos points</p>
             <ul className="mt-1.5 space-y-1.5">
-              {commerce.catalogue.map((r) => {
+              {commerce.catalogue.map((r, i) => {
                 const ok = points >= r.cout
                 return (
-                  <li key={r.id} className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm ring-1 ${ok ? 'bg-green-50 text-green-900 ring-green-200' : 'bg-gray-50 text-gray-700 ring-gray-900/5'}`}>
+                  <li key={i} className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm ring-1 ${ok ? 'bg-green-50 text-green-900 ring-green-200' : 'bg-gray-50 text-gray-700 ring-gray-900/5'}`}>
                     <span className="min-w-0">
                       <span className="font-semibold">{r.nom}</span>
                       {r.description && <span className="block text-xs">{r.description}</span>}

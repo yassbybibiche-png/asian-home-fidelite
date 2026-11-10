@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { useRoute } from '../router'
-import type { Client, Commerce, Tirage } from '../types'
+import type { Client, Commerce, CommercePublic, Tirage } from '../types'
 import { analyserContact } from '../lib/fidelite'
 import { estPerdant, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ResultatTirage } from '../data/api'
@@ -39,7 +39,10 @@ export default function Jouer() {
   return api ? <JouerApi api={api} /> : <JouerLocal />
 }
 
-function verifierCommerce(commerce: Commerce): ReactNode {
+/** Démo locale : commerce complet ; mode API : fiche publique (libellés des lots sans probabilité). */
+type CommerceJeu = Commerce | CommercePublic
+
+function verifierCommerce(commerce: CommerceJeu): ReactNode {
   if (!commerce.actif) return <MessagePublic titre={commerce.nom}>Le jeu de ce commerce n’est plus disponible.</MessagePublic>
   if (lotsJouables(commerce.lots).length === 0) return <MessagePublic titre={commerce.nom}>Aucun lot n’est configuré pour le moment.</MessagePublic>
   return null
@@ -48,7 +51,7 @@ function verifierCommerce(commerce: Commerce): ReactNode {
 type Etape = 'pret' | 'rotation' | 'resultat'
 
 /** En-tête + roue, communs aux deux modes. */
-function Cadre({ commerce, rotation, children, pied }: { commerce: Commerce; rotation: number; children: ReactNode; pied: ReactNode }) {
+function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; rotation: number; children: ReactNode; pied: ReactNode }) {
   return (
     <div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
       <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-6 pb-8 text-center shadow-relief">
@@ -245,7 +248,7 @@ function stockageLocal(): Storage | null {
 
 function JouerApi({ api }: { api: ClientApi }) {
   const { param } = useRoute()
-  const [commerce, setCommerce] = useState<Commerce | null>(null)
+  const [commerce, setCommerce] = useState<CommercePublic | null>(null)
   const [erreur, setErreur] = useState<'inconnu' | 'horsLigne' | null>(null)
 
   const charger = useCallback(() => {
@@ -261,7 +264,7 @@ function JouerApi({ api }: { api: ClientApi }) {
   return verifierCommerce(commerce) ?? <PartieApi key={commerce.id} api={api} commerce={commerce} />
 }
 
-function PartieApi({ api, commerce }: { api: ClientApi; commerce: Commerce }) {
+function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic }) {
   const memoire = useMemo(() => memoireJoueur(stockageLocal(), commerce.id), [commerce.id])
   // Code de parrainage dans le lien partagé (#/jouer/<id>?parrain=AH-XXXXXX) : attaché à l'inscription.
   const parrain = useMemo(() => /[?&]parrain=([A-Za-z0-9-]+)/.exec(window.location.hash)?.[1], [])
