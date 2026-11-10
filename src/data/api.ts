@@ -19,8 +19,27 @@ export class ErreurApi extends Error {
   }
 }
 
-/** PIN d'un commerce (X-Commerce-PIN) ou PIN admin (X-Admin-PIN, ouvre tous les commerces). */
-export type Acces = { role: 'commerce'; commerceId: string; pin: string } | { role: 'admin'; pin: string }
+/**
+ * Preuve d'accès envoyée au serveur : jeton de session (X-Session, obtenu une fois contre le PIN) ou, en repli
+ * (serveur sans sessions, ancien serveur), le PIN lui-même à chaque requête.
+ */
+type Preuve = { pin: string; jeton?: undefined } | { jeton: string; expireLe?: string; pin?: undefined }
+
+/** Commerce (PIN X-Commerce-PIN) ou admin (PIN X-Admin-PIN, ouvre tous les commerces) ; PIN ou jeton de session. */
+export type Acces = ({ role: 'commerce'; commerceId: string } | { role: 'admin' }) & Preuve
+
+/** Session d'un membre de l'équipe (caisse), obtenue contre son code. */
+export type AccesEquipe = { role: 'equipe'; commerceId: string; jeton: string; expireLe?: string; membreNom?: string }
+
+export interface Session {
+  jeton: string
+  role: 'commerce' | 'admin' | 'equipe'
+  commerceId?: string
+  membreNom?: string
+  expireLe: string
+}
+
+export type DemandeSession = { role: 'commerce'; commerceId: string; pin: string } | { role: 'admin'; pin: string } | { role: 'equipe'; commerceId: string; code: string }
 
 export interface EtatCommerce {
   commerce: Commerce
@@ -31,8 +50,8 @@ export interface EtatCommerce {
   journal?: EntreeJournal[]
 }
 
-/** Accès à la caisse : code équipe (4 chiffres) ou PIN du gérant. */
-export type AccesCaisse = { code: string } | Acces
+/** Accès à la caisse : session équipe, code équipe (4 chiffres, repli) ou accès du gérant. */
+export type AccesCaisse = { code: string } | AccesEquipe | Acces
 
 export interface ReponseCaisse {
   auteur: EntreeJournal['auteur']
@@ -84,7 +103,30 @@ export function baseApi(valeur: string | undefined): string | null {
 function entetesAcces(acces: AccesCaisse | null | undefined): Record<string, string> {
   if (!acces) return {}
   if ('code' in acces) return { 'X-Equipe-Code': acces.code }
+  if (acces.jeton) return { 'X-Session': acces.jeton }
+  if (acces.role === 'equipe' || acces.pin === undefined) return {}
   return acces.role === 'admin' ? { 'X-Admin-PIN': acces.pin } : { 'X-Commerce-PIN': acces.pin }
+}
+
+/**
+ * Échange un PIN / code contre un jeton de session. Renvoie null si le serveur ne sait pas en délivrer
+ * (503 : SESSION_SECRET absente ; 404 / 405 : serveur d'avant les sessions ; 0 : injoignable) : l'appelant garde
+ * alors le PIN en en-tête, comme avant. Un PIN refusé (401) ou un blocage (429) est relancé tel quel.
+ */
+export async function echangerContreSession(api: Pick<ClientApi, 'ouvrirSession'>, demande: DemandeSession): Promise<Session | null> {
+  try {
+    return await api.ouvrirSession(demande)
+  } catch (e) {
+    if (e instanceof ErreurApi && [0, 404, 405, 503].includes(e.statut)) return null
+    throw e
+  }
+}
+
+/** Accès « jeton » correspondant à une session ouverte par le gérant ou l'admin. */
+export function accesDeSession(s: Session): Acces | null {
+  if (s.role === 'admin') return { role: 'admin', jeton: s.jeton, expireLe: s.expireLe }
+  if (s.role === 'commerce' && s.commerceId) return { role: 'commerce', commerceId: s.commerceId, jeton: s.jeton, expireLe: s.expireLe }
+  return null
 }
 
 const enc = encodeURIComponent
@@ -127,6 +169,11 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
   return {
     base,
     sante: () => requete('GET', '/sante') as Promise<{ ok: boolean; version: string; demo: boolean }>,
+
+    // ---- Sessions : le PIN / code n'est envoyé qu'ici, une fois ; ensuite seul le jeton circule (X-Session) ----
+    ouvrirSession: (demande: DemandeSession) => requete('POST', '/sessions', { corps: demande }) as Promise<Session>,
+    /** Révoque le jeton côté serveur (« Verrouiller »). */
+    fermerSession: (jeton: string) => requete('DELETE', '/sessions', { acces: { role: 'admin', jeton } }) as Promise<{ ok: boolean }>,
 
     // ---- Public ----
     commerces: async () => ((await requete('GET', '/commerces')) as { commerces: Commerce[] }).commerces,
@@ -194,8 +241,9 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     marquerLus: (clientId: string) => requete('POST', `/cartes/${enc(clientId)}/lus`),
 
     // ---- Admin ----
-    creerCommerce: async (pinAdmin: string, champs: { nom: string; type: TypeCommerce; lienGoogle: string; pin: string }) =>
-      ((await requete('POST', '/commerces', { acces: { role: 'admin', pin: pinAdmin }, corps: champs })) as { commerce: Commerce }).commerce,
+    /** `admin` : accès admin (PIN ou session), ou le PIN admin seul. */
+    creerCommerce: async (admin: string | Acces, champs: { nom: string; type: TypeCommerce; lienGoogle: string; pin: string }) =>
+      ((await requete('POST', '/commerces', { acces: typeof admin === 'string' ? { role: 'admin', pin: admin } : admin, corps: champs })) as { commerce: Commerce }).commerce,
   }
 }
 

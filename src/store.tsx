@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { Avis, Client, Commerce, Etat, Tirage, TypeCommerce } from './types'
 import { depotLocal, type Depot } from './data/depot'
 import { creerDepotApi, etatVide, type DepotApi } from './data/depotApi'
-import { baseApi, creerClientApi, ErreurApi, MESSAGE_HORS_LIGNE, type Acces, type ClientApi } from './data/api'
+import { accesDeSession, baseApi, creerClientApi, echangerContreSession, ErreurApi, MESSAGE_HORS_LIGNE, type Acces, type ClientApi } from './data/api'
 import { creerCoffrePin, rangementIndexedDb, type CoffrePin } from './data/coffrePin'
 import { analyserContact, nouveauClient, offrirRecompense, trouverClientParContact, validerVisite } from './lib/fidelite'
 import { appliquerInscription } from './lib/programme'
@@ -264,6 +264,9 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
 
   const verrouiller = useCallback(
     async (message?: string) => {
+      // Révocation côté serveur, sans attendre ni bloquer (hors ligne : le jeton expirera seul).
+      const jeton = accesRef.current?.jeton
+      if (jeton) void api.fermerSession(jeton).catch(() => {})
       accesRef.current = null
       // Les chargements encore en cours (faits avec l'ancien PIN) seront ignorés.
       dernierApplique.current = ++numero.current
@@ -274,7 +277,7 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       setEtat((e) => ({ ...etatVide(), commerces: e.commerces.map((c) => ({ ...c })), commerceActifId: e.commerceActifId }))
       setErreurConnexion(message ?? null)
     },
-    [coffre, depot],
+    [api, coffre, depot],
   )
 
   const recharger = useCallback(async () => {
@@ -287,7 +290,9 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
     } catch (err) {
       if (n <= dernierApplique.current) return
       if (err instanceof ErreurApi && err.statut === 401 && accesRef.current) {
-        await verrouiller('PIN refusé (il a peut-être été changé) : déverrouillez à nouveau.')
+        await verrouiller(
+          accesRef.current.jeton ? 'Session expirée ou fermée : déverrouillez à nouveau avec votre PIN.' : 'PIN refusé (il a peut-être été changé) : déverrouillez à nouveau.',
+        )
         return
       }
       // « Hors ligne » seulement si le serveur est vraiment injoignable (pas pour un refus 429 ou une erreur 500).
@@ -299,8 +304,9 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
   // Démarrage : PIN mémorisé (chiffré) dans cet onglet ? Si oui, cache affiché tout de suite, puis serveur.
   useEffect(() => {
     let annule = false
-    coffre.lire().then((a) => {
+    coffre.lire().then((lu) => {
       if (annule) return
+      const a = lu && lu.role !== 'equipe' ? lu : null
       if (a) {
         accesRef.current = a
         setAcces(a)
@@ -335,7 +341,14 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
   }, [recharger])
 
   const deverrouiller = useCallback(
-    async (a: Acces) => {
+    async (saisi: Acces) => {
+      // Le PIN part une seule fois (POST /sessions) contre un jeton court ; ensuite seul le jeton circule.
+      // Serveur sans sessions (503 : SESSION_SECRET absente, ancien serveur) : repli sur le PIN en en-tête, comme avant.
+      let a = saisi
+      if (saisi.pin) {
+        const s = await echangerContreSession(api, saisi.role === 'admin' ? { role: 'admin', pin: saisi.pin } : { role: 'commerce', commerceId: saisi.commerceId, pin: saisi.pin })
+        a = (s && accesDeSession(s)) ?? saisi
+      }
       const n = ++numero.current
       const e = await depot.chargerServeur(a, a.role === 'commerce' ? a.commerceId : actifRef.current)
       dernierApplique.current = Math.max(dernierApplique.current, n)
@@ -344,7 +357,7 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       appliquer(e)
       await coffre.memoriser(a)
     },
-    [appliquer, coffre, depot],
+    [api, appliquer, coffre, depot],
   )
 
   /** Toute action passe par le serveur avec le PIN, puis l'état est rechargé (le serveur fait foi). */
@@ -404,7 +417,7 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       creerCommerce: (n: NouveauCommerce) =>
         avecPin(async (a) => {
           if (a.role !== 'admin') throw new Error('Seul l’admin peut créer un commerce.')
-          const c = await api.creerCommerce(a.pin, { nom: n.nom, type: n.type, lienGoogle: n.lienGoogle, pin: n.pin ?? '' })
+          const c = await api.creerCommerce(a, { nom: n.nom, type: n.type, lienGoogle: n.lienGoogle, pin: n.pin ?? '' })
           actifRef.current = c.id
           return c
         }),
