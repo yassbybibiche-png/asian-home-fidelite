@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, CommercePublic, Tirage } from '../types'
 import { analyserContact } from '../lib/fidelite'
-import { estPerdant, jourEnClair, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
+import { estPerdant, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
 import {
   apresVerification,
   ETAPES_VALIDATION,
@@ -18,7 +18,28 @@ import { estAsianHome } from '../lib/visuels'
 import { attributsChamp, avecPrenom, etatSaisieContact, virgulePrenom, type ModeContact } from '../lib/inscriptionJeu'
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ReponseCarte, type ResultatTirage } from '../data/api'
 import { lancerTirage, memoireJoueur, type JoueurMemorise } from '../data/jeuApi'
-import { DUREE_ROTATION_MS, LegendeRoue, Roue } from '../components/Roue'
+import {
+  delaiResultat,
+  detecterPlateforme,
+  dureeConfettis,
+  estInstallee,
+  etapesEcranAccueil,
+  genererConfettis,
+  MOTIF_VIBRATION_GAIN,
+  MOTIF_VIBRATION_PERDU,
+  NOTE_WALLET,
+  TEXTE_CODE_A_MONTRER,
+  TEXTE_CODE_UNE_FOIS,
+  TEXTE_DEJA_JOUE,
+  TEXTE_GAIN_SANS_CODE,
+  TEXTE_PERDU_PROCHAINE,
+  TEXTE_PERDU_TAMPON,
+  texteValidite,
+  TITRE_PERDU,
+  toursRotation,
+  vibrer,
+} from '../lib/animationRoue'
+import { LegendeRoue, Roue, useMouvementReduit } from '../components/Roue'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteJeu } from '../components/Squelette'
 import { BadgeDemo, BoutonCopier, LienConfidentialite, LogoCommerce, MessageErreur, PiedPublic } from '../components/ui'
@@ -185,7 +206,7 @@ function MessageDejaJoue({ prenom, lot, code, remis }: { prenom: string; lot: st
         </p>
       )}
       {remis ? <p className="mt-2 font-semibold text-green-800">✓ Lot déjà remis au comptoir. Bon appétit !</p> : code && <CodeGagnant code={code} />}
-      <p className="mt-2 text-sm text-gray-600">1 tirage par personne et par jour. Revenez lors de votre prochaine visite !</p>
+      <p className="mt-2 text-sm text-gray-600">{TEXTE_DEJA_JOUE}</p>
     </section>
   )
 }
@@ -248,6 +269,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
   const [gain, setGain] = useState<Tirage | null>(null)
   const minuterie = useRef<number | undefined>(undefined)
   useEffect(() => () => window.clearTimeout(minuterie.current), [])
+  const reduit = useMouvementReduit()
 
   const trouver = (id: string | null) => (id ? etat.clients.find((c) => c.id === id && c.commerceId === commerce.id) : undefined)
   const joueur = trouver(joueurId)
@@ -276,9 +298,9 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
     // Enregistré dès le lancement : recharger la page pendant l'animation ne permet pas de rejouer.
     enregistrerTirage(tirage)
     setGain(tirage)
-    setRotation((r) => rotationCible(r, secteur))
+    setRotation((r) => rotationCible(r, secteur, Math.random(), toursRotation(reduit)))
     setEtape('rotation')
-    minuterie.current = window.setTimeout(() => setEtape('resultat'), DUREE_ROTATION_MS + 200)
+    minuterie.current = window.setTimeout(() => setEtape('resultat'), delaiResultat(reduit))
   }
 
   return (
@@ -304,7 +326,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
           />
         )
       ) : etape === 'resultat' && gain ? (
-        <Resultat lot={gain.lot} prenom={joueur.prenom} />
+        <Resultat lot={gain.lot} prenom={joueur.prenom} lienCarte={`#/carte/${joueur.id}`} />
       ) : dejaJoue ? (
         <MessageDejaJoue prenom={joueur.prenom} lot={dejaJoue.lot} />
       ) : statut === 'sansVisite' ? (
@@ -378,6 +400,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
   const minuterie = useRef<number | undefined>(undefined)
   const verifierMaintenant = useRef<() => void>(() => {})
   useEffect(() => () => window.clearTimeout(minuterie.current), [])
+  const reduit = useMouvementReduit()
   const visiteValidee = useVisiteValidee(jeu?.statut)
 
   // État du jeu du jour, vu par le serveur (visite validée ? déjà joué ?). Renvoie le statut, ou null en cas d'échec.
@@ -465,9 +488,9 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
     }
     setGain(issue.resultat)
     memoire.memoriserGain({ ...issue.resultat, clientId: joueur.clientId })
-    if (issue.secteur) setRotation((r) => rotationCible(r, issue.secteur!))
+    if (issue.secteur) setRotation((r) => rotationCible(r, issue.secteur!, Math.random(), toursRotation(reduit)))
     setEtape('rotation')
-    minuterie.current = window.setTimeout(() => setEtape('resultat'), issue.secteur ? DUREE_ROTATION_MS + 200 : 0)
+    minuterie.current = window.setTimeout(() => setEtape('resultat'), delaiResultat(reduit, !!issue.secteur))
   }
 
   const gainMemorise = memoire.gain()
@@ -502,7 +525,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
         )
       ) : etape !== 'pret' && gain ? (
         etape === 'resultat' ? (
-          <Resultat lot={gain.lot} prenom={joueur.prenom} code={gain.perdant ? undefined : gain.code} />
+          <Resultat lot={gain.lot} prenom={joueur.prenom} code={gain.perdant ? undefined : gain.code} lienCarte={`#/carte/${joueur.clientId}`} />
         ) : (
           <button className="bouton w-full py-4 text-lg" disabled>
             La roue tourne…
@@ -743,33 +766,124 @@ function DemandePrenom({ prenom, onEnregistrer }: { prenom: string; onEnregistre
 
 function CodeGagnant({ code }: { code: string }) {
   return (
-    <div className="mt-3 space-y-2">
-      <p className="text-sm text-gray-600">Code gagnant à montrer au comptoir :</p>
-      <p className="rounded-xl border-2 border-dashed border-or-500 bg-amber-50 py-3 font-mono text-3xl font-extrabold tracking-[0.3em] text-gray-900 select-all">
+    <div className="mt-3 space-y-2" data-code-gagnant>
+      <p className="text-sm text-gray-600">{TEXTE_CODE_A_MONTRER}</p>
+      <p className="rounded-xl border-2 border-dashed border-or-500 bg-amber-50 py-4 font-mono text-4xl font-extrabold tracking-[0.3em] text-gray-900 select-all">
         {code}
       </p>
       {/* Le code n'est accepté en caisse que le jour du tirage (P0-U3). */}
-      <p className="text-sm font-semibold text-gray-800">Valable aujourd’hui, {jourEnClair(new Date())}</p>
+      <p className="text-base font-bold text-gray-900" data-validite>
+        🗓️ {texteValidite(new Date())}
+      </p>
+      <p className="text-xs text-gray-600">{TEXTE_CODE_UNE_FOIS}</p>
       <BoutonCopier texte={code} libelle="Copier le code" className="bouton-secondaire w-full" />
     </div>
   )
 }
 
-function Resultat({ lot, prenom, code }: { lot: string; prenom: string; code?: string }) {
-  const perdu = estPerdant(lot)
+/** Pluie de confettis au gain (CSS maison, aucune dépendance) ; rien en mouvement réduit. Décorative. */
+function Confettis() {
+  const reduit = useMouvementReduit()
+  const confettis = useMemo(() => genererConfettis(reduit), [reduit])
+  const [termine, setTermine] = useState(false)
+  useEffect(() => {
+    const t = window.setTimeout(() => setTermine(true), dureeConfettis(confettis) + 100)
+    return () => window.clearTimeout(t)
+  }, [confettis])
+  if (termine || confettis.length === 0) return null
   return (
-    <section
-      className={`carte apparition text-center ${perdu ? '' : 'bg-gradient-to-b from-amber-50 to-white ring-2 ring-or-500'}`}
-      role="status"
-      aria-live="polite"
-    >
+    <div className="confettis" aria-hidden>
+      {confettis.map((c, i) => (
+        <span
+          key={i}
+          className={c.rond ? 'confetti rounded-full' : 'confetti'}
+          style={
+            {
+              left: `${c.gauche}%`,
+              backgroundColor: c.couleur,
+              animationDelay: `${c.delai}ms`,
+              animationDuration: `${c.duree}ms`,
+              '--derive': `${c.derive}px`,
+              '--rotation': `${c.rotation}deg`,
+            } as CSSProperties
+          }
+        />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * « Garder ma carte » : en attendant Apple / Google Wallet, ajout de la carte web à l'écran d'accueil, avec les
+ * gestes propres à l'iPhone ou à Android. Rien à proposer si la page est déjà ouverte depuis l'écran d'accueil.
+ */
+export function GarderCarte({ lienCarte }: { lienCarte: string }) {
+  const [ouvert, setOuvert] = useState(false)
+  const plateforme = useMemo(() => detecterPlateforme(navigator.userAgent, navigator.maxTouchPoints ?? 0), [])
+  if (estInstallee()) return null
+  return (
+    <div className="mt-3 text-left" data-garder-carte={plateforme}>
+      <button type="button" className="bouton w-full" aria-expanded={ouvert} aria-controls="garder-carte" onClick={() => setOuvert((o) => !o)}>
+        📲 Garder ma carte sur mon téléphone
+      </button>
+      {ouvert && (
+        <div id="garder-carte" className="apparition mt-3 space-y-2 rounded-xl bg-fond p-3 text-sm text-gray-800">
+          <p className="font-semibold text-gray-900">
+            {plateforme === 'ios' ? 'Sur iPhone' : plateforme === 'android' ? 'Sur Android' : 'Sur votre téléphone'} : ajoutez votre carte à l’écran d’accueil
+          </p>
+          <ol className="list-decimal space-y-1 pl-5">
+            {etapesEcranAccueil(plateforme).map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ol>
+          <a href={lienCarte} className="bouton-secondaire w-full">
+            Ouvrir ma carte
+          </a>
+          <p className="text-xs text-gray-600">{NOTE_WALLET}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function Resultat({ lot, prenom, code, lienCarte }: { lot: string; prenom: string; code?: string; lienCarte: string }) {
+  const perdu = estPerdant(lot)
+  // Retour tactile à l'apparition du résultat (Android ; sans effet sur iPhone, qui n'a pas l'API).
+  useEffect(() => void vibrer(perdu ? MOTIF_VIBRATION_PERDU : MOTIF_VIBRATION_GAIN), [perdu])
+  if (perdu)
+    return (
+      <section className="carte apparition text-center" role="status" aria-live="polite" data-resultat="perdu">
+        <p className="text-5xl" aria-hidden>
+          🍀
+        </p>
+        <p className="mt-2 text-lg font-bold">
+          {TITRE_PERDU}
+          {virgulePrenom(prenom)}… mais votre visite compte !
+        </p>
+        <p className="mt-2 rounded-xl bg-green-50 p-3 text-sm font-semibold text-green-900 ring-1 ring-green-200">✓ {TEXTE_PERDU_TAMPON}</p>
+        <p className="mt-2 text-sm text-gray-700">{TEXTE_PERDU_PROCHAINE}</p>
+        <GarderCarte lienCarte={lienCarte} />
+      </section>
+    )
+  return (
+    <section className="carte apparition bg-gradient-to-b from-amber-50 to-white text-center ring-2 ring-or-500" role="status" aria-live="polite" data-resultat="gain">
+      <Confettis />
       <p className="text-5xl" aria-hidden>
-        {perdu ? '🍀' : '🎉'}
+        🎉
       </p>
-      <p className="mt-2 text-lg font-bold">{perdu ? `Pas cette fois${virgulePrenom(prenom)}…` : `${avecPrenom('Bravo', prenom)}, vous avez gagné :`}</p>
-      <p className="mt-1 font-titre text-3xl font-bold text-marque-600">{lot}</p>
-      {!perdu && !code && <p className="mt-2 text-sm text-gray-600">Montrez cet écran au comptoir pour profiter de votre lot.</p>}
-      {!perdu && code && <CodeGagnant code={code} />}
+      <p className="mt-2 text-lg font-bold">{`${avecPrenom('Bravo', prenom)}, vous avez gagné :`}</p>
+      <p className="mt-1 font-titre text-4xl leading-tight font-bold break-words text-marque-600">{lot}</p>
+      {code ? (
+        <CodeGagnant code={code} />
+      ) : (
+        <>
+          <p className="mt-2 text-sm text-gray-600">{TEXTE_GAIN_SANS_CODE}</p>
+          <p className="mt-1 text-base font-bold text-gray-900" data-validite>
+            🗓️ {texteValidite(new Date())}
+          </p>
+        </>
+      )}
+      <GarderCarte lienCarte={lienCarte} />
     </section>
   )
 }

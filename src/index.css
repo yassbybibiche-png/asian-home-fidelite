@@ -166,10 +166,49 @@ h3 {
   }
 }
 
-/* Mouvement réduit : point fixe (pas de clignotement accéléré par la règle globale), le texte reste. */
+/* #/jouer, écran de gain (P1-C2) : confettis en CSS (transform + opacity seulement, composités : 60 fps). */
+@keyframes confetti-chute {
+  0% {
+    transform: translate3d(0, -10vh, 0) rotate(0deg);
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(var(--derive, 0px), 105vh, 0) rotate(var(--rotation, 540deg));
+    opacity: 0;
+  }
+}
+
+.confettis {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.confetti {
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 12px;
+  border-radius: 2px;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation-name: confetti-chute;
+  animation-timing-function: cubic-bezier(0.25, 0.6, 0.4, 1);
+  animation-fill-mode: both;
+}
+
+/* Mouvement réduit : point fixe (pas de clignotement accéléré par la règle globale), le texte reste. Pas de confettis. */
 @media (prefers-reduced-motion: reduce) {
   .attente-pulse,
   .attente-pulse::after {
     animation: none;
+  }
+  .confettis {
+    display: none;
   }
 }

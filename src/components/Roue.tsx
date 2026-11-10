@@ -1,7 +1,20 @@
+import { useEffect, useState } from 'react'
 import { LONGUEUR_TEXTE_MAX, POLICE_ROUE, RAYON_LIBELLE, largeurEstimee, secteursAffiches } from '../lib/roue'
 import type { LotRoue } from '../lib/roulette'
+import { prefereMouvementReduit, REQUETE_MOUVEMENT_REDUIT, transitionRoue } from '../lib/animationRoue'
 
-export const DUREE_ROTATION_MS = 4500
+/** Réglage « réduire les animations » du téléphone, suivi en direct. */
+export function useMouvementReduit(): boolean {
+  const [reduit, setReduit] = useState(() => prefereMouvementReduit(typeof window === 'undefined' ? undefined : window))
+  useEffect(() => {
+    const requete = window.matchMedia?.(REQUETE_MOUVEMENT_REDUIT)
+    if (!requete) return
+    const suivre = () => setReduit(requete.matches)
+    requete.addEventListener?.('change', suivre)
+    return () => requete.removeEventListener?.('change', suivre)
+  }, [])
+  return reduit
+}
 
 /** Point sur le cercle ; angle en degrés, 0 = en haut, sens horaire. */
 function point(angle: number, r: number): string {
@@ -17,6 +30,7 @@ function point(angle: number, r: number): string {
 export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) {
   const parts = secteursAffiches(lots)
   const R = 88
+  const reduit = useMouvementReduit()
   return (
     <div className="relative mx-auto aspect-square w-full max-w-80">
       {/* Pointeur fixe en haut */}
@@ -40,11 +54,8 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
           return <circle key={i} cx={x} cy={y} r={2.2} fill={i % 2 ? '#f2d48a' : '#fff7e0'} />
         })}
       </svg>
-      {/* Secteurs : seule cette couche tourne. */}
-      <div
-        className="absolute inset-0"
-        style={{ transform: `rotate(${rotation}deg)`, transition: `transform ${DUREE_ROTATION_MS}ms cubic-bezier(0.15, 0.85, 0.2, 1)` }}
-      >
+      {/* Secteurs : seule cette couche tourne (transform seul, couche composée : 60 fps sans repeindre le SVG). */}
+      <div className="absolute inset-0 will-change-transform" style={{ transform: `rotate(${rotation}deg)`, transition: transitionRoue(reduit) }}>
         <svg viewBox="-100 -100 200 200" className="h-full w-full" aria-hidden>
           <g>
             {parts.map((s) => {
