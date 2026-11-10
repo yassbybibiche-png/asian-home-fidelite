@@ -1,0 +1,48 @@
+/* Page hors ligne minimale (P1-C3), servie par le service worker. Feuille liée : la CSP a style-src 'self'. */
+body {
+  margin: 0;
+  background: #111111;
+  color: #ffffff;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.hors-ligne {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2rem 1.5rem;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.hors-ligne h1 {
+  margin: 0;
+  color: #c9a227;
+  font-size: 1.4rem;
+}
+
+.hors-ligne p {
+  margin: 0;
+  max-width: 22rem;
+  line-height: 1.5;
+}
+
+.hors-ligne__logo {
+  border-radius: 1rem;
+}
+
+.hors-ligne__bouton {
+  display: inline-block;
+  min-height: 44px;
+  padding: 0.7rem 1.6rem;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #c9a227;
+  color: #111111;
+  font-weight: 700;
+  text-decoration: none;
+}
