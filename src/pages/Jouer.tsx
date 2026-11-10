@@ -17,7 +17,8 @@ import {
 import { estAsianHome } from '../lib/visuels'
 import { attributsChamp, avecPrenom, etatSaisieContact, virgulePrenom, type ModeContact } from '../lib/inscriptionJeu'
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ReponseCarte, type ResultatTirage } from '../data/api'
-import { lancerTirage, memoireJoueur, type JoueurMemorise } from '../data/jeuApi'
+import { lancerTirage, memoireJoueur, signalerScan, type JoueurMemorise } from '../data/jeuApi'
+import { accrocheJeu, jourParis } from '../lib/mesure'
 import {
   delaiResultat,
   detecterPlateforme,
@@ -91,6 +92,8 @@ type Etape = 'pret' | 'rotation' | 'resultat'
 /** En-tête + roue, communs aux deux modes. */
 function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; rotation: number; children: ReactNode; pied: ReactNode }) {
   const { t } = useLangue()
+  // Test A/B « accroche » (P2-Q3, docs/TESTS-AB.md) : variante du jour, la même pour tous les clients de la journée.
+  const accroche = accrocheJeu(commerce, jourParis(new Date()))
   return (
     <div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
       <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-2 pb-8 text-center shadow-relief">
@@ -99,7 +102,7 @@ function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; 
           <LogoCommerce commerce={commerce} taille="lg" />
         </div>
         <h1 className="titre-or mt-3 text-2xl">{commerce.nom}</h1>
-        <p className="mt-1 font-semibold text-or-300">{t('Tournez la roue et gagnez un cadeau !')}</p>
+        <p className="mt-1 font-semibold text-or-300">{t(accroche.modele, accroche.valeurs)}</p>
         {commerce.coordonnees && <p className="mt-1 text-sm text-white/70">{commerce.coordonnees}</p>}
       </header>
 
@@ -383,6 +386,14 @@ function stockageLocal(): Storage | null {
   }
 }
 
+function stockageSession(): Storage | null {
+  try {
+    return sessionStorage
+  } catch {
+    return null
+  }
+}
+
 function JouerApi({ api }: { api: ClientApi }) {
   const { param } = useRoute()
   const [commerce, setCommerce] = useState<CommercePublic | null>(null)
@@ -422,6 +433,8 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
   const reduit = useMouvementReduit()
   const { t } = useLangue()
   const visiteValidee = useVisiteValidee(jeu?.statut)
+  // Mesure anonyme (P2-Q3) : page de jeu ouverte, une fois par onglet ; seul le type part, jamais la carte.
+  useEffect(() => void signalerScan(api, commerce.id, stockageSession()), [api, commerce.id])
 
   // État du jeu du jour, vu par le serveur (visite validée ? déjà joué ?). Renvoie le statut, ou null en cas d'échec.
   const majStatut = useCallback(

@@ -49,6 +49,8 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'Langue': 'Language',
   // ---- Jeu (#/jouer) ----
   'Tournez la roue et gagnez un cadeau !': 'Spin the wheel and win a gift!',
+  // Variante B du test A/B « accroche » (P2-Q3) : le libellé du lot n'est pas traduit (comme sur la roue).
+  'Tournez la roue : {lot} à gagner !': 'Spin the wheel: {lot} to win!',
   'À gagner': 'Prizes',
   'Lots de la roue': 'Wheel prizes',
   'Roue de la chance : {n} lots à gagner, détaillés ci-dessous': 'Wheel of fortune: {n} prizes to win, listed below',

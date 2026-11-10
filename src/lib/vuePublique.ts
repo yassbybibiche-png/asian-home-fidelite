@@ -52,5 +52,7 @@ export function commercePublic(c: Commerce): CommercePublic {
     programme: programmePublic(c),
     // Durée de conservation effective (P1-B6) : publiée sur la page de confidentialité.
     conservationMois: dureeConservationMois(c),
+    // Test A/B « accroche » (P2-Q3) : seulement l'indicateur « en cours » ; jamais les dates ni les coûts des lots.
+    ...(c.testsAB?.accroche?.actif ? { testAccroche: true as const } : {}),
   }
 }

@@ -11,6 +11,7 @@ import { COULEUR_DEFAUT, FOND_DEFAUT, problemesApparence } from '../lib/apparenc
 import { JOURS_SEMAINE, PALIERS_DEFAUT } from '../lib/programme'
 import { compteurLibelle, MAX_CARACTERES_ROUE } from '../lib/roue'
 import { CONSERVATION_DEFAUT_MOIS, CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, libelleDuree } from '../lib/rgpd'
+import { basculerAccroche, coutLotValide, jourParis } from '../lib/mesure'
 
 /** Client fictif de l'aperçu (jamais enregistré). */
 const APERCU_CLIENT: Client = { id: 'apercu', commerceId: '', prenom: 'Aperçu', tampons: 3, points: 42, visites: [], derniereVisite: null, creeLe: '2026-01-01T00:00:00.000Z' }
@@ -67,6 +68,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
 
   const lots = lotsEdites.map((l) => ({ ...l, libelle: l.libelle.trim() })).filter((l) => l.libelle)
   const probasValides = lots.every((l) => Number.isFinite(l.probabilite) && l.probabilite >= 0 && l.probabilite <= 100)
+  // Coût unitaire des lots (P2-Q3) : facultatif, 0 à 1 000 € ; sert au tableau de bord, jamais montré aux clients.
+  const coutsValides = lots.every((l) => coutLotValide(l.coutCentimes))
   const total = lots.reduce((s, l) => s + (Number.isFinite(l.probabilite) ? l.probabilite : 0), 0)
   const nomValide = brouillon.nom.trim().length > 0
   const seuilValide = Number.isInteger(brouillon.seuilTampons) && brouillon.seuilTampons >= 2 && brouillon.seuilTampons <= 50
@@ -87,7 +90,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   const conservationValide = Number.isInteger(conservation) && conservation >= CONSERVATION_MIN_MOIS && conservation <= CONSERVATION_MAX_MOIS
   // Liens de commande (P1-C5) : vides ou en https (le serveur refuse le reste).
   const liensCommandeValides = [brouillon.lienDeliveroo, brouillon.lienUberEats].every((l) => !l?.trim() || /^https:\/\/\S+$/i.test(l.trim()))
-  const valide = nomValide && seuilValide && lots.length >= 2 && probasValides && total > 0 && tauxValide && catalogueValide && !problemes.length && conservationValide && liensCommandeValides
+  const valide = nomValide && seuilValide && lots.length >= 2 && probasValides && coutsValides && total > 0 && tauxValide && catalogueValide && !problemes.length && conservationValide && liensCommandeValides
 
   function maj<K extends keyof Commerce>(champ: K, valeur: Commerce[K]) {
     setBrouillon((b) => ({ ...b, [champ]: valeur }))
@@ -421,7 +424,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
         <legend className="sr-only">Roulette</legend>
         <h2 className="titre-carte">Lots de la roulette</h2>
         <p className="text-sm text-gray-600">
-          Texte libre + chance de sortir (en %). Un lot « Dommage ! » (perdant) est possible. Visez {MAX_CARACTERES_ROUE} caractères au plus : le libellé tient alors en entier sur la roue ; la liste des lots sous la roue l’affiche toujours en entier.
+          Texte libre + chance de sortir (en %) + coût pour vous (€, facultatif : matière et emballage d’un lot, sert au coût des lots du tableau de bord, jamais montré aux clients). Un lot « Dommage ! » (perdant) est possible. Visez {MAX_CARACTERES_ROUE} caractères au plus : le libellé tient alors en entier sur la roue ; la liste des lots sous la roue l’affiche toujours en entier.
         </p>
         <ul className="space-y-2">
           {lotsEdites.map((lot, i) => (
@@ -457,6 +460,24 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                 />
                 <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-gray-600">%</span>
               </div>
+              <label className="sr-only" htmlFor={`cout-${i}`}>
+                Coût du lot {i + 1} en euros
+              </label>
+              <div className="relative min-w-0 flex-1 sm:w-28 sm:flex-none">
+                <input
+                  id={`cout-${i}`}
+                  className="champ pr-8 text-right"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  max={1000}
+                  step={0.01}
+                  placeholder="coût"
+                  value={lot.coutCentimes === undefined ? '' : lot.coutCentimes / 100}
+                  onChange={(e) => majLot(i, { ...lot, coutCentimes: e.target.value === '' ? undefined : Math.round(e.target.valueAsNumber * 100) })}
+                />
+                <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-gray-600">€</span>
+              </div>
               <button
                 type="button"
                 className="h-12 w-12 shrink-0 rounded-xl bg-white text-xl text-gray-600 ring-1 ring-gray-300 transition hover:text-red-700 hover:ring-red-200 active:bg-gray-100"
@@ -475,18 +496,26 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
         >
           + Ajouter un lot
         </button>
-        <p className={`text-sm ${lots.length >= 2 && probasValides && total > 0 ? 'text-gray-600' : 'text-red-700'}`}>
+        <p className={`text-sm ${lots.length >= 2 && probasValides && coutsValides && total > 0 ? 'text-gray-600' : 'text-red-700'}`}>
           {lots.length} lot{lots.length > 1 ? 's' : ''} · total {total} %
           {lots.length < 2
             ? ' — il en faut au moins 2'
             : !probasValides
               ? ' — chaque chance doit être entre 0 et 100 %'
-              : total <= 0
-                ? ' — au moins un lot doit avoir une chance > 0'
-                : total !== 100
-                  ? ' — le total ne fait pas 100 % : les chances seront recalculées au prorata'
-                  : ''}
+              : !coutsValides
+                ? ' — chaque coût doit être entre 0 et 1 000 €'
+                : total <= 0
+                  ? ' — au moins un lot doit avoir une chance > 0'
+                  : total !== 100
+                    ? ' — le total ne fait pas 100 % : les chances seront recalculées au prorata'
+                    : ''}
         </p>
+        <Interrupteur
+          libelle="Test A/B : phrase d’accroche de la page de jeu"
+          aide="Un jour sur deux, la phrase sous votre nom cite un lot (« Tournez la roue : Nems offerts à gagner ! ») au lieu de « Tournez la roue et gagnez un cadeau ! ». Résultats dans le tableau de bord. Aucune donnée client en plus."
+          actif={!!brouillon.testsAB?.accroche?.actif}
+          onChange={(v) => maj('testsAB', { ...brouillon.testsAB, accroche: basculerAccroche(brouillon.testsAB?.accroche, v, jourParis(new Date())) })}
+        />
       </fieldset>
 
       <fieldset className="carte space-y-3">

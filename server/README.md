@@ -268,6 +268,9 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `PATCH /commerces/:id` (complément P1-B6) | commerçant | `conservationMois` : durée de conservation après la dernière visite, entier de 6 à 120 (400 sinon) ; absent = 36 (3 ans). Publiée dans la fiche publique (`conservationMois` effectif) pour la page de confidentialité. |
 | `POST /cartes/:clientId/donnees` | public (lien de la carte + contact) | **P1-B6.** « Recevoir mes données » depuis la carte : `{ contact }` = téléphone ou e-mail de l'inscription (mêmes normalisations : 06… / +33… / 0033…, e-mail sans casse) → le CSV de l'export individuel. **403** contact différent, 404 carte inconnue. Limité par IP et par carte (`ficheClientParIp`). Marche même si le commerce est désactivé. Journalisé. |
 | `POST /cartes/:clientId/suppression` | public (lien de la carte + contact) | **P1-B6.** « Demander la suppression » : `{ contact }` → `demandeSuppressionLe` posé sur le client (idempotent), journalisé → `{ ok, demandeSuppressionLe, commerce }`. La suppression elle-même est faite par le commerçant (fiche client, `DELETE` ci-dessus) : il remet d'abord une éventuelle récompense en attente. 403 / 404 comme ci-dessus. |
+| `POST /commerces/:id/evenements` | **public** | **P2-Q3 — mesure anonyme.** Corps `{ type: 'scan' \| 'clicGoogle' }` et **rien d'autre** (tout autre champ → 400, pour qu'aucune identité ne puisse être envoyée) → **202** `{ ok, compte }`. `scan` = page de jeu ouverte (QR ou lien, une fois par onglet), `clicGoogle` = tap sur le bouton d'avis Google de la page de jeu. +1 sur le compteur (commerce, jour à Paris, type) de la table `evenements_jour` (migration 0008) : ni client, ni contact, ni IP, ni heure. `compte: false` si la migration manque ou si le commerce est en pause (rien n'est compté, jamais d'erreur visible). Limite `evenementParIp`. `tirage` et `gain` ne sont pas acceptés ici : le serveur les compte lui-même après chaque `POST …/tirages` réussi (un échec de comptage n'affecte jamais le tirage). |
+| `GET /commerces/:id/mesures` | commerçant | **P2-Q3.** `?depuis=AAAA-MM-JJ` (défaut et minimum : 400 jours) → `{ compteurs: [{ jour, type, n }], migration, depuis, aujourdhui }`. Sans migration 0008 : `compteurs: []`, `migration: false`. Les coûts, séries et comparaisons sont calculés par le tableau de bord (`src/lib/mesure.ts`) à partir de `…/etat`. |
+| `PATCH /commerces/:id` (complément P2-Q3) | commerçant | `lots[].coutCentimes` : coût unitaire du lot pour le commerce, entier de 0 à 100 000 centimes, facultatif (jamais publié aux clients). `testsAB: { accroche: { actif } }` : test A/B de la phrase d'accroche de la page de jeu (`docs/TESTS-AB.md`) ; `depuis` / `jusqua` sont posés par le serveur (jour à Paris) à l'activation / l'arrêt ; la fiche publique ne reçoit que `testAccroche: true` pendant le test. |
 | `PATCH /commerces/:id` (complément P1-B3) | commerçant | `relancesAuto: { inactif, anniversaire }` (désactivées par défaut ; case dans l'écran Messages). Tournée lancée en arrière-plan à l'ouverture du tableau de bord (`GET …/etat`), une fois par commerce et par jour : clients consentants seulement, une relance auto par client et par tournée, une fois par absence (inactif 30-120 j) / par an (anniversaire). Rien sans prestataire ni migration 0007. |
 
 Accès « commerçant » = en-tête `X-Session` (jeton `commerce` de ce commerce ou `admin`), **ou** en repli `X-Commerce-PIN`
@@ -371,6 +374,7 @@ compte sur deux compteurs, rangés dans la table `tentatives_auth` (migration 00
 | `tirageParContact` | 5 | idem, par contact | réessais légitimes (réseau), pas plus |
 | `ficheClientParIp` | 10 | `POST …/clients/:id/profil`, `POST …/clients/:id/rattrapage` (demande du client), `POST …/clients/:id/prenom` (P1-C1), `POST …/clients/:id/message-prive` (P1-C4, par IP **et** par carte) ; P1-B6 : `POST /cartes/:id/donnees` et `…/suppression` (par IP **et** par carte) ; P1-C3 : `POST /cartes/retrouver` (par IP) | rares par nature |
 | `sessionParIp` | 30 | `POST /sessions` | borne le coût scrypt ; toute l'équipe ouvre sa session depuis le même wifi en début de service |
+| `evenementParIp` | 30 | `POST /commerces/:id/evenements` (P2-Q3) | une page de jeu en envoie 1 ou 2 ; au-delà, l'événement n'est simplement pas compté |
 
 Les routes authentifiées (gérant, caisse, admin) ne sont **pas** limitées : la file hors ligne de la caisse doit pouvoir
 tout rejouer d'un coup. L'IP est celle de `X-Forwarded-For` derrière Render (`TRUST_PROXY`) ; si Render ne réécrit pas
@@ -615,7 +619,7 @@ déclarée nulle part dans le code ni dans la configuration du dépôt (l'URL `h
 | `demandes_rattrapage` | les traces d'audit du client (0004) |
 | `envois` | son journal de relances SMS / e-mail (0007) |
 | autres clients | ses **filleuls** perdent leur `parrainId` vers lui (un filleul pas encore récompensé perd ce bonus) ; rien d'autre ne change |
-| compteurs du commerce | aucun compteur agrégé n'est stocké : statistiques et tableau de bord sont recalculés depuis les clients restants |
+| compteurs du commerce | statistiques, coûts des lots et séries du tableau de bord sont recalculés depuis les clients et tirages restants. Seuls les compteurs **anonymes** `evenements_jour` (P2-Q3, 0008 : un nombre par jour et par type, sans aucun lien avec un client) ne bougent pas — ils ne contiennent rien de lui |
 
 Ordre : dépendances d'abord, client en dernier (sous Supabase, sans transaction, une suppression interrompue se rejoue).
 Tables d'une migration non appliquée : rien à supprimer, comptées 0 (jamais de 500). Après suppression : `GET /cartes/:id`
@@ -763,6 +767,16 @@ Supabase → **SQL Editor** → coller `supabase/migrations/0007_relances.sql` �
 `/api/v1/sante` → `"migrations": { …, "relances": true }` (relu au plus toutes les 60 s). Sans elle : journal des envois
 vide, refus non tracés, aucun envoi réel (503). Annulation : `0007_relances.down.sql` (supprime la table `envois` ; le
 consentement, stocké sur les clients, est conservé).
+
+### Migration 0008 (mesure anonyme du tableau de bord, P2-Q3) — à appliquer pour l'entonnoir
+
+Supabase → **SQL Editor** → coller `supabase/migrations/0008_mesure.sql` → **Run** (rejouable). Vérifier :
+`/api/v1/sante` → `"migrations": { …, "mesure": true }` (relu au plus toutes les 60 s). Elle crée la table
+`evenements_jour` (commerce, jour, type, nombre — **aucune identité**) et la fonction `incrementer_evenement` (incrément
+atomique, exécutable par `service_role` seulement), RLS sans policy comme les autres tables. Sans elle : rien n'est compté,
+l'entonnoir et le test A/B du tableau de bord restent vides (avec un message), **le jeu et le tirage ne changent pas** ;
+coûts des lots, séries visites / tirages / gains et comparaison au mois précédent marchent (ils viennent des tirages et des
+visites déjà en base). Annulation : `0008_mesure.down.sql` (supprime les compteurs et la fonction ; aucune donnée client).
 
 ## Migration future (écrite avant S1 — Supabase est désormais préparé et la procédure écrite, voir plus haut)
 

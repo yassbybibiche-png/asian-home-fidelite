@@ -513,6 +513,8 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
             ...(c.programme ? { programme: c.programme } : {}),
             ...(c.relancesAuto ? { relancesAuto: c.relancesAuto } : {}),
             ...(c.conservationMois !== undefined ? { conservationMois: c.conservationMois } : {}),
+            // Test A/B (P2-Q3) : seul l'état est envoyé, le serveur pose lui-même les dates.
+            ...(c.testsAB?.accroche ? { testsAB: { accroche: { actif: c.testsAB.accroche.actif } } } : {}),
           })
         }),
       creerCommerce: (n: NouveauCommerce) =>
