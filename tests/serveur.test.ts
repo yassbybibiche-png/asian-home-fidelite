@@ -78,7 +78,7 @@ describe('Serveur /api/v1', () => {
     assert.match(ah.coordonnees, /11 rue André Joineau, 93310 Le Pré-Saint-Gervais/)
     assert.match(ah.coordonnees, /07 82 97 48 01/)
     assert.match(ah.coordonnees, /@asianhomeparis/)
-    assert.deepEqual(ah.lots.map((l: { libelle: string }) => l.libelle).slice(0, 4), ['Nems offerts', 'Thé glacé maison offert', 'Mochi offert', '-10 % sur l’addition'])
+    assert.deepEqual(ah.lots.map((l: { libelle: string }) => l.libelle).slice(0, 4), ['Nems offerts', 'Thé glacé', 'Mochi offert', 'Remise 10 %'])
     assert.doesNotMatch(JSON.stringify(r.contenu), /pin|hash|sel/i)
 
     const etat = await srv.api('GET', `/commerces/${ASIAN_HOME}/etat`, undefined, { 'X-Commerce-PIN': '1234' })

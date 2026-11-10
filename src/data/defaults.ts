@@ -26,11 +26,12 @@ export function nouveauCommerce(nom: string, type: TypeCommerce, lienGoogle: str
     lienGoogle: lienGoogle.trim(),
     recompense: 'Une récompense offerte au 10e passage',
     seuilTampons: 10,
+    // Libellés ≤ 12 caractères : lisibles en entier sur la roue (src/lib/roue.ts).
     lots: [
-      { libelle: '-10 % sur le prochain passage', probabilite: 20 },
-      { libelle: 'Un petit cadeau offert', probabilite: 20 },
-      { libelle: '-5 % sur le prochain passage', probabilite: 30 },
-      { libelle: 'Pas de chance, à la prochaine !', probabilite: 30 },
+      { libelle: 'Remise 10 %', probabilite: 20 },
+      { libelle: 'Petit cadeau', probabilite: 20 },
+      { libelle: 'Remise 5 %', probabilite: 30 },
+      { libelle: 'Dommage !', probabilite: 30 },
     ],
     reglesReponseAuto: { auto5Etoiles: true, auto4Etoiles: false, brouillonAutres: true },
     actif: true,

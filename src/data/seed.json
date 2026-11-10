@@ -16,7 +16,7 @@
           "probabilite": 20
         },
         {
-          "libelle": "Thé glacé maison offert",
+          "libelle": "Thé glacé",
           "probabilite": 25
         },
         {
@@ -24,11 +24,11 @@
           "probabilite": 15
         },
         {
-          "libelle": "-10 % sur l’addition",
+          "libelle": "Remise 10 %",
           "probabilite": 10
         },
         {
-          "libelle": "Pas de chance, à la prochaine !",
+          "libelle": "Dommage !",
           "probabilite": 30
         }
       ],
@@ -50,19 +50,19 @@
       "seuilTampons": 8,
       "lots": [
         {
-          "libelle": "Soin profond offert",
+          "libelle": "Soin offert",
           "probabilite": 15
         },
         {
-          "libelle": "-10 % sur la prochaine coupe",
+          "libelle": "-10 % coupe",
           "probabilite": 30
         },
         {
-          "libelle": "Shampoing format voyage offert",
+          "libelle": "Shampoing",
           "probabilite": 25
         },
         {
-          "libelle": "Pas de chance, à la prochaine !",
+          "libelle": "Dommage !",
           "probabilite": 30
         }
       ],
@@ -84,19 +84,19 @@
       "seuilTampons": 6,
       "lots": [
         {
-          "libelle": "-15 % sur un article",
+          "libelle": "Remise 15 %",
           "probabilite": 10
         },
         {
-          "libelle": "Tote bag offert",
+          "libelle": "Tote bag",
           "probabilite": 20
         },
         {
-          "libelle": "Emballage cadeau offert",
+          "libelle": "Emballage",
           "probabilite": 30
         },
         {
-          "libelle": "-5 % sur le prochain achat",
+          "libelle": "Remise 5 %",
           "probabilite": 40
         }
       ],
@@ -652,21 +652,21 @@
       "id": "c-atelier-camille-ti-2",
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-3",
-      "lot": "-10 % sur la prochaine coupe",
+      "lot": "-10 % coupe",
       "date": "2026-11-05T14:04:00.000Z"
     },
     {
       "id": "c-atelier-camille-ti-1",
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-3",
-      "lot": "Pas de chance, à la prochaine !",
+      "lot": "Dommage !",
       "date": "2026-11-04T12:25:00.000Z"
     },
     {
       "id": "c-maison-lila-ti-4",
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-2",
-      "lot": "-15 % sur un article",
+      "lot": "Remise 15 %",
       "date": "2026-11-04T11:17:00.000Z"
     },
     {
@@ -680,49 +680,49 @@
       "id": "c-atelier-camille-ti-4",
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-7",
-      "lot": "Shampoing format voyage offert",
+      "lot": "Shampoing",
       "date": "2026-11-01T12:19:00.000Z"
     },
     {
       "id": "c-maison-lila-ti-1",
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-7",
-      "lot": "-15 % sur un article",
+      "lot": "Remise 15 %",
       "date": "2026-10-30T13:51:00.000Z"
     },
     {
       "id": "c-atelier-camille-ti-3",
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-9",
-      "lot": "Soin profond offert",
+      "lot": "Soin offert",
       "date": "2026-10-28T16:31:00.000Z"
     },
     {
       "id": "c-maison-lila-ti-2",
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-1",
-      "lot": "Tote bag offert",
+      "lot": "Tote bag",
       "date": "2026-10-25T11:49:00.000Z"
     },
     {
       "id": "c-atelier-camille-ti-5",
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-6",
-      "lot": "Pas de chance, à la prochaine !",
+      "lot": "Dommage !",
       "date": "2026-10-21T16:16:00.000Z"
     },
     {
       "id": "c-maison-lila-ti-3",
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-1",
-      "lot": "-5 % sur le prochain achat",
+      "lot": "Remise 5 %",
       "date": "2026-10-20T16:09:00.000Z"
     },
     {
       "id": "c-maison-lila-ti-5",
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-9",
-      "lot": "-5 % sur le prochain achat",
+      "lot": "Remise 5 %",
       "date": "2026-10-20T11:13:00.000Z"
     },
     {
@@ -743,14 +743,14 @@
       "id": "c-atelier-camille-ti-6",
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-10",
-      "lot": "Shampoing format voyage offert",
+      "lot": "Shampoing",
       "date": "2026-10-18T17:26:00.000Z"
     },
     {
       "id": "c-maison-lila-ti-6",
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-5",
-      "lot": "Emballage cadeau offert",
+      "lot": "Emballage",
       "date": "2026-10-18T13:10:00.000Z"
     },
     {
