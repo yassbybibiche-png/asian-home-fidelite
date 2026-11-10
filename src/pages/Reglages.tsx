@@ -85,7 +85,9 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   // Durée de conservation RGPD (P1-B6), en mois ; absente = 3 ans.
   const conservation = brouillon.conservationMois ?? CONSERVATION_DEFAUT_MOIS
   const conservationValide = Number.isInteger(conservation) && conservation >= CONSERVATION_MIN_MOIS && conservation <= CONSERVATION_MAX_MOIS
-  const valide = nomValide && seuilValide && lots.length >= 2 && probasValides && total > 0 && tauxValide && catalogueValide && !problemes.length && conservationValide
+  // Liens de commande (P1-C5) : vides ou en https (le serveur refuse le reste).
+  const liensCommandeValides = [brouillon.lienDeliveroo, brouillon.lienUberEats].every((l) => !l?.trim() || /^https:\/\/\S+$/i.test(l.trim()))
+  const valide = nomValide && seuilValide && lots.length >= 2 && probasValides && total > 0 && tauxValide && catalogueValide && !problemes.length && conservationValide && liensCommandeValides
 
   function maj<K extends keyof Commerce>(champ: K, valeur: Commerce[K]) {
     setBrouillon((b) => ({ ...b, [champ]: valeur }))
@@ -106,6 +108,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
       nom: brouillon.nom.trim(),
       lienGoogle: brouillon.lienGoogle.trim(),
       coordonnees: brouillon.coordonnees?.trim() || undefined,
+      lienDeliveroo: brouillon.lienDeliveroo?.trim() || undefined,
+      lienUberEats: brouillon.lienUberEats?.trim() || undefined,
       lots,
       eurosParPoint: taux,
       catalogue: catalogue.map((r) => ({ ...r, nom: r.nom.trim(), description: r.description?.trim() || undefined })),
@@ -171,6 +175,40 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
             onChange={(e) => maj('coordonnees', e.target.value)}
           />
           <p className="mt-1 text-sm text-gray-500">Affiché aux clients sur la page de jeu et sur leur carte.</p>
+        </div>
+        {/* Liens de commande (P1-C5) : bouton « Commander » du menu public, affiché seulement si le lien est renseigné. */}
+        <div>
+          <label className="etiquette" htmlFor="deliveroo">
+            Lien Deliveroo (optionnel)
+          </label>
+          <input
+            id="deliveroo"
+            className="champ"
+            type="url"
+            inputMode="url"
+            placeholder="https://deliveroo.fr/menu/…"
+            value={brouillon.lienDeliveroo ?? ''}
+            onChange={(e) => maj('lienDeliveroo', e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="etiquette" htmlFor="ubereats">
+            Lien Uber Eats (optionnel)
+          </label>
+          <input
+            id="ubereats"
+            className="champ"
+            type="url"
+            inputMode="url"
+            placeholder="https://www.ubereats.com/fr/store/…"
+            value={brouillon.lienUberEats ?? ''}
+            onChange={(e) => maj('lienUberEats', e.target.value)}
+          />
+          {liensCommandeValides ? (
+            <p className="mt-1 text-sm text-gray-500">Vide = pas de bouton « Commander » sur le menu client.</p>
+          ) : (
+            <p className="mt-1 text-sm font-semibold text-red-700">Les liens de commande doivent commencer par https://</p>
+          )}
         </div>
       </fieldset>
 

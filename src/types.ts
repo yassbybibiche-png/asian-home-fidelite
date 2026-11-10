@@ -52,6 +52,12 @@ export interface Commerce {
   lienGoogle: string
   /** Adresse, téléphone, horaires… en texte libre, affiché sur les pages client (optionnel). */
   coordonnees?: string
+  /**
+   * Liens de commande en ligne (P1-C5), https, renseignés par le commerçant dans ses réglages. Vide / absent = bouton
+   * « Commander » masqué sur le menu public : aucun lien n'est jamais deviné.
+   */
+  lienDeliveroo?: string
+  lienUberEats?: string
   recompense: string
   seuilTampons: number
   /** Lots de la roulette : texte libre + probabilité simple. */
@@ -153,6 +159,9 @@ export interface CommercePublic {
   logo?: string
   lienGoogle: string
   coordonnees?: string
+  /** Liens de commande (P1-C5) : présents seulement s'ils sont renseignés. */
+  lienDeliveroo?: string
+  lienUberEats?: string
   recompense: string
   seuilTampons: number
   /** Libellés des lots jouables, dans l'ordre de la roue — sans probabilité (le tirage est fait par le serveur). */

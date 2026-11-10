@@ -126,6 +126,8 @@ export type ChampsReglages = Partial<
     | 'logo'
     | 'lienGoogle'
     | 'coordonnees'
+    | 'lienDeliveroo'
+    | 'lienUberEats'
     | 'recompense'
     | 'seuilTampons'
     | 'lots'

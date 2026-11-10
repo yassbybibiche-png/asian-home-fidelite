@@ -37,6 +37,9 @@ export function commercePublic(c: Commerce): CommercePublic {
     ...(c.logo !== undefined ? { logo: c.logo } : {}),
     lienGoogle: c.lienGoogle,
     ...(c.coordonnees !== undefined ? { coordonnees: c.coordonnees } : {}),
+    // Liens de commande (P1-C5) : publiés seulement s'ils sont renseignés (le menu public affiche alors le bouton).
+    ...(c.lienDeliveroo ? { lienDeliveroo: c.lienDeliveroo } : {}),
+    ...(c.lienUberEats ? { lienUberEats: c.lienUberEats } : {}),
     recompense: c.recompense,
     seuilTampons: c.seuilTampons,
     // Jouables seulement (un lot à 0 % n'apparaît pas sur la roue), dans l'ordre : la roue publique a des secteurs égaux.

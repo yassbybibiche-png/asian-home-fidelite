@@ -144,6 +144,26 @@ Hors carte (prix à confirmer);Bœuf Basilic;;Bœuf mariné façon thaï, légum
 11 rue André Joineau, 93310 Le Pré-Saint-Gervais · 07 82 97 48 01 · 7 j/7 11h30–14h30 et 18h30–23h30 ·
 Halal · Instagram / Snapchat @AsianHomeParis · Livraison Deliveroo et Uber Eats · https://linktr.ee/asianhomefrance
 
-**Reste à faire** : Deliveroo, Uber Eats et le linktr.ee n'apparaissent toujours pas dans l'app
-(aucun lien de commande dans le code). Les liens exacts de commande ne sont pas inventés : à fournir
-par le commerçant.
+## Menu client (lot P1-C5)
+
+- **Boutons** sur `#/menu` (Asian Home) : Appeler (`tel:+33782974801`), Itinéraire (Google Maps vers
+  « 11 rue André Joineau, 93310 Le Pré-Saint-Gervais »), Instagram @asianhomeparis.
+- **Commander Deliveroo / Uber Eats** : emplacements prêts, champs `lienDeliveroo` / `lienUberEats` dans
+  Réglages → « Le commerce » (https uniquement, liste blanche du PATCH, publiés seulement s'ils sont renseignés).
+  Bouton masqué tant que le lien est vide.
+- **Badges** « 🌶 Épicé / Option épicée », « 🌱 Végétarien / Option végétarienne » : **déduits** des mots du nom
+  ou de la description (épicé, spicy, sauce dynamite, « cru ou épicé », « veggie », « … ou légume »), affichés
+  avec un astérisque « à confirmer auprès de l'équipe ». La carte n'en indique aucun. Règles : `src/lib/menuClient.ts`.
+- **Bandeau « Menu Midi »** : du lundi au vendredi, 11h30–14h30 (heure de Paris), renvoie vers les formules midi.
+- Recherche : « boeuf » trouve « Bœuf » (ligatures œ / æ dépliées dans `sansAccents`).
+
+## ⚠ Infos manquantes (à fournir par le commerçant)
+
+1. **Lien Deliveroo** du restaurant → Réglages, champ « Lien Deliveroo ».
+2. **Lien Uber Eats** du restaurant → Réglages, champ « Lien Uber Eats ».
+3. linktr.ee/asianhomefrance : pas affiché dans l'app (non demandé).
+4. Allergènes de chaque plat ; confirmation des badges épicé / végétarien déduits.
+5. Les 2 prix à confirmer (Riz Thaï 8,90 €, 6 Maki Gold 100,00 €) et les 3 plats hors carte sans prix.
+
+Les liens exacts de commande ne sont pas inventés : aucun lien Deliveroo / Uber Eats dans le code ni le seed
+(vérifié par `tests/menu-client-p1-c5.test.ts`).

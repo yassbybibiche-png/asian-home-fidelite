@@ -1,9 +1,12 @@
 // Recherche dans la liste des clients (logique pure, testée).
 import type { Client } from '../types'
 
-/** Minuscules sans accents : « Hélène » → « helene ». */
+/**
+ * Minuscules sans accents : « Hélène » → « helene ». Les ligatures (que NFD ne décompose pas) sont dépliées :
+ * « Bœuf » → « boeuf », « Æ » → « ae » — la saisie passe par la même fonction, « bœuf » trouve donc aussi « Boeuf ».
+ */
 export function sansAccents(s: string): string {
-  return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+  return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/œ/g, 'oe').replace(/æ/g, 'ae')
 }
 
 /**

@@ -96,7 +96,8 @@ function sansConfigurationPrivee(json: unknown, route: string) {
 }
 
 // `conservationMois` (P1-B6) : durée de conservation effective, affichée sur la page publique de confidentialité.
-const CLES_PUBLIQUES = ['actif', 'apparence', 'catalogue', 'conservationMois', 'coordonnees', 'demo', 'id', 'lienGoogle', 'logo', 'lots', 'nom', 'programme', 'recompense', 'seuilTampons', 'type']
+// `lienDeliveroo` / `lienUberEats` (P1-C5) : boutons « Commander » du menu public, seulement s'ils sont renseignés.
+const CLES_PUBLIQUES = ['actif', 'apparence', 'catalogue', 'conservationMois', 'coordonnees', 'demo', 'id', 'lienDeliveroo', 'lienGoogle', 'lienUberEats', 'logo', 'lots', 'nom', 'programme', 'recompense', 'seuilTampons', 'type']
 
 function vuePubliqueAttendue(c: CommercePublic, route: string) {
   for (const k of Object.keys(c)) assert.ok(CLES_PUBLIQUES.includes(k), `${route} : champ inattendu « ${k} »`)

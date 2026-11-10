@@ -500,6 +500,8 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
             // un envoi ne doit pas remettre l'ancienne adresse en enregistrant le reste.
             lienGoogle: c.lienGoogle,
             coordonnees: c.coordonnees ?? '',
+            lienDeliveroo: c.lienDeliveroo ?? '',
+            lienUberEats: c.lienUberEats ?? '',
             recompense: c.recompense,
             seuilTampons: c.seuilTampons,
             lots: c.lots,
