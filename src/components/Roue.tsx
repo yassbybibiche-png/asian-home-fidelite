@@ -1,8 +1,6 @@
-import { secteurs, type LotRoue } from '../lib/roulette'
+import { LONGUEUR_TEXTE_MAX, POLICE_ROUE, RAYON_LIBELLE, largeurEstimee, secteursAffiches } from '../lib/roue'
+import type { LotRoue } from '../lib/roulette'
 
-// Palette laque / encre / ivoire / or ; texte choisi pour un contraste ≥ 4,5:1 sur chaque secteur.
-const COULEURS = ['#b3262d', '#fbf3e4', '#1f2937', '#f2d48a', '#7f1a1f', '#fdf3f2']
-const TEXTE_CLAIR = new Set(['#b3262d', '#1f2937', '#7f1a1f'])
 export const DUREE_ROTATION_MS = 4500
 
 /** Point sur le cercle ; angle en degrés, 0 = en haut, sens horaire. */
@@ -11,19 +9,14 @@ function point(angle: number, r: number): string {
   return `${(r * Math.sin(rad)).toFixed(2)} ${(-r * Math.cos(rad)).toFixed(2)}`
 }
 
-function abreger(texte: string, max = 17): string {
-  return texte.length > max ? `${texte.slice(0, max - 1)}…` : texte
-}
-
 /**
  * Roue en SVG : secteurs proportionnels aux chances quand elles sont connues (aperçu commerçant, démo locale) ;
  * égaux sur la page publique, qui ne reçoit que les libellés (le tirage est fait par le serveur).
+ * Libellés ≤ 12 caractères en police ≥ 14 px ; secteur < 30° : numéro de légende ; < 12° : rien (voir LegendeRoue).
  */
 export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) {
-  const parts = secteurs(lots)
+  const parts = secteursAffiches(lots)
   const R = 88
-  // Une couleur jamais identique à sa voisine, même quand le dernier secteur rejoint le premier.
-  const couleur = (i: number) => (parts.length > 1 && i === parts.length - 1 && i % COULEURS.length === 0 ? COULEURS[2] : COULEURS[i % COULEURS.length])
   return (
     <div className="relative mx-auto aspect-square w-full max-w-80">
       {/* Pointeur fixe en haut */}
@@ -54,30 +47,32 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
       >
         <svg viewBox="-100 -100 200 200" className="h-full w-full" aria-hidden>
           <g>
-            {parts.map((s, i) => {
-              const c = couleur(i)
+            {parts.map((s) => {
               const etendue = s.fin - s.debut
               const milieu = s.debut + etendue / 2
               const forme =
                 etendue >= 359.99 ? (
-                  <circle r={R} fill={c} />
+                  <circle r={R} fill={s.couleur} />
                 ) : (
-                  <path d={`M0 0 L${point(s.debut, R)} A${R} ${R} 0 ${etendue > 180 ? 1 : 0} 1 ${point(s.fin, R)} Z`} fill={c} stroke="#d4a73c" strokeWidth={0.8} />
+                  <path d={`M0 0 L${point(s.debut, R)} A${R} ${R} 0 ${etendue > 180 ? 1 : 0} 1 ${point(s.fin, R)} Z`} fill={s.couleur} stroke="#d4a73c" strokeWidth={0.8} />
                 )
+              // Garde-fou : un libellé large (majuscules…) est resserré plutôt que de déborder du secteur.
+              const serre = s.affichage === 'libelle' && largeurEstimee(s.texteRoue) > LONGUEUR_TEXTE_MAX
               return (
-                <g key={i}>
+                <g key={s.numero}>
                   {forme}
-                  {etendue >= 12 && (
+                  {s.affichage !== 'aucun' && (
                     <text
-                      transform={`rotate(${milieu}) translate(0 -52) rotate(-90)`}
+                      transform={s.affichage === 'libelle' ? `rotate(${milieu}) translate(0 -${RAYON_LIBELLE}) rotate(-90)` : `rotate(${milieu}) translate(0 -72)`}
                       textAnchor="middle"
                       dominantBaseline="middle"
-                      fontSize={etendue < 30 ? 6.5 : 7.8}
+                      fontSize={POLICE_ROUE}
                       fontWeight={700}
                       letterSpacing={0.2}
-                      fill={TEXTE_CLAIR.has(c) ? '#fff' : '#1f2937'}
+                      fill={s.couleurTexte}
+                      {...(serre ? { textLength: LONGUEUR_TEXTE_MAX, lengthAdjust: 'spacingAndGlyphs' } : {})}
                     >
-                      {abreger(s.lot.libelle)}
+                      {s.texteRoue}
                     </text>
                   )}
                 </g>
@@ -98,6 +93,33 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
         <circle r={15} fill="url(#roue-moyeu)" stroke="#fff" strokeWidth={2} />
         <circle r={5.5} fill="#b3262d" />
       </svg>
+    </div>
+  )
+}
+
+/**
+ * Légende sous la roue : tous les lots, libellé complet, pastille à la couleur (et au numéro) du secteur.
+ * C'est la version lisible par les lecteurs d'écran : la roue elle-même est décorative (aria-hidden).
+ */
+export function LegendeRoue({ lots }: { lots: LotRoue[] }) {
+  const parts = secteursAffiches(lots)
+  return (
+    <div className="mt-4 px-2">
+      <h2 className="text-center text-base font-semibold text-or-300">À gagner</h2>
+      <ol className="mt-2 grid gap-2 text-base text-white" aria-label="Lots de la roue">
+        {parts.map((s) => (
+          <li key={s.numero} className="flex items-center gap-3" data-legende-lot>
+            <span
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold ring-1 ring-or-400/60"
+              style={{ backgroundColor: s.couleur, color: s.couleurTexte }}
+              aria-hidden
+            >
+              {s.numero}
+            </span>
+            <span className="min-w-0 break-words">{s.libelle}</span>
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }
