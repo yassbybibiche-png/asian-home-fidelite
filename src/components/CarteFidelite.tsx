@@ -1,13 +1,38 @@
 import type { Client, Commerce, CommercePublic } from '../types'
 import { recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { eurosParPoint, soldePoints } from '../lib/points'
-import { configDefi, configOffreHebdo, configParrainage, niveauClient, offreHebdoDuJour, prochainPalier, recompensesEnAttenteValables, reserveUtilisable, JOURS_SEMAINE } from '../lib/programme'
+import { configDefi, configOffreHebdo, configParrainage, niveauClient, offreHebdoDuJour, prochainPalier, reserveUtilisable, JOURS_SEMAINE } from '../lib/programme'
 import { assombrir, estCouleur } from '../lib/apparence'
 import { banniereCommerce, VISUELS } from '../lib/visuels'
 import { dateRelative } from '../lib/format'
 import { urlAbsolue } from '../router'
+import { cleTamponsVus, lotsEnAttente, tamponsNouveaux, texteExpiration, texteProgression, type GainDuJour } from '../lib/carte'
 import { LogoCommerce, QrCode } from './ui'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+
+/**
+ * Tampons gagnés depuis la dernière ouverture de la carte sur ce téléphone (P1-C3), à animer. La valeur vue est
+ * mémorisée à chaque affichage ; un tampon ajouté pendant que la page est ouverte (rechargement au retour) s'anime aussi.
+ */
+function useTamponsNouveaux(clientId: string, tampons: number, actif: boolean): number[] {
+  const [nouveaux, setNouveaux] = useState<number[]>([])
+  useEffect(() => {
+    if (!actif) return
+    const cle = cleTamponsVus(clientId)
+    let vus: number | null = null
+    try {
+      const v = localStorage.getItem(cle)
+      vus = v === null ? null : Number(v)
+      localStorage.setItem(cle, String(tampons))
+    } catch {
+      // Stockage indisponible (navigation privée stricte) : pas d'animation, la carte reste juste.
+    }
+    const n = tamponsNouveaux(vus, tampons)
+    // Jamais remis à vide ici : en StrictMode l'effet tourne deux fois, la 2e lecture ne doit pas effacer l'animation.
+    if (n.length) setNouveaux(n)
+  }, [actif, clientId, tampons])
+  return nouveaux
+}
 
 const dateCourte = (iso: string) => new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
 
@@ -29,8 +54,23 @@ export function libelleTaux(commerce: Pick<Commerce, 'eurosParPoint'>): string {
  * Ne lit que des champs de la vue publique (`CommercePublic`) : le taux de points (`eurosParPoint`) n'en fait plus
  * partie (P0-S3) et n'est donc plus affiché ici — le commerçant le voit dans Réglages et en caisse.
  */
-export function CarteFidelite({ client, commerce, sansQr = false }: { client: Client; commerce: Commerce | CommercePublic; sansQr?: boolean }) {
+export function CarteFidelite({
+  client,
+  commerce,
+  sansQr = false,
+  animer = false,
+  gainDuJour,
+}: {
+  client: Client
+  commerce: Commerce | CommercePublic
+  sansQr?: boolean
+  /** Page publique du client : anime les tampons gagnés depuis sa dernière ouverture (pas dans la fiche commerçant). */
+  animer?: boolean
+  /** Gain de la roue du jour pas encore retiré : listé avec les récompenses à retirer (valable aujourd'hui seulement). */
+  gainDuJour?: GainDuJour | null
+}) {
   const tampons = tamponsAffiches(client, commerce)
+  const nouveaux = useTamponsNouveaux(client.id, tampons, animer)
   const pct = Math.round((tampons / commerce.seuilTampons) * 100)
   const debloquee = recompenseDebloquee(client, commerce)
   const restants = Math.max(0, commerce.seuilTampons - tampons)
@@ -44,7 +84,7 @@ export function CarteFidelite({ client, commerce, sansQr = false }: { client: Cl
   const maintenant = new Date()
   const niveau = niveauClient(client, commerce)
   const palier = prochainPalier(client, commerce)
-  const enAttente = recompensesEnAttenteValables(client, maintenant)
+  const enAttente = lotsEnAttente(client, gainDuJour, maintenant)
   const defi = client.defi && configDefi(commerce).actif ? client.defi : undefined
   const defiProgression = defi ? client.visites.filter((v) => new Date(v).getTime() >= new Date(defi.debut).getTime()).length : 0
   const reserve = reserveUtilisable(client, maintenant)
@@ -111,10 +151,12 @@ export function CarteFidelite({ client, commerce, sansQr = false }: { client: Cl
           {Array.from({ length: commerce.seuilTampons }, (_, i) => {
             const plein = i < tampons
             const dernier = i === commerce.seuilTampons - 1
+            const rang = nouveaux.indexOf(i)
             return (
               <li
                 key={i}
-                className={`flex aspect-square w-full max-w-12 items-center justify-center rounded-full text-sm font-bold ${
+                style={rang > 0 ? { animationDelay: `${rang * 150}ms` } : undefined}
+                className={`flex aspect-square w-full max-w-12 items-center justify-center rounded-full text-sm font-bold ${rang >= 0 && plein ? 'tampon-nouveau ' : ''}${
                   plein
                     ? 'bg-marque-500 text-white shadow-[inset_0_-2px_0_rgb(0_0_0/0.15)]'
                     : dernier
@@ -139,9 +181,14 @@ export function CarteFidelite({ client, commerce, sansQr = false }: { client: Cl
           <div className="h-full rounded-full bg-gradient-to-r from-marque-500 via-marque-600 to-or-400 transition-all duration-500" style={{ width: `${pct}%` }} />
         </div>
         <p className="mt-1.5 flex justify-between text-sm text-gray-600">
-          <span>{debloquee ? 'Carte complète' : `Encore ${restants} tampon${restants > 1 ? 's' : ''}`}</span>
+          <span>{debloquee ? 'Carte complète' : texteProgression(restants, commerce)}</span>
           <span className="font-semibold text-marque-600">{pct} %</span>
         </p>
+        {nouveaux.length > 0 && (
+          <p className="apparition mt-2 text-center text-sm font-semibold text-marque-700" role="status">
+            ✨ +{nouveaux.length} tampon{nouveaux.length > 1 ? 's' : ''} depuis votre dernière ouverture de la carte
+          </p>
+        )}
 
         {debloquee ? (
           <div className="apparition mt-4 rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100 p-4 text-amber-900 ring-2 ring-or-500" role="status">
@@ -184,11 +231,18 @@ export function CarteFidelite({ client, commerce, sansQr = false }: { client: Cl
         {enAttente.length > 0 && (
           <div className="mt-4 rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100 p-4 text-amber-900 ring-2 ring-or-500" role="status">
             <p className="surtitre text-amber-800">À retirer au comptoir</p>
-            <ul className="mt-1 space-y-1">
+            <ul className="mt-1 space-y-1.5">
               {enAttente.map((r) => (
                 <li key={r.id} className="text-sm">
-                  <span className="font-bold">🎁 {r.libelle}</span>
-                  {r.expireLe && <span className="block text-xs">Valable jusqu’au {dateCourte(r.expireLe)}</span>}
+                  <span className="font-bold">
+                    {r.origine === 'roue' ? '🎡' : '🎁'} {r.libelle}
+                  </span>
+                  {r.code && (
+                    <span className="block text-xs">
+                      Code à montrer : <span className="font-mono font-bold tracking-widest">{r.code}</span>
+                    </span>
+                  )}
+                  <span className="block text-xs">{texteExpiration(r.expireLe, maintenant)}</span>
                 </li>
               ))}
             </ul>

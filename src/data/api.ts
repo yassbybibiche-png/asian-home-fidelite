@@ -4,6 +4,7 @@ import type { Avis, Client, Commerce, CommercePublic, EntreeJournal, EnvoiRelanc
 import type { StatutGain, StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
 import type { ClientAPurger } from '../lib/rgpd'
+import type { LotHistorique } from '../lib/carte'
 
 export const MESSAGE_HORS_LIGNE = 'Serveur injoignable — vérifiez la connexion.'
 
@@ -103,6 +104,8 @@ export interface ReponseCarte {
   /** codeDuJour / remisDuJour : absents sur un serveur d'avant P0-U3. */
   jeu: { statut: StatutJeu; lotDuJour: string | null; codeDuJour?: string | null; remisDuJour?: boolean }
   menuDisponible?: boolean
+  /** P1-C3 : lots gagnés à la roue (sans code), pour l'historique de la carte. Absent sur un serveur plus ancien. */
+  historiqueLots?: LotHistorique[]
 }
 
 /** Gain de la roue vu en caisse (GET / POST …/caisse/gains/:code). */
@@ -251,6 +254,11 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     commerces: async () => ((await requete('GET', '/commerces')) as { commerces: CommercePublic[] }).commerces,
     commerce: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}`)) as { commerce: CommercePublic }).commerce,
     carte: (clientId: string) => requete('GET', `/cartes/${enc(clientId)}`) as Promise<ReponseCarte>,
+    /**
+     * « Carte introuvable » (P1-C3, audit F-12) : réponse identique que le contact ait une carte ou non. `envoi` dit
+     * seulement si le serveur sait envoyer un lien sur ce canal (prestataire SMS / e-mail configuré).
+     */
+    retrouverCarte: (contact: string) => requete('POST', '/cartes/retrouver', { corps: { contact } }) as Promise<{ ok: boolean; envoi: boolean }>,
     /** Auto-inscription depuis la page de jeu (sans PIN) : renvoie la carte sans téléphone ni e-mail. Prénom optionnel, parrainage en option. */
     // `consentementRelance` : case des relances SMS / e-mail, jamais pré-cochée (envoyée seulement si cochée).
     inscrirePublic: (commerceId: string, prenom: string, contact: string, parrain?: string, consentementRelance = false) =>
