@@ -150,7 +150,9 @@ function MenuAffiche({
                               aria-expanded={detail}
                               onClick={() => setOuvert(detail ? null : p.id)}
                             >
-                              {p.photo && <img src={p.photo} alt="" loading="lazy" className="h-16 w-16 shrink-0 rounded-xl object-cover" />}
+                              {(p.photoVignette ?? p.photo) && (
+                                <img src={p.photoVignette ?? p.photo} alt="" loading="lazy" className="h-16 w-16 shrink-0 rounded-xl object-cover" />
+                              )}
                               <span className="min-w-0 flex-1">
                                 <span className="flex flex-wrap items-center gap-2">
                                   <span className="font-semibold">{p.nom}</span>

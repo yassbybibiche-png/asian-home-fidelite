@@ -233,6 +233,8 @@ export interface Produit {
   prix: number | null
   /** https://… ou image compressée (data:image/jpeg;base64,…). */
   photo?: string
+  /** Petite version pour la liste du menu (même format que `photo`) ; absente = `photo` est utilisée. */
+  photoVignette?: string
   allergenes: string[]
 }
 

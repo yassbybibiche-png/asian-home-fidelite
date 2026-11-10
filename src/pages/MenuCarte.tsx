@@ -151,7 +151,7 @@ export default function MenuCarte() {
       <section className="carte space-y-2">
         <h2 className="titre-carte">Fichier CSV (Excel)</h2>
         <p className="text-sm text-gray-700">
-          Colonnes : categorie ; nom ; prix (ex : 6,50 — vide = « Prix sur place ») ; description ; photo ; allergenes (séparés par |). L’import ne
+          Colonnes : categorie ; nom ; prix (ex : 6,50 — vide = « Prix sur place ») ; description ; photo ; allergenes (séparés par |) ; photo_vignette (optionnelle). L’import ne
           fait que remplir l’éditeur : rien n’est publié avant « Enregistrer le menu ». Le menu en cours est sauvegardé en CSV avant tout remplacement.
         </p>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -239,6 +239,8 @@ function EditeurCategorie({ categorie, onChange }: { categorie: CategorieEditee;
 function EditeurProduit({ produit, onChange }: { produit: ProduitEdite; onChange(p: ProduitEdite | null): void }) {
   const [erreurPhoto, setErreurPhoto] = useState<string | null>(null)
   const maj = <K extends keyof ProduitEdite>(k: K, v: ProduitEdite[K]) => onChange({ ...produit, [k]: v })
+  // Une vignette ne doit jamais survivre à la photo qu'elle réduit : changer ou retirer la photo l'efface.
+  const majPhoto = (photo: string | undefined) => onChange({ ...produit, photo, photoVignette: undefined })
   const id = produit.id
   return (
     <li className="space-y-2 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-900/5">
@@ -273,7 +275,7 @@ function EditeurProduit({ produit, onChange }: { produit: ProduitEdite; onChange
             className="champ min-w-0"
             placeholder="https://…"
             value={produit.photo?.startsWith('data:') ? '(image importée)' : (produit.photo ?? '')}
-            onChange={(e) => maj('photo', e.target.value)}
+            onChange={(e) => majPhoto(e.target.value)}
           />
         </div>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -288,7 +290,7 @@ function EditeurProduit({ produit, onChange }: { produit: ProduitEdite; onChange
                 if (!f) return
                 try {
                   setErreurPhoto(null)
-                  maj('photo', await compresserPhoto(f))
+                  majPhoto(await compresserPhoto(f))
                 } catch (err) {
                   setErreurPhoto(messageErreur(err))
                 }
@@ -296,13 +298,30 @@ function EditeurProduit({ produit, onChange }: { produit: ProduitEdite; onChange
             />
           </label>
           {produit.photo && (
-            <button type="button" className="min-h-11 px-2 text-sm font-semibold text-gray-700 underline" onClick={() => maj('photo', undefined)}>
+            <button type="button" className="min-h-11 px-2 text-sm font-semibold text-gray-700 underline" onClick={() => majPhoto(undefined)}>
               Retirer la photo
             </button>
           )}
         </div>
         <MessageErreur>{erreurPhoto}</MessageErreur>
       </div>
+      {produit.photo && (
+        <div>
+          <label className="etiquette" htmlFor={`vignette-${id}`}>
+            Vignette (optionnelle — sinon la photo est utilisée)
+          </label>
+          <div className="flex items-center gap-2">
+            {produit.photoVignette && <img src={produit.photoVignette} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />}
+            <input
+              id={`vignette-${id}`}
+              className="champ min-w-0"
+              placeholder="https://… (petite image pour la liste du menu)"
+              value={produit.photoVignette ?? ''}
+              onChange={(e) => maj('photoVignette', e.target.value || undefined)}
+            />
+          </div>
+        </div>
+      )}
       <details>
         <summary className="min-h-11 cursor-pointer py-2 font-medium">Allergènes ({produit.allergenes.length})</summary>
         <div className="grid grid-cols-2 gap-1">

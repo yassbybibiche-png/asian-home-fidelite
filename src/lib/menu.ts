@@ -66,9 +66,14 @@ export function validerMenu(brut: unknown, commerceId: string, maintenant: Date)
       // Prix absent (null / absent) = prix non vérifié, affiché « Prix sur place » — jamais 0 € inventé.
       const prix = prixBrut == null ? null : prixBrut
       if (prix !== null && (typeof prix !== 'number' || !Number.isInteger(prix) || prix < 0 || prix > 1_000_000)) throw new ErreurMenu(`« ${nom} » : prix invalide.`)
-      const photo = chaine(pr.photo, `photo de « ${nom} »`, LIMITES_MENU.photoOctets * 1.4)
-      if (photo && !PHOTO.test(photo)) throw new ErreurMenu(`« ${nom} » : photo = adresse https://…, image JPEG / PNG / WebP, ou visuel local /visuels/…`)
-      if (photo.startsWith('data:') && photo.length > LIMITES_MENU.photoOctets * 1.37) throw new ErreurMenu(`« ${nom} » : photo trop lourde (60 Ko maximum après compression).`)
+      const image = (v: unknown, champ: string) => {
+        const s = chaine(v, `${champ} de « ${nom} »`, LIMITES_MENU.photoOctets * 1.4)
+        if (s && !PHOTO.test(s)) throw new ErreurMenu(`« ${nom} » : ${champ} = adresse https://…, image JPEG / PNG / WebP, ou visuel local /visuels/…`)
+        if (s.startsWith('data:') && s.length > LIMITES_MENU.photoOctets * 1.37) throw new ErreurMenu(`« ${nom} » : ${champ} trop lourde (60 Ko maximum après compression).`)
+        return s
+      }
+      const photo = image(pr.photo, 'photo')
+      const photoVignette = image(pr.photoVignette, 'vignette')
       // Visuel local : doit exister dans public/visuels/ (vérifié par les tests, pas ici — le serveur n'a pas accès au bundle front).
       const allergenes = Array.isArray(pr.allergenes) ? pr.allergenes : []
       if (!allergenes.every((a) => ALLERGENES.includes(a as string))) throw new ErreurMenu(`« ${nom} » : allergène inconnu.`)
@@ -76,6 +81,7 @@ export function validerMenu(brut: unknown, commerceId: string, maintenant: Date)
       const description = chaine(pr.description, `description de « ${nom} »`, 300)
       if (description) produit.description = description
       if (photo) produit.photo = photo
+      if (photoVignette) produit.photoVignette = photoVignette
       return produit
     })
     return { id: id(cat.id, 'cat', i), nom: nomCat, produits }
@@ -123,16 +129,26 @@ export function bandeauPrixManquants(menu: Pick<Menu, 'categories'>): string | n
 // ALLERGENES, LIMITES_MENU) ; csv.ts ne fournit que l'encodage d'une cellule.
 
 export const COLONNES_CSV_MENU = ['categorie', 'nom', 'prix', 'description', 'photo', 'allergenes'] as const
+/**
+ * Colonne optionnelle (lot P1-B2), en dernière position : exportée seulement si un plat a une vignette
+ * — un menu sans vignette garde exactement le format B1. À l'import, colonne absente = pas de vignette.
+ */
+export const COLONNE_CSV_VIGNETTE = 'photo_vignette'
+type ColonneCsv = (typeof COLONNES_CSV_MENU)[number] | typeof COLONNE_CSV_VIGNETTE
 
 /** Prix en centimes → « 6,50 » (vide = prix null), même format que l'éditeur. */
 export const prixEnTexte = (prix: number | null): string => (prix == null ? '' : (prix / 100).toFixed(2).replace('.', ','))
 
 /** Menu → CSV « à la française » (séparateur ;, BOM UTF-8), une ligne par plat. */
 export function menuEnCsv(menu: Pick<Menu, 'categories'>): string {
+  const vignettes = menu.categories.some((c) => c.produits.some((p) => p.photoVignette))
   const lignes = menu.categories.flatMap((c) =>
-    c.produits.map((p) => [c.nom, p.nom, prixEnTexte(p.prix), p.description ?? '', p.photo ?? '', p.allergenes.join('|')].map(celluleCsv).join(';')),
+    c.produits.map((p) =>
+      [c.nom, p.nom, prixEnTexte(p.prix), p.description ?? '', p.photo ?? '', p.allergenes.join('|'), ...(vignettes ? [p.photoVignette ?? ''] : [])].map(celluleCsv).join(';'),
+    ),
   )
-  return '﻿' + [COLONNES_CSV_MENU.join(';'), ...lignes].join('\r\n') + '\r\n'
+  const entete = [...COLONNES_CSV_MENU, ...(vignettes ? [COLONNE_CSV_VIGNETTE] : [])]
+  return '﻿' + [entete.join(';'), ...lignes].join('\r\n') + '\r\n'
 }
 
 /** Nom du fichier de sauvegarde / d'export : menu-avant-remplacement-AAAA-MM-JJ.csv (date locale). */
@@ -196,14 +212,14 @@ export function menuDepuisCsv(texte: string, commerceId: string, maintenant: Dat
   if (!lignes.length) throw new ErreurMenu('Fichier vide : aucune ligne à importer.')
   const [entete, ...donnees] = lignes
   const noms = entete.cellules.map((c) => sansAccents(c.trim().toLowerCase()))
-  const col = Object.fromEntries(COLONNES_CSV_MENU.map((k) => [k, noms.indexOf(k)])) as Record<(typeof COLONNES_CSV_MENU)[number], number>
+  const col = Object.fromEntries([...COLONNES_CSV_MENU, COLONNE_CSV_VIGNETTE].map((k) => [k, noms.indexOf(k)])) as Record<ColonneCsv, number>
   if (col.categorie < 0 || col.nom < 0) throw new ErreurMenu(`Ligne ${entete.ligne} : en-tête attendu « ${COLONNES_CSV_MENU.join(';')} ».`)
   if (!donnees.length) throw new ErreurMenu('Aucun plat dans le fichier (seulement l’en-tête).')
 
   const categories: { id: string; nom: string; produits: unknown[] }[] = []
   let total = 0
   for (const { ligne, cellules } of donnees) {
-    const val = (k: (typeof COLONNES_CSV_MENU)[number]) => (col[k] < 0 ? '' : sansApostropheFormule((cellules[col[k]] ?? '').trim()))
+    const val = (k: ColonneCsv) => (col[k] < 0 ? '' : sansApostropheFormule((cellules[col[k]] ?? '').trim()))
     const erreur = (m: string) => new ErreurMenu(`Ligne ${ligne} : ${m}`)
     const nomCat = val('categorie')
     const nom = val('nom')
@@ -218,7 +234,7 @@ export function menuDepuisCsv(texte: string, commerceId: string, maintenant: Dat
       if (!connu) throw erreur(`allergène inconnu « ${a} » (liste : ${ALLERGENES.join(', ')}).`)
       allergenes.push(connu)
     }
-    const produit = { nom, prix, description: val('description'), photo: val('photo'), allergenes }
+    const produit = { nom, prix, description: val('description'), photo: val('photo'), photoVignette: val(COLONNE_CSV_VIGNETTE), allergenes }
     // Règles de forme (longueurs, photo) : celles de validerMenu, ramenées à la ligne fautive.
     try {
       validerMenu({ categories: [{ nom: nomCat, produits: [produit] }] }, commerceId, maintenant)
