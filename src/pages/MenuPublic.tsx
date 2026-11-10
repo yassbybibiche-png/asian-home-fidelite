@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MESSAGE_MODE_SERVEUR, useStore } from '../store'
 import { useRoute } from '../router'
-import type { Commerce, Menu } from '../types'
+import type { CommercePublic, Menu } from '../types'
 import { ErreurApi } from '../data/api'
 import { formaterPrix } from '../lib/points'
 import { filtrerMenu } from '../lib/menu'
@@ -14,7 +14,7 @@ import { HorsLignePublic, MessagePublic } from './Jouer'
 export default function MenuPublic() {
   const { api } = useStore()
   const { param } = useRoute()
-  const [donnees, setDonnees] = useState<{ menu: Menu; commerce: Commerce } | null>(null)
+  const [donnees, setDonnees] = useState<{ menu: Menu; commerce: CommercePublic } | null>(null)
   const [erreur, setErreur] = useState<'introuvable' | 'inactif' | 'horsLigne' | null>(null)
   const [recherche, setRecherche] = useState('')
   const [categorie, setCategorie] = useState<string>('toutes')
@@ -49,7 +49,7 @@ function MenuAffiche({
   setOuvert,
 }: {
   menu: Menu
-  commerce: Commerce
+  commerce: CommercePublic
   recherche: string
   setRecherche: (s: string) => void
   categorie: string

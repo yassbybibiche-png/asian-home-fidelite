@@ -1,6 +1,6 @@
 // Client HTTP de l'API /api/v1 (server/). Aucune règle métier ici : le serveur décide de tout
 // (tampons, récompense, tirage). `fetch` est injectable pour les tests (aucun vrai serveur dans `npm test`).
-import type { Avis, Client, Commerce, EntreeJournal, MembreEquipe, Menu, MessageClient, Tirage, TypeCommerce } from '../types'
+import type { Avis, Client, Commerce, CommercePublic, EntreeJournal, MembreEquipe, Menu, MessageClient, Tirage, TypeCommerce } from '../types'
 import type { StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
 
@@ -77,7 +77,8 @@ export type CartePublique = Omit<Client, 'telephone' | 'email'>
 
 export interface ReponseCarte {
   client: CartePublique
-  commerce: Commerce
+  /** Vue publique (sans probabilités, règles d'avis, taux de points ni réglages internes du programme). */
+  commerce: CommercePublic
   jeu: { statut: StatutJeu; lotDuJour: string | null }
   menuDisponible?: boolean
 }
@@ -176,8 +177,9 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     fermerSession: (jeton: string) => requete('DELETE', '/sessions', { acces: { role: 'admin', jeton } }) as Promise<{ ok: boolean }>,
 
     // ---- Public ----
-    commerces: async () => ((await requete('GET', '/commerces')) as { commerces: Commerce[] }).commerces,
-    commerce: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}`)) as { commerce: Commerce }).commerce,
+    // Fiches publiques seulement : le commerce complet (réglages) vient de `etat`, avec PIN ou session.
+    commerces: async () => ((await requete('GET', '/commerces')) as { commerces: CommercePublic[] }).commerces,
+    commerce: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}`)) as { commerce: CommercePublic }).commerce,
     carte: (clientId: string) => requete('GET', `/cartes/${enc(clientId)}`) as Promise<ReponseCarte>,
     /** Auto-inscription depuis la page de jeu (sans PIN) : renvoie la carte sans téléphone ni e-mail. Prénom optionnel, parrainage en option. */
     inscrirePublic: (commerceId: string, prenom: string, contact: string, parrain?: string) =>
@@ -234,7 +236,7 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
       ((await requete('GET', `/commerces/${enc(commerceId)}/messages`, { acces })) as { messages: MessageCommercant[] }).messages,
     envoyerMessage: async (commerceId: string, acces: Acces, cible: Cible, texte: string) =>
       ((await requete('POST', `/commerces/${enc(commerceId)}/messages`, { acces, corps: { cible, texte } })) as { destinataires: number }).destinataires,
-    menu: (commerceId: string) => requete('GET', `/commerces/${enc(commerceId)}/menu`) as Promise<{ menu: Menu; commerce: Commerce }>,
+    menu: (commerceId: string) => requete('GET', `/commerces/${enc(commerceId)}/menu`) as Promise<{ menu: Menu; commerce: CommercePublic }>,
     majMenu: async (commerceId: string, acces: Acces, menu: Pick<Menu, 'categories'>) =>
       ((await requete('PUT', `/commerces/${enc(commerceId)}/menu`, { acces, corps: menu })) as { menu: Menu }).menu,
     /** Public : le client marque ses messages comme lus. */

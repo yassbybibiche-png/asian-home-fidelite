@@ -5,7 +5,7 @@
 // Conflits : le serveur fait foi. Chaque chargement réussi REMPLACE entièrement le cache ; aucune
 // modification n'est faite « en local d'abord » (pas de file d'attente hors ligne) : une action qui
 // échoue faute de réseau est refusée avec un message, jamais simulée.
-import type { Etat } from '../types'
+import type { Commerce, Etat } from '../types'
 import type { Depot } from './depot'
 import { ErreurApi, type Acces, type ClientApi } from './api.ts'
 
@@ -27,7 +27,7 @@ export interface DepotApi extends Depot {
 }
 
 /** Commerces dont les données privées sont accessibles avec ce PIN. */
-export function commercesAccessibles(etat: Pick<Etat, 'commerces'>, acces: Acces | null): string[] {
+export function commercesAccessibles(etat: { commerces: Pick<Commerce, 'id'>[] }, acces: Acces | null): string[] {
   if (!acces) return []
   return acces.role === 'admin' ? etat.commerces.map((c) => c.id) : etat.commerces.filter((c) => c.id === acces.commerceId).map((c) => c.id)
 }
@@ -77,11 +77,13 @@ export function creerDepotApi(api: ClientApi, stockage: Stockage | null, mainten
       const ids = commercesAccessibles({ commerces }, acces)
       if (acces?.role === 'commerce' && !ids.length) throw new ErreurApi(404, 'Commerce inconnu.')
       const etats = await Promise.all(ids.map((id) => api.etat(id, acces!)))
-      // La fiche complète (renvoyée avec le PIN) remplace la fiche publique.
+      // La fiche complète (renvoyée avec le PIN) remplace la fiche publique. Les commerces non accessibles gardent
+      // leur fiche publique (sans réglages) : seuls id / nom / type / logo / demo / actif en sont lus (Verrou,
+      // sélecteur), jamais une page commerçant — celles-ci exigent l'accès, donc la fiche complète.
       const complets = new Map(etats.map((e) => [e.commerce.id, e.commerce]))
       const actif = ids.includes(commerceActifId ?? '') ? commerceActifId! : (ids[0] ?? commerces[0]?.id ?? '')
       const etat: Etat = {
-        commerces: commerces.map((c) => complets.get(c.id) ?? c),
+        commerces: commerces.map((c) => complets.get(c.id) ?? (c as unknown as Commerce)),
         clients: etats.flatMap((e) => e.clients),
         tirages: etats.flatMap((e) => e.tirages),
         avis: etats.flatMap((e) => e.avis),
