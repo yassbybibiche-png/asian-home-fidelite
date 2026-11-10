@@ -1,7 +1,7 @@
 // Export CSV des clients : même fonction pour le serveur (GET /export.csv) et le mode local du front.
 import type { Client } from '../types'
 
-function celluleCsv(v: string | number | null | undefined): string {
+export function celluleCsv(v: string | number | null | undefined): string {
   let s = v == null ? '' : String(v)
   // Anti-injection de formules (Excel / LibreOffice), sauf pour un numéro de téléphone « +33… ».
   if (/^[=+\-@\t\r]/.test(s) && !/^\+[\d\s.\-()]+$/.test(s)) s = `'${s}`

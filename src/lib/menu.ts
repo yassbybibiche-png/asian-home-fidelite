@@ -1,6 +1,7 @@
 // Menu digital : validation partagée (le serveur refuse tout menu invalide, le front affiche les mêmes erreurs).
 import type { CategorieMenu, Menu, Produit } from '../types'
 import { sansAccents } from './recherche.ts'
+import { celluleCsv } from './csv.ts'
 
 /** Prix non vérifié : affiché tel quel, jamais remplacé par un montant inventé. */
 export const LIBELLE_PRIX_ABSENT = 'Prix sur place'
@@ -23,7 +24,9 @@ export const ALLERGENES = [
   'Mollusques',
 ]
 
-export const LIMITES_MENU = { categories: 20, produits: 60, photoOctets: 60_000 }
+// 120 produits : la carte officielle d'Asian Home compte 81 plats (78 tarifés + 3 hors carte),
+// l'ancienne limite de 60 la refusait ; marge pour les ajouts du commerçant.
+export const LIMITES_MENU = { categories: 20, produits: 120, photoOctets: 60_000 }
 
 const PHOTO = /^(https:\/\/\S{1,500}|data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+|\/visuels\/[\w\-]+\.(?:jpg|jpeg|png|webp))$/
 
@@ -100,4 +103,137 @@ export function filtrerMenu(categories: CategorieMenu[], saisie: string): Catego
 /** Nombre de plats d'un menu. */
 export function compterPlats(menu: Pick<Menu, 'categories'>): number {
   return menu.categories.reduce((s, c) => s + c.produits.length, 0)
+}
+
+/**
+ * Bandeau du menu public : seulement si au moins un plat affiché est sans prix
+ * (repli ou menu enregistré partiel) ; null si tous les prix sont renseignés.
+ */
+export function bandeauPrixManquants(menu: Pick<Menu, 'categories'>): string | null {
+  const plats = menu.categories.flatMap((c) => c.produits)
+  const sansPrix = plats.filter((p) => p.prix == null).length
+  if (!sansPrix) return null
+  return sansPrix === plats.length
+    ? 'Carte du restaurant — les prix ne sont pas encore renseignés dans l’app : ils sont affichés sur place.'
+    : 'Certains prix ne sont pas encore renseignés dans l’app : ils sont indiqués « Prix sur place ».'
+}
+
+// ---------- Import / export CSV du menu ----------
+// Ici plutôt que dans csv.ts : l'import réutilise les règles de validerMenu (ErreurMenu,
+// ALLERGENES, LIMITES_MENU) ; csv.ts ne fournit que l'encodage d'une cellule.
+
+export const COLONNES_CSV_MENU = ['categorie', 'nom', 'prix', 'description', 'photo', 'allergenes'] as const
+
+/** Prix en centimes → « 6,50 » (vide = prix null), même format que l'éditeur. */
+export const prixEnTexte = (prix: number | null): string => (prix == null ? '' : (prix / 100).toFixed(2).replace('.', ','))
+
+/** Menu → CSV « à la française » (séparateur ;, BOM UTF-8), une ligne par plat. */
+export function menuEnCsv(menu: Pick<Menu, 'categories'>): string {
+  const lignes = menu.categories.flatMap((c) =>
+    c.produits.map((p) => [c.nom, p.nom, prixEnTexte(p.prix), p.description ?? '', p.photo ?? '', p.allergenes.join('|')].map(celluleCsv).join(';')),
+  )
+  return '﻿' + [COLONNES_CSV_MENU.join(';'), ...lignes].join('\r\n') + '\r\n'
+}
+
+/** Nom du fichier de sauvegarde / d'export : menu-avant-remplacement-AAAA-MM-JJ.csv (date locale). */
+export function nomFichierMenuCsv(date: Date): string {
+  const d = (n: number) => String(n).padStart(2, '0')
+  return `menu-avant-remplacement-${date.getFullYear()}-${d(date.getMonth() + 1)}-${d(date.getDate())}.csv`
+}
+
+/** Découpe un CSV (guillemets doublés, retours ligne dans les champs guillemetés) ; chaque ligne garde son numéro (1 = première). */
+function lireCsv(texte: string, sep: string): { ligne: number; cellules: string[] }[] {
+  const lignes: { ligne: number; cellules: string[] }[] = []
+  let cellules: string[] = []
+  let cellule = ''
+  let guillemets = false
+  let ligne = 1
+  let debut = 1
+  const finCellule = () => (cellules.push(cellule), (cellule = ''))
+  const finLigne = () => (finCellule(), lignes.push({ ligne: debut, cellules }), (cellules = []))
+  for (let i = 0; i < texte.length; i++) {
+    const c = texte[i]
+    if (guillemets) {
+      if (c === '"' && texte[i + 1] === '"') (cellule += '"'), i++
+      else if (c === '"') guillemets = false
+      else {
+        if (c === '\n') ligne++
+        cellule += c
+      }
+    } else if (c === '"' && cellule === '') guillemets = true
+    else if (c === sep) finCellule()
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && texte[i + 1] === '\n') i++
+      finLigne()
+      debut = ++ligne
+    } else cellule += c
+  }
+  if (guillemets) throw new ErreurMenu(`Ligne ${debut} : guillemet ouvert jamais refermé.`)
+  if (cellule !== '' || cellules.length) finLigne()
+  return lignes
+}
+
+/** « 6,50 », « 6.50 », « 6 », « 6,50 € » → centimes ; vide → null ; sinon undefined (invalide). */
+function prixDepuisTexte(s: string): number | null | undefined {
+  const t = s.replace(/\s|€/g, '')
+  if (!t) return null
+  const m = /^(\d{1,7})(?:[.,](\d{1,2}))?$/.exec(t)
+  if (!m) return undefined
+  return Number(m[1]) * 100 + Number((m[2] ?? '').padEnd(2, '0'))
+}
+
+/** Annule la neutralisation anti-formule de celluleCsv (« '=… » → « =… »). */
+const sansApostropheFormule = (s: string) => (/^'[=+\-@\t\r]/.test(s) ? s.slice(1) : s)
+
+/**
+ * CSV (export de menuEnCsv, ou fichier Excel en ; ou en ,) → Menu validé.
+ * Mêmes règles que validerMenu ; erreurs en français avec le numéro de ligne. Lève ErreurMenu.
+ */
+export function menuDepuisCsv(texte: string, commerceId: string, maintenant: Date): Menu {
+  const brut = texte.replace(/^﻿/, '')
+  const sep = brut.includes(';') ? ';' : ','
+  const lignes = lireCsv(brut, sep).filter((l) => l.cellules.some((c) => c.trim()))
+  if (!lignes.length) throw new ErreurMenu('Fichier vide : aucune ligne à importer.')
+  const [entete, ...donnees] = lignes
+  const noms = entete.cellules.map((c) => sansAccents(c.trim().toLowerCase()))
+  const col = Object.fromEntries(COLONNES_CSV_MENU.map((k) => [k, noms.indexOf(k)])) as Record<(typeof COLONNES_CSV_MENU)[number], number>
+  if (col.categorie < 0 || col.nom < 0) throw new ErreurMenu(`Ligne ${entete.ligne} : en-tête attendu « ${COLONNES_CSV_MENU.join(';')} ».`)
+  if (!donnees.length) throw new ErreurMenu('Aucun plat dans le fichier (seulement l’en-tête).')
+
+  const categories: { id: string; nom: string; produits: unknown[] }[] = []
+  let total = 0
+  for (const { ligne, cellules } of donnees) {
+    const val = (k: (typeof COLONNES_CSV_MENU)[number]) => (col[k] < 0 ? '' : sansApostropheFormule((cellules[col[k]] ?? '').trim()))
+    const erreur = (m: string) => new ErreurMenu(`Ligne ${ligne} : ${m}`)
+    const nomCat = val('categorie')
+    const nom = val('nom')
+    if (!nomCat) throw erreur('la catégorie est obligatoire.')
+    if (!nom) throw erreur('le nom du plat est obligatoire.')
+    const prix = prixDepuisTexte(val('prix'))
+    if (prix === undefined) throw erreur(`prix « ${val('prix')} » invalide (ex : 6,50 ; vide = « ${LIBELLE_PRIX_ABSENT} »).`)
+    if (prix !== null && prix > 1_000_000) throw erreur('prix trop élevé (10 000 € maximum).')
+    const allergenes: string[] = []
+    for (const a of val('allergenes').split('|').map((x) => x.trim()).filter(Boolean)) {
+      const connu = ALLERGENES.find((x) => sansAccents(x.toLowerCase()) === sansAccents(a.toLowerCase()))
+      if (!connu) throw erreur(`allergène inconnu « ${a} » (liste : ${ALLERGENES.join(', ')}).`)
+      allergenes.push(connu)
+    }
+    const produit = { nom, prix, description: val('description'), photo: val('photo'), allergenes }
+    // Règles de forme (longueurs, photo) : celles de validerMenu, ramenées à la ligne fautive.
+    try {
+      validerMenu({ categories: [{ nom: nomCat, produits: [produit] }] }, commerceId, maintenant)
+    } catch (e) {
+      if (e instanceof ErreurMenu) throw erreur(e.message)
+      throw e
+    }
+    let cat = categories.find((c) => c.nom === nomCat)
+    if (!cat) {
+      if (categories.length >= LIMITES_MENU.categories) throw erreur(`${LIMITES_MENU.categories} catégories maximum dans le menu.`)
+      cat = { id: `csv-c${categories.length + 1}`, nom: nomCat, produits: [] }
+      categories.push(cat)
+    }
+    if (++total > LIMITES_MENU.produits) throw erreur(`${LIMITES_MENU.produits} produits maximum dans le menu.`)
+    cat.produits.push({ ...produit, id: `${cat.id}-p${cat.produits.length + 1}` })
+  }
+  return validerMenu({ categories }, commerceId, maintenant)
 }

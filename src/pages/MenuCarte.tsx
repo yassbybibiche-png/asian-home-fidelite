@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { MESSAGE_MODE_SERVEUR, messageErreur, useAction, useStore } from '../store'
 import { urlAbsolue } from '../router'
 import type { CategorieMenu, Produit } from '../types'
-import { ALLERGENES, LIMITES_MENU } from '../lib/menu'
+import { ALLERGENES, LIMITES_MENU, compterPlats, menuDepuisCsv, menuEnCsv, nomFichierMenuCsv, prixEnTexte } from '../lib/menu'
 import { analyserMontant } from '../lib/points'
 import { BoutonCopier, EnTete, MessageErreur, QrCode, Vide } from '../components/ui'
 import { estAsianHome } from '../lib/visuels'
@@ -12,8 +12,22 @@ type ProduitEdite = Omit<Produit, 'prix'> & { prix: string }
 type CategorieEditee = Omit<CategorieMenu, 'produits'> & { produits: ProduitEdite[] }
 
 const idLocal = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-const versEdition = (cats: CategorieMenu[]): CategorieEditee[] =>
-  cats.map((c) => ({ ...c, produits: c.produits.map((p) => ({ ...p, prix: p.prix == null ? '' : (p.prix / 100).toFixed(2).replace('.', ',') })) }))
+const versEdition = (cats: CategorieMenu[]): CategorieEditee[] => cats.map((c) => ({ ...c, produits: c.produits.map((p) => ({ ...p, prix: prixEnTexte(p.prix) })) }))
+/** Contenu de l'éditeur → menu (prix « 6,50 » → centimes ; vide ou illisible → null, jamais 0 € inventé). */
+const depuisEdition = (cats: CategorieEditee[]): CategorieMenu[] =>
+  cats.map((c) => ({ ...c, produits: c.produits.map((p) => ({ ...p, prix: p.prix.trim() ? analyserMontant(p.prix) : null })) }))
+
+/** Télécharge le contenu de l'éditeur en CSV (menu-avant-remplacement-AAAA-MM-JJ.csv). */
+function telechargerMenuCsv(cats: CategorieEditee[]) {
+  const url = URL.createObjectURL(new Blob([menuEnCsv({ categories: depuisEdition(cats) })], { type: 'text/csv;charset=utf-8' }))
+  const lien = document.createElement('a')
+  lien.href = url
+  lien.download = nomFichierMenuCsv(new Date())
+  document.body.appendChild(lien)
+  lien.click()
+  lien.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
 
 /** Photo choisie sur l'appareil → JPEG redimensionné (≤ 480 px) et compressé sous 60 Ko. */
 async function compresserPhoto(fichier: File): Promise<string> {
@@ -37,6 +51,7 @@ export default function MenuCarte() {
   const [erreurChargement, setErreurChargement] = useState<string | null>(null)
   const { executer, enCours, erreur } = useAction()
   const [enregistre, setEnregistre] = useState(false)
+  const [erreurCsv, setErreurCsv] = useState<string | null>(null)
   const lien = urlAbsolue('menu', commerce.id)
 
   useEffect(() => {
@@ -62,11 +77,32 @@ export default function MenuCarte() {
     setCategories((cs) => (c ? cs!.map((x, j) => (j === i ? c : x)) : cs!.filter((_, j) => j !== i)))
   }
   const prixInvalide = categories.some((c) => c.produits.some((p) => p.prix.trim() && analyserMontant(p.prix) === null))
+  const editeurNonVide = categories.some((c) => c.produits.length > 0)
+
+  /** Remplace le contenu de l'éditeur, après sauvegarde CSV automatique du menu actuel (s'il n'est pas vide) et confirmation. */
+  function remplacer(nouvelles: CategorieMenu[], question: string) {
+    if (editeurNonVide) {
+      telechargerMenuCsv(categories!)
+      if (!window.confirm(`${question} Le menu actuel vient d’être sauvegardé en CSV (${nomFichierMenuCsv(new Date())}). Les modifications non enregistrées seront perdues.`)) return
+    }
+    setEnregistre(false)
+    setErreurCsv(null)
+    setCategories(versEdition(nouvelles))
+  }
+
+  async function importerCsv(fichier: File) {
+    let menu
+    try {
+      menu = menuDepuisCsv(await fichier.text(), commerce.id, new Date())
+    } catch (e) {
+      setErreurCsv(`Fichier non importé : ${messageErreur(e)}`)
+      return
+    }
+    remplacer(menu.categories, `Remplacer le menu de l’éditeur par le fichier « ${fichier.name} » (${compterPlats(menu)} plats) ?`)
+  }
 
   async function enregistrer() {
-    const menu = {
-      categories: categories!.map((c) => ({ ...c, produits: c.produits.map((p) => ({ ...p, prix: p.prix.trim() ? (analyserMontant(p.prix) ?? 0) : null })) })),
-    }
+    const menu = { categories: depuisEdition(categories!) }
     const r = await executer(() => avecPin((a, cli) => cli.majMenu(commerce.id, a, menu)))
     if (r.ok) {
       setCategories(versEdition(r.valeur.categories))
@@ -95,26 +131,49 @@ export default function MenuCarte() {
 
       {estAsianHome(commerce) && (
         <section className="carte space-y-2">
-          <h2 className="titre-carte">Vraie carte du restaurant</h2>
+          <h2 className="titre-carte">Carte officielle du restaurant</h2>
           <p className="text-sm text-gray-700">
-            Charge les {COMPTE_PLATS_REELS} plats réels d’Asian Home (relevés sur Uber Eats) dans l’éditeur ci-dessous, avec leurs photos. Les prix
-            n’ont pas pu être vérifiés : ils restent vides et s’affichent « Prix sur place » tant que vous ne les renseignez pas.
+            Charge les {COMPTE_PLATS_REELS} plats de la carte officielle d’Asian Home dans l’éditeur ci-dessous, avec les prix relevés le 10/11/2026 sur
+            la carte du restaurant. 2 prix sont à confirmer : Riz Thaï 8,90 € et 6 Maki Gold 100,00 €. Les 3 plats absents de la carte (Thaï-sty
+            Krusty, Bœuf Basilic, Boisson 33cl) sont conservés sans prix dans « Hors carte (prix à confirmer) ».
           </p>
           <button
             type="button"
             className="bouton-secondaire w-full"
-            onClick={() => {
-              const existants = categories.some((c) => c.produits.length > 0)
-              if (existants && !window.confirm('Remplacer le menu actuel par la vraie carte du restaurant (39 plats) ? Les modifications non enregistrées seront perdues.')) return
-              setEnregistre(false)
-              setCategories(versEdition(menuReelAsianHome().categories))
-            }}
+            onClick={() => remplacer(menuReelAsianHome().categories, `Remplacer le menu actuel par la carte officielle du restaurant (${COMPTE_PLATS_REELS} plats) ?`)}
           >
-            📖 Charger la vraie carte d’Asian Home ({COMPTE_PLATS_REELS} plats)
+            📖 Charger la carte officielle d’Asian Home ({COMPTE_PLATS_REELS} plats, prix inclus)
           </button>
           <p className="text-xs text-gray-600">Pensez à « Enregistrer le menu » ensuite : la carte devient votre menu publié, modifiable à tout moment.</p>
         </section>
       )}
+
+      <section className="carte space-y-2">
+        <h2 className="titre-carte">Fichier CSV (Excel)</h2>
+        <p className="text-sm text-gray-700">
+          Colonnes : categorie ; nom ; prix (ex : 6,50 — vide = « Prix sur place ») ; description ; photo ; allergenes (séparés par |). L’import ne
+          fait que remplir l’éditeur : rien n’est publié avant « Enregistrer le menu ». Le menu en cours est sauvegardé en CSV avant tout remplacement.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button type="button" className="bouton-secondaire w-full" disabled={!editeurNonVide} onClick={() => telechargerMenuCsv(categories)}>
+            ⬇ Exporter le menu actuel (CSV)
+          </button>
+          <label className="bouton-secondaire w-full cursor-pointer">
+            ⬆ Importer un menu (CSV)
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="sr-only"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                e.target.value = ''
+                if (f) void importerCsv(f)
+              }}
+            />
+          </label>
+        </div>
+        <MessageErreur>{erreurCsv}</MessageErreur>
+      </section>
 
       {categories.map((c, i) => (
         <EditeurCategorie key={c.id} categorie={c} onChange={(x) => majCat(i, x)} />
