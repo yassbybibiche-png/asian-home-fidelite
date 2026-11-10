@@ -95,7 +95,8 @@ function sansConfigurationPrivee(json: unknown, route: string) {
   for (const [nom, motif] of INTERDITS) assert.doesNotMatch(texte, motif, `${route} : ${nom} exposé(e)`)
 }
 
-const CLES_PUBLIQUES = ['actif', 'apparence', 'catalogue', 'coordonnees', 'demo', 'id', 'lienGoogle', 'logo', 'lots', 'nom', 'programme', 'recompense', 'seuilTampons', 'type']
+// `conservationMois` (P1-B6) : durée de conservation effective, affichée sur la page publique de confidentialité.
+const CLES_PUBLIQUES = ['actif', 'apparence', 'catalogue', 'conservationMois', 'coordonnees', 'demo', 'id', 'lienGoogle', 'logo', 'lots', 'nom', 'programme', 'recompense', 'seuilTampons', 'type']
 
 function vuePubliqueAttendue(c: CommercePublic, route: string) {
   for (const k of Object.keys(c)) assert.ok(CLES_PUBLIQUES.includes(k), `${route} : champ inattendu « ${k} »`)

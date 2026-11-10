@@ -6,10 +6,11 @@ import { ErreurApi, type ClientApi } from '../data/api'
 import { CarteFidelite } from '../components/CarteFidelite'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteCarte } from '../components/Squelette'
-import { BadgeDemo, EncartWallet, MessageErreur } from '../components/ui'
+import { BadgeDemo, EncartWallet, LienConfidentialite, MessageErreur, PiedPublic, telecharger } from '../components/ui'
 import { dateRelative } from '../lib/format'
 import { estAsianHome, VISUELS } from '../lib/visuels'
 import { configRattrapage, peutCompleterProfil } from '../lib/programme'
+import { nomFichierExportClient } from '../lib/rgpd'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 
 /** Page publique #/carte/<clientId> : la carte de fidélité sur le téléphone du client. */
@@ -93,6 +94,7 @@ function Carte({ client, commerce, demo, pied, menu, actions }: { client: Client
       <EncartWallet demo={demo} />
       {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}
       <p className="text-center text-xs text-gray-600">{pied}</p>
+      <PiedPublic commerceId={commerce.id} />
     </div>
   )
 }
@@ -161,7 +163,12 @@ function CarteApi({ api }: { api: ClientApi }) {
       commerce={donnees.commerce}
       demo={!!donnees.commerce.demo}
       menu={donnees.menu}
-      actions={<FormulairesProgramme api={api} client={donnees.client} commerce={donnees.commerce} onMaj={charger} />}
+      actions={
+        <>
+          <FormulairesProgramme api={api} client={donnees.client} commerce={donnees.commerce} onMaj={charger} />
+          <MesDonnees api={api} client={donnees.client} commerce={donnees.commerce} onMaj={charger} />
+        </>
+      }
       pied={
         <>
           {donnees.commerce.demo && <BadgeDemo>Démo</BadgeDemo>}
@@ -286,5 +293,72 @@ function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi
       {message && <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">{message}</p>}
       {erreur && <MessageErreur>{erreur}</MessageErreur>}
     </div>
+  )
+}
+
+/**
+ * Droits RGPD depuis la carte (P1-B6) : « Recevoir mes données » (CSV téléchargé) et « Demander la suppression »
+ * (demande enregistrée, le restaurant supprime la carte depuis sa fiche client). Le lien de la carte ne suffit pas :
+ * le client confirme avec le téléphone ou l'e-mail donné à l'inscription.
+ */
+function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: Client; commerce: CommercePublic; onMaj(): void }) {
+  const [contact, setContact] = useState('')
+  const [message, setMessage] = useState('')
+  const [erreur, setErreur] = useState('')
+  const [enCours, setEnCours] = useState(false)
+
+  async function agir(action: 'donnees' | 'suppression') {
+    if (enCours) return
+    setErreur('')
+    setMessage('')
+    if (!contact.trim()) return setErreur('Indiquez le téléphone ou l’e-mail donné à l’inscription.')
+    if (action === 'suppression' && !window.confirm('Demander la suppression de votre carte et de toutes vos données (tampons, points, historique) ? Le restaurant la supprimera définitivement.')) return
+    setEnCours(true)
+    try {
+      if (action === 'donnees') {
+        telecharger(nomFichierExportClient(client.id), await api.donneesCarte(client.id, contact.trim()))
+        setMessage('Vos données ont été téléchargées (fichier CSV, lisible dans un tableur).')
+      } else {
+        await api.demanderSuppression(client.id, contact.trim())
+        setMessage('Demande enregistrée : le restaurant supprimera votre carte et vos données.')
+        onMaj()
+      }
+    } catch (err) {
+      setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
+    } finally {
+      setEnCours(false)
+    }
+  }
+
+  return (
+    <details className="carte">
+      <summary className="titre-carte min-h-11 cursor-pointer">Mes données personnelles</summary>
+      <div className="mt-3 space-y-3">
+        <p className="text-sm text-gray-600">
+          Recevez une copie de vos données ou demandez leur suppression. <LienConfidentialite commerceId={commerce.id} />
+        </p>
+        {client.demandeSuppressionLe && (
+          <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+            Demande de suppression enregistrée le {new Date(client.demandeSuppressionLe).toLocaleDateString('fr-FR')} : le restaurant va supprimer votre carte.
+          </p>
+        )}
+        <div>
+          <label className="etiquette" htmlFor="cp-contact-rgpd">
+            Votre téléphone ou e-mail (celui de l’inscription)
+          </label>
+          <input id="cp-contact-rgpd" className="champ" inputMode="email" autoComplete="off" value={contact} onChange={(e) => setContact(e.target.value)} />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" className="bouton-secondaire min-h-11" disabled={enCours} onClick={() => void agir('donnees')}>
+            Recevoir mes données
+          </button>
+          <button type="button" className="bouton-secondaire min-h-11" disabled={enCours || !!client.demandeSuppressionLe} onClick={() => void agir('suppression')}>
+            Demander la suppression
+          </button>
+        </div>
+        {message && <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">{message}</p>}
+        {erreur && <MessageErreur>{erreur}</MessageErreur>}
+      </div>
+    </details>
   )
 }

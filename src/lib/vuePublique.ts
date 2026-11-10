@@ -14,6 +14,7 @@
 import type { Commerce, CommercePublic, ProgrammePublic } from '../types'
 import { configDefi, configNiveaux, configOffreHebdo, configPaliers, configParrainage, configRattrapage } from './programme.ts'
 import { lotsJouables } from './roulette.ts'
+import { dureeConservationMois } from './rgpd.ts'
 
 export function programmePublic(c: Pick<Commerce, 'programme' | 'seuilTampons'>): ProgrammePublic {
   const parrainage = configParrainage(c)
@@ -46,5 +47,7 @@ export function commercePublic(c: Commerce): CommercePublic {
     // Couleurs et bannière seulement (`Apparence` ne contient rien d'autre aujourd'hui ; un ajout futur resterait privé).
     ...(c.apparence ? { apparence: { ...(couleur ? { couleur } : {}), ...(fond ? { fond } : {}), ...(banniere ? { banniere } : {}) } } : {}),
     programme: programmePublic(c),
+    // Durée de conservation effective (P1-B6) : publiée sur la page de confidentialité.
+    conservationMois: dureeConservationMois(c),
   }
 }

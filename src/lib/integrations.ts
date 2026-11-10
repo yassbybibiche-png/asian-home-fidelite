@@ -70,12 +70,16 @@ export function etatGoogleBusiness(s: { configure: boolean; connecte: boolean } 
   }
 }
 
-/** Bloc RGPD affiché dans Plus et Offre (et repris dans le README). */
+/**
+ * Bloc RGPD affiché dans Plus et Offre (et repris dans le README) : résumé de la page publique de confidentialité
+ * (`politiqueConfidentialite`, src/lib/rgpd.ts) — mêmes durées, mêmes droits, même hébergement.
+ */
 export const MENTIONS_RGPD = [
-  'Données collectées : prénom + téléphone ou e-mail du client, ses visites, tampons, récompenses et gains de la roulette.',
+  'Données collectées : prénom + téléphone ou e-mail du client, ses visites, tampons, points, récompenses et gains de la roulette ; anniversaire et plat préféré seulement s’il les donne.',
   'Finalité : la carte de fidélité et la roulette du commerce. Aucune revente, aucune publicité tierce.',
   'Relances SMS / e-mail : seulement avec le consentement explicite du client (case non pré-cochée, date et origine conservées) ; désinscription à tout moment (réponse STOP par SMS, lien dans chaque e-mail, ou auprès du commerçant). Aucun envoi tant qu’aucun prestataire n’est configuré.',
-  'Conservation : tant que le client utilise sa carte ; durée maximale à fixer par le commerce (par exemple 3 ans après la dernière visite).',
-  'Export ou suppression sur simple demande au commerçant (export CSV disponible ; la suppression n’a pas encore de bouton : l’administrateur la fait à la main dans la base).',
-  'Hébergement : à préciser selon le déploiement choisi — dans l’Union européenne de préférence.',
+  'Conservation : 3 ans après la dernière visite par défaut (réglable dans Réglages) ; l’écran Clients liste à l’avance les cartes à purger, le commerce confirme la purge (jamais automatique, journalisée).',
+  'Droits du client : accès, rectification, export, suppression, retrait du consentement — depuis sa carte (« Recevoir mes données », « Demander la suppression »), en caisse ou par message au commerce.',
+  'Export et suppression côté commerce : sur la fiche client, export CSV de ses données et bouton « Supprimer ce client » (tirages, journal, parrainages, demandes et relances supprimés avec lui ; suppression journalisée).',
+  'Hébergement dans l’Union européenne : serveur Render (Frankfurt, Allemagne) ; base Supabase (région à confirmer, Central EU Frankfurt prévue).',
 ]

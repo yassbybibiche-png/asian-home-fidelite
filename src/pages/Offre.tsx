@@ -16,7 +16,7 @@ const INCLUS = [
 ]
 
 export default function Offre() {
-  const { estDemo } = useStore()
+  const { estDemo, commerce } = useStore()
   return (
     <div className="space-y-5">
       <EnTete titre={`L’offre ${NOM_APP}`} sousTitre="Un seul produit, pour tous les commerces." action={estDemo ? <BadgeDemo /> : undefined} />
@@ -60,7 +60,7 @@ export default function Offre() {
         </p>
       </section>
 
-      <BlocRgpd />
+      <BlocRgpd commerceId={commerce.id} />
 
       <p className="rounded-xl bg-amber-50 px-4 py-3 text-center font-semibold text-amber-800 ring-1 ring-amber-200">
         {estDemo ? 'Démo — ' : ''}Aucune souscription ni aucun paiement dans l’app

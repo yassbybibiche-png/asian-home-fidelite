@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useAction, useDonneesCommerce, useStore } from '../store'
 import type { Client } from '../types'
 import { estActif, estARelancer, joursDepuis } from '../lib/stats'
-import { dateRelative } from '../lib/format'
+import { dateCourte, dateRelative } from '../lib/format'
+import { libelleDuree, type ClientAPurger } from '../lib/rgpd'
 import { analyserContact, messageRelance, recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { correspondRecherche } from '../lib/recherche'
 import { MENTION_ENVOI } from '../lib/integrations'
@@ -94,6 +95,8 @@ export default function Clients() {
 
       <BoutonExport />
 
+      <ConservationDonnees />
+
       {filtre === 'relancer' && (
         <p className="mb-3 text-sm text-gray-600">
           Clients déjà venus, mais sans visite depuis plus de 30 jours. Copiez le message et envoyez-le vous-même (SMS, WhatsApp, e-mail).{' '}
@@ -135,6 +138,142 @@ function BoutonExport() {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * RGPD (P1-B6) — demandes de suppression reçues depuis les cartes, et purge de conservation : AVERTISSEMENT d'abord
+ * (clients dont la durée est dépassée ou le sera sous 30 jours, avec la date prévue et ce qui les protège), puis
+ * purge lancée par le commerçant après saisie de « PURGER ». Rien n'est jamais supprimé sans cette confirmation.
+ */
+function ConservationDonnees() {
+  const { mode, api, acces, avecPin } = useStore()
+  const { commerce, clients } = useDonneesCommerce()
+  const { executer, enCours, erreur } = useAction()
+  const [liste, setListe] = useState<{ conservationMois: number; clients: ClientAPurger[] } | null>(null)
+  const [version, setVersion] = useState(0)
+  const [confirmation, setConfirmation] = useState(false)
+  const [saisie, setSaisie] = useState('')
+  const [annonce, setAnnonce] = useState('')
+  const demandes = clients.filter((c) => c.demandeSuppressionLe)
+
+  useEffect(() => {
+    if (mode !== 'api' || !api || !acces) return
+    let actif = true
+    // Lecture seule : appel direct (pas `avecPin`, qui rechargerait tout l'état et relancerait cet effet).
+    api.listePurge(commerce.id, acces).then(
+      (r) => actif && setListe(r),
+      () => actif && setListe(null),
+    )
+    return () => {
+      actif = false
+    }
+    // Relue quand la liste des clients change de taille (suppression, inscription) ou après une action ici.
+  }, [mode, api, acces, commerce.id, clients.length, version])
+
+  if (mode !== 'api') return null
+  const dus = (liste?.clients ?? []).filter((c) => c.statut === 'due' && !c.protection)
+
+  async function exclure(id: string) {
+    setAnnonce('')
+    const r = await executer(() => avecPin((a, x) => x.majClient(commerce.id, a, id, { exclusPurge: true })))
+    if (r.ok) setVersion((v) => v + 1)
+  }
+
+  async function purger() {
+    if (saisie.trim() !== 'PURGER') return
+    const r = await executer(() => avecPin((a, x) => x.purger(commerce.id, a, dus.map((c) => c.id))))
+    if (r.ok) {
+      setAnnonce(`✓ ${r.valeur.supprimes} client(s) supprimé(s)${r.valeur.ignores ? `, ${r.valeur.ignores} ignoré(s) (revenus entre-temps ou protégés)` : ''}. Purge enregistrée dans le journal.`)
+      setConfirmation(false)
+      setSaisie('')
+      setVersion((v) => v + 1)
+    }
+  }
+
+  return (
+    <section className="carte mb-4 space-y-3" aria-label="Données personnelles">
+      <h2 className="titre-carte">Données personnelles (RGPD)</h2>
+      {demandes.length > 0 && (
+        <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+          <p className="font-semibold">
+            {demandes.length} demande{demandes.length > 1 ? 's' : ''} de suppression reçue{demandes.length > 1 ? 's' : ''} depuis la carte :
+          </p>
+          <ul className="mt-1 space-y-1">
+            {demandes.map((c) => (
+              <li key={c.id}>
+                <a href={`#/client/${c.id}`} className="inline-flex min-h-11 items-center font-semibold underline">
+                  {c.prenom || 'Client sans prénom'} — le {dateCourte(c.demandeSuppressionLe!)}
+                </a>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1">Ouvrez la fiche pour exporter ses données si besoin, puis « Supprimer ce client ».</p>
+        </div>
+      )}
+      {!liste ? (
+        <p className="text-sm text-gray-600">Durée de conservation : liste des cartes à purger indisponible pour le moment.</p>
+      ) : (
+        <>
+          <p className="text-sm text-gray-600">
+            Conservation : {libelleDuree(liste.conservationMois)} après la dernière visite (modifiable dans Réglages).{' '}
+            {liste.clients.length ? 'Cartes concernées maintenant ou dans les 30 jours :' : 'Aucune carte à purger pour le moment.'}
+          </p>
+          {liste.clients.length > 0 && (
+            <ul className="divide-y divide-gray-100 text-sm">
+              {liste.clients.map((c) => (
+                <li key={c.id} className="flex items-center justify-between gap-3 py-2">
+                  <span className="min-w-0">
+                    <a href={`#/client/${c.id}`} className="font-semibold underline">
+                      {c.prenom || 'Sans prénom'}
+                    </a>
+                    <span className="block text-xs text-gray-600">
+                      Dernière activité {dateCourte(c.derniereActivite)} · purge {c.statut === 'due' ? 'possible depuis' : 'prévue le'} {dateCourte(c.purgeLe)}
+                      {c.protection ? ` · conservé : ${c.protection.toLowerCase()}` : ''}
+                    </span>
+                  </span>
+                  {!c.protection && (
+                    <button type="button" className="bouton-secondaire min-h-11 shrink-0 px-3 text-xs" disabled={enCours} onClick={() => void exclure(c.id)}>
+                      Exclure
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {dus.length > 0 &&
+            (!confirmation ? (
+              <button type="button" className="bouton-secondaire w-full text-red-700" disabled={enCours} onClick={() => (setConfirmation(true), setSaisie(''), setAnnonce(''))}>
+                Purger {dus.length} client{dus.length > 1 ? 's' : ''} inactif{dus.length > 1 ? 's' : ''}…
+              </button>
+            ) : (
+              <div className="space-y-2 rounded-xl bg-red-50 p-3 ring-1 ring-red-200">
+                <p className="text-sm text-red-900">
+                  Suppression <strong>définitive</strong> de {dus.length} client{dus.length > 1 ? 's' : ''} (cartes, historique, gains, journal) : impossible à annuler.
+                </p>
+                <label className="etiquette" htmlFor="confirmer-purge">
+                  Tapez PURGER pour confirmer
+                </label>
+                <input id="confirmer-purge" className="champ" autoComplete="off" value={saisie} onChange={(e) => setSaisie(e.target.value)} />
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" className="bouton-secondaire min-h-11" disabled={enCours} onClick={() => setConfirmation(false)}>
+                    Annuler
+                  </button>
+                  <button type="button" className="bouton min-h-11 bg-red-700 hover:bg-red-800 active:bg-red-900" disabled={enCours || saisie.trim() !== 'PURGER'} onClick={() => void purger()}>
+                    {enCours ? 'Purge…' : 'Purger'}
+                  </button>
+                </div>
+              </div>
+            ))}
+        </>
+      )}
+      <MessageErreur>{erreur && `Rien n’a été supprimé : ${erreur}`}</MessageErreur>
+      {annonce && (
+        <p className="alerte-succes" role="status">
+          {annonce}
+        </p>
+      )}
+    </section>
   )
 }
 

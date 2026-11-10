@@ -24,6 +24,7 @@ import Equipe from './pages/Equipe'
 import Messages from './pages/Messages'
 import MenuCarte from './pages/MenuCarte'
 import Desinscription from './pages/Desinscription'
+import Confidentialite from './pages/Confidentialite'
 
 const ONGLETS: { page: Page; libelle: string }[] = [
   { page: 'accueil', libelle: 'Tableau de bord' },
@@ -67,6 +68,7 @@ const COMPOSANTS: Record<Page, ComponentType> = {
   messages: Messages,
   menuCarte: MenuCarte,
   desinscription: Desinscription,
+  confidentialite: Confidentialite,
 }
 
 /** Onglet surligné pour les sous-pages (fiche client → Clients, QR vitrine → Roulette). */

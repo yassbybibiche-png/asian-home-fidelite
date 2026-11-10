@@ -491,6 +491,7 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
             ...(c.apparence ? { apparence: c.apparence } : {}),
             ...(c.programme ? { programme: c.programme } : {}),
             ...(c.relancesAuto ? { relancesAuto: c.relancesAuto } : {}),
+            ...(c.conservationMois !== undefined ? { conservationMois: c.conservationMois } : {}),
           })
         }),
       creerCommerce: (n: NouveauCommerce) =>

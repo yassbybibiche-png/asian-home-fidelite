@@ -256,6 +256,14 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `POST /commerces/:id/stop-sms` | public (signature Twilio) | **P1-B3.** Webhook Twilio « A message comes in » : `Body` = STOP / ARRET / DESINSCRIPTION… (casse et accents ignorés, 1er mot) → consentement du client de ce numéro (`From`) retiré, journalisé ; autre mot : rien. **501** sans Twilio configuré, **403** si `X-Twilio-Signature` est fausse. Répond un TwiML vide. |
 | `POST /desinscription/:clientId/:jeton` | public (jeton HMAC) | **P1-B3.** Lien de désinscription des e-mails (page `#/desinscription/<clientId>/<jeton>`, bouton « Me désinscrire ») et One-Click `List-Unsubscribe-Post`. Jeton = HMAC du commerce + client (secret tiré une fois, gardé dans `meta`). Idempotent → `{ ok, commerce }` ; 404 lien invalide. |
 | `GET /c/:clientId` (hors `/api`) | public | **P1-B3.** Lien court des SMS → 302 vers `/#/carte/<clientId>`. |
+| `GET /commerces/:id/clients/:clientId/export.csv` | commerçant | **P1-B6.** Toutes les données de CE client en CSV (même format que l'export global : `;`, BOM, anti-injection) : profil, contact, tampons, points, visites, récompenses, échanges, tirages (lot, code, remise), rattrapages, consentement (date, origine), messages, relances. Une ligne par donnée : `rubrique;date;libelle;valeur`. Rien d'un autre client (le parrain n'apparaît que par « oui »), jamais de PIN / hash / code équipe ni d'identifiant technique. Journalisé (action `rgpd`). |
+| `DELETE /commerces/:id/clients/:clientId` | commerçant (pas l'équipe) | **P1-B6.** Corps obligatoire `{ "confirmation": "SUPPRIMER" }` (400 sinon). Suppression définitive avec la **cascade** décrite dans « RGPD » ci-dessous → `{ ok, bilan: { client, tirages, journal, parrainages, rattrapages, envois } }`. Journalisé SANS prénom, contact ni identifiant (qui, quand, motif, combien). 404 client inconnu. |
+| `GET /commerces/:id/purge` | commerçant | **P1-B6.** Avertissement avant purge → `{ conservationMois, maintenant, clients: [{ id, prenom, derniereActivite, purgeLe, statut: 'due' \| 'bientot', protection? }] }` : clients dont la date de purge (dernière visite, à défaut inscription, + durée) est passée ou tombe dans les 30 jours. `protection` = raison de ne PAS purger (exclu par le commerce, récompense en attente valable, plat en réserve valable, visite oubliée en attente). |
+| `POST /commerces/:id/purge` | commerçant | **P1-B6.** `{ clientIds: [...] }` (ceux affichés par le GET) → supprime, avec la cascade, ceux qui sont **encore** purgeables au moment de l'appel (revérifié ici : revenu entre-temps, exclu, protégé → ignoré) → `{ supprimes, ignores, clientsSupprimes }`. Une entrée de journal par purge : auteur, date, durée, nombre de clients et de lignes supprimées (sans prénom). 400 liste absente / vide. |
+| `PATCH /commerces/:id/clients/:clientId` (complément P1-B6) | commerçant | `exclusPurge: boolean` : exclut le client de la purge de conservation (ou l'y remet). Journalisé (action `rgpd`). |
+| `PATCH /commerces/:id` (complément P1-B6) | commerçant | `conservationMois` : durée de conservation après la dernière visite, entier de 6 à 120 (400 sinon) ; absent = 36 (3 ans). Publiée dans la fiche publique (`conservationMois` effectif) pour la page de confidentialité. |
+| `POST /cartes/:clientId/donnees` | public (lien de la carte + contact) | **P1-B6.** « Recevoir mes données » depuis la carte : `{ contact }` = téléphone ou e-mail de l'inscription (mêmes normalisations : 06… / +33… / 0033…, e-mail sans casse) → le CSV de l'export individuel. **403** contact différent, 404 carte inconnue. Limité par IP et par carte (`ficheClientParIp`). Marche même si le commerce est désactivé. Journalisé. |
+| `POST /cartes/:clientId/suppression` | public (lien de la carte + contact) | **P1-B6.** « Demander la suppression » : `{ contact }` → `demandeSuppressionLe` posé sur le client (idempotent), journalisé → `{ ok, demandeSuppressionLe, commerce }`. La suppression elle-même est faite par le commerçant (fiche client, `DELETE` ci-dessus) : il remet d'abord une éventuelle récompense en attente. 403 / 404 comme ci-dessus. |
 | `PATCH /commerces/:id` (complément P1-B3) | commerçant | `relancesAuto: { inactif, anniversaire }` (désactivées par défaut ; case dans l'écran Messages). Tournée lancée en arrière-plan à l'ouverture du tableau de bord (`GET …/etat`), une fois par commerce et par jour : clients consentants seulement, une relance auto par client et par tournée, une fois par absence (inactif 30-120 j) / par an (anniversaire). Rien sans prestataire ni migration 0007. |
 
 Accès « commerçant » = en-tête `X-Session` (jeton `commerce` de ce commerce ou `admin`), **ou** en repli `X-Commerce-PIN`
@@ -357,7 +365,7 @@ compte sur deux compteurs, rangés dans la table `tentatives_auth` (migration 00
 | `inscriptionParContact` | 5 | idem, par numéro / e-mail normalisé dans ce commerce | une personne ne s'inscrit qu'une fois ; freine l'énumération (F-12) |
 | `tirageParIp` | 20 | `POST /commerces/:id/tirages` | 1 tirage / jour / client ; laisse une salle pleine jouer |
 | `tirageParContact` | 5 | idem, par contact | réessais légitimes (réseau), pas plus |
-| `ficheClientParIp` | 10 | `POST …/clients/:id/profil`, `POST …/clients/:id/rattrapage` (demande du client) | rares par nature |
+| `ficheClientParIp` | 10 | `POST …/clients/:id/profil`, `POST …/clients/:id/rattrapage` (demande du client) ; P1-B6 : `POST /cartes/:id/donnees` et `…/suppression` (par IP **et** par carte) | rares par nature |
 | `sessionParIp` | 30 | `POST /sessions` | borne le coût scrypt ; toute l'équipe ouvre sa session depuis le même wifi en début de service |
 
 Les routes authentifiées (gérant, caisse, admin) ne sont **pas** limitées : la file hors ligne de la caisse doit pouvoir
@@ -578,6 +586,53 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
   `sqlite3 fidelite.db ".backup copie.db"`).
 - Pas encore de route de sauvegarde complète ni d'import (tirages, avis, historique) : voir « Limites ».
 
+## RGPD (P1-B6)
+
+**Page publique** `#/confidentialite/<commerceId>` (texte : `politiqueConfidentialite`, `src/lib/rgpd.ts`) : responsable du
+traitement (le commerce et ses coordonnées), données collectées, finalité, aucune revente, prestataires nommés seulement
+s'ils sont configurés (Twilio / Brevo / Google Wallet, lus dans `GET /sante`), durée de conservation configurée, droits et
+marche à suivre, hébergement. Liens : formulaire d'inscription (page de jeu), pied des pages client (jeu, carte, menu),
+écrans Plus / Offre. Mentions courtes alignées : `MENTIONS_RGPD` (`src/lib/integrations.ts`).
+
+**Hébergement.** Serveur : Render, région **Frankfurt** (vérifié : `render.yaml`, `region: frankfurt`). Base : Supabase,
+**région à confirmer** — la procédure plus bas fait choisir *Central EU (Frankfurt)*, mais la région du projet réel n'est
+déclarée nulle part dans le code ni dans la configuration du dépôt (l'URL `https://<ref>.supabase.co` ne la contient pas).
+À vérifier dans le dashboard Supabase (*Project Settings → General*), puis corriger `HEBERGEMENT_BASE` dans `src/lib/rgpd.ts`.
+
+**Cascade de la suppression d'un client** (`supprimerClientCascade` dans `app.ts`, `Stockage.supprimerClient`) :
+
+| Donnée | Effet |
+|---|---|
+| ligne `clients` | supprimée (avec ce qu'elle contient : contact, tampons, points, visites, récompenses, échanges, **messages** de la boîte de réception, **demandes de rattrapage**, consentement) |
+| `tirages` | tous ceux du client (`client_id`) |
+| `journal` | toutes les entrées rattachées au client (`donnees->>clientId`) |
+| `parrainages` | les traces où il est **parrain ou filleul** |
+| `demandes_rattrapage` | les traces d'audit du client (0004) |
+| `envois` | son journal de relances SMS / e-mail (0007) |
+| autres clients | ses **filleuls** perdent leur `parrainId` vers lui (un filleul pas encore récompensé perd ce bonus) ; rien d'autre ne change |
+| compteurs du commerce | aucun compteur agrégé n'est stocké : statistiques et tableau de bord sont recalculés depuis les clients restants |
+
+Ordre : dépendances d'abord, client en dernier (sous Supabase, sans transaction, une suppression interrompue se rejoue).
+Tables d'une migration non appliquée : rien à supprimer, comptées 0 (jamais de 500). Après suppression : `GET /cartes/:id`
+→ 404, l'export global ne contient plus le client, et son téléphone / e-mail ne retrouve plus aucune carte (une nouvelle
+inscription crée une carte vierge). Trace : une entrée `rgpd` « Client supprimé (motif) avec N tirage(s)… » sans prénom,
+contact ni identifiant. **Limite** : le texte d'une entrée de journal d'un AUTRE client peut citer son prénom (ex. passage
+du filleul « +50 points pour Alice (filleul) et +50 points pour Bob (parrain) ») ; ces entrées appartiennent à l'autre
+client et ne sont pas réécrites.
+
+**Flux de la demande du client** : depuis sa carte (« Mes données personnelles »), il confirme son téléphone / e-mail ;
+« Recevoir mes données » télécharge son CSV ; « Demander la suppression » enregistre la demande (`demandeSuppressionLe`).
+Le commerçant la voit dans Clients (encadré « demandes de suppression ») et sur la fiche client, exporte si besoin, puis
+« Supprimer ce client… » → saisie de `SUPPRIMER` → `DELETE`. Choix : la suppression reste une décision du commerçant
+(récompense en attente à remettre, litige), jamais automatique depuis un lien public.
+
+**Durée de conservation et purge** : `conservationMois` (Réglages, 6 à 120, défaut 36) après la dernière visite (à défaut
+l'inscription). Déclenchement réel : **aucune tâche planifiée** (Render Free n'exécute rien sans requête). L'écran Clients
+appelle `GET …/purge` à chaque ouverture et affiche l'avertissement (cartes dues ou dues sous 30 jours, date prévue,
+protection, bouton « Exclure ») ; la purge n'a lieu que quand le gérant clique « Purger N clients… » et tape `PURGER`
+(`POST …/purge`). Jamais purgés : client exclu, récompense en attente encore valable, plat en réserve valable, visite
+oubliée en attente de décision. Chaque purge est journalisée (auteur, date, durée, nombre de clients et de lignes).
+
 ## Limites honnêtes
 
 - SQLite : 1 seule instance (fichier local). Sous Supabase, plusieurs instances partagent la base ; l'anti-bruteforce
@@ -586,7 +641,8 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
 - Pas de comptes utilisateurs : un PIN par commerce, partagé par l'équipe ; pas de journal « qui a fait quoi ».
 - Le client se reconnaît par son téléphone / e-mail sans vérification (pas de SMS de confirmation) : quelqu'un qui
   connaît le numéro d'un client voit son prénom et ses tampons, et peut jouer à sa place s'il a une visite validée ce jour-là.
-- Pas de route d'import, pas de suppression de client (RGPD : à faire à la main dans la base pour l'instant).
+- Pas de route d'import. Suppression d'un client et purge de conservation : voir « RGPD (P1-B6) » (aucune purge
+  planifiée autonome : rien ne tourne sur Render Free sans requête).
 - Le code serveur n'est pas vérifié par `tsc` (pas de `@types/node` installé, pour ne rien ajouter) : il est couvert par les tests HTTP.
 - Le front en mode API (V2) recharge tout l'état toutes les 10 s : avec le PIN admin, une requête `/etat` par
   commerce. Suffisant pour quelques commerces ; au-delà, prévoir une route agrégée ou un rechargement incrémental.

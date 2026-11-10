@@ -208,8 +208,8 @@ export function EncartWallet({ demo = false, lienCarte }: { demo?: boolean; lien
   )
 }
 
-/** Mentions RGPD courtes (Plus, Offre). */
-export function BlocRgpd() {
+/** Mentions RGPD courtes (Plus, Offre) ; la politique complète est la page publique #/confidentialite/<commerceId>. */
+export function BlocRgpd({ commerceId }: { commerceId?: string }) {
   return (
     <section className="carte">
       <h2 className="titre-carte">Données personnelles (RGPD)</h2>
@@ -218,6 +218,25 @@ export function BlocRgpd() {
           <li key={m}>{m}</li>
         ))}
       </ul>
+      {commerceId && <LienConfidentialite commerceId={commerceId} className="mt-2 flex min-h-11 items-center text-sm" />}
     </section>
+  )
+}
+
+/** Lien vers la politique de confidentialité du commerce (P1-B6) : inscription, pied des pages client, Plus / Offre. */
+export function LienConfidentialite({ commerceId, className = '' }: { commerceId: string; className?: string }) {
+  return (
+    <a href={`#/confidentialite/${encodeURIComponent(commerceId)}`} className={`font-semibold text-marque-700 underline ${className}`}>
+      Politique de confidentialité
+    </a>
+  )
+}
+
+/** Pied de page des pages client (jeu, carte, menu) : la politique de confidentialité toujours à un tap. */
+export function PiedPublic({ commerceId }: { commerceId: string }) {
+  return (
+    <footer className="mt-2 border-t border-gray-200 pt-3 text-center text-xs text-gray-600">
+      <LienConfidentialite commerceId={commerceId} className="inline-flex min-h-11 items-center" />
+    </footer>
   )
 }

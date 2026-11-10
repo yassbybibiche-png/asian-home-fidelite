@@ -20,7 +20,7 @@ import { lancerTirage, memoireJoueur, type JoueurMemorise } from '../data/jeuApi
 import { DUREE_ROTATION_MS, LegendeRoue, Roue } from '../components/Roue'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteJeu } from '../components/Squelette'
-import { BadgeDemo, BoutonCopier, LogoCommerce, MessageErreur } from '../components/ui'
+import { BadgeDemo, BoutonCopier, LienConfidentialite, LogoCommerce, MessageErreur, PiedPublic } from '../components/ui'
 
 export function MessagePublic({ titre, children }: { titre: string; children: ReactNode }) {
   return (
@@ -83,6 +83,7 @@ function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; 
       {children}
 
       <p className="text-center text-xs text-gray-600">{pied}</p>
+      <PiedPublic commerceId={commerce.id} />
     </div>
   )
 }
@@ -292,6 +293,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
           <Continuer prenom={memorise.prenom} onContinuer={() => choisirJoueur(memorise)} onOublier={() => (memoriserJoueur(commerce.id, null), setMemoriseId(null))} />
         ) : (
           <Identification
+            commerceId={commerce.id}
             nomCommerce={commerce.nom}
             onEnvoyer={async (prenom, contactSaisi, consentementRelance) => {
               choisirJoueur((await inscrireClient(commerce.id, prenom, contactSaisi, consentementRelance)).client)
@@ -486,6 +488,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
         ) : (
           <Identification
             parrain={parrain}
+            commerceId={commerce.id}
             nomCommerce={commerce.nom}
             onEnvoyer={async (prenom, contactSaisi, consentementRelance) => {
               const { client } = await api.inscrirePublic(commerce.id, prenom, contactSaisi, parrain, consentementRelance)
@@ -559,10 +562,12 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
 function Identification({
   onEnvoyer,
   parrain,
+  commerceId,
   nomCommerce,
 }: {
   onEnvoyer(prenom: string, contactSaisi: string, consentementRelance: boolean): Promise<void>
   parrain?: string
+  commerceId: string
   nomCommerce: string
 }) {
   const [prenom, setPrenom] = useState('')
@@ -622,6 +627,9 @@ function Identification({
         <input type="checkbox" className="mt-0.5" checked={consentement} onChange={(e) => setConsentement(e.target.checked)} />
         <span>J’accepte de recevoir les offres de {nomCommerce} par SMS ou e-mail (désinscription à tout moment).</span>
       </label>
+      <p className="text-xs text-gray-600">
+        Vos données servent uniquement à votre carte de fidélité, jamais revendues : <LienConfidentialite commerceId={commerceId} />.
+      </p>
       <MessageErreur>{erreur}</MessageErreur>
       <button type="submit" className="bouton w-full" disabled={!contactSaisi.trim() || enCours}>
         {enCours ? 'Un instant…' : 'C’est parti'}

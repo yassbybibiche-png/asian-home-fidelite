@@ -5,7 +5,7 @@ import type { CommercePublic, Menu } from '../types'
 import { ErreurApi } from '../data/api'
 import { formaterPrix } from '../lib/points'
 import { bandeauPrixManquants, filtrerMenu } from '../lib/menu'
-import { LogoCommerce } from '../components/ui'
+import { LogoCommerce, PiedPublic } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
 import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
 import { estSignature, menuReelAsianHome } from '../data/menu-reel'
@@ -197,6 +197,7 @@ function MenuAffiche({
       )}
       {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}
       <p className="text-center text-xs text-gray-600">Allergènes : demandez conseil à l’équipe en cas de doute.</p>
+      <PiedPublic commerceId={commerce.id} />
     </div>
   )
 }

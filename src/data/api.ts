@@ -3,6 +3,7 @@
 import type { Avis, Client, Commerce, CommercePublic, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce } from '../types'
 import type { StatutGain, StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
+import type { ClientAPurger } from '../lib/rgpd'
 
 export const MESSAGE_HORS_LIGNE = 'Serveur injoignable — vérifiez la connexion.'
 
@@ -117,7 +118,23 @@ export interface GainCaisse {
 export type ChampsReglages = Partial<
   Pick<
     Commerce,
-    'nom' | 'type' | 'logo' | 'lienGoogle' | 'coordonnees' | 'recompense' | 'seuilTampons' | 'lots' | 'reglesReponseAuto' | 'actif' | 'eurosParPoint' | 'catalogue' | 'messagesAuto' | 'apparence' | 'programme' | 'relancesAuto'
+    | 'nom'
+    | 'type'
+    | 'logo'
+    | 'lienGoogle'
+    | 'coordonnees'
+    | 'recompense'
+    | 'seuilTampons'
+    | 'lots'
+    | 'reglesReponseAuto'
+    | 'actif'
+    | 'eurosParPoint'
+    | 'catalogue'
+    | 'messagesAuto'
+    | 'apparence'
+    | 'programme'
+    | 'relancesAuto'
+    | 'conservationMois'
   >
 >
 
@@ -220,7 +237,7 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
         ok: boolean
         version: string
         demo: boolean
-        integrations?: { sms?: boolean; email?: boolean; googleBusinessProfile?: boolean }
+        integrations?: { sms?: boolean; email?: boolean; googleBusinessProfile?: boolean; googleWallet?: boolean }
         migrations?: { relances?: boolean }
       }>,
 
@@ -243,6 +260,12 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     /** Désinscription des relances depuis le lien d'un e-mail (page #/desinscription/…). */
     desinscrire: (clientId: string, jeton: string) =>
       requete('POST', `/desinscription/${enc(clientId)}/${enc(jeton)}`) as Promise<{ ok: boolean; commerce: string }>,
+    // RGPD (P1-B6), depuis la carte : identité = lien de la carte + téléphone ou e-mail donné à l'inscription (403 sinon).
+    /** « Recevoir mes données » : CSV de toutes les données du client. */
+    donneesCarte: (clientId: string, contact: string) => requete('POST', `/cartes/${enc(clientId)}/donnees`, { corps: { contact }, texte: true }) as Promise<string>,
+    /** « Demander la suppression » : demande enregistrée, la suppression est faite par le commerce. */
+    demanderSuppression: (clientId: string, contact: string) =>
+      requete('POST', `/cartes/${enc(clientId)}/suppression`, { corps: { contact } }) as Promise<{ ok: boolean; demandeSuppressionLe: string; commerce: string }>,
     /** Le navigateur n'envoie qu'un contact : la visite du jour, le tirage du jour et le lot sont décidés par le serveur. */
     tirer: (commerceId: string, contact: string, prenom?: string, parrain?: string) =>
       requete('POST', `/commerces/${enc(commerceId)}/tirages`, { corps: { contact, ...(prenom ? { prenom } : {}), ...(parrain ? { parrain } : {}) } }) as Promise<ResultatTirage>,
@@ -292,8 +315,20 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     publierReponse: async (commerceId: string, acces: Acces, avisId: string) =>
       ((await requete('POST', `/commerces/${enc(commerceId)}/avis/${enc(avisId)}/publier-reponse`, { acces })) as { avis: Avis }).avis,
     exportCsv: (commerceId: string, acces: Acces) => requete('GET', `/commerces/${enc(commerceId)}/export.csv`, { acces, texte: true }) as Promise<string>,
-    majClient: async (commerceId: string, acces: Acces, clientId: string, champs: { anniversaire?: string; platPrefere?: string; consentementRelance?: boolean }) =>
+    majClient: async (commerceId: string, acces: Acces, clientId: string, champs: { anniversaire?: string; platPrefere?: string; consentementRelance?: boolean; exclusPurge?: boolean }) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}`, { acces, corps: champs })) as { client: Client }).client,
+    // ---- RGPD (P1-B6) ----
+    /** CSV de toutes les données d'un client (droit d'accès / portabilité). */
+    exportClient: (commerceId: string, acces: Acces, clientId: string) =>
+      requete('GET', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/export.csv`, { acces, texte: true }) as Promise<string>,
+    /** Suppression définitive (cascade : tirages, journal, parrainages, rattrapages, relances). */
+    supprimerClient: (commerceId: string, acces: Acces, clientId: string) =>
+      requete('DELETE', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}`, { acces, corps: { confirmation: 'SUPPRIMER' } }) as Promise<{ ok: boolean; bilan: Record<string, number | boolean> }>,
+    /** Avertissement avant purge : clients dont la durée de conservation est dépassée ou presque. */
+    listePurge: (commerceId: string, acces: Acces) =>
+      requete('GET', `/commerces/${enc(commerceId)}/purge`, { acces }) as Promise<{ conservationMois: number; maintenant: string; clients: ClientAPurger[] }>,
+    purger: (commerceId: string, acces: Acces, clientIds: string[]) =>
+      requete('POST', `/commerces/${enc(commerceId)}/purge`, { acces, corps: { clientIds } }) as Promise<{ supprimes: number; ignores: number }>,
     /** Relance SMS / e-mail (P1-B3) : 501 sans prestataire, 409 sans consentement / déjà envoyée aujourd'hui. */
     relancer: (commerceId: string, acces: Acces, clientId: string, demande: { modele: ModeleRelance; canal?: 'sms' | 'email' }) =>
       requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/relance`, { acces, corps: demande }) as Promise<{ envoye: boolean; canal: 'sms' | 'email'; envoi: EnvoiRelance }>,

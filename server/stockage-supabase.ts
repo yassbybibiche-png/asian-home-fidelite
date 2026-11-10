@@ -291,6 +291,24 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       }
     },
 
+    // ---- RGPD (P1-B6) : suppression d'un client et de sa cascade ----
+    // Pas de transaction (voir l'en-tête) : les dépendances partent d'abord, la ligne du client en dernier ; une
+    // suppression interrompue laisse le client en place et se rejoue en entier. Table absente (migration pas
+    // appliquée) : rien à supprimer, 0. Le journal n'a pas de colonne client : filtre sur `donnees->>clientId`.
+    supprimerClient: async (commerceId, clientId) => {
+      const suppr = async (table: string, colonne: string) => {
+        const lignes = await ouVide(ok<unknown[] | null>(table, sb.from(table).delete().eq('commerce_id', commerceId).eq(colonne, clientId).select('id')), [])
+        return lignes?.length ?? 0
+      }
+      const tirages = await suppr('tirages', 'client_id')
+      const journal = await suppr('journal', 'donnees->>clientId')
+      const parrainages = (await suppr('parrainages', 'parrain_id')) + (await suppr('parrainages', 'filleul_id'))
+      const rattrapages = await suppr('demandes_rattrapage', 'client_id')
+      const envois = await suppr('envois', 'client_id')
+      const client = (await suppr('clients', 'id')) > 0
+      return { client, tirages, journal, parrainages, rattrapages, envois }
+    },
+
     /** PAS de « tout ou rien » (voir l'en-tête du fichier) : verrou optimiste sur les lignes lues pendant `fn`. */
     transaction: (fn) => versions.run(new Map(), async () => fn()),
     fermer: () => {},

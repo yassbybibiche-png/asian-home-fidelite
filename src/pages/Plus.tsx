@@ -81,7 +81,7 @@ export default function Plus() {
         </ul>
       </section>
 
-      <BlocRgpd />
+      <BlocRgpd commerceId={commerce.id} />
     </div>
   )
 }

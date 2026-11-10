@@ -42,6 +42,19 @@ export interface TentativesAuth {
 type P<T> = T | Promise<T>
 
 /**
+ * Bilan d'une suppression de client (P1-B6, RGPD) : nombre de lignes supprimées dans chaque table. `client` = la ligne
+ * du client elle-même (avec tout ce qu'elle contient : messages, demandes de rattrapage, échanges, consentement…).
+ */
+export interface BilanSuppression {
+  client: boolean
+  tirages: number
+  journal: number
+  parrainages: number
+  rattrapages: number
+  envois: number
+}
+
+/**
  * Contrat commun aux deux stockages : SQLite (ici, synchrone) et Supabase (`stockage-supabase.ts`, asynchrone).
  * Le serveur attend (`await`) chaque appel, ce qui marche pour les deux ; les noms et les formes de données sont identiques.
  */
@@ -120,6 +133,13 @@ export interface Stockage {
   envois(commerceId: string, limite: number, clientId?: string): P<EnvoiRelance[]>
   /** Table de la migration 0007 présente (toujours vrai sous SQLite). */
   schemaRelances(): P<boolean>
+  /**
+   * Suppression d'un client (P1-B6, RGPD) avec sa cascade : ses tirages, ses entrées de journal (`clientId`), les
+   * parrainages où il est parrain OU filleul, ses demandes de rattrapage, ses envois de relances, puis sa ligne.
+   * Dépendances d'abord, client en dernier : une suppression interrompue (Supabase, sans transaction) se rejoue.
+   * Tables d'une migration absente (Supabase) : rien à supprimer, comptées 0.
+   */
+  supprimerClient(commerceId: string, clientId: string): P<BilanSuppression>
   /** Pas d'imbrication. SQLite : vraie transaction. Supabase : voir `stockage-supabase.ts` (pas de transaction multi-requêtes). */
   transaction<T>(fn: () => P<T>): Promise<T>
   fermer(): P<void>
@@ -258,6 +278,13 @@ export function ouvrirStockage(fichier: string) {
     majEnvoi: db.prepare('UPDATE envois SET statut = ?, donnees = ? WHERE id = ? AND commerce_id = ?'),
     envois: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
     envoisClient: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? AND client_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
+    // RGPD (P1-B6) : cascade de la suppression d'un client.
+    supprTirages: db.prepare('DELETE FROM tirages WHERE commerce_id = ? AND client_id = ?'),
+    supprJournal: db.prepare("DELETE FROM journal WHERE commerce_id = ? AND json_extract(donnees, '$.clientId') = ?"),
+    supprParrainages: db.prepare('DELETE FROM parrainages WHERE commerce_id = ? AND (parrain_id = ? OR filleul_id = ?)'),
+    supprRattrapages: db.prepare('DELETE FROM demandes_rattrapage WHERE commerce_id = ? AND client_id = ?'),
+    supprEnvois: db.prepare('DELETE FROM envois WHERE commerce_id = ? AND client_id = ?'),
+    supprClient: db.prepare('DELETE FROM clients WHERE commerce_id = ? AND id = ?'),
   }
 
   // Les transactions peuvent contenir des `await` (contrat commun avec Supabase) : elles passent une par une
@@ -334,6 +361,17 @@ export function ouvrirStockage(fichier: string) {
     envois: (commerceId: string, limite: number, clientId?: string) =>
       lire<EnvoiRelance>(clientId ? q.envoisClient.all(commerceId, clientId, limite) : q.envois.all(commerceId, limite)),
     schemaRelances: () => true,
+    supprimerClient: (commerceId: string, clientId: string) => {
+      const n = (r: { changes: number | bigint }) => Number(r.changes)
+      return {
+        tirages: n(q.supprTirages.run(commerceId, clientId)),
+        journal: n(q.supprJournal.run(commerceId, clientId)),
+        parrainages: n(q.supprParrainages.run(commerceId, clientId, clientId)),
+        rattrapages: n(q.supprRattrapages.run(commerceId, clientId)),
+        envois: n(q.supprEnvois.run(commerceId, clientId)),
+        client: n(q.supprClient.run(commerceId, clientId)) > 0,
+      }
+    },
 
     /** Exécute `fn` d'un bloc : tout est écrit, ou rien. */
     transaction<T>(fn: () => T | Promise<T>): Promise<T> {
