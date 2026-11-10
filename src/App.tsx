@@ -3,6 +3,7 @@ import { useStore } from './store'
 import { aller, useRoute, PAGES_PUBLIQUES, type Page } from './router'
 import { BadgeDemo, Icone, LogoCommerce } from './components/ui'
 import { Verrou } from './components/Verrou'
+import { SqueletteCommercant } from './components/Squelette'
 import { NOM_APP, libelleType } from './data/defaults'
 import TableauDeBord from './pages/TableauDeBord'
 import Clients from './pages/Clients'
@@ -147,7 +148,7 @@ export default function App() {
   }
 
   // Mode API : pages commerçant derrière le PIN.
-  if (mode === 'api' && !accesPret) return <p className="px-4 py-16 text-center text-gray-600" role="status">Chargement…</p>
+  if (mode === 'api' && !accesPret) return <SqueletteCommercant libelle="Chargement…" />
   if (mode === 'api' && (!acces || !commerce)) return <Verrou />
 
   return (
