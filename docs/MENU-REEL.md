@@ -1,5 +1,12 @@
 # Menu réel — Asian Home Paris
 
+> **Document historique, remplacé le 10/11/2026 par
+> [MENU-OFFICIEL-2026-11-10.md](MENU-OFFICIEL-2026-11-10.md)** (carte officielle
+> du restaurant, 81 plats avec prix). Il décrit l'ancien menu de repli (39 plats,
+> source Uber Eats, sans prix), conservé dans `docs/menu-reel.json` (relevé brut,
+> plus utilisé par le code ni les tests) et sauvegardé en CSV dans
+> `docs/menu-39-plats-avant-import-2026-11-10.csv`.
+
 Relevé le 10/11/2026. Restaurant : Asian Home Paris, 11 rue André Joineau,
 93310 Le Pré-Saint-Gervais — asiatique halal (Thaï, Japonais, Vietnam, Chine).
 Tél. 07 82 97 48 01. Horaires : 11h30–14h30 et 18h30–23h30, 7 j/7.
