@@ -196,7 +196,8 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
     if (methode === 'DELETE') {
       const cibles = new Set(filtrer(table, params))
       tables[table] = tables[table].filter((l) => !cibles.has(l))
-      return new Response(null, { status: 204 })
+      // `.delete().select(…)` (P1-B6 : bilan de la suppression d'un client) : PostgREST renvoie les lignes supprimées.
+      return representation ? json(200, projeter([...cibles], params.get('select'))) : new Response(null, { status: 204 })
     }
     return erreur(405, 'PGRST000', 'méthode non gérée')
   }
@@ -952,6 +953,57 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       await b.app.fermer()
     }
   })
+
+  test('suppression d’un client : cascade dans chaque table (journal filtré sur donnees->>clientId), autres clients intacts', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const bob = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Bob', contact: '0611111111' }, PIN)).contenu.client as Client
+      const alice = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Alice', contact: '0622222222', parrain: bob.codeParrainage }, PIN)).contenu.client as Client
+      for (const c of [bob, alice]) assert.equal((await api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)).statut, 200)
+      assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0611111111' })).statut, 201)
+      assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0622222222' })).statut, 201)
+      assert.equal((await api('POST', `/commerces/${AH}/clients/${bob.id}/relance`, { modele: 'inactif' }, PIN)).statut, 501)
+      const deBob = () => ({
+        tirages: f.tables.tirages.filter((l) => l.client_id === bob.id).length,
+        journal: f.tables.journal.filter((l) => (l.donnees as { clientId?: string }).clientId === bob.id).length,
+        parrainages: f.tables.parrainages.filter((l) => l.parrain_id === bob.id || l.filleul_id === bob.id).length,
+        envois: f.tables.envois.filter((l) => l.client_id === bob.id).length,
+      })
+      const avant = deBob()
+      for (const [k, n] of Object.entries(avant)) assert.ok(n > 0, k)
+      const r = await api('DELETE', `/commerces/${AH}/clients/${bob.id}`, { confirmation: 'SUPPRIMER' }, PIN)
+      assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+      assert.deepEqual(r.contenu.bilan, { ...avant, rattrapages: 0, client: true })
+      assert.deepEqual(deBob(), { tirages: 0, journal: 0, parrainages: 0, envois: 0 })
+      assert.equal(f.tables.clients.some((l) => l.id === bob.id), false)
+      const restante = f.tables.clients.find((l) => l.id === alice.id)!.donnees as Client
+      assert.equal(restante.parrainId, undefined, 'le filleul ne pointe plus vers la carte supprimée')
+      assert.equal(f.tables.tirages.filter((l) => l.client_id === alice.id).length, 1)
+      const journal = f.tables.journal.find((l) => /Client supprimé/.test(String((l.donnees as { details: string }).details)))!
+      assert.ok(journal && !JSON.stringify(journal).includes('Bob'))
+      const del = f.requetes.find((q) => q.methode === 'DELETE' && q.table === 'journal')!
+      assert.equal(del.params.get('donnees->>clientId'), `eq.${bob.id}`)
+      assert.equal((await api('GET', `/cartes/${bob.id}`)).statut, 404)
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('sans les migrations 0003 / 0004 / 0007 : suppression quand même (tables absentes = rien à supprimer), jamais de 500', async () => {
+    const f = fauxPostgrest({ sans0003: true, sans0004: true, sans0007: true })
+    const { app, api } = await demarrer(f)
+    try {
+      const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
+      const r = await api('DELETE', `/commerces/${AH}/clients/${c.id}`, { confirmation: 'SUPPRIMER' }, PIN)
+      assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+      assert.deepEqual(r.contenu.bilan, { client: true, tirages: 0, journal: 0, parrainages: 0, rattrapages: 0, envois: 0 })
+      assert.equal(f.tables.clients.length, 0)
+      assert.equal((await api('GET', `/commerces/${AH}/purge`, undefined, PIN)).statut, 200)
+    } finally {
+      await app.fermer()
+    }
+  })
 })
 
 // ---------- Secrets et configuration ----------
@@ -974,7 +1026,9 @@ describe('Supabase : variables d’environnement et secrets', () => {
       readdirSync(d).flatMap((n) => (statSync(join(d, n)).isDirectory() ? fichiers(join(d, n)) : [join(d, n)]))
     for (const f of fichiers(join(racine, 'src'))) {
       const contenu = readFileSync(f, 'utf8')
-      assert.doesNotMatch(contenu, /SUPABASE|supabase-js|service_role/i, f)
+      // « Supabase » peut être NOMMÉ (hébergement, page de confidentialité P1-B6) : seuls les variables, le client
+      // `@supabase/supabase-js` et la clé service_role sont interdits côté front.
+      assert.doesNotMatch(contenu, /SUPABASE_[A-Z]|supabase-js|@supabase|service_role/i, f)
     }
   })
 
