@@ -65,6 +65,8 @@ const SCHEMA: Record<string, { pk: string; uniques: Unicite[]; fk?: [string, str
     uniques: [{ nom: 'envois_un_par_jour', cle: (l) => (l.statut === 'en_cours' || l.statut === 'envoye' ? `${l.commerce_id}|${l.client_id}|${l.modele}|${l.jour}` : null) }],
     fk: [['commerce_id', 'commerces']],
   },
+  // 0008_mesure.sql — écrite seulement par la fonction `incrementer_evenement` (POST /rpc/…), clé (commerce_id, jour, type).
+  evenements_jour: { pk: 'jour', uniques: [], fk: [['commerce_id', 'commerces']] },
 }
 
 interface Requete {
@@ -75,14 +77,15 @@ interface Requete {
   corps: unknown
 }
 
-/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` à `sans0007` : idem pour 0004 à 0007. */
-function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, sans0006 = false, sans0007 = false } = {}) {
+/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` à `sans0008` : idem pour 0004 à 0008. */
+function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, sans0006 = false, sans0007 = false, sans0008 = false } = {}) {
   const absentes = new Set([
     ...(sans0003 ? ['equipe', 'journal', 'menus'] : []),
     ...(sans0004 ? ['parrainages', 'demandes_rattrapage'] : []),
     ...(sans0005 ? ['sessions_revoquees'] : []),
     ...(sans0006 ? ['tentatives_auth'] : []),
     ...(sans0007 ? ['envois'] : []),
+    ...(sans0008 ? ['evenements_jour'] : []),
   ])
   const tables: Record<string, Ligne[]> = Object.fromEntries(Object.keys(SCHEMA).map((t) => [t, []]))
   const requetes: Requete[] = []
@@ -106,7 +109,12 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
   function filtrer(table: string, params: URLSearchParams): Ligne[] {
     let lignes = tables[table]
     for (const [col, v] of params) {
-      if (['select', 'order', 'on_conflict', 'limit'].includes(col)) continue
+      if (['select', 'order', 'on_conflict', 'limit', 'offset'].includes(col)) continue
+      if (v.startsWith('gte.')) {
+        // Seul usage : jours AAAA-MM-JJ (compteurs de la mesure, P2-Q3) — l'ordre alphabétique est l'ordre chronologique.
+        lignes = lignes.filter((l) => l[col] != null && String(l[col]) >= v.slice(4))
+        continue
+      }
       if (v.startsWith('lt.')) {
         // Seul usage : dates (timestamptz) — nettoyage des sessions révoquées et des tentatives d'accès. NULL < x : faux.
         lignes = lignes.filter((l) => l[col] != null && Date.parse(String(l[col])) < Date.parse(v.slice(3)))
@@ -121,12 +129,22 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
     }
     const ordre = params.get('order')
     if (ordre) {
-      const [col, sens] = ordre.split('.')
-      const val = (l: Ligne) => (col === 'date' ? Date.parse(String(l[col])) : Number(l[col]))
-      lignes = [...lignes].sort((a, b) => (val(a) - val(b)) * (sens === 'desc' ? -1 : 1))
+      // Plusieurs clés possibles (`jour.asc,type.asc`) ; dates comparées en temps, nombres en nombres, sinon en texte.
+      const cles = ordre.split(',').map((o) => o.split('.'))
+      const val = (l: Ligne, col: string) => (col === 'date' ? Date.parse(String(l[col])) : typeof l[col] === 'string' ? (l[col] as string) : Number(l[col]))
+      lignes = [...lignes].sort((a, b) => {
+        for (const [col, sens] of cles) {
+          const x = val(a, col)
+          const y = val(b, col)
+          const d = x < y ? -1 : x > y ? 1 : 0
+          if (d) return sens === 'desc' ? -d : d
+        }
+        return 0
+      })
     }
+    const debut = Number(params.get('offset') ?? 0)
     const limite = params.get('limit')
-    return limite ? lignes.slice(0, Number(limite)) : lignes
+    return limite ? lignes.slice(debut, debut + Number(limite)) : lignes.slice(debut)
   }
 
   const projeter = (lignes: Ligne[], select: string | null) =>
@@ -150,6 +168,7 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
   async function traiter(methode: string, table: string, params: URLSearchParams, entetes: Headers, corps: unknown): Promise<Response> {
     if (entetes.get('apikey') !== CLE || entetes.get('authorization') !== `Bearer ${CLE}`) return erreur(401, 'PGRST301', 'clé absente')
     if (panne) return erreur(500, 'XX000', 'base indisponible') // (503 / 520 : supabase-js réessaie seul les lectures)
+    if (table === 'rpc') return appeler(params.get('__fonction') ?? '', corps as Ligne)
     if (!SCHEMA[table] || absentes.has(table)) return erreur(404, 'PGRST205', `Could not find the table 'public.${table}' in the schema cache`)
     const s = SCHEMA[table]
     const representation = (entetes.get('prefer') ?? '').includes('return=representation')
@@ -202,10 +221,25 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
     return erreur(405, 'PGRST000', 'méthode non gérée')
   }
 
+  /** Fonctions SQL appelées par `sb.rpc(…)` (POST /rest/v1/rpc/<nom>) : seule `incrementer_evenement` (0008) existe. */
+  function appeler(nom: string, args: Ligne): Response {
+    if (nom !== 'incrementer_evenement' || absentes.has('evenements_jour')) {
+      return erreur(404, 'PGRST202', `Could not find the function public.${nom} in the schema cache`)
+    }
+    if (!tables.commerces.some((c) => c.id === args.p_commerce_id)) return erreur(409, '23503', 'violates foreign key constraint')
+    if (!['scan', 'tirage', 'gain', 'clicGoogle'].includes(String(args.p_type))) return erreur(400, '23514', 'violates check constraint')
+    // insert … on conflict (commerce_id, jour, type) do update set n = n + 1 — atomique (un seul appel synchrone ici).
+    const l = tables.evenements_jour.find((x) => x.commerce_id === args.p_commerce_id && x.jour === args.p_jour && x.type === args.p_type)
+    if (l) l.n = Number(l.n) + 1
+    else tables.evenements_jour.push({ commerce_id: args.p_commerce_id, jour: args.p_jour, type: args.p_type, n: 1 })
+    return new Response(null, { status: 204 })
+  }
+
   async function fauxFetch(entree: string | URL | Request, init?: RequestInit): Promise<Response> {
     const url = new URL(String(entree))
     assert.equal(url.origin, URL_SB)
-    const [, rest, v1, table] = url.pathname.split('/')
+    const [, rest, v1, table, fonction] = url.pathname.split('/')
+    if (table === 'rpc') url.searchParams.set('__fonction', fonction ?? '')
     assert.equal(`${rest}/${v1}`, 'rest/v1', 'uniquement l’API REST (PostgREST), jamais de connexion Postgres directe')
     const methode = init?.method ?? 'GET'
     const entetes = new Headers(init?.headers)
@@ -764,7 +798,7 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.equal((await api('DELETE', '/sessions', undefined, entete)).statut, 200)
       assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, entete)).statut, 401, 'révoquée en mémoire')
       assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).statut, 200, 'le PIN en en-tête marche toujours')
-      assert.deepEqual(Object.keys((await api('GET', '/sante')).contenu.migrations), ['cartiz', 'programme', 'relances'], '/sante : 0005 / 0006 n’y figurent pas (P1-B3 ajoute `relances`, migration 0007)')
+      assert.deepEqual(Object.keys((await api('GET', '/sante')).contenu.migrations), ['cartiz', 'programme', 'relances', 'mesure'], '/sante : 0005 / 0006 n’y figurent pas (P1-B3 ajoute `relances`, migration 0007 ; P2-Q3 `mesure`, 0008)')
     } finally {
       await app.fermer()
     }
@@ -985,6 +1019,66 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       const del = f.requetes.find((q) => q.methode === 'DELETE' && q.table === 'journal')!
       assert.equal(del.params.get('donnees->>clientId'), `eq.${bob.id}`)
       assert.equal((await api('GET', `/cartes/${bob.id}`)).statut, 404)
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P2-Q3 : compteurs anonymes via la fonction incrementer_evenement (0008) — aucune identité, lecture paginée', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const lots = [{ libelle: 'Nems offerts', probabilite: 100, coutCentimes: 150 }, { libelle: 'Dommage !', probabilite: 0 }]
+      assert.equal((await api('PATCH', `/commerces/${AH}`, { lots }, PIN)).statut, 200)
+      const ins = await api('POST', `/commerces/${AH}/clients`, { contact: '06 12 34 56 78' })
+      await api('POST', `/commerces/${AH}/clients/${ins.contenu.client.id}/visite`, undefined, PIN)
+      assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).statut, 201)
+      for (const type of ['scan', 'scan', 'clicGoogle']) assert.equal((await api('POST', `/commerces/${AH}/evenements`, { type })).contenu.compte, true)
+      const jour = '2026-11-09'
+      const n = (type: string) => f.tables.evenements_jour.find((l) => l.jour === jour && l.type === type)?.n
+      assert.deepEqual([n('scan'), n('tirage'), n('gain'), n('clicGoogle')], [2, 1, 1, 1])
+      for (const l of f.tables.evenements_jour) assert.deepEqual(Object.keys(l).sort(), ['commerce_id', 'jour', 'n', 'type'], 'aucune colonne d’identité')
+      const appels = f.requetes.filter((r) => r.table === 'rpc')
+      assert.equal(appels.length, 5)
+      for (const a of appels) assert.deepEqual(Object.keys(a.corps as object).sort(), ['p_commerce_id', 'p_jour', 'p_type'])
+      assert.ok(!JSON.stringify(appels.map((a) => a.corps)).includes('0612345678'))
+
+      // 400 jours × 4 types = 1 600 lignes > 1 000 (plafond PostgREST) : lecture en 2 pages, rien de perdu.
+      f.tables.evenements_jour.length = 0
+      const debut = new Date('2025-10-06T00:00:00Z')
+      for (let i = 0; i < 400; i++) {
+        const j = new Date(debut.getTime() + i * 86_400_000).toISOString().slice(0, 10)
+        for (const type of ['scan', 'tirage', 'gain', 'clicGoogle']) f.tables.evenements_jour.push({ commerce_id: AH, jour: j, type, n: 1 })
+      }
+      const m = await api('GET', `/commerces/${AH}/mesures`, undefined, PIN)
+      assert.equal(m.statut, 200)
+      assert.equal(m.contenu.migration, true)
+      assert.equal(m.contenu.compteurs.length, 1600)
+      assert.deepEqual(m.contenu.compteurs[0], { jour: '2025-10-06', type: 'clicGoogle', n: 1 })
+      const lectures = f.requetes.filter((r) => r.table === 'evenements_jour' && r.methode === 'GET' && r.params.get('select') === 'jour,type,n')
+      assert.deepEqual(lectures.map((r) => r.params.get('offset')), ['0', '1000'])
+      assert.equal((await api('GET', `/commerces/${AH}/mesures`)).statut, 401, 'gérant seulement')
+      assert.equal((await api('GET', '/sante')).contenu.migrations.mesure, true)
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P2-Q3 : production AVANT la migration 0008 — tirage inchangé, événements ignorés (202), mesures vides, jamais de 500', async () => {
+    const f = fauxPostgrest({ sans0008: true })
+    const { app, api } = await demarrer(f)
+    try {
+      const ins = await api('POST', `/commerces/${AH}/clients`, { contact: '06 12 34 56 78' })
+      await api('POST', `/commerces/${AH}/clients/${ins.contenu.client.id}/visite`, undefined, PIN)
+      const jeu = await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })
+      assert.equal(jeu.statut, 201, 'le tirage ne dépend pas de la mesure')
+      assert.equal(f.tables.tirages.length, 1)
+      const e = await api('POST', `/commerces/${AH}/evenements`, { type: 'scan' })
+      assert.deepEqual([e.statut, e.contenu.compte], [202, false])
+      const m = await api('GET', `/commerces/${AH}/mesures`, undefined, PIN)
+      assert.deepEqual([m.statut, m.contenu.migration, m.contenu.compteurs], [200, false, []])
+      assert.equal((await api('GET', '/sante')).contenu.migrations.mesure, false)
+      assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).statut, 200)
     } finally {
       await app.fermer()
     }

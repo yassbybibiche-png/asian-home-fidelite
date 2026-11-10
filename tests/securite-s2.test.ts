@@ -62,6 +62,7 @@ describe('P0-S2 : routes publiques limitées (F-04)', () => {
       tirageParContact: 5,
       ficheClientParIp: 10,
       sessionParIp: 30,
+      evenementParIp: 30,
     })
     const readme = readFileSync(join(import.meta.dirname, '..', 'server', 'README.md'), 'utf8')
     for (const [k, v] of Object.entries(LIMITES_PUBLIQUES)) assert.match(readme, new RegExp(`\`${k}\`[^\\n]*\\b${v}\\b`), `${k} documenté dans server/README.md`)

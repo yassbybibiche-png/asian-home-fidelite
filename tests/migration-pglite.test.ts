@@ -233,6 +233,55 @@ describe('Migration Supabase exécutée sur Postgres (PGlite)', () => {
     await db.exec(sql('0007_relances.sql'))
   })
 
+  test('0008_mesure : rejouable ; RLS fermée à anon (table ET fonction) ; incrément atomique ; aucune colonne d’identité ; DOWN', async () => {
+    await db.exec(sql('0008_mesure.sql'))
+    await db.exec(sql('0008_mesure.sql'))
+    const colonnes = await db.query<{ column_name: string }>(
+      `select column_name from information_schema.columns where table_schema = 'public' and table_name = 'evenements_jour' order by ordinal_position`)
+    assert.deepEqual(colonnes.rows.map((r) => r.column_name), ['commerce_id', 'jour', 'type', 'n'], 'ni client, ni contact, ni IP, ni heure')
+    const t = await db.query<{ relrowsecurity: boolean }>(`select relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname = 'evenements_jour'`)
+    assert.deepEqual(t.rows.map((r) => r.relrowsecurity), [true])
+    assert.equal((await db.query<{ n: number }>(`select count(*)::int as n from pg_policies where schemaname = 'public'`)).rows[0].n, 0)
+    const fonction = 'public.incrementer_evenement(text, date, text)'
+    for (const role of ['anon', 'authenticated', 'public']) {
+      const { rows } = await db.query<{ ok: boolean }>(`select has_function_privilege($1, $2, 'execute') as ok`, [role, fonction])
+      assert.equal(rows[0].ok, false, `${role} ne peut pas exécuter la fonction`)
+    }
+    for (const role of ['anon', 'authenticated']) {
+      const { rows } = await db.query<{ ok: boolean }>(`select has_table_privilege($1, 'public.evenements_jour', 'select') or has_table_privilege($1, 'public.evenements_jour', 'insert') as ok`, [role])
+      assert.equal(rows[0].ok, false, role)
+    }
+    await db.query(`insert into public.commerces (id, donnees, pin_hash, pin_sel) values ('c8', '{"id":"c8"}', 'h', 's')`)
+    await db.exec('set role service_role')
+    try {
+      const plus1 = (type: string, jour = '2026-11-10') => db.query(`select public.incrementer_evenement('c8', $1::date, $2)`, [jour, type])
+      await Promise.all([plus1('scan'), plus1('scan'), plus1('scan'), plus1('tirage'), plus1('scan', '2026-11-11')])
+      const { rows } = await db.query<{ jour: string; type: string; n: number }>(`select to_char(jour, 'YYYY-MM-DD') as jour, type, n from public.evenements_jour where commerce_id = 'c8' order by jour, type`)
+      assert.deepEqual(rows, [
+        { jour: '2026-11-10', type: 'scan', n: 3 },
+        { jour: '2026-11-10', type: 'tirage', n: 1 },
+        { jour: '2026-11-11', type: 'scan', n: 1 },
+      ])
+      assert.equal(await codeErreur(plus1('pigeon')), '23514', 'type inconnu refusé')
+      assert.equal(await codeErreur(db.query(`select public.incrementer_evenement('inconnu', '2026-11-10'::date, 'scan')`)), '23503', 'commerce inconnu refusé')
+    } finally {
+      await db.exec('reset role')
+    }
+    await db.exec('set role anon')
+    try {
+      assert.equal(await codeErreur(db.query(`select public.incrementer_evenement('c8', '2026-11-10'::date, 'scan')`)), '42501', 'anon : exécution refusée')
+    } finally {
+      await db.exec('reset role')
+    }
+    await db.query(`delete from public.commerces where id = 'c8'`)
+    assert.equal((await db.query<{ n: number }>(`select count(*)::int as n from public.evenements_jour`)).rows[0].n, 0, 'suppression en cascade')
+    await db.exec(sql('0008_mesure.down.sql'))
+    await db.exec(sql('0008_mesure.down.sql'))
+    assert.equal((await db.query(`select 1 from pg_class where relnamespace = 'public'::regnamespace and relname = 'evenements_jour'`)).rows.length, 0)
+    assert.equal((await db.query(`select 1 from pg_proc where proname = 'incrementer_evenement'`)).rows.length, 0)
+    await db.exec(sql('0008_mesure.sql'))
+  })
+
   test('suppression d’un commerce : clients et tirages supprimés en cascade', async () => {
     await db.query(`delete from public.commerces where id = 'c1'`)
     const { rows } = await db.query<{ n: number }>(
