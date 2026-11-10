@@ -34,6 +34,7 @@ import {
 import { problemesApparence } from '../src/lib/apparence.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
 import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
+import { ErreurLogo, LIMITES_LOGO, messageTropLourd, urlLogo, validerLogo, type FormatLogo } from '../src/lib/logo.ts'
 import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
@@ -765,15 +766,19 @@ const TAILLE_MAX_CORPS = 64 * 1024
 /** Le menu peut contenir des photos compressées (60 Ko chacune au plus). */
 const TAILLE_MAX_MENU = 3 * 1024 * 1024
 
-async function lireBrut(req: IncomingMessage, max: number): Promise<string> {
+async function lireOctets(req: IncomingMessage, max: number, messageTrop = 'Requête trop volumineuse.'): Promise<Buffer> {
   let taille = 0
   const morceaux: Buffer[] = []
   for await (const m of req) {
     taille += (m as Buffer).length
-    if (taille > max) throw err(413, 'Requête trop volumineuse.')
+    if (taille > max) throw err(413, messageTrop)
     morceaux.push(m as Buffer)
   }
-  return Buffer.concat(morceaux).toString('utf8')
+  return Buffer.concat(morceaux)
+}
+
+async function lireBrut(req: IncomingMessage, max: number): Promise<string> {
+  return (await lireOctets(req, max)).toString('utf8')
 }
 
 /** Corps `application/x-www-form-urlencoded` (webhooks Twilio). */
@@ -1421,7 +1426,39 @@ export async function creerServeur(o: OptionsServeur) {
     return { client, existant: false }
   }
 
-  type Reponse = { statut?: number; json?: unknown; csv?: { nom: string; contenu: string }; xml?: string; redirection?: string }
+  // ---- Logo téléversé (P1-B5) ----
+  // Rangé dans `meta` (clé `logo:<commerce>`, valeur JSON { type, version, donnees base64 } ; vide = aucun) : pas de
+  // migration, et la ligne JSONB du commerce ne garde que l'adresse versionnée. Gardé en mémoire après la 1re lecture
+  // (Render = une instance) : chaque affichage public ne relit pas l'image en base.
+  type LogoStocke = { type: FormatLogo; version: string; octets: Buffer }
+  const cleMetaLogo = (commerceId: string) => `logo:${commerceId}`
+  const logosEnMemoire = new Map<string, LogoStocke | null>()
+
+  async function lireLogo(commerceId: string): Promise<LogoStocke | null> {
+    if (logosEnMemoire.has(commerceId)) return logosEnMemoire.get(commerceId)!
+    const brut = await st.meta(cleMetaLogo(commerceId))
+    let logo: LogoStocke | null = null
+    if (brut) {
+      const v = JSON.parse(brut) as { type: FormatLogo; version: string; donnees: string }
+      logo = { type: v.type, version: v.version, octets: Buffer.from(v.donnees, 'base64') }
+    }
+    logosEnMemoire.set(commerceId, logo)
+    return logo
+  }
+  async function ecrireLogo(commerceId: string, logo: LogoStocke | null) {
+    logosEnMemoire.delete(commerceId)
+    await st.majMeta(cleMetaLogo(commerceId), logo ? JSON.stringify({ type: logo.type, version: logo.version, donnees: logo.octets.toString('base64') }) : '')
+    logosEnMemoire.set(commerceId, logo)
+  }
+
+  type Reponse = {
+    statut?: number
+    json?: unknown
+    csv?: { nom: string; contenu: string }
+    xml?: string
+    redirection?: string
+    image?: { type: string; octets: Buffer; etag: string; cache: string }
+  }
 
   async function router(req: IncomingMessage, chemin: string[]): Promise<Reponse> {
     const m = req.method
@@ -1571,6 +1608,46 @@ export async function creerServeur(o: OptionsServeur) {
         return { json: { commerce: maj } }
       }
       if (m === 'GET') return { json: { commerce: commercePublic(commerce) } }
+      throw err(405, 'Méthode non autorisée.')
+    }
+
+    // ---------- Logo téléversé (P1-B5) ----------
+    // GET public (pages accueil / carte / menu) ; PUT et DELETE : commerçant. Le corps du PUT est le fichier brut
+    // (PNG / JPEG / WebP, 2 Mo maximum) : le format est lu dans ses octets, le Content-Type envoyé est ignoré.
+    if (sous === 'logo' && !sousId) {
+      if (m === 'GET') {
+        const logo = await lireLogo(id)
+        if (!logo) throw err(404, 'Aucun logo téléversé pour ce commerce : le logo par défaut s’affiche.')
+        const versionDemandee = new URL(req.url ?? '/', 'http://localhost').searchParams.get('v')
+        // Adresse versionnée (celle du champ `logo`) : un nouvel envoi change l'adresse, on peut la garder un an.
+        const cache = versionDemandee === logo.version ? CACHE_IMMUABLE : 'public, max-age=300'
+        return { image: { type: logo.type, octets: logo.octets, etag: `"${logo.version}"`, cache } }
+      }
+      if (m === 'PUT') {
+        await exigerCommercant(req, id)
+        const octets = await lireOctets(req, LIMITES_LOGO.octetsMax, messageTropLourd())
+        let infos
+        try {
+          infos = validerLogo(octets)
+        } catch (e) {
+          if (e instanceof ErreurLogo) throw err(e.statut, e.message)
+          throw e
+        }
+        const version = createHash('sha256').update(octets).digest('hex').slice(0, 16)
+        // Fichier d'abord, adresse ensuite : un échec entre les deux laisse l'ancien logo affiché, jamais une image cassée.
+        await ecrireLogo(id, { type: infos.type, version, octets })
+        const maj: Commerce = { ...commerce, logo: urlLogo(id, version) }
+        await st.majCommerce(maj)
+        return { json: { commerce: maj, logo: { ...infos, octets: octets.length } } }
+      }
+      if (m === 'DELETE') {
+        // « Revenir au logo par défaut » : champ vidé (repli sur public/visuels/logo.png pour Asian Home, initiales sinon).
+        await exigerCommercant(req, id)
+        const maj: Commerce = { ...commerce, logo: '' }
+        await st.majCommerce(maj)
+        await ecrireLogo(id, null)
+        return { json: { commerce: maj } }
+      }
       throw err(405, 'Méthode non autorisée.')
     }
 
@@ -2321,6 +2398,16 @@ export async function creerServeur(o: OptionsServeur) {
           'Cache-Control': 'no-store',
         })
         res.end(r.csv.contenu)
+        return
+      }
+      if (r.image) {
+        const communs = { ...entetes, 'Cache-Control': r.image.cache, ETag: r.image.etag }
+        if (etagCorrespond(req.headers['if-none-match'], r.image.etag)) {
+          res.writeHead(304, communs).end()
+          return
+        }
+        res.writeHead(200, { ...communs, 'Content-Type': r.image.type, 'Content-Length': String(r.image.octets.length) })
+        res.end(r.image.octets)
         return
       }
       if (r.xml != null) {
