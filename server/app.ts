@@ -12,7 +12,7 @@ import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
 import { canalDuClient, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
 import { estPerdant, lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
-import { appliquerRegles } from '../src/lib/avis.ts'
+import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
 import { actionDejaTraitee, avecAction, echangerPoints, formaterPrix, soldePoints } from '../src/lib/points.ts'
 import { analyserAnniversaire, clientsCibles, deposerMessage, genererMessages, marquerLus, TYPES_MESSAGES, type Cible, type Evenement } from '../src/lib/messages.ts'
@@ -38,6 +38,27 @@ import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type Pin, type
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
+import {
+  chiffrerJetons,
+  dechiffrerJetons,
+  echangerCode,
+  emplacementValide,
+  ErreurGoogle,
+  googleBusinessConfigure,
+  jetonsFrais,
+  listerAvisGoogle,
+  lireEtat,
+  MESSAGE_NON_BRANCHE,
+  placeIdDuLien,
+  publierReponseGoogle,
+  revoquerJeton,
+  signerEtat,
+  trouverEmplacement,
+  urlAutorisation,
+  type ConfigGoogleBusiness,
+  type ConfigGoogleComplete,
+  type JetonsGoogle,
+} from './google-business.ts'
 
 // ---------- Seuils anti-abus (P0-S2) — à ajuster ici ; justification dans server/README.md ----------
 
@@ -111,6 +132,8 @@ export interface OptionsServeur {
   googleWallet?: ConfigGoogleWallet
   /** Prestataires SMS / e-mail (V3) : absents = 501 « à brancher », rien n'est envoyé. */
   notifications?: ConfigNotifications
+  /** Google Business Profile (P1-B4) : sans client ID + client secret = 501 « à brancher », aucun appel à Google. */
+  googleBusiness?: ConfigGoogleBusiness
   /** Secret de signature des jetons de session (SESSION_SECRET) ; absent = POST /sessions répond 503, le PIN en en-tête reste accepté. */
   secretSession?: string
   /** Seuils des routes publiques, si différents de LIMITES_PUBLIQUES (tests). */
@@ -800,7 +823,7 @@ export async function creerServeur(o: OptionsServeur) {
   const integrations = () => ({
     googleWallet: walletConfigure(o.googleWallet),
     appleWallet: 'en_suspens',
-    googleBusinessProfile: false,
+    googleBusinessProfile: googleBusinessConfigure(o.googleBusiness),
     ...notifications.statut(),
   })
 
@@ -1117,6 +1140,58 @@ export async function creerServeur(o: OptionsServeur) {
     return createHmac('sha256', await lireSecretDesinscription()).update(`desinscription:${commerceId}:${clientId}`).digest('base64url').slice(0, 32)
   }
 
+  // ---- Google Business Profile (P1-B4) ----
+  // Jetons OAuth rangés côté serveur uniquement : table `meta` (clé `google_business:<commerce>`, lisible par le seul
+  // service_role, comme `secret_desinscription`), chiffrés en AES-256-GCM avec une clé dérivée du client secret.
+  // Jamais renvoyés au navigateur. Le client secret ne vit que dans GOOGLE_CLIENT_SECRET.
+
+  const fetchGoogle: typeof fetch = o.googleBusiness?.fetch ?? ((...a) => fetch(...a))
+  /** Nonces des `state` émis et pas encore utilisés (une connexion = un aller-retour ; Render = une instance). */
+  const etatsGoogle = new Map<string, number>()
+  const cleMetaGoogle = (commerceId: string) => `google_business:${commerceId}`
+
+  function exigerGoogle(): ConfigGoogleComplete {
+    if (!googleBusinessConfigure(o.googleBusiness)) throw err(501, MESSAGE_NON_BRANCHE)
+    return o.googleBusiness
+  }
+  const redirectionGoogle = (g: ConfigGoogleComplete, req: IncomingMessage, commerceId: string) =>
+    g.redirectUri ?? `${sitePublic(req)}/api/v1/commerces/${encodeURIComponent(commerceId)}/google/callback`
+
+  async function lireJetonsGoogle(g: ConfigGoogleComplete, commerceId: string) {
+    return dechiffrerJetons(g.clientSecret, await st.meta(cleMetaGoogle(commerceId)))
+  }
+  async function ecrireJetonsGoogle(g: ConfigGoogleComplete, commerceId: string, j: JetonsGoogle | null) {
+    // Pas de suppression dans `meta` : une valeur vide vaut « non connecté ».
+    await st.majMeta(cleMetaGoogle(commerceId), j ? chiffrerJetons(g.clientSecret, j) : '')
+  }
+
+  /** Jetons valables (rafraîchis au besoin, puis réenregistrés). Refresh token refusé par Google : connexion effacée. */
+  async function accesGoogle(g: ConfigGoogleComplete, commerceId: string): Promise<JetonsGoogle & { accessToken: string }> {
+    const j = await lireJetonsGoogle(g, commerceId)
+    if (!j) throw err(409, 'Google n’est pas connecté pour ce commerce : utilisez « Connecter Google » sur l’écran Avis.')
+    try {
+      const { jetons, rafraichi } = await jetonsFrais(g, fetchGoogle, j, maintenant())
+      if (rafraichi) await ecrireJetonsGoogle(g, commerceId, jetons)
+      return jetons as JetonsGoogle & { accessToken: string }
+    } catch (e) {
+      if (e instanceof ErreurGoogle && e.code === 'invalid_grant') await ecrireJetonsGoogle(g, commerceId, null)
+      throw e
+    }
+  }
+
+  /** Publie `a.reponse` sur Google et renvoie l'avis marqué « publié » (déjà enregistré). */
+  async function publierSurGoogle(accessToken: string, a: Avis): Promise<Avis> {
+    await publierReponseGoogle(fetchGoogle, accessToken, a.googleId!, a.reponse!)
+    return st.transaction(async () => {
+      const frais = await st.unAvis(a.commerceId, a.id)
+      // Réponse modifiée entre-temps : la version publiée n'est plus celle en base, on ne la marque pas.
+      if (!frais || frais.reponse !== a.reponse) return frais ?? a
+      const publie: Avis = { ...frais, reponsePublieeLe: maintenant().toISOString() }
+      await st.majAvis(publie)
+      return publie
+    })
+  }
+
   interface Tentative {
     http: number
     message: string
@@ -1346,7 +1421,7 @@ export async function creerServeur(o: OptionsServeur) {
     return { client, existant: false }
   }
 
-  type Reponse = { statut?: number; json?: unknown; csv?: { nom: string; contenu: string }; xml?: string }
+  type Reponse = { statut?: number; json?: unknown; csv?: { nom: string; contenu: string }; xml?: string; redirection?: string }
 
   async function router(req: IncomingMessage, chemin: string[]): Promise<Reponse> {
     const m = req.method
@@ -2030,6 +2105,128 @@ export async function creerServeur(o: OptionsServeur) {
       return { statut: 201, json: { lot, code, date, perdant: estPerdant(lot) } }
     }
 
+    // ---- Google Business Profile (P1-B4) : 501 tant que GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET manquent ----
+
+    if (sous === 'google' && !sousId && m === 'GET') {
+      // État de la connexion (gérant) : jamais de jeton, seulement « configuré / connecté depuis le … ».
+      await exigerCommercant(req, id)
+      if (!googleBusinessConfigure(o.googleBusiness)) return { json: { configure: false, connecte: false } }
+      const j = await lireJetonsGoogle(o.googleBusiness, id)
+      return { json: { configure: true, connecte: !!j, ...(j ? { connecteLe: j.connecteLe, fiche: !!(o.googleBusiness.emplacement ?? j.emplacement) } : {}) } }
+    }
+
+    if (sous === 'google' && sousId === 'auth' && !action && m === 'GET') {
+      // Lien vers l'écran de consentement Google (scope business.manage, refresh token demandé). Le front appelle
+      // `?format=json` avec sa session et ouvre l'URL reçue ; sinon redirection 302 directe.
+      await exigerCommercant(req, id)
+      const g = exigerGoogle()
+      const t = maintenant()
+      for (const [n, fin] of etatsGoogle) if (fin <= t.getTime()) etatsGoogle.delete(n)
+      const { etat, nonce } = signerEtat(g.clientSecret, id, t)
+      etatsGoogle.set(nonce, t.getTime() + 10 * 60_000)
+      const url = urlAutorisation(g, redirectionGoogle(g, req, id), etat)
+      const format = new URL(req.url ?? '/', 'http://localhost').searchParams.get('format')
+      return format === 'json' ? { json: { url } } : { redirection: url }
+    }
+
+    if (sous === 'google' && sousId === 'callback' && !action && m === 'GET') {
+      // PUBLIC — retour de Google après le consentement. Le `state` signé (commerce + nonce à usage unique, 10 min)
+      // prouve que la connexion a été lancée par le gérant de CE commerce. Jetons rangés côté serveur, jamais renvoyés.
+      limiterIp(req, 'lecture', limites.lectureParIp)
+      const g = exigerGoogle()
+      const q = new URL(req.url ?? '/', 'http://localhost').searchParams
+      const etat = lireEtat(g.clientSecret, q.get('state') ?? '', maintenant())
+      if (!etat || etat.commerceId !== id || !etatsGoogle.delete(etat.nonce)) {
+        throw err(400, 'Lien de connexion Google invalide ou expiré : relancez « Connecter Google » depuis l’écran Avis.')
+      }
+      const site = sitePublic(req)
+      if (q.get('error')) return { redirection: `${site}/#/avis/google-refuse` }
+      const code = q.get('code')
+      if (!code) throw err(400, 'Réponse de Google sans code d’autorisation : relancez « Connecter Google ».')
+      const jetons = await echangerCode(g, fetchGoogle, code, redirectionGoogle(g, req, id), maintenant())
+      await ecrireJetonsGoogle(g, id, jetons)
+      await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'avisGoogle', 'Google Business Profile connecté (consentement donné sur Google)')
+      return { redirection: `${site}/#/avis/google-connecte` }
+    }
+
+    if (sous === 'google' && sousId === 'deconnecter' && !action && m === 'POST') {
+      // Révocation chez Google (best-effort) puis suppression des jetons rangés ici.
+      const auteur = await exigerCommercant(req, id)
+      const g = exigerGoogle()
+      const j = await lireJetonsGoogle(g, id)
+      const revoque = j ? await revoquerJeton(fetchGoogle, j.refreshToken) : false
+      await ecrireJetonsGoogle(g, id, null)
+      if (j) await journaliser(id, { type: 'gerant', nom: auteur }, 'avisGoogle', `Google Business Profile déconnecté${revoque ? ' (accès révoqué chez Google)' : ' (révocation chez Google non confirmée)'}`)
+      return { json: { ok: true, revoque } }
+    }
+
+    if (sous === 'google' && sousId === 'import-avis' && !action && m === 'POST') {
+      // Import des avis de la fiche : déduplication par identifiant Google, avis saisis à la main et brouillons
+      // préservés, règles appliquées (auto 5★, brouillon sinon). Seule la réponse auto 5★ est publiée d'office, et
+      // seulement si la règle est active ; tout le reste attend une validation manuelle.
+      const auteur = await exigerCommercant(req, id)
+      const g = exigerGoogle()
+      let jetons = await accesGoogle(g, id)
+      let emplacement = emplacementValide(g.emplacement) ? g.emplacement : jetons.emplacement
+      if (!emplacementValide(emplacement)) {
+        emplacement = await trouverEmplacement(fetchGoogle, jetons.accessToken, placeIdDuLien(commerce.lienGoogle))
+        jetons = { ...jetons, emplacement }
+        await ecrireJetonsGoogle(g, id, jetons)
+      }
+      const bruts = await listerAvisGoogle(fetchGoogle, jetons.accessToken, emplacement)
+      const fusion = await st.transaction(async () => {
+        const r = fusionnerImport(await st.avis(id), bruts, commerce)
+        let ajoutes = 0
+        for (const a of r.nouveaux) {
+          try {
+            await st.ajouterAvis(a)
+            ajoutes++
+          } catch (e) {
+            // Import simultané : l'autre a déjà rangé cet avis (même identifiant).
+            if (!(e instanceof ErreurConflit)) throw e
+          }
+        }
+        for (const a of r.modifies) await st.majAvis(a)
+        return { importes: ajoutes, misAJour: r.modifies.length, ignores: r.ignores }
+      })
+      let publiees = 0
+      const echecs: string[] = []
+      // Publication d'office limitée aux avis postés APRÈS la connexion : le premier import ne répond pas en rafale à
+      // tout l'historique (ces réponses restent préparées, publiables d'un tap après relecture).
+      const nouveauxDepuisConnexion = (x: Avis) => x.date >= jetons.connecteLe
+      for (const a of (await st.avis(id)).filter((x) => nouveauxDepuisConnexion(x) && publicationAutomatique(x, commerce))) {
+        try {
+          await publierSurGoogle(jetons.accessToken, a)
+          publiees++
+        } catch (e) {
+          // La réponse reste « préparée » : publiable plus tard depuis l'écran Avis.
+          echecs.push(e instanceof Error ? e.message : String(e))
+        }
+      }
+      await journaliser(
+        id,
+        { type: 'gerant', nom: auteur },
+        'avisGoogle',
+        `Import Google : ${fusion.importes} nouvel(s) avis, ${fusion.misAJour} mis à jour, ${publiees} réponse(s) auto 5★ publiée(s)${echecs.length ? `, ${echecs.length} échec(s) de publication` : ''}`,
+      )
+      return { json: { ...fusion, publiees, echecsPublication: echecs.length, ...(echecs.length ? { erreurPublication: echecs[0] } : {}), avis: await st.avis(id) } }
+    }
+
+    if (sous === 'avis' && sousId && action === 'publier-reponse' && !extra && m === 'POST') {
+      // Publication d'une réponse sur Google : réponse validée à la main, ou réponse auto de la règle 5★ active.
+      // Brouillon non validé, réponse auto hors règle 5★, avis saisi à la main → 409, rien n'est envoyé.
+      const auteur = await exigerCommercant(req, id)
+      const g = exigerGoogle()
+      const a = await st.unAvis(id, sousId)
+      if (!a) throw err(404, 'Avis inconnu dans ce commerce.')
+      const refus = refusPublication(a, commerce)
+      if (refus) throw err(409, refus)
+      const { accessToken } = await accesGoogle(g, id)
+      const avis = await publierSurGoogle(accessToken, a)
+      await journaliser(id, { type: 'gerant', nom: auteur }, 'avisGoogle', `Réponse publiée sur Google (avis ${a.note}★ de ${a.auteur})`)
+      return { json: { avis } }
+    }
+
     if (sous === 'avis' && !sousId && m === 'POST') {
       await exigerCommercant(req, id)
       const corps = await lireCorps(req)
@@ -2048,6 +2245,7 @@ export async function creerServeur(o: OptionsServeur) {
         note,
         texte: texte(corps.texte ?? '', 'texte', 2000),
         date,
+        source: 'manuel',
       }
       const avis = appliquerRegles(brut, commerce)
       await st.ajouterAvis(avis)
@@ -2070,6 +2268,8 @@ export async function creerServeur(o: OptionsServeur) {
         }
         if ('reponse' in corps) {
           const rep = corps.reponse === null ? '' : texte(corps.reponse, 'reponse', 2000)
+          // Réponse modifiée : la version publiée sur Google n'est plus à jour (à republier).
+          if (rep !== (a.reponse ?? '')) delete r.reponsePublieeLe
           delete r.reponseAuto
           if (rep) {
             r.reponse = rep
@@ -2109,6 +2309,10 @@ export async function creerServeur(o: OptionsServeur) {
       }
       const chemin = url.pathname.slice('/api/v1/'.length).split('/').filter(Boolean).map(decodeURIComponent)
       const r = await router(req, chemin)
+      if (r.redirection) {
+        res.writeHead(302, { ...entetes, Location: r.redirection, 'Cache-Control': 'no-store' }).end()
+        return
+      }
       if (r.csv) {
         res.writeHead(200, {
           ...entetes,
@@ -2133,7 +2337,9 @@ export async function creerServeur(o: OptionsServeur) {
           ? err(409, 'Modification simultanée : réessayez.')
           : erreur instanceof ErreurMigrationManquante
             ? err(503, erreur.message)
-            : erreur
+            : erreur instanceof ErreurGoogle
+              ? err(erreur.statut, erreur.message)
+              : erreur
       const http = e instanceof ErreurHttp
       if (!http) console.error(`[serveur] ${req.method} ${url.pathname} :`, e)
       const statut = http ? e.statut : 500

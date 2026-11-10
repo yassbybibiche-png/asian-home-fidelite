@@ -198,7 +198,7 @@ export interface MembreEquipe {
   creeLe: string
 }
 
-export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi' | 'gain' | 'consentement'
+export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi' | 'gain' | 'consentement' | 'avisGoogle'
 
 /** Parrainage réussi (trace d'audit ; les points sont sur les cartes des deux clients). */
 export interface Parrainage {
@@ -388,6 +388,12 @@ export interface Avis {
   reponseAuto?: boolean
   /** Brouillon à relire avant publication. */
   brouillon?: string
+  /** Provenance (P1-B4) : importé de Google Business Profile, ou saisi à la main (absent = saisi à la main). */
+  source?: 'google' | 'manuel'
+  /** Avis importé : nom Google de l'avis (`accounts/…/locations/…/reviews/…`), clé de déduplication. */
+  googleId?: string
+  /** Date de publication de `reponse` sur Google (absente = pas publiée ; effacée si la réponse est modifiée). */
+  reponsePublieeLe?: string
 }
 
 export type StatutAvis = 'sansReponse' | 'brouillon' | 'repondu'

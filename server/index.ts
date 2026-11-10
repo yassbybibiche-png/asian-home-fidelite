@@ -11,6 +11,7 @@ import { resolve } from 'node:path'
 import pkg from '../package.json' with { type: 'json' }
 import { creerServeur, lireOrigineCors } from './app.ts'
 import { configDepuisEnv } from './notifications/index.ts'
+import { configGoogleBusinessDepuisEnv } from './google-business.ts'
 import { configSupabaseDepuisEnv } from './stockage-supabase.ts'
 
 const env = process.env
@@ -91,6 +92,8 @@ try {
     // V3 : intégrations préparées, inactives tant que ces variables sont absentes (aucune n'est configurée).
     googleWallet: { issuerId: env.GOOGLE_WALLET_ISSUER_ID, fichierCleService: env.GOOGLE_WALLET_SERVICE_ACCOUNT_FILE },
     notifications: configDepuisEnv(env),
+    // P1-B4 : GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (+ GOOGLE_REDIRECT_URI, GOOGLE_BUSINESS_LOCATION facultatives).
+    googleBusiness: configGoogleBusinessDepuisEnv(env),
   })
 } catch (e) {
   arreter(e instanceof Error ? e.message : String(e))
@@ -100,7 +103,7 @@ const port = Number(env.PORT ?? 3001)
 app.serveur.listen(port, () => {
   console.log(`[serveur] Asian Home Fidélité ${pkg.version} — http://localhost:${port}/api/v1/sante`)
   console.log(`[serveur] mode ${production ? 'production' : 'développement'} · base ${supabase ? `Supabase ${new URL(supabase.url).host}` : fichierDb} · démo ${env.DEMO === '1' ? 'oui' : 'non'} · fuseau ${env.TZ}`)
-  console.log('[serveur] intégrations : voir /api/v1/sante (Apple Wallet en suspens ; Google Wallet, SMS, e-mail actifs seulement si leurs variables sont définies)')
+  console.log('[serveur] intégrations : voir /api/v1/sante (Apple Wallet en suspens ; Google Wallet, Google Business Profile, SMS, e-mail actifs seulement si leurs variables sont définies)')
 })
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
