@@ -73,6 +73,28 @@ h3 {
   }
 }
 
+/* #/jouer, attente de la visite validée (P0-U4) : point doré qui pulse, halo qui s'élargit. */
+@keyframes attente-halo {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes attente-point {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 /* Champs de formulaire lisibles et faciles à toucher (≥ 48 px de haut). */
 @layer components {
   .champ {
@@ -132,5 +154,22 @@ h3 {
   }
   .apparition {
     animation: apparition 0.35s ease-out both;
+  }
+  .attente-pulse {
+    @apply relative inline-flex h-3 w-3 shrink-0 rounded-full bg-or-400;
+    animation: attente-point 1.6s ease-in-out infinite;
+  }
+  .attente-pulse::after {
+    content: '';
+    @apply absolute inset-0 rounded-full bg-or-400;
+    animation: attente-halo 1.6s ease-out infinite;
+  }
+}
+
+/* Mouvement réduit : point fixe (pas de clignotement accéléré par la règle globale), le texte reste. */
+@media (prefers-reduced-motion: reduce) {
+  .attente-pulse,
+  .attente-pulse::after {
+    animation: none;
   }
 }

@@ -3,7 +3,18 @@ import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, CommercePublic, Tirage } from '../types'
 import { analyserContact } from '../lib/fidelite'
-import { estPerdant, jourEnClair, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot } from '../lib/roulette'
+import { estPerdant, jourEnClair, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
+import {
+  apresVerification,
+  ETAPES_VALIDATION,
+  INTRO_ATTENTE,
+  MESSAGE_ATTENTE_HORS_LIGNE,
+  MESSAGE_VISITE_VALIDEE,
+  suivreVisite,
+  TEXTE_ATTENTE,
+  type SuiviVisite,
+} from '../lib/attenteVisite'
+import { estAsianHome } from '../lib/visuels'
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ReponseCarte, type ResultatTirage } from '../data/api'
 import { lancerTirage, memoireJoueur, type JoueurMemorise } from '../data/jeuApi'
 import { DUREE_ROTATION_MS, LegendeRoue, Roue } from '../components/Roue'
@@ -76,17 +87,90 @@ function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; 
   )
 }
 
-function MessageSansVisite({ prenom, lienCarte }: { prenom: string; lienCarte: string }) {
+/**
+ * Scan avant la validation de la visite (P0-U4) : les deux gestes dans l'ordre, un état d'attente animé tant que la
+ * caisse n'a pas validé, et toujours une action possible (carte, menu, nouvelle vérification).
+ */
+export function MessageSansVisite({
+  prenom,
+  lienCarte,
+  lienMenu,
+  horsLigne = false,
+  onVerifier,
+}: {
+  prenom: string
+  lienCarte: string
+  lienMenu?: string
+  horsLigne?: boolean
+  onVerifier?: () => void
+}) {
   return (
-    <section className="carte space-y-3 text-center" role="status">
-      <p className="titre-carte">Bonjour {prenom} !</p>
-      <p className="text-gray-700">Pour jouer, validez d’abord votre visite du jour au comptoir.</p>
-      <p className="text-sm text-gray-600">Présentez votre carte de fidélité en caisse : 1 visite validée = 1 participation.</p>
-      <a href={lienCarte} className="bouton-secondaire w-full">
-        Voir ma carte de fidélité
-      </a>
+    <section className="carte space-y-4" aria-labelledby="attente-titre">
+      <div className="text-center">
+        <p id="attente-titre" className="titre-carte">
+          Bonjour {prenom} !
+        </p>
+        <p className="mt-1 text-gray-700">{INTRO_ATTENTE}</p>
+      </div>
+      <ol className="space-y-2" aria-label="Pour débloquer la roue">
+        {ETAPES_VALIDATION.map((etape, i) => (
+          <li key={etape} className="flex items-start gap-3 rounded-xl bg-fond p-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-nuit-950 font-bold text-or-400" aria-hidden>
+              {i + 1}
+            </span>
+            <span className="pt-1 text-gray-800">{etape}</span>
+          </li>
+        ))}
+      </ol>
+      {horsLigne ? (
+        <div className="space-y-1 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="alert" data-attente="hors-ligne">
+          <p>{MESSAGE_ATTENTE_HORS_LIGNE}</p>
+          {onVerifier && (
+            <button type="button" className="lien" onClick={onVerifier}>
+              Réessayer maintenant
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="hero-sombre flex items-center justify-center gap-3 rounded-xl px-4 py-3" role="status" aria-live="polite" aria-busy="true" data-attente="en-cours">
+          <span className="attente-pulse" aria-hidden />
+          <span className="font-semibold text-or-300">{TEXTE_ATTENTE}</span>
+        </div>
+      )}
+      <p className="text-center text-sm text-gray-600">1 visite validée = 1 participation par jour.</p>
+      <div className="grid gap-2">
+        <a href={lienCarte} className="bouton w-full">
+          Voir ma carte de fidélité
+        </a>
+        {lienMenu && (
+          <a href={lienMenu} className="bouton-secondaire w-full">
+            📖 Voir le menu en attendant
+          </a>
+        )}
+        {onVerifier && !horsLigne && (
+          <button type="button" className="min-h-11 w-full text-sm font-semibold text-gray-600 underline" onClick={onVerifier}>
+            C’est validé ? Vérifier maintenant
+          </button>
+        )}
+      </div>
     </section>
   )
+}
+
+/** Transition visible quand la caisse vient de valider la visite : la roue est débloquée. */
+export function VisiteValidee() {
+  return (
+    <p className="alerte-succes apparition text-center text-base" role="status" aria-live="polite" data-attente="validee">
+      ✓ {MESSAGE_VISITE_VALIDEE}
+    </p>
+  )
+}
+
+/** Vrai dès que le statut du jeu passe de « sans visite » à « prêt » sous les yeux du client (et le reste). */
+function useVisiteValidee(statut: StatutJeu | null | undefined): boolean {
+  const [suivi, setSuivi] = useState<SuiviVisite>({ statut, validee: false })
+  if (suivi.statut !== statut) setSuivi(suivreVisite(suivi, statut))
+  return suivi.validee
 }
 
 function MessageDejaJoue({ prenom, lot, code, remis }: { prenom: string; lot: string | null; code?: string; remis?: boolean }) {
@@ -166,6 +250,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
   const memorise = trouver(memoriseId)
   const statut = joueur && etape === 'pret' ? statutJeu(joueur, etat.tirages, commerce.id) : undefined
   const dejaJoue = joueur && statut === 'dejaJoue' ? tirageDuJour(etat.tirages, commerce.id, joueur.id) : undefined
+  const visiteValidee = useVisiteValidee(statut)
 
   function choisirJoueur(client: Client) {
     setJoueurId(client.id)
@@ -219,9 +304,12 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
       ) : statut === 'sansVisite' ? (
         <MessageSansVisite prenom={joueur.prenom} lienCarte={`#/carte/${joueur.id}`} />
       ) : (
-        <button className="bouton w-full py-4 text-lg" onClick={tourner} disabled={etape !== 'pret'}>
-          {etape === 'rotation' ? 'La roue tourne…' : `🎡 Tourner la roue, ${joueur.prenom} !`}
-        </button>
+        <>
+          {visiteValidee && etape === 'pret' && <VisiteValidee />}
+          <button className="bouton w-full py-4 text-lg" onClick={tourner} disabled={etape !== 'pret'}>
+            {etape === 'rotation' ? 'La roue tourne…' : `🎡 Tourner la roue, ${joueur.prenom} !`}
+          </button>
+        </>
       )}
 
       {joueur && (etape === 'resultat' || dejaJoue) && (
@@ -278,16 +366,23 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
   const [gain, setGain] = useState<ResultatTirage | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [enCours, setEnCours] = useState(false)
+  const [horsLigne, setHorsLigne] = useState(false)
+  const [menuDisponible, setMenuDisponible] = useState(() => estAsianHome(commerce))
   const minuterie = useRef<number | undefined>(undefined)
+  const verifierMaintenant = useRef<() => void>(() => {})
   useEffect(() => () => window.clearTimeout(minuterie.current), [])
+  const visiteValidee = useVisiteValidee(jeu?.statut)
 
-  // État du jeu du jour, vu par le serveur (visite validée ? déjà joué ?).
+  // État du jeu du jour, vu par le serveur (visite validée ? déjà joué ?). Renvoie le statut, ou null en cas d'échec.
   const majStatut = useCallback(
-    async (j: JoueurMemorise) => {
+    async (j: JoueurMemorise): Promise<StatutJeu | null> => {
       try {
         const r = await api.carte(j.clientId)
         setJeu(r.jeu)
+        setMenuDisponible((m) => m || !!r.menuDisponible)
         setMessage(null)
+        setHorsLigne(false)
+        return r.jeu.statut
       } catch (e) {
         if (e instanceof ErreurApi && e.statut === 404) {
           // Carte effacée côté serveur : on oublie ce profil sur ce téléphone.
@@ -295,7 +390,11 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
           setJoueur(null)
           setMemorise(null)
           setJeu(null)
-        } else setMessage(e instanceof ErreurApi ? e.message : MESSAGE_HORS_LIGNE)
+        } else {
+          setHorsLigne(!(e instanceof ErreurApi) || e.horsLigne)
+          setMessage(e instanceof ErreurApi ? e.message : MESSAGE_HORS_LIGNE)
+        }
+        return null
       }
     },
     [api, memoire],
@@ -303,16 +402,40 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
 
   useEffect(() => {
     if (!joueur || etape !== 'pret') return
-    void majStatut(joueur)
-    // En attente de la visite validée au comptoir : la roue se débloque toute seule (toutes les 10 s / au retour).
-    const siVisible = () => document.visibilityState === 'visible' && void majStatut(joueur)
-    const minuterieStatut = window.setInterval(siVisible, 10_000)
+    // En attente de la visite validée au comptoir : la roue se débloque toute seule. Vérification toutes les 10 s
+    // tant que la roue est verrouillée (espacée jusqu'à 60 s si le réseau ou le serveur ne répond pas), et tout de
+    // suite au retour sur l'onglet, au retour du réseau ou sur « Vérifier maintenant ». Arrêt dès que la roue est prête.
+    let actif = true
+    let enVol = false
+    let echecs = 0
+    let prochaine: number | undefined
+    const verifier = async () => {
+      if (enVol) return
+      window.clearTimeout(prochaine)
+      enVol = true
+      const statut = await majStatut(joueur)
+      enVol = false
+      if (!actif) return
+      const suite = apresVerification(statut, echecs)
+      echecs = suite.echecs
+      if (suite.delai !== null) prochaine = window.setTimeout(siVisible, suite.delai)
+    }
+    // Onglet caché : pas de requête ; la vérification reprend au retour (visibilitychange).
+    function siVisible() {
+      if (document.visibilityState === 'visible') void verifier()
+    }
+    verifierMaintenant.current = () => void verifier()
+    void verifier()
     document.addEventListener('visibilitychange', siVisible)
     window.addEventListener('focus', siVisible)
+    window.addEventListener('online', siVisible)
     return () => {
-      window.clearInterval(minuterieStatut)
+      actif = false
+      window.clearTimeout(prochaine)
+      verifierMaintenant.current = () => {}
       document.removeEventListener('visibilitychange', siVisible)
       window.removeEventListener('focus', siVisible)
+      window.removeEventListener('online', siVisible)
     }
   }, [joueur, etape, majStatut])
 
@@ -377,7 +500,17 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
           </button>
         )
       ) : !jeu ? (
-        message ? <MessageErreur>{message}</MessageErreur> : <p className="text-center text-gray-500">Vérification de votre carte…</p>
+        message ? (
+          // Jamais d'écran figé : l'erreur dit quoi faire, la vérification reprend seule et ce bouton la relance.
+          <>
+            <MessageErreur>{message}</MessageErreur>
+            <button className="bouton-secondaire w-full" onClick={() => verifierMaintenant.current()}>
+              Réessayer
+            </button>
+          </>
+        ) : (
+          <p className="text-center text-gray-500">Vérification de votre carte…</p>
+        )
       ) : jeu.statut === 'dejaJoue' ? (
         <MessageDejaJoue
           prenom={joueur.prenom}
@@ -388,11 +521,18 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
         />
       ) : jeu.statut === 'sansVisite' ? (
         <>
-          <MessageSansVisite prenom={joueur.prenom} lienCarte={`#/carte/${joueur.clientId}`} />
-          <MessageErreur>{message}</MessageErreur>
+          <MessageSansVisite
+            prenom={joueur.prenom}
+            lienCarte={`#/carte/${joueur.clientId}`}
+            lienMenu={menuDisponible ? `#/menu/${commerce.id}` : undefined}
+            horsLigne={horsLigne}
+            onVerifier={() => verifierMaintenant.current()}
+          />
+          {!horsLigne && <MessageErreur>{message}</MessageErreur>}
         </>
       ) : (
         <>
+          {visiteValidee && <VisiteValidee />}
           <MessageErreur>{message}</MessageErreur>
           <button className="bouton w-full py-4 text-lg" onClick={() => void tourner()} disabled={enCours}>
             {enCours ? 'Tirage en cours…' : `🎡 Tourner la roue, ${joueur.prenom} !`}
