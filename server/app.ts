@@ -752,8 +752,9 @@ function servirStatique(dossier: string, chemin: string, req: IncomingMessage, r
   if (!existsSync(fichier)) return false
   const infos = statSync(fichier)
   const balise = etag(infos.size, infos.mtimeMs)
-  const cache =
-    fichier === join(racine, 'index.html')
+  // Service worker et manifest (P1-C3) : revérifiés à chaque fois, comme index.html, sinon une ancienne version du
+  // service worker resterait jusqu'à une heure en cache HTTP.
+  const cache = [join(racine, 'index.html'), join(racine, 'sw.js'), join(racine, 'manifest.webmanifest')].includes(fichier)
       ? 'no-cache' // toujours revérifié (ETag → 304) : un nouveau déploiement est pris dès le rechargement
       : asset
         ? CACHE_IMMUABLE
@@ -1325,6 +1326,41 @@ export async function creerServeur(o: OptionsServeur) {
     tourneesEnCours.add(p)
   }
 
+  // ---- « Carte introuvable » → retrouver sa carte par téléphone / e-mail (P1-C3, audit F-12) ----
+  // Réponse identique que le contact ait une carte ou non, et rendue AVANT la recherche (envoi en arrière-plan) : ni le
+  // contenu ni le temps de réponse ne disent si quelqu'un est client. Sans prestataire configuré pour le canal, rien
+  // n'est cherché ni envoyé. Au plus RECHERCHE_CARTE_MAX_JOUR envois par contact et par 24 h (pas de bombardement).
+  const RECHERCHE_CARTE_MAX_JOUR = 3
+  const recherchesCarte = new Map<string, number[]>()
+  function envoyerLiensCarte(contact: { telephone?: string; email?: string }, canal: Canal, site: string) {
+    const cle = cleContact(contact)
+    const t = maintenant().getTime()
+    const recentes = (recherchesCarte.get(cle) ?? []).filter((d) => t - d < 24 * 3600_000 && d <= t)
+    if (recentes.length >= RECHERCHE_CARTE_MAX_JOUR) return
+    if (recherchesCarte.size > 5000) for (const [k, v] of recherchesCarte) if (v.every((d) => t - d >= 24 * 3600_000)) recherchesCarte.delete(k)
+    recherchesCarte.set(cle, [...recentes, t])
+    const p = (async () => {
+      for (const c of await st.commerces()) {
+        if (!c.actif) continue
+        const client = await st.clientParContact(c.id, contact)
+        if (!client) continue
+        const destinataire = canal === 'sms' ? (/^0\d{9}$/.test(cle) ? `+33${cle.slice(1)}` : `+${cle}`) : cle
+        const message: Message =
+          canal === 'sms'
+            ? { destinataire, texte: `${c.nom} : votre carte de fidélité ${lienCourtCarte(site, client.id)}` }
+            : {
+                destinataire,
+                sujet: `Votre carte de fidélité ${c.nom}`,
+                texte: `Bonjour,\n\nVoici le lien de votre carte de fidélité ${c.nom} :\n${lienCarte(site, client.id)}\n\nVous n’avez rien demandé ? Ignorez ce message.\n\nL’équipe de ${c.nom}`,
+              }
+        await notifications.envoyer(canal, message)
+      }
+    })()
+      .catch((e) => console.warn(`[carte] lien de carte non envoyé : ${e instanceof Error ? e.message : e}`))
+      .finally(() => tourneesEnCours.delete(p))
+    tourneesEnCours.add(p)
+  }
+
   /** Messages automatiques dus pour cet événement (règles du commerce). */
   const avecMessages = (client: Client, commerce: Commerce, evenement: Evenement, t = maintenant()) =>
     genererMessages(client, commerce, evenement, t, nouvelIdMessage).client
@@ -1530,6 +1566,16 @@ export async function creerServeur(o: OptionsServeur) {
         },
       }
     }
+    if (ressource === 'cartes' && id === 'retrouver' && !sous && m === 'POST') {
+      // PUBLIC (P1-C3) : « Carte introuvable » → recevoir le lien de sa carte. Même réponse 202 que le contact ait une
+      // carte ou non (audit F-12) ; `envoi` = un prestataire est configuré pour ce canal (état du serveur, déjà dans /sante).
+      limiterIp(req, 'fiche', limites.ficheClientParIp)
+      const contact = contactOuErreur((await lireCorps(req)).contact)
+      const canal: Canal = contact.email ? 'email' : 'sms'
+      const envoi = notifications.statut()[canal]
+      if (envoi) envoyerLiensCarte(contact, canal, sitePublic(req))
+      return { statut: 202, json: { ok: true, envoi } }
+    }
     if (ressource === 'cartes' && id && !sous && m === 'GET') {
       // PUBLIC (ajout V2) : la carte vue par le client (#/carte/<clientId>) et l'état de son jeu du jour.
       // Mêmes informations que POST /clients en public : jamais de téléphone ni d'e-mail. Seule exception (P0-U3) : le
@@ -1570,6 +1616,12 @@ export async function creerServeur(o: OptionsServeur) {
               remisDuJour: !!duJour?.remis,
             },
             menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
+            // P1-C3 : historique des lots de la roue (gagnants seulement), sans aucun code — seul celui du jour est servi ci-dessus.
+            historiqueLots: tirages
+              .filter((x) => !estPerdant(x.lot))
+              .sort((a, b) => b.date.localeCompare(a.date))
+              .slice(0, 20)
+              .map((x) => ({ lot: x.lot, date: x.date, statut: statutGain(x, t) })),
           },
         }
       }

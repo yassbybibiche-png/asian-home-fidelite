@@ -202,6 +202,27 @@ h3 {
   animation-fill-mode: both;
 }
 
+/* #/carte, nouveau tampon depuis la dernière ouverture (P1-C3) : le tampon se pose (échelle + rotation), transform seul. */
+@keyframes tampon-pose {
+  0% {
+    transform: scale(2.2) rotate(-25deg);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(0.9) rotate(4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.tampon-nouveau {
+  animation: tampon-pose 0.6s cubic-bezier(0.2, 0.8, 0.3, 1.2) both;
+  box-shadow: 0 0 0 3px var(--color-or-400);
+}
+
 /* Mouvement réduit : point fixe (pas de clignotement accéléré par la règle globale), le texte reste. Pas de confettis. */
 @media (prefers-reduced-motion: reduce) {
   .attente-pulse,
@@ -210,5 +231,9 @@ h3 {
   }
   .confettis {
     display: none;
+  }
+  /* Le nouveau tampon reste signalé par son contour doré, sans mouvement. */
+  .tampon-nouveau {
+    animation: none;
   }
 }

@@ -187,7 +187,22 @@ export function BoutonCopier({ texte, libelle = 'Copier le message', className =
  * Wallet : simple encart d'information, JAMAIS un bouton « Ajouter » (aucun pass n'existe).
  * Apple Wallet en suspens, Google Wallet à brancher ; en attendant, la carte web et son QR suffisent.
  */
-export function EncartWallet({ demo = false, lienCarte }: { demo?: boolean; lienCarte?: string }) {
+export function EncartWallet({ demo = false, lienCarte, replie = false }: { demo?: boolean; lienCarte?: string; replie?: boolean }) {
+  // Carte publique (P1-C3, audit §b) : une seule ligne, le détail s'ouvre au toucher — pas un bloc entier pour une absence.
+  if (replie)
+    return (
+      <details className="rounded-2xl bg-gray-50 px-4 text-sm text-gray-700 ring-1 ring-gray-200" aria-label={LIBELLE_WALLET}>
+        <summary className="flex min-h-11 cursor-pointer items-center gap-2 font-semibold text-gray-900">
+          <span aria-hidden>👛</span> {LIBELLE_WALLET} {demo && <BadgeDemo>Démo</BadgeDemo>}
+        </summary>
+        <ul className="space-y-0.5">
+          {ETATS_WALLET.map((e) => (
+            <li key={e}>· {e}</li>
+          ))}
+        </ul>
+        <p className="mt-1.5 pb-3">{EXPLICATION_WALLET}</p>
+      </details>
+    )
   return (
     <section className="rounded-2xl bg-gray-50 p-4 text-sm text-gray-700 ring-1 ring-gray-200" aria-label={LIBELLE_WALLET}>
       <p className="flex items-center gap-2 font-semibold text-gray-900">

@@ -211,7 +211,8 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `GET /sante` | public | `{ ok, version, mode, stockage, demo, integrations }` — `integrations` (V3) : `{ googleWallet, appleWallet: 'en_suspens', googleBusinessProfile, sms, email }`, chacun `false` tant que rien n'est configuré. `migrations` : `{ cartiz, programme, relances }` — `relances` = migration 0007 (table `envois`) appliquée. |
 | `GET /commerces` | public | Fiches publiques (jamais de PIN ni de hash). |
 | `GET /commerces/:id` | public | Une fiche publique. |
-| `GET /cartes/:clientId` | public | **Ajout V2** (page `#/carte/:clientId` et état de la roue) : `{ client (sans téléphone ni e-mail), commerce (fiche publique), jeu: { statut: 'pret' \| 'sansVisite' \| 'dejaJoue', lotDuJour, codeDuJour, remisDuJour } }`. P0-U3 : `codeDuJour` = code gagnant du tirage **du jour** de ce client (null si perdant ou pas de tirage), re-servi à son titulaire (autre téléphone, cache vidé) ; aucune autre route publique ne renvoie de code. 404 inconnue, 409 commerce inactif. |
+| `GET /cartes/:clientId` | public | **Ajout V2** (page `#/carte/:clientId` et état de la roue) : `{ client (sans téléphone ni e-mail), commerce (fiche publique), jeu: { statut: 'pret' \| 'sansVisite' \| 'dejaJoue', lotDuJour, codeDuJour, remisDuJour } }`. P0-U3 : `codeDuJour` = code gagnant du tirage **du jour** de ce client (null si perdant ou pas de tirage), re-servi à son titulaire (autre téléphone, cache vidé) ; aucune autre route publique ne renvoie de code. 404 inconnue, 409 commerce inactif. P1-C3 : `historiqueLots` = lots gagnés à la roue (20 derniers, perdants exclus) `{ lot, date, statut: 'valable' \| 'remis' \| 'expire' }`, **sans aucun code**. |
+| `POST /cartes/retrouver` | public | **P1-C3** (« Carte introuvable », audit F-12). `{ contact }` → **toujours 202 `{ ok: true, envoi }`**, que le contact ait une carte ou non ; `envoi` = un prestataire est configuré pour ce canal (Twilio pour un numéro, Brevo pour un e-mail — état du serveur, déjà public dans `/sante`). Si `envoi`, la recherche et l'envoi du lien (`/c/<id>` en SMS, `#/carte/<id>` en e-mail) se font **après** la réponse (le temps de réponse ne trahit rien) ; 3 envois max par contact et par 24 h. Sans prestataire : rien n'est cherché ni envoyé. 400 si le contact est illisible ; limite `ficheClientParIp`. |
 | `POST /commerces` | admin | `{ nom, type, lienGoogle?, pin, …réglages? }` → crée le commerce (défauts de `nouveauCommerce`). |
 | `PATCH /commerces/:id` | commerçant | Réglages : `nom, type, logo, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, actif`. Tout autre champ → 400. Réapplique les règles d'avis (comme le front). |
 | `PUT /commerces/:id/logo` | commerçant | **P1-B5.** Corps = le fichier brut (pas de JSON). PNG / JPEG / WebP lus dans les octets (le `Content-Type` est ignoré) ; 2 Mo max (413), 100 à 4 096 px de côté, autre format (GIF, SVG, texte…) → 400 avec message clair. Rangé dans `meta` (clé `logo:<id>`, aucune migration) ; `logo` du commerce = `/api/v1/commerces/:id/logo?v=<empreinte>` → `{ commerce, logo: { type, largeur, hauteur, octets } }`. Le front (Réglages) réduit l'image à 512 px en WebP avant l'envoi. |
@@ -367,7 +368,7 @@ compte sur deux compteurs, rangés dans la table `tentatives_auth` (migration 00
 | `inscriptionParContact` | 5 | idem, par numéro / e-mail normalisé dans ce commerce | une personne ne s'inscrit qu'une fois ; freine l'énumération (F-12) |
 | `tirageParIp` | 20 | `POST /commerces/:id/tirages` | 1 tirage / jour / client ; laisse une salle pleine jouer |
 | `tirageParContact` | 5 | idem, par contact | réessais légitimes (réseau), pas plus |
-| `ficheClientParIp` | 10 | `POST …/clients/:id/profil`, `POST …/clients/:id/rattrapage` (demande du client), `POST …/clients/:id/prenom` (P1-C1) ; P1-B6 : `POST /cartes/:id/donnees` et `…/suppression` (par IP **et** par carte) | rares par nature |
+| `ficheClientParIp` | 10 | `POST …/clients/:id/profil`, `POST …/clients/:id/rattrapage` (demande du client), `POST …/clients/:id/prenom` (P1-C1) ; P1-B6 : `POST /cartes/:id/donnees` et `…/suppression` (par IP **et** par carte) ; P1-C3 : `POST /cartes/retrouver` (par IP) | rares par nature |
 | `sessionParIp` | 30 | `POST /sessions` | borne le coût scrypt ; toute l'équipe ouvre sa session depuis le même wifi en début de service |
 
 Les routes authentifiées (gérant, caisse, admin) ne sont **pas** limitées : la file hors ligne de la caisse doit pouvoir
@@ -424,6 +425,7 @@ personnalisé le jour où il existe).
 | API JSON (succès et erreurs), export CSV | `no-store` |
 | `dist/assets/*` (nom avec hash Vite) | `public, max-age=31536000, immutable` ; un asset absent → 404 (pas index.html) |
 | `index.html` (et toute route du front) | `no-cache` (revérifié à chaque fois : un déploiement est pris au rechargement) |
+| `sw.js`, `manifest.webmanifest` (PWA, P1-C3) | `no-cache` (un nouveau service worker est pris au prochain chargement) |
 | autres fichiers (`/visuels/*.jpg`…) | `public, max-age=3600` |
 
 Tous les fichiers statiques ont un `ETag` faible (taille + date de modification) : `If-None-Match` correspondant → 304.
