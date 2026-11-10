@@ -19,6 +19,7 @@ import {
 import { analyserContact, nouveauClient, offrirRecompense, trouverClientParContact, validerVisite } from './lib/fidelite'
 import { appliquerInscription } from './lib/programme'
 import { appliquerRegles } from './lib/avis'
+import { ajouterMessagePrive, validerMessagePrive } from './lib/messagePrive'
 import { clientsEnCsv, nomFichierCsv } from './lib/csv'
 import { nouveauCommerce } from './data/defaults'
 
@@ -87,6 +88,8 @@ interface Store {
   enregistrerTirage(tirage: Tirage): void
   /** Mode local uniquement : prénom donné après le tirage, si la carte n'en a pas (en mode API : `api.prenomCarte`). */
   nommerClient(clientId: string, prenom: string): void
+  /** Mode local uniquement : message privé au restaurant après le jeu (en mode API : `api.messagePrive`). */
+  laisserMessagePrive(clientId: string, note: number, texte: string): Promise<void>
   /** Ajoute un avis en appliquant aussitôt les règles automatiques du commerce. */
   ajouterAvis(commerceId: string, avis: { auteur: string; note: number; texte: string }): Promise<void>
   /** `brouillon` (null = supprimer) ou `reponse` (marque comme répondu). */
@@ -145,8 +148,11 @@ export function FournisseurStore({ children, depot = depotLocal }: { children: R
 
 function StoreLocal({ children, depot }: { children: ReactNode; depot: Depot }) {
   const [etat, setEtat] = useState<Etat>(() => depot.charger())
+  // Dernier état connu, pour les actions qui doivent refuser (et le dire) avant d'écrire.
+  const etatRef = useRef(etat)
 
   useEffect(() => {
+    etatRef.current = etat
     depot.enregistrer(etat)
   }, [depot, etat])
 
@@ -197,6 +203,16 @@ function StoreLocal({ children, depot }: { children: ReactNode; depot: Depot }) 
       offrirRecompense: async (clientId: string) => majClient(clientId, (c, co) => offrirRecompense(c, co)),
       enregistrerTirage: (tirage: Tirage) => setEtat((e) => ({ ...e, tirages: [tirage, ...e.tirages] })),
       nommerClient: (clientId: string, prenom: string) => majClient(clientId, (c) => (c.prenom.trim() || !prenom.trim() ? c : { ...c, prenom: prenom.trim() })),
+      laisserMessagePrive: async (clientId: string, note: number, texte: string) => {
+        const valide = validerMessagePrive({ note, texte })
+        if (typeof valide === 'string') throw new Error(valide)
+        const t = new Date()
+        const avant = etatRef.current.clients.find((c) => c.id === clientId)
+        if (!avant) throw new Error('Carte introuvable.')
+        const apres = ajouterMessagePrive(avant, { id: `mp-${t.getTime().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, ...valide, creeLe: t.toISOString() }, t)
+        if (typeof apres === 'string') throw new Error(apres)
+        majClient(clientId, () => apres)
+      },
       ajouterAvis: async (commerceId: string, a: { auteur: string; note: number; texte: string }) =>
         setEtat((e) => {
           const commerce = e.commerces.find((c) => c.id === commerceId)
@@ -520,6 +536,9 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       },
       nommerClient: () => {
         throw new Error('En mode serveur, le prénom passe par la page de jeu (api.prenomCarte).')
+      },
+      laisserMessagePrive: async () => {
+        throw new Error('En mode serveur, le message privé passe par la page de jeu (api.messagePrive).')
       },
       ajouterAvis: (commerceId: string, avis: { auteur: string; note: number; texte: string }) =>
         avecPin((a) => api.ajouterAvis(commerceId, a, avis).then(() => undefined)),

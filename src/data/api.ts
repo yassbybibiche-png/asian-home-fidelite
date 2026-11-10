@@ -277,6 +277,12 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     /** Prénom donné après le tirage (P1-C1) : seulement si la carte n'en a pas ; identité = carte + contact (403 sinon). */
     prenomCarte: (commerceId: string, clientId: string, contact: string, prenom: string) =>
       requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/prenom`, { corps: { contact, prenom } }) as Promise<{ client: CartePublique }>,
+    /** Message privé au restaurant après le jeu (P1-C4) : stocké, jamais expédié ; identité = carte + contact (403 sinon). */
+    messagePrive: (commerceId: string, clientId: string, contact: string, note: number, texte: string) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/message-prive`, { corps: { contact, note, texte } }) as Promise<{
+        ok: boolean
+        message: { id: string; creeLe: string }
+      }>,
     /** Le navigateur n'envoie qu'un contact : la visite du jour, le tirage du jour et le lot sont décidés par le serveur. */
     tirer: (commerceId: string, contact: string, prenom?: string, parrain?: string) =>
       requete('POST', `/commerces/${enc(commerceId)}/tirages`, { corps: { contact, ...(prenom ? { prenom } : {}), ...(parrain ? { parrain } : {}) } }) as Promise<ResultatTirage>,

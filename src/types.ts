@@ -231,6 +231,15 @@ export interface DemandeRattrapage {
   decideLe?: string
 }
 
+/** Message privé laissé au restaurant après le jeu (P1-C4), proposé avant Google pour une note basse. Stocké, jamais expédié. */
+export interface MessagePrive {
+  id: string
+  /** Note choisie dans l'app (1 à 5). */
+  note: number
+  texte: string
+  creeLe: string
+}
+
 /** Récompense gagnée, à retirer au comptoir (palier, défi, anniversaire…). */
 export interface RecompenseEnAttente {
   id: string
@@ -361,6 +370,8 @@ export interface Client {
   reservesGagnees?: string[]
   /** Demandes de rattrapage de visites oubliées. */
   demandesRattrapage?: DemandeRattrapage[]
+  /** Messages privés laissés au restaurant (P1-C4) : visibles par le commerce (#/avis), jamais sur la carte publique. */
+  messagesPrives?: MessagePrive[]
   /** Plat préféré, collecté après la 2e visite (profiling progressif, jamais à l'inscription). */
   platPrefere?: string
   // ---- RGPD (P1-B6) ----

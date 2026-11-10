@@ -9,6 +9,7 @@ import { LIBELLE_SOURCE, MODELES, appliquerRegles, modeleSuggere, refusPublicati
 import { ETAPES_CONNEXION_GOOGLE, GUIDE_GOOGLE_BUSINESS, TEXTE_AVIS_DEMO, TEXTE_AVIS_VIDE_PRODUCTION, etatGoogleBusiness } from '../lib/integrations'
 import { BadgeDemo, EnTete, Etoiles, MessageErreur, Vide } from '../components/ui'
 import { InvitationAvis } from '../components/InvitationAvis'
+import { messagesPrivesDuCommerce, type MessagePriveCommerce } from '../lib/messagePrive'
 
 /** État Google Business Profile (P1-B4) : null = non configuré sur le serveur, mode local ou état inconnu. */
 const ContexteGoogle = createContext<{ etat: EtatGoogle | null; relire(): void }>({ etat: null, relire: () => {} })
@@ -44,7 +45,8 @@ const STATUTS: Record<StatutAvis, { libelle: string; classe: string }> = {
 }
 
 export default function AvisPage() {
-  const { commerce, avis } = useDonneesCommerce()
+  const { commerce, avis, clients } = useDonneesCommerce()
+  const messagesPrives = messagesPrivesDuCommerce(clients)
   const { appliquerReglesAvis, mode, estDemo } = useStore()
   const regles = useAction()
   const google = useEtatGoogle(commerce.id)
@@ -91,6 +93,8 @@ export default function AvisPage() {
       </div>
 
       {simulation && <FormulaireSimulation onFermer={() => setSimulation(false)} />}
+
+      <MessagesPrives messages={messagesPrives} />
 
       <ApercuInvitation />
 
@@ -154,6 +158,42 @@ export default function AvisPage() {
         </ul>
       )}
     </ContexteGoogle.Provider>
+  )
+}
+
+/**
+ * Messages privés laissés après le jeu (P1-C4) : note basse dans l'app → le client a écrit au restaurant avant (ou au
+ * lieu de) Google. Prénom et lien vers la fiche seulement ; rien n'est publié ni expédié.
+ */
+function MessagesPrives({ messages }: { messages: MessagePriveCommerce[] }) {
+  return (
+    <details className="carte mb-4" open={messages.length > 0} data-messages-prives>
+      <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 font-bold">
+        Messages privés des clients <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{messages.length}</span>
+      </summary>
+      <p className="mt-2 text-sm text-gray-600">
+        Après la roue, un client qui choisit 3★ ou moins peut vous écrire en privé avant de publier sur Google (le lien Google lui reste proposé). Ces messages ne
+        sont pas publiés.
+      </p>
+      {messages.length === 0 ? (
+        <p className="mt-2 text-sm text-gray-500">Aucun message privé pour le moment.</p>
+      ) : (
+        <ul className="mt-3 space-y-3">
+          {messages.map((m) => (
+            <li key={m.id} className="rounded-xl bg-fond p-3">
+              <div className="flex items-center justify-between gap-2">
+                <a href={`#/client/${m.clientId}`} className="min-w-0 truncate font-semibold underline">
+                  {m.prenom.trim() || 'Client sans prénom'}
+                </a>
+                <Etoiles note={m.note} />
+              </div>
+              <p className="mt-1 text-xs text-gray-600">{dateRelative(m.creeLe)}</p>
+              <p className="mt-2 whitespace-pre-line break-words text-gray-800">{m.texte}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
   )
 }
 
