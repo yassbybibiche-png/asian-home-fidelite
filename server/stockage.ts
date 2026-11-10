@@ -23,6 +23,22 @@ export interface DemandeRattrapageTrace extends DemandeRattrapage {
   clientId: string
 }
 
+/** Secret visé par le dernier échec enregistré sur un compteur (P0-S2) : PIN admin, PIN commerce ou code équipe. */
+export type PorteeAuth = 'admin' | 'commerce' | 'equipe'
+
+/**
+ * Compteur d'échecs d'authentification (migration 0006 : `tentatives_auth`). `cle` = `ip:<ip>` (tous secrets
+ * confondus) ou `cible:<commerceId>` / `cible:admin` (toutes IP confondues) ; jamais de PIN, de code ni de contact.
+ * Dates ISO UTC.
+ */
+export interface TentativesAuth {
+  cle: string
+  portee: PorteeAuth
+  echecs: number
+  bloqueJusqua: string | null
+  derniereTentative: string
+}
+
 type P<T> = T | Promise<T>
 
 /**
@@ -76,6 +92,15 @@ export interface Stockage {
   revoquerSession(jti: string, expireLe: string, maintenant: string): P<void>
   /** Jeton révoqué ? Supabase sans la table : false (le serveur consulte d'abord sa mémoire). */
   sessionRevoquee(jti: string): P<boolean>
+  /**
+   * Anti-bruteforce persistant (migration 0006 : `tentatives_auth`) : la base fait foi après un redémarrage.
+   * `enregistrerTentativesAuth` écrit la ligne entière (upsert sur `cle`) et supprime au passage les lignes dont la
+   * dernière tentative et le blocage sont antérieurs à `purgerAvant`.
+   * Supabase sans la table : lève ErreurMigrationManquante (le serveur se replie alors sur sa mémoire).
+   */
+  tentativesAuth(cle: string): P<TentativesAuth | undefined>
+  enregistrerTentativesAuth(t: TentativesAuth, purgerAvant: string): P<void>
+  effacerTentativesAuth(cle: string): P<void>
   /** Pas d'imbrication. SQLite : vraie transaction. Supabase : voir `stockage-supabase.ts` (pas de transaction multi-requêtes). */
   transaction<T>(fn: () => P<T>): Promise<T>
   fermer(): P<void>
@@ -142,6 +167,10 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS rattrapages_commerce ON demandes_rattrapage (commerce_id, date);
   CREATE TABLE IF NOT EXISTS sessions_revoquees (jti TEXT PRIMARY KEY, expire_le TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS tentatives_auth (
+    cle TEXT PRIMARY KEY, portee TEXT NOT NULL, echecs INTEGER NOT NULL, bloque_jusqu_a TEXT, derniere_tentative TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS tentatives_auth_derniere ON tentatives_auth (derniere_tentative);
 `
 
 type Ligne = { donnees: string }
@@ -188,6 +217,15 @@ export function ouvrirStockage(fichier: string) {
     revoquerSession: db.prepare('INSERT INTO sessions_revoquees (jti, expire_le) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING'),
     purgerRevocations: db.prepare('DELETE FROM sessions_revoquees WHERE expire_le < ?'),
     sessionRevoquee: db.prepare('SELECT 1 AS x FROM sessions_revoquees WHERE jti = ?'),
+    tentativesAuth: db.prepare(
+      'SELECT cle, portee, echecs, bloque_jusqu_a AS bloqueJusqua, derniere_tentative AS derniereTentative FROM tentatives_auth WHERE cle = ?',
+    ),
+    majTentativesAuth: db.prepare(
+      `INSERT INTO tentatives_auth (cle, portee, echecs, bloque_jusqu_a, derniere_tentative) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (cle) DO UPDATE SET portee = excluded.portee, echecs = excluded.echecs, bloque_jusqu_a = excluded.bloque_jusqu_a, derniere_tentative = excluded.derniere_tentative`,
+    ),
+    purgerTentativesAuth: db.prepare('DELETE FROM tentatives_auth WHERE derniere_tentative < ? AND (bloque_jusqu_a IS NULL OR bloque_jusqu_a < ?)'),
+    effacerTentativesAuth: db.prepare('DELETE FROM tentatives_auth WHERE cle = ?'),
   }
 
   // Les transactions peuvent contenir des `await` (contrat commun avec Supabase) : elles passent une par une
@@ -248,6 +286,15 @@ export function ouvrirStockage(fichier: string) {
       q.revoquerSession.run(jti, expireLe)
     },
     sessionRevoquee: (jti: string) => !!q.sessionRevoquee.get(jti),
+    tentativesAuth: (cle: string) => {
+      const l = q.tentativesAuth.get(cle) as TentativesAuth | undefined
+      return l && { ...l }
+    },
+    enregistrerTentativesAuth: (t: TentativesAuth, purgerAvant: string) => {
+      q.purgerTentativesAuth.run(purgerAvant, purgerAvant)
+      q.majTentativesAuth.run(t.cle, t.portee, t.echecs, t.bloqueJusqua, t.derniereTentative)
+    },
+    effacerTentativesAuth: (cle: string) => void q.effacerTentativesAuth.run(cle),
 
     /** Exécute `fn` d'un bloc : tout est écrit, ou rien. */
     transaction<T>(fn: () => T | Promise<T>): Promise<T> {
