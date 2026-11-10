@@ -477,7 +477,8 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
           await api.majCommerce(c.id, a, {
             nom: c.nom,
             type: c.type,
-            logo: c.logo ?? '',
+            // Pas de `logo` : il ne change que par PUT / DELETE …/logo (P1-B5). Un brouillon de Réglages ouvert avant
+            // un envoi ne doit pas remettre l'ancienne adresse en enregistrant le reste.
             lienGoogle: c.lienGoogle,
             coordonnees: c.coordonnees ?? '',
             recompense: c.recompense,

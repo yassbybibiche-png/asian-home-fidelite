@@ -7,9 +7,10 @@ import type { Commerce } from '../types'
  *
  * Le commerce en production n'a ni logo ni bannière renseignés :
  * ces visuels sont utilisés en repli pour Asian Home uniquement, sans toucher
- * aux données ni au backend. Si le commerçant renseigne un jour son propre
- * logo ou sa propre bannière (Réglages → Apparence), c'est la sienne qui
- * s'affiche.
+ * aux données ni au backend. Dès que le commerçant envoie son propre logo
+ * (Réglages → Le commerce, lot P1-B5) ou renseigne sa bannière (Réglages →
+ * Apparence), c'est le sien qui s'affiche ; « Revenir au logo par défaut »
+ * rétablit ce repli.
  */
 export const VISUELS = {
   /** Logo officiel ASIAN HOUSE, blanc sur noir : à afficher sur fond sombre uniquement. */

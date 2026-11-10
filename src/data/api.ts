@@ -177,17 +177,19 @@ export function signalDelai(ms: number): AbortSignal | undefined {
 }
 
 export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(...a), delaiMs = 10_000) {
-  async function requete(methode: string, chemin: string, options: { acces?: AccesCaisse | null; corps?: unknown; texte?: boolean } = {}) {
+  async function requete(methode: string, chemin: string, options: { acces?: AccesCaisse | null; corps?: unknown; fichier?: Blob; texte?: boolean; delaiMs?: number } = {}) {
     const entetes: Record<string, string> = { ...entetesAcces(options.acces) }
     if (options.corps !== undefined) entetes['Content-Type'] = 'application/json'
+    // Fichier brut (logo) : envoyé tel quel ; le serveur lit le format dans les octets, pas dans cet en-tête.
+    if (options.fichier) entetes['Content-Type'] = options.fichier.type || 'application/octet-stream'
     let r: Response
     try {
       r = await f(base + chemin, {
         method: methode,
         headers: entetes,
-        body: options.corps === undefined ? undefined : JSON.stringify(options.corps),
+        body: options.fichier ?? (options.corps === undefined ? undefined : JSON.stringify(options.corps)),
         cache: 'no-store',
-        signal: signalDelai(delaiMs),
+        signal: signalDelai(options.delaiMs ?? delaiMs),
       })
     } catch {
       throw new ErreurApi(0, MESSAGE_HORS_LIGNE)
@@ -264,6 +266,12 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
       ((await requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/recompense`, { acces })) as { client: Client }).client,
     majCommerce: async (commerceId: string, acces: Acces, champs: ChampsReglages) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}`, { acces, corps: champs })) as { commerce: Commerce }).commerce,
+    /** Logo téléversé (P1-B5) : PNG / JPEG / WebP, 2 Mo maximum ; renvoie le commerce avec la nouvelle adresse du logo. */
+    envoyerLogo: async (commerceId: string, acces: Acces, fichier: Blob) =>
+      ((await requete('PUT', `/commerces/${enc(commerceId)}/logo`, { acces, fichier, delaiMs: 60_000 })) as { commerce: Commerce }).commerce,
+    /** « Revenir au logo par défaut ». */
+    supprimerLogo: async (commerceId: string, acces: Acces) =>
+      ((await requete('DELETE', `/commerces/${enc(commerceId)}/logo`, { acces })) as { commerce: Commerce }).commerce,
     majPin: (commerceId: string, acces: Acces, pin: string) => requete('PUT', `/commerces/${enc(commerceId)}/pin`, { acces, corps: { pin } }),
     ajouterAvis: async (commerceId: string, acces: Acces, avis: { auteur: string; note: number; texte: string }) =>
       ((await requete('POST', `/commerces/${enc(commerceId)}/avis`, { acces, corps: avis })) as { avis: Avis }).avis,
