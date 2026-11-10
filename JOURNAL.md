@@ -750,5 +750,10 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   (base temporaire, PIN dev 1234) : PUT menu réel 200 → GET public 7 catégories / 39 plats, prix tous null,
   5 photos rattachées, front servi 200, photo 200. Le rendu 390 px réel sur téléphone reste non vérifié
   (aucun navigateur sur la VM).
-- **Déploiement** : push master → Render auto-déploie ; vérification en ligne après le push : /sante, accueil 200,
-  #/menu avec les vrais plats (repli), photos 200.
+- **Déploiement** : push master `3ba8f8a` → Render auto-déploie ; vérifié en ligne ~06h54 : /sante
+  (production / supabase / demo false, migrations cartiz + programme true), accueil 200, nouveau bundle
+  `index-BTQW53Pc.js` servi (contient la vraie carte : « Thaï-sty Krusty », « 8 Maki Dragon », « Prix sur place »),
+  CSS avec `.hero-sombre`, 6/6 nouvelles photos 200. Le menu enregistré en base reste vide (GET /menu :
+  0 catégorie) — c'est le repli public qui affiche les 39 plats sur #/menu en attendant que le commerçant
+  enregistre son menu avec les prix. Rendu visuel réel à 390 px sur téléphone non vérifié (pas de navigateur
+  sur la VM) : le repli et l'interactivité sont couverts par les tests + le serveur local, pas par un rendu.
