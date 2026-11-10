@@ -1,9 +1,10 @@
-// Envoi SMS / e-mail — BRANCHEMENTS PRÉPARÉS, AUCUN ENVOI DANS CETTE VERSION (V3).
+// Envoi SMS / e-mail (P1-B3 : relances de bout en bout — consentement, modèles, journal `envois`, STOP).
 // Sans clé configurée, `envoyer` lève une erreur 501 « à brancher » et n'appelle aucun prestataire.
-// Avec les variables d'environnement (server/README.md), le code d'appel est prêt mais n'a JAMAIS été
-// exécuté contre un vrai prestataire : aucune clé n'a été créée ni configurée.
-import { adaptateurTwilio, configTwilio, type ConfigTwilio } from './twilio.ts'
+// Avec les variables d'environnement (server/README.md), le code d'appel est prêt et testé contre des prestataires
+// SIMULÉS (fetch injecté) ; il n'a JAMAIS été exécuté contre le vrai Twilio ni le vrai Brevo : aucune clé n'a été créée.
+import { adaptateurTwilio, configTwilio, signatureTwilio, type ConfigTwilio } from './twilio.ts'
 import { adaptateurBrevo, configBrevo, type ConfigBrevo } from './brevo.ts'
+import { timingSafeEqual } from 'node:crypto'
 
 export type Canal = 'sms' | 'email'
 
@@ -13,6 +14,8 @@ export interface Message {
   texte: string
   /** E-mail seulement. */
   sujet?: string
+  /** E-mail seulement : en-têtes ajoutés (List-Unsubscribe…). */
+  entetes?: Record<string, string>
 }
 
 export interface Adaptateur {
@@ -53,6 +56,16 @@ export function creerNotifications(c: ConfigNotifications = {}) {
       const a = adaptateurs[canal]
       if (!a.configure) throw new ErreurNonBranche(canal)
       return a.envoyer(m)
+    },
+    /**
+     * Webhook des SMS entrants (STOP) : signature `X-Twilio-Signature` calculée avec le jeton Twilio sur l'URL exacte
+     * appelée et les paramètres reçus. Twilio non configuré → false (la route répond 501 avant d'en arriver là).
+     */
+    signatureSmsValide(url: string, params: URLSearchParams, signature: string | undefined) {
+      if (!c.twilio || !signature) return false
+      const attendue = Buffer.from(signatureTwilio(c.twilio.authToken, url, params))
+      const recue = Buffer.from(signature)
+      return attendue.length === recue.length && timingSafeEqual(attendue, recue)
     },
   }
 }

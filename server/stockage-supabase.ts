@@ -17,7 +17,7 @@
 // d'un commerce peut enregistrer les réglages puis échouer sur un des avis réévalués.
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createClient, type PostgrestError } from '@supabase/supabase-js'
-import type { Avis, Client, Commerce, EntreeJournal, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
+import type { Avis, Client, Commerce, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
 import { cleContact } from '../src/lib/fidelite.ts'
 import { ErreurConflit, ErreurMigrationManquante, type DemandeRattrapageTrace, type Pin, type Stockage, type TentativesAuth } from './stockage.ts'
 
@@ -25,6 +25,7 @@ const TABLES_0003 = ['equipe', 'journal', 'menus']
 const TABLES_0004 = ['parrainages', 'demandes_rattrapage']
 const TABLES_0005 = ['sessions_revoquees']
 const TABLES_0006 = ['tentatives_auth']
+const TABLES_0007 = ['envois']
 
 /** Lecture d'une table de la migration 0003 : vide tant que la migration n'est pas appliquée (l'existant continue de marcher). */
 async function ouVide<T>(lecture: Promise<T>, vide: T): Promise<T> {
@@ -81,6 +82,7 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
         if (TABLES_0004.includes(table)) throw new ErreurMigrationManquante(table, '0004_programme.sql')
         if (TABLES_0005.includes(table)) throw new ErreurMigrationManquante(table, '0005_sessions_revoquees.sql')
         if (TABLES_0006.includes(table)) throw new ErreurMigrationManquante(table, '0006_tentatives_auth.sql')
+        if (TABLES_0007.includes(table)) throw new ErreurMigrationManquante(table, '0007_relances.sql')
       }
       throw new Error(`Supabase (${table}) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
     }
@@ -266,6 +268,28 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       )
     },
     effacerTentativesAuth: async (cle) => void (await ok('tentatives_auth', sb.from('tentatives_auth').delete().eq('cle', cle))),
+
+    // ---- Relances (0007_relances.sql) : tant que la migration manque, le journal se lit vide et aucun envoi ne part ----
+    ajouterEnvoi: async (e) =>
+      void (await ok(
+        'envois',
+        sb.from('envois').insert({ id: e.id, commerce_id: e.commerceId, client_id: e.clientId, modele: e.modele, canal: e.canal, statut: e.statut, jour: e.jour, date: e.date, donnees: e }),
+      )),
+    majEnvoi: async (e) => void (await ok('envois', sb.from('envois').update({ statut: e.statut, donnees: e }).eq('id', e.id).eq('commerce_id', e.commerceId))),
+    envois: (commerceId, limite, clientId) => {
+      let requete = sb.from('envois').select('donnees').eq('commerce_id', commerceId)
+      if (clientId) requete = requete.eq('client_id', clientId)
+      return ouVide(lire<EnvoiRelance>('envois', requete.order('date', { ascending: false }).limit(limite)), [])
+    },
+    schemaRelances: async () => {
+      try {
+        await ok('envois', sb.from('envois').select('*').limit(0))
+        return true
+      } catch (e) {
+        if (e instanceof ErreurMigrationManquante) return false
+        throw e
+      }
+    },
 
     /** PAS de « tout ou rien » (voir l'en-tête du fichier) : verrou optimiste sur les lignes lues pendant `fn`. */
     transaction: (fn) => versions.run(new Map(), async () => fn()),

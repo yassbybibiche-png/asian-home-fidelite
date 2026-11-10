@@ -1,5 +1,17 @@
 // Adaptateur SMS Twilio (API REST « Messages »). Prêt, jamais exécuté contre Twilio : aucune clé configurée.
+import { createHmac } from 'node:crypto'
 import type { Adaptateur, Message } from './index.ts'
+
+/**
+ * Signature d'une requête webhook Twilio (en-tête X-Twilio-Signature, doc Twilio « Webhooks security ») :
+ * HMAC-SHA1 (clé : jeton d'authentification) de l'URL complète suivie des paramètres POST triés par nom (nom + valeur
+ * concaténés, sans séparateur), en base64.
+ */
+export function signatureTwilio(authToken: string, url: string, params: URLSearchParams): string {
+  const noms = [...new Set(params.keys())].sort()
+  const donnees = url + noms.map((n) => params.getAll(n).map((v) => n + v).join('')).join('')
+  return createHmac('sha1', authToken).update(donnees, 'utf8').digest('base64')
+}
 
 export interface ConfigTwilio {
   accountSid: string

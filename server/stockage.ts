@@ -4,7 +4,7 @@
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Avis, Client, Commerce, DemandeRattrapage, EntreeJournal, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
+import type { Avis, Client, Commerce, DemandeRattrapage, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
 import { cleContact } from '../src/lib/fidelite.ts'
 
 export interface Pin {
@@ -109,6 +109,17 @@ export interface Stockage {
   tentativesAuth(cle: string): P<TentativesAuth | undefined>
   enregistrerTentativesAuth(t: TentativesAuth, purgerAvant: string): P<void>
   effacerTentativesAuth(cle: string): P<void>
+  /**
+   * Journal des envois de relances (migration 0007 : `envois`). Index unique (commerce, client, modèle, jour) sur les
+   * lignes `en_cours` / `envoye` : une 2e réservation de la même relance le même jour lève ErreurConflit.
+   * Supabase sans la table : `ajouterEnvoi` / `majEnvoi` lèvent ErreurMigrationManquante, `envois` renvoie [].
+   */
+  ajouterEnvoi(e: EnvoiRelance): P<void>
+  majEnvoi(e: EnvoiRelance): P<void>
+  /** Du plus récent au plus ancien ; `clientId` : ceux de ce client seulement. */
+  envois(commerceId: string, limite: number, clientId?: string): P<EnvoiRelance[]>
+  /** Table de la migration 0007 présente (toujours vrai sous SQLite). */
+  schemaRelances(): P<boolean>
   /** Pas d'imbrication. SQLite : vraie transaction. Supabase : voir `stockage-supabase.ts` (pas de transaction multi-requêtes). */
   transaction<T>(fn: () => P<T>): Promise<T>
   fermer(): P<void>
@@ -179,6 +190,13 @@ const SCHEMA = `
     cle TEXT PRIMARY KEY, portee TEXT NOT NULL, echecs INTEGER NOT NULL, bloque_jusqu_a TEXT, derniere_tentative TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS tentatives_auth_derniere ON tentatives_auth (derniere_tentative);
+  CREATE TABLE IF NOT EXISTS envois (
+    id TEXT PRIMARY KEY, commerce_id TEXT NOT NULL, client_id TEXT NOT NULL, modele TEXT NOT NULL, canal TEXT NOT NULL,
+    statut TEXT NOT NULL, jour TEXT NOT NULL, date TEXT NOT NULL, donnees TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS envois_un_par_jour ON envois (commerce_id, client_id, modele, jour) WHERE statut IN ('en_cours', 'envoye');
+  CREATE INDEX IF NOT EXISTS envois_commerce ON envois (commerce_id, date);
+  CREATE INDEX IF NOT EXISTS envois_client ON envois (commerce_id, client_id, date);
 `
 
 type Ligne = { donnees: string }
@@ -236,6 +254,10 @@ export function ouvrirStockage(fichier: string) {
     ),
     purgerTentativesAuth: db.prepare('DELETE FROM tentatives_auth WHERE derniere_tentative < ? AND (bloque_jusqu_a IS NULL OR bloque_jusqu_a < ?)'),
     effacerTentativesAuth: db.prepare('DELETE FROM tentatives_auth WHERE cle = ?'),
+    ajoutEnvoi: db.prepare('INSERT INTO envois (id, commerce_id, client_id, modele, canal, statut, jour, date, donnees) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    majEnvoi: db.prepare('UPDATE envois SET statut = ?, donnees = ? WHERE id = ? AND commerce_id = ?'),
+    envois: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
+    envoisClient: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? AND client_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
   }
 
   // Les transactions peuvent contenir des `await` (contrat commun avec Supabase) : elles passent une par une
@@ -307,6 +329,11 @@ export function ouvrirStockage(fichier: string) {
       q.majTentativesAuth.run(t.cle, t.portee, t.echecs, t.bloqueJusqua, t.derniereTentative)
     },
     effacerTentativesAuth: (cle: string) => void q.effacerTentativesAuth.run(cle),
+    ajouterEnvoi: (e: EnvoiRelance) => inserer(q.ajoutEnvoi, e.id, e.commerceId, e.clientId, e.modele, e.canal, e.statut, e.jour, e.date, JSON.stringify(e)),
+    majEnvoi: (e: EnvoiRelance) => inserer(q.majEnvoi, e.statut, JSON.stringify(e), e.id, e.commerceId),
+    envois: (commerceId: string, limite: number, clientId?: string) =>
+      lire<EnvoiRelance>(clientId ? q.envoisClient.all(commerceId, clientId, limite) : q.envois.all(commerceId, limite)),
+    schemaRelances: () => true,
 
     /** Exécute `fn` d'un bloc : tout est écrit, ou rien. */
     transaction<T>(fn: () => T | Promise<T>): Promise<T> {
