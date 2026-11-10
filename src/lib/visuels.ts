@@ -18,17 +18,17 @@ export const VISUELS = {
   heroPlats: '/visuels/hero-plats.jpg',
   /** Table dressée : bao buns, plateau de sushis, cocktails. */
   tableSushis: '/visuels/table-sushis.jpg',
-  /** Cocktails signature Koh Samui / Tokyo / Piña Colada. */
+  /** Cocktails signature Kohsamui / Tokyo / Piña Colada. */
   cocktails: '/visuels/cocktails.jpg',
   /** Salle du restaurant : plafond d'ombrelles, tables dressées, sans personne. */
   interieur: '/visuels/interieur.jpg',
   /** Rouleau de sushis sur ardoise. */
   sushisArdoise: '/visuels/sushis-ardoise.jpg',
-  /** Makis sur ardoise, filigrane ASIAN HOME (8 Maki Dragon / 8 Maki Tiger). */
+  /** Makis sur ardoise, filigrane ASIAN HOME (8 Maki Chicken Dragon / 8 Maki Tiger). */
   menuMakis: '/visuels/menu-makis.jpg',
   /** Loc Lac : bœuf caramélisé, riz rouge, œuf au plat. */
   menuLocLac: '/visuels/menu-loc-lac.jpg',
-  /** Nouilles sautées aux crevettes — rattachée à « Mi Prat » (identification probable, voir docs/MENU-REEL.md). */
+  /** Nouilles sautées aux crevettes — rattachée à « Mi Prat » (identification probable, voir docs/MENU-OFFICIEL-2026-11-10.md ; à remplacer par la photo légendée du PDF, lot B2). */
   menuNouillesCrevettes: '/visuels/menu-nouilles-crevettes.jpg',
   /** Mango sticky rice : mangue et riz gluant coco (Mango Stick). */
   menuMangoStickyRice: '/visuels/menu-mango-sticky-rice.jpg',
@@ -80,7 +80,7 @@ export function photoCategorie(nom: string): PhotoCategorie | null {
     return { src: VISUELS.sushisArdoise, alt: 'Rouleau de sushis sur ardoise' }
   }
   if (n.includes('boisson') || n.includes('cocktail')) {
-    return { src: VISUELS.cocktails, alt: 'Cocktails signature : Koh Samui, Tokyo et Piña Colada' }
+    return { src: VISUELS.cocktails, alt: 'Cocktails signature : Kohsamui, Tokyo et Piña Colada' }
   }
   if (n.includes('thaï') || n.includes('thai')) {
     // Plat thaï non identifié précisément : illustre la catégorie, jamais un plat nommé.

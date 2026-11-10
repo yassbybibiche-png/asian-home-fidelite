@@ -4,7 +4,7 @@ import { useRoute } from '../router'
 import type { CommercePublic, Menu } from '../types'
 import { ErreurApi } from '../data/api'
 import { formaterPrix } from '../lib/points'
-import { filtrerMenu } from '../lib/menu'
+import { bandeauPrixManquants, filtrerMenu } from '../lib/menu'
 import { LogoCommerce } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
 import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
@@ -58,12 +58,13 @@ function MenuAffiche({
   ouvert: string | null
   setOuvert: (s: string | null) => void
 }) {
-  // Menu enregistré vide chez Asian Home : on affiche la vraie carte du restaurant
-  // (relevée sur Uber Eats, prix non vérifiés → « Prix sur place »). Dès que le
-  // commerçant enregistre son propre menu, c'est le sien qui s'affiche.
+  // Menu enregistré vide chez Asian Home : on affiche la carte officielle du restaurant
+  // (relevée le 10/11/2026, avec ses prix ; les 3 plats hors carte restent « Prix sur place »).
+  // Dès que le commerçant enregistre son propre menu, c'est le sien qui s'affiche.
   const menuEnregistre = menu.categories.some((c) => c.produits.length > 0)
   const repliReel = !menuEnregistre && estAsianHome(commerce)
   const menuAffiche = useMemo(() => (repliReel ? menuReelAsianHome() : menu), [repliReel, menu])
+  const bandeauPrix = useMemo(() => bandeauPrixManquants(menuAffiche), [menuAffiche])
   const categories = useMemo(
     () => filtrerMenu(menuAffiche.categories.filter((c) => c.produits.length), recherche),
     [menuAffiche, recherche],
@@ -90,11 +91,7 @@ function MenuAffiche({
         />
       )}
 
-      {repliReel && (
-        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
-          Carte du restaurant — les prix ne sont pas encore renseignés dans l’app : ils sont affichés sur place.
-        </p>
-      )}
+      {bandeauPrix && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">{bandeauPrix}</p>}
 
       {categories.length === 0 && !recherche ? (
         <MessagePublic titre="Menu à venir">Le commerce n’a pas encore publié son menu.</MessagePublic>
