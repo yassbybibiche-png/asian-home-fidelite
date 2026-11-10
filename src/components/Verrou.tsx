@@ -5,7 +5,8 @@ import { BadgeDemo, LogoCommerce } from './ui'
 
 /**
  * Mode API : écran de déverrouillage des pages commerçant. PIN commerce (4-6 chiffres) ou PIN admin.
- * Le PIN n'est jamais affiché (champ masqué) ; il est mémorisé chiffré pour la durée de l'onglet.
+ * Le PIN n'est jamais affiché (champ masqué) ; il est échangé contre un jeton de session (gardé chiffré pour la durée
+ * de l'onglet) — ou, si le serveur n'ouvre pas de session, mémorisé chiffré comme avant.
  */
 export function Verrou() {
   const { etat, deverrouiller, recharger, connexion, erreurConnexion } = useStore()
@@ -116,8 +117,8 @@ export function Verrou() {
           {enCours ? 'Vérification…' : 'Déverrouiller'}
         </button>
         <p className="text-xs text-gray-500">
-          Le PIN reste mémorisé tant que cet onglet est ouvert (chiffré, jamais en clair). « Verrouiller » l’efface, ainsi que les données clients gardées
-          sur cet appareil.
+          Le PIN est vérifié une fois puis remplacé par une session de 8 h, gardée chiffrée tant que cet onglet est ouvert. « Verrouiller » ferme la
+          session et efface les données clients gardées sur cet appareil.
         </p>
       </form>
     </div>

@@ -22,6 +22,7 @@ import { ErreurConflit, ErreurMigrationManquante, type DemandeRattrapageTrace, t
 
 const TABLES_0003 = ['equipe', 'journal', 'menus']
 const TABLES_0004 = ['parrainages', 'demandes_rattrapage']
+const TABLES_0005 = ['sessions_revoquees']
 
 /** Lecture d'une table de la migration 0003 : vide tant que la migration n'est pas appliquée (l'existant continue de marcher). */
 async function ouVide<T>(lecture: Promise<T>, vide: T): Promise<T> {
@@ -72,8 +73,12 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     const { data, error } = await requete
     if (error) {
       if (error.code === '23505') throw new ErreurConflit(`Doublon refusé par la base (${table}) : ${error.message}`)
-      // Table inconnue (PostgREST : PGRST205 ; Postgres : 42P01) → migration 0003 / 0004 pas encore appliquée.
-      if ((TABLES_0003.includes(table) || TABLES_0004.includes(table)) && (error.code === 'PGRST205' || error.code === '42P01')) throw new ErreurMigrationManquante(table)
+      // Table inconnue (PostgREST : PGRST205 ; Postgres : 42P01) → migration 0003 / 0004 / 0005 pas encore appliquée.
+      if (error.code === 'PGRST205' || error.code === '42P01') {
+        if (TABLES_0003.includes(table)) throw new ErreurMigrationManquante(table)
+        if (TABLES_0004.includes(table)) throw new ErreurMigrationManquante(table, '0004_programme.sql')
+        if (TABLES_0005.includes(table)) throw new ErreurMigrationManquante(table, '0005_sessions_revoquees.sql')
+      }
       throw new Error(`Supabase (${table}) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
     }
     return data as T
@@ -211,6 +216,19 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
         throw e
       }
     },
+
+    // ---- Sessions (0005_sessions_revoquees.sql) : tant que la migration manque, le serveur révoque en mémoire ----
+    revoquerSession: async (jti, expireLe, maintenant) => {
+      try {
+        await ok('sessions_revoquees', sb.from('sessions_revoquees').delete().lt('expire_le', maintenant))
+      } catch (err) {
+        if (err instanceof ErreurMigrationManquante) throw err
+        console.warn(`[stockage] nettoyage des sessions révoquées reporté : ${err instanceof Error ? err.message : err}`)
+      }
+      await ok('sessions_revoquees', sb.from('sessions_revoquees').upsert({ jti, expire_le: expireLe }, { onConflict: 'jti', ignoreDuplicates: true }))
+    },
+    sessionRevoquee: async (jti) =>
+      (await ouVide(ok<unknown[]>('sessions_revoquees', sb.from('sessions_revoquees').select('jti').eq('jti', jti)), [])).length > 0,
 
     /** PAS de « tout ou rien » (voir l'en-tête du fichier) : verrou optimiste sur les lignes lues pendant `fn`. */
     transaction: (fn) => versions.run(new Map(), async () => fn()),

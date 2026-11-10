@@ -54,6 +54,7 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `PORT` | `3001` | Port HTTP. |
 | `ADMIN_PIN` | dev : `000000` ; **production : obligatoire** | PIN admin (création de commerces, accès à tous les commerces, réinitialisation d'un PIN). En production : 8 à 12 chiffres, pas tous identiques, sinon refus de démarrer. |
 | `PIN_ASIAN_HOME` | dev : `1234` ; **production : obligatoire au 1er démarrage** | PIN commerçant (4 à 6 chiffres) donné à Asian Home Paris lors de la création de la base. Ignoré ensuite (le changer via `PUT /pin`). |
+| `SESSION_SECRET` | dev : secret éphémère (avertissement) ; **production : à créer** | **P0-S1.** Secret de signature (HMAC-SHA256) des jetons de session, 32 caractères minimum (ex. `openssl rand -base64 48`). Absente en production : le serveur **démarre quand même** (avertissement dans les journaux), `POST /sessions` répond 503 et le front reste sur le PIN en en-tête. Trop courte en production : refus de démarrer. La changer ferme toutes les sessions ouvertes. |
 | `NODE_ENV` | — | `production` active le mode production. Sur Render, la variable `RENDER` (posée par Render) l'active aussi. |
 | `DB_FILE` | `data/fidelite.db` | Chemin du fichier SQLite. |
 | `DEMO` | `0` | `1` = ajoute aussi les 2 commerces de démo (Atelier Coiff' Camille, Maison Lila) avec leurs données fictives, marqués `demo: true`. |
@@ -99,7 +100,7 @@ secrète correspond au rôle `service_role`, qui contourne la RLS). Libellés ex
 
 **Schéma** (`supabase/migrations/0001_schema_initial.sql`, rejouable) : tables `meta`, `commerces`, `clients`, `tirages`, `avis` ;
 objets métier en JSONB `donnees` (forme de `src/types.ts`, inchangée) ; colonnes `commerce_id`, `client_id`, `cle_contact`, `date`
-(timestamptz) ; PIN en `pin_hash` + `pin_sel` (SHA-256 + sel, jamais en clair) ; unique `(commerce_id, cle_contact)` ;
+(timestamptz) ; PIN en `pin_hash` + `pin_sel` (scrypt + sel depuis P0-S1, SHA-256 + sel avant ; jamais en clair) ; unique `(commerce_id, cle_contact)` ;
 index `tirages (commerce_id, client_id)` et `avis (commerce_id, date)` ; **index unique 1 tirage par client et par jour**
 `(commerce_id, client_id, jour à Europe/Paris)` ; colonne `version` incrémentée par trigger (verrou optimiste).
 
@@ -200,6 +201,8 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 
 | Méthode et chemin | Accès | Effet |
 |---|---|---|
+| `POST /sessions` | PIN / code dans le corps | **P0-S1.** `{ role: 'commerce', commerceId, pin }`, `{ role: 'admin', pin }` ou `{ role: 'equipe', commerceId, code }` → 201 `{ jeton, role, commerceId?, membreNom?, expireLe }`. Même anti-bruteforce que les en-têtes (401 / 429), re-hachage scrypt au passage. 503 si `SESSION_SECRET` absente. |
+| `DELETE /sessions` | `X-Session` | **P0-S1.** Révoque le jeton (« Verrouiller ») → `{ ok: true }` ; idempotent ; 401 si jeton absent ou falsifié. |
 | `GET /sante` | public | `{ ok, version, mode, stockage, demo, integrations }` — `integrations` (V3) : `{ googleWallet, appleWallet: 'en_suspens', googleBusinessProfile, sms, email }`, chacun `false` tant que rien n'est configuré. |
 | `GET /commerces` | public | Fiches publiques (jamais de PIN ni de hash). |
 | `GET /commerces/:id` | public | Une fiche publique. |
@@ -233,8 +236,34 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `GET /commerces/:id/etat` (complément) | commerçant | Aussi `membres` (sans code) et `journal` (200 dernières actions). Les clients n'y ont plus leur boîte de réception (egress). |
 | `POST /commerces/:id/clients/:clientId/relance` | commerçant | **V3, à brancher.** `{ canal: 'sms' \| 'email', message? }`. **501** sans prestataire (cas actuel), rien n'est envoyé. Configuré : 409 si le client n'a pas `consentementRelance: true` (aucun écran ne le recueille encore) ou n'a pas le contact demandé ; sinon envoi du message de relance + mention de désinscription. |
 
-Accès « commerçant » = en-tête `X-Commerce-PIN` du commerce, **ou** `X-Admin-PIN` (l'admin ouvre tous les commerces).
-Accès « code équipe » = en-tête `X-Equipe-Code` (4 chiffres d'un membre de l'équipe de ce commerce).
+Accès « commerçant » = en-tête `X-Session` (jeton `commerce` de ce commerce ou `admin`), **ou** en repli `X-Commerce-PIN`
+du commerce, **ou** `X-Admin-PIN` (l'admin ouvre tous les commerces).
+Accès « code équipe » = `X-Session` (jeton `equipe` de ce commerce) **ou** en repli `X-Equipe-Code` (4 chiffres d'un membre).
+`X-Session`, s'il est présent, décide seul : jeton falsifié / expiré / révoqué → 401 ; valide mais hors de sa portée (autre
+commerce, session équipe sur une route gérant, session commerce sur une route admin) → 403. Le PIN en en-tête reste
+accepté pour la compatibilité (à déprécier quand tous les clients auront basculé).
+
+### Jetons de session (P0-S1)
+
+- Forme : `v1.<base64url(JSON)>.<base64url(HMAC-SHA256(SESSION_SECRET, <base64url(JSON)>))>`, contenu
+  `{ jti (uuid), role, commerceId?, membreId?, nom?, exp (secondes unix) }`. Signé, **pas chiffré** : rien de secret dedans
+  (ni PIN ni code). Vérification de la signature à temps constant, puis expiration, puis révocation.
+- Durées : gérant et admin 8 h, équipe (caisse) 12 h. Pas de renouvellement : à l'expiration, le front redemande le PIN / code.
+- Révocation : `DELETE /sessions` → mémoire du processus + table `sessions_revoquees` (migration 0005 : `jti`, `expire_le`) ;
+  les révocations expirées sont supprimées au passage. Sans la table (0005 pas appliquée) : révocation en mémoire
+  seulement (perdue au redémarrage — le jeton expire de toute façon), aucune erreur. Un « non révoqué » lu en base est
+  gardé 5 min en mémoire (Render = 1 instance, et toute révocation passe d'abord par la mémoire).
+- Membre retiré de l'équipe → sa session tombe aussitôt (le membre est relu à chaque requête). Limite : changer un PIN
+  ou un code ne ferme **pas** les sessions déjà ouvertes (elles expirent en 8 h / 12 h ; « Verrouiller » les ferme).
+- Front : le PIN / code n'est envoyé qu'à `POST /sessions` ; le jeton est gardé dans le coffre chiffré de l'onglet
+  (`src/data/coffrePin.ts`). 503 / ancien serveur / réseau → repli transparent sur le PIN en en-tête, comme avant.
+
+### Migration 0005 (révocation des sessions) — à appliquer en production
+
+Facultative pour que tout marche (le serveur tolère son absence), nécessaire pour que « Verrouiller » survive à un
+redémarrage du serveur. Supabase → **SQL Editor** → coller `supabase/migrations/0005_sessions_revoquees.sql` → **Run**
+(rejouable). Vérifier : `select relname, relrowsecurity from pg_class where relname = 'sessions_revoquees';` → 1 ligne,
+`true`. Annulation : `0005_sessions_revoquees.down.sql` (supprime la table ; sans effet sur les données métier).
 
 ### Migration 0003 (modules caisse / points / équipe / messages / menu) — à appliquer en production
 
@@ -257,15 +286,25 @@ curl -s -X POST localhost:3001/api/v1/commerces/c-asian-home-paris/tirages -H 'C
 
 ## Sécurité (minimale, assumée)
 
-- PIN commerçant : 4 à 6 chiffres, stocké en **SHA-256 + sel aléatoire** (jamais en clair, jamais renvoyé),
-  comparaison à temps constant.
+- PIN commerçant (4 à 6 chiffres), PIN admin et codes équipe : hachés en **scrypt** (`node:crypto`, aucune dépendance) —
+  sel aléatoire 16 octets, N = 16384, r = 8, p = 1, clé de 64 octets, maxmem 64 Mo (≈ 46 ms par vérification) ; jamais en
+  clair, jamais renvoyés ; comparaison à temps constant. Le PIN admin (variable d'environnement) est haché en mémoire au démarrage.
+- **Format du hash, sans colonne en plus** (P0-S1) : le format est encodé dans la valeur de `pin_hash` / `code_hash`
+  elle-même, pour éviter une migration de schéma. `scrypt$v1$<128 hex>` = scrypt (format actuel) ; 64 caractères hexadécimaux
+  nus = ancien SHA-256(`<sel>:<PIN>`) à 1 itération. Les deux sont acceptés (`pinCorrect`, `server/app.ts`) ; un hash
+  ancien format est **re-haché en scrypt au premier accès réussi** (en-tête ou `POST /sessions`) et réécrit en base, au
+  mieux : un échec d'écriture est journalisé et ne fait jamais échouer l'accès (réessayé au suivant). Un PIN jamais
+  utilisé reste en SHA-256 jusqu'à son prochain usage. `v1` permettra de changer les paramètres plus tard sans ambiguïté.
+- **Sessions** : le PIN n'est plus envoyé à chaque requête par le front, seulement échangé une fois contre un jeton
+  court (voir « Jetons de session » plus haut).
 - **Anti-bruteforce** (en mémoire) : 10 PIN faux en 10 minutes depuis la même IP → 429 pendant 10 minutes,
-  même avec le bon PIN. Remis à zéro à chaque redémarrage du serveur. Les routes publiques ne sont pas bloquées.
-- Limite honnête : un PIN de 4 à 6 chiffres haché en SHA-256 se retrouve en quelques secondes **si la base fuit** (fichier
-  SQLite, ou table `commerces` / clé secrète Supabase). La protection repose sur le fait que la base n'est accessible qu'au
-  serveur (RLS + clé secrète uniquement chez Render), et en ligne sur l'anti-bruteforce.
+  même avec le bon PIN (en-têtes et `POST /sessions` confondus). Remis à zéro à chaque redémarrage du serveur. Les routes publiques ne sont pas bloquées.
+- Limite honnête : scrypt coûte ≈ 46 ms par essai (mesuré le 10/11/2026 sur la machine de dev) contre quelques µs pour
+  l'ancien SHA-256, mais un PIN de 4 chiffres n'a que 10 000 valeurs : **si la base fuit**, il reste trouvable (≈ 8 min
+  de calcul par PIN sur un cœur, au lieu d'une fraction de seconde). La protection principale reste que la base n'est
+  accessible qu'au serveur (RLS + clé secrète uniquement chez Render).
 - Le tirage est entièrement décidé par le serveur : le navigateur n'envoie qu'un contact, jamais un lot.
-- HTTPS : fourni par l'hébergeur (Render le fait d'office). Ne pas exposer le serveur en HTTP simple sur Internet (les PIN passent dans les en-têtes).
+- HTTPS : fourni par l'hébergeur (Render le fait d'office). Ne pas exposer le serveur en HTTP simple sur Internet (jetons et PIN passent dans les en-têtes).
 
 ## Mise en production : Supabase (base) + Render Free (serveur) — aucun déploiement n'a été fait
 
@@ -347,12 +386,14 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
    **Frankfurt**, build `npm ci && npm run build:api` (front en mode API, servi à la même adresse que l'API), start
    `npm run serveur`, contrôle de santé `/api/v1/sante`, `NODE_VERSION=24`. Si le fichier contient une erreur, la page
    l'affiche à la place (il est validé par `npm test`, donc ça ne devrait pas arriver).
-4. Render demande alors les **4 secrets** (`sync: false` dans `render.yaml` ; ils ne sont **jamais** dans le dépôt) :
+4. Render demande alors les **secrets** (`sync: false` dans `render.yaml` ; ils ne sont **jamais** dans le dépôt) :
    - `SUPABASE_URL` = l'URL de l'étape c (`https://<ref>.supabase.co`)
    - `SUPABASE_SERVICE_ROLE_KEY` = la clé secrète de l'étape c (`sb_secret_…`)
    - `ADMIN_PIN` = un PIN de **8 à 12 chiffres**, pas tous identiques, choisi par vous (gardez-le pour vous)
    - `PIN_ASIAN_HOME` = le PIN **4 à 6 chiffres** que vous donnerez au restaurant (lu au **premier** démarrage seulement ;
      ensuite on le change dans l'app)
+   - `SESSION_SECRET` (P0-S1, 5e secret) = une chaîne aléatoire d'au moins 32 caractères (`openssl rand -base64 48`).
+     Service **déjà créé** : Render ne la demande pas — l'ajouter à la main dans **Environment** (voir ⚠️ ci-dessous).
    Puis **Deploy Blueprint** (libellé de la doc Render du 09/11/2026 ; le brief disait « Apply » — prendre le bouton de
    validation affiché). Rien d'autre à saisir : `PORT`, `RENDER` et `NODE_ENV=production` (au démarrage seulement, pas au
    build — donc `npm ci` installe bien TypeScript et Vite) sont posés par Render ; `TZ`, `TRUST_PROXY` et le mode production
@@ -361,7 +402,7 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
    **Environment** → modifier → enregistrer (Render redéploie ; sinon **Manual Deploy**). Si Render réclame une carte
    bancaire ou propose un plan payant : **ne pas valider** — vérifier que le plan affiché est bien *Free* (à confirmer à l'écran).
    *Sans Blueprint* (secours) : **New** → **Web Service** → même dépôt → Language **Node**, Branch `master`, Region
-   **Frankfurt**, les mêmes Build / Start Commands, Instance Type **Free**, et les 5 variables (`NODE_VERSION=24` + les 4
+   **Frankfurt**, les mêmes Build / Start Commands, Instance Type **Free**, et les 6 variables (`NODE_VERSION=24` + les 5
    secrets) dans *Environment Variables* → **Create Web Service**.
 5. Attendre « Live » (premier build : quelques minutes). Journaux attendus : « mode production · base Supabase
    <ref>.supabase.co » — l'hôte seulement, jamais la clé. Le serveur refuse de démarrer (et le déploiement échoue au

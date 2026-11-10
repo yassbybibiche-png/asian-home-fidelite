@@ -5,6 +5,7 @@
 // même sur un hébergeur réglé en UTC. À fixer avant toute manipulation de date.
 process.env.TZ ||= 'Europe/Paris'
 
+import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import pkg from '../package.json' with { type: 'json' }
@@ -29,6 +30,22 @@ if (!adminPin) {
 if (!/^\d{4,12}$/.test(adminPin)) arreter('ADMIN_PIN doit contenir 4 à 12 chiffres.')
 if (production && (adminPin.length < 8 || /^(\d)\1+$/.test(adminPin))) arreter('ADMIN_PIN trop simple pour la production : 8 chiffres minimum, pas tous identiques.')
 
+// Jetons de session (P0-S1). Absent en production : on démarre QUAND MÊME (sinon le déploiement casserait avant que
+// la variable soit créée sur Render) — POST /api/v1/sessions répond 503 et le front reste sur le PIN en en-tête.
+let secretSession = env.SESSION_SECRET?.trim() || undefined
+if (secretSession && secretSession.length < 32) {
+  if (production) arreter('SESSION_SECRET trop court : 32 caractères minimum (ex. `openssl rand -base64 48`).')
+  console.warn('[serveur] SESSION_SECRET court (< 32 caractères) : acceptable en développement seulement.')
+}
+if (!secretSession) {
+  if (production) {
+    console.warn('[serveur] SESSION_SECRET absente : jetons de session DÉSACTIVÉS (POST /api/v1/sessions → 503), le PIN en en-tête reste utilisé. Créez la variable sur Render.')
+  } else {
+    secretSession = randomBytes(32).toString('base64url')
+    console.warn('[serveur] SESSION_SECRET absente : secret de session ÉPHÉMÈRE de développement (les sessions tombent à chaque redémarrage).')
+  }
+}
+
 let pinInitial = env.PIN_ASIAN_HOME
 if (!pinInitial && !production) pinInitial = '1234'
 
@@ -45,6 +62,7 @@ try {
     supabase,
     adminPin,
     pinInitial,
+    secretSession,
     demo: env.DEMO === '1',
     production,
     derriereProxy: env.TRUST_PROXY === '1' || !!env.RENDER,

@@ -1,12 +1,19 @@
-// Mémorise le PIN pour la durée de l'onglet (sessionStorage), JAMAIS en clair :
-// sessionStorage ne contient que le PIN chiffré (AES-GCM) ; la clé est une CryptoKey NON exportable,
+// Mémorise l'accès pour la durée de l'onglet (sessionStorage), JAMAIS en clair :
+// sessionStorage ne contient que l'accès chiffré (AES-GCM) ; la clé est une CryptoKey NON exportable,
 // rangée dans IndexedDB (elle ne peut pas être lue, seulement utilisée par cette page).
-// Fermer l'onglet efface le PIN chiffré ; « Verrouiller » efface le PIN chiffré ET la clé.
+// Fermer l'onglet efface l'accès chiffré ; « Verrouiller » efface l'accès chiffré ET la clé.
+//
+// Deux formes acceptées (toute autre forme est rejetée à la lecture) :
+// • { jeton } : jeton de session (P0-S1) — le cas normal, le PIN / code n'est plus gardé du tout ;
+// • { pin } : PIN (ou code équipe, pour la caisse) — repli quand le serveur ne délivre pas de session.
 //
 // Limite honnête : un script exécuté dans la page (faille XSS) pourrait utiliser la clé pour déchiffrer.
 // Sans WebCrypto (page servie en http:// hors localhost) ou sans IndexedDB, rien n'est mémorisé :
-// le PIN reste en mémoire et sera redemandé au prochain rechargement.
-import type { Acces } from './api'
+// l'accès reste en mémoire et sera redemandé au prochain rechargement.
+import type { Acces, AccesEquipe } from './api'
+
+/** Ce que le coffre sait garder : accès gérant / admin (PIN ou jeton), ou session équipe de la caisse. */
+export type ContenuCoffre = Acces | AccesEquipe
 
 type Stockage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
@@ -19,9 +26,18 @@ export interface RangementCle {
 const enBase64 = (o: ArrayBuffer | Uint8Array) => btoa(String.fromCharCode(...new Uint8Array(o instanceof Uint8Array ? o : new Uint8Array(o))))
 const deBase64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 
-function estAcces(x: unknown): x is Acces {
-  const a = x as Acces
-  return !!a && typeof a.pin === 'string' && /^\d{4,12}$/.test(a.pin) && (a.role === 'admin' || (a.role === 'commerce' && typeof a.commerceId === 'string'))
+const JETON = /^v1\.[\w-]+\.[\w-]+$/
+
+function estContenu(x: unknown): x is ContenuCoffre {
+  if (!x || typeof x !== 'object') return false
+  const a = x as Record<string, unknown>
+  const roleOk = a.role === 'admin' || ((a.role === 'commerce' || a.role === 'equipe') && typeof a.commerceId === 'string')
+  if (!roleOk) return false
+  const avecPin = typeof a.pin === 'string' && /^\d{4,12}$/.test(a.pin)
+  const avecJeton = typeof a.jeton === 'string' && JETON.test(a.jeton)
+  // Exactement une preuve ; le PIN ne vaut que pour commerce / admin.
+  if (avecPin) return a.jeton === undefined && a.role !== 'equipe'
+  return avecJeton && a.pin === undefined
 }
 
 export function creerCoffrePin(
@@ -43,8 +59,8 @@ export function creerCoffrePin(
 
   return {
     disponible,
-    async memoriser(acces: Acces): Promise<boolean> {
-      if (!disponible) return false
+    async memoriser(acces: ContenuCoffre): Promise<boolean> {
+      if (!disponible || !estContenu(acces)) return false
       try {
         const k = await cle(true)
         const iv = globalThis.crypto.getRandomValues(new Uint8Array(12))
@@ -55,7 +71,7 @@ export function creerCoffrePin(
         return false
       }
     },
-    async lire(): Promise<Acces | null> {
+    async lire(): Promise<ContenuCoffre | null> {
       if (!disponible) return null
       try {
         const brut = session!.getItem(CLE_SESSION)
@@ -65,7 +81,7 @@ export function creerCoffrePin(
         if (!k) return null
         const clair = await subtle!.decrypt({ name: 'AES-GCM', iv: deBase64(iv) }, k, deBase64(donnees))
         const acces: unknown = JSON.parse(new TextDecoder().decode(clair))
-        return estAcces(acces) ? acces : null
+        return estContenu(acces) ? acces : null
       } catch {
         return null
       }

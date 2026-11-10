@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { MESSAGE_MODE_SERVEUR, messageErreur, useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, EntreeJournal } from '../types'
-import { ErreurApi, type ClientApi } from '../data/api'
+import { echangerContreSession, ErreurApi, type AccesCaisse, type ClientApi } from '../data/api'
 import { creerCoffrePin, rangementIndexedDb } from '../data/coffrePin'
 import { recompenseDebloquee, tamponsAffiches } from '../lib/fidelite'
 import { analyserMontant, formaterPrix, passageCeJour, pointsPourMontant, soldePoints } from '../lib/points'
@@ -44,13 +44,16 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
   const file = useMemo(() => creerFileCaisse(stockage('localStorage'), `fidelite:caisse:file:v1:${commerceId}`), [commerceId])
   const cleCache = `fidelite:caisse:cache:v1:${commerceId}`
 
-  const [code, setCode] = useState<string | null>(null)
+  // Accès de la caisse : session équipe (jeton, cas normal) ou code équipe (repli : serveur sans sessions).
+  // Hors ligne, l'accès mémorisé reste utilisable tel quel : les actions vont dans la file, rien n'est vérifié
+  // localement ; un jeton expiré entre-temps sera refusé au retour du réseau (actions gardées, code redemandé).
+  const [acces, setAcces] = useState<AccesCaisse | null>(null)
   const [pret, setPret] = useState(false)
   const [donnees, setDonnees] = useState<Cache | null>(null)
   const [enLigne, setEnLigne] = useState(true)
   const [etatFile, setEtatFile] = useState<EtatFile>(() => file.lire())
   const [erreurAcces, setErreurAcces] = useState<string | null>(null)
-  const codeRef = useRef<string | null>(null)
+  const accesRef = useRef<AccesCaisse | null>(null)
   const reponses = useRef(new Map<string, Client>())
 
   const ecrireCache = useCallback(
@@ -67,20 +70,22 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
   )
 
   const charger = useCallback(
-    async (c = codeRef.current) => {
-      if (!c) return
+    async (a = accesRef.current) => {
+      if (!a) return
       try {
-        const r = await api.caisse(commerceId, { code: c })
+        const r = await api.caisse(commerceId, a)
         ecrireCache({ commerce: r.commerce, clients: r.clients, auteur: r.auteur, synchroLe: new Date().toISOString() })
         setEnLigne(true)
         setErreurAcces(null)
       } catch (e) {
         if (e instanceof ErreurApi && e.horsLigne) setEnLigne(false)
         else if (e instanceof ErreurApi && e.statut === 401) {
-          codeRef.current = null
-          setCode(null)
+          accesRef.current = null
+          setAcces(null)
           await coffre.oublier()
-          setErreurAcces('Code équipe refusé (il a peut-être été changé) : saisissez-le à nouveau.')
+          setErreurAcces(
+            'jeton' in a ? 'Session de caisse expirée ou fermée : saisissez votre code équipe.' : 'Code équipe refusé (il a peut-être été changé) : saisissez-le à nouveau.',
+          )
         } else setErreurAcces(messageErreur(e))
       }
     },
@@ -89,10 +94,10 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
 
   const envoyer = useCallback(
     async (a: ActionCaisse): Promise<Envoi> => {
-      const c = codeRef.current
+      const c = accesRef.current
       if (!c) return { ok: false, reseau: true }
       try {
-        const r = await api.actionCaisse(commerceId, { code: c }, a.type, {
+        const r = await api.actionCaisse(commerceId, c, a.type, {
           clientId: a.clientId,
           actionId: a.id,
           faitLe: a.faitLe,
@@ -102,7 +107,7 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
         reponses.current.set(a.id, r.client)
         return { ok: true }
       } catch (e) {
-        // Réseau coupé, ou code changé entre-temps : l'action reste en file (rien n'est perdu ni compté).
+        // Réseau coupé, code changé ou session expirée entre-temps : l'action reste en file (rien n'est perdu ni compté).
         if (e instanceof ErreurApi && (e.horsLigne || e.statut === 401 || e.statut === 429)) {
           if (e.horsLigne) setEnLigne(false)
           return { ok: false, reseau: true }
@@ -120,7 +125,7 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
     return e
   }, [charger, envoyer, file])
 
-  // Démarrage : code mémorisé (chiffré) pour cet onglet ? Données en cache affichées tout de suite (hors ligne).
+  // Démarrage : session (ou code, en repli) mémorisée chiffrée pour cet onglet ? Données en cache affichées tout de suite (hors ligne).
   useEffect(() => {
     try {
       const brut = stockage('localStorage')?.getItem(cleCache)
@@ -128,10 +133,13 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
     } catch {
       // cache illisible : ignoré
     }
-    void coffre.lire().then((a) => {
-      if (a && a.role === 'commerce' && a.commerceId === commerceId) {
-        codeRef.current = a.pin
-        setCode(a.pin)
+    void coffre.lire().then((lu) => {
+      // Session équipe (jeton) ; ou code équipe chiffré (repli, et format d'avant les sessions : { role: 'commerce', pin: code }).
+      const a: AccesCaisse | null =
+        !lu || lu.role === 'admin' || lu.commerceId !== commerceId ? null : lu.role === 'equipe' ? lu : lu.pin ? { code: lu.pin } : null
+      if (a) {
+        accesRef.current = a
+        setAcces(a)
         void synchroniser()
       }
       setPret(true)
@@ -140,7 +148,7 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
 
   // Retour du réseau, et toutes les 15 s tant que des actions attendent.
   useEffect(() => {
-    if (!code) return
+    if (!acces) return
     const surLigne = () => {
       setEnLigne(true)
       void synchroniser()
@@ -157,17 +165,20 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
       window.removeEventListener('offline', horsLigne)
       window.clearInterval(minuterie)
     }
-  }, [charger, code, file, synchroniser])
+  }, [acces, charger, file, synchroniser])
 
   async function deverrouiller(saisi: string) {
     setErreurAcces(null)
     try {
-      const r = await api.caisse(commerceId, { code: saisi })
-      codeRef.current = saisi
-      setCode(saisi)
+      // Le code part une fois (POST /sessions) contre un jeton de 12 h ; serveur sans sessions : repli sur le code, comme avant.
+      const s = await echangerContreSession(api, { role: 'equipe', commerceId, code: saisi })
+      const a: AccesCaisse = s ? { role: 'equipe', commerceId, jeton: s.jeton, expireLe: s.expireLe, membreNom: s.membreNom } : { code: saisi }
+      const r = await api.caisse(commerceId, a)
+      accesRef.current = a
+      setAcces(a)
       ecrireCache({ commerce: r.commerce, clients: r.clients, auteur: r.auteur, synchroLe: new Date().toISOString() })
       setEnLigne(true)
-      await coffre.memoriser({ role: 'commerce', commerceId, pin: saisi })
+      await coffre.memoriser('jeton' in a ? a : { role: 'commerce', commerceId, pin: saisi })
       void synchroniser()
     } catch (e) {
       setErreurAcces(e instanceof ErreurApi && e.horsLigne ? 'Serveur injoignable : le code équipe doit être vérifié en ligne une première fois.' : messageErreur(e))
@@ -175,8 +186,11 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
   }
 
   async function verrouiller() {
-    codeRef.current = null
-    setCode(null)
+    const a = accesRef.current
+    // Révocation côté serveur, sans attendre (hors ligne : le jeton expirera seul).
+    if (a && 'jeton' in a && a.jeton) void api.fermerSession(a.jeton).catch(() => {})
+    accesRef.current = null
+    setAcces(null)
     await coffre.oublier()
   }
 
@@ -193,7 +207,7 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
   }
 
   if (!pret) return <p className="px-4 py-16 text-center text-gray-600" role="status">Chargement…</p>
-  if (!code) return <Deverrouillage commerce={donnees?.commerce} erreur={erreurAcces} onCode={deverrouiller} attente={etatFile.attente.length} />
+  if (!acces) return <Deverrouillage commerce={donnees?.commerce} erreur={erreurAcces} onCode={deverrouiller} attente={etatFile.attente.length} />
   if (!donnees) return <MessagePublic titre="Caisse">{enLigne ? 'Chargement des clients…' : 'Hors ligne et aucune donnée en mémoire sur cet appareil.'}</MessagePublic>
 
   return (
