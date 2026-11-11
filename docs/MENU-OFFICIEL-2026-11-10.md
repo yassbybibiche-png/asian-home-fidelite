@@ -89,7 +89,11 @@ le menu public, la validation serveur, le CSV et l'éditeur restent inchangés. 
 
 **Aucun allergène n'est indiqué sur la carte officielle** : tous les plats ont `allergenes: []`.
 Rien n'est inventé ; le pied de page de `#/menu` (« Allergènes : demandez conseil à l'équipe en cas
-de doute. ») reste affiché. À compléter par le commerçant (éditeur ou CSV).
+de doute. ») reste affiché. **P1-M2 (11/11/2026) :** tant qu'aucun allergène n'est renseigné, la
+fiche dépliée de chaque plat affiche la mention explicite « Allergènes : demander en caisse »
+(`libelleAllergenes()`, `src/lib/menu.ts`) — jamais « sans allergène ». Dès qu'une liste est
+renseignée, c'est elle qui s'affiche. **À compléter par le commerçant** (éditeur `#/menuCarte` :
+cases à cocher des 14 allergènes UE par plat ; ou CSV, colonne `allergenes`, séparés par `|`).
 
 ## Photos
 

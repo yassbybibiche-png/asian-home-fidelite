@@ -251,6 +251,7 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'sur place': 'on site',
   'Description à venir — demandez conseil à l’équipe.': 'Description coming soon — ask the team for advice.',
   'Allergènes :': 'Allergens:',
+  'Allergènes : demander en caisse': 'Allergens: please ask at the counter.',
   '★ Signature': '★ Signature',
   '★ Plat signature — l’un des best-sellers du restaurant.': '★ Signature dish — one of the restaurant’s best-sellers.',
   'Allergènes : demandez conseil à l’équipe en cas de doute.': 'Allergens: ask the team for advice if in doubt.',

@@ -1,5 +1,34 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P1-M2 « Allergènes » (AUDIT.md §7)
+- **Contexte :** le commerçant n'a fourni AUCUN allergène (0/81 renseigné) : rien n'est inventé.
+  Chaque fiche de plat dépliée affiche désormais la mention explicite « Allergènes : demander en
+  caisse » tant que la liste est vide ; dès qu'une liste est renseignée, c'est elle qui s'affiche.
+  Le pied de page général (« demandez conseil à l'équipe en cas de doute ») reste affiché.
+- **Code :** `src/lib/menu.ts` — `LIBELLE_ALLERGENES_ABSENTS` + `libelleAllergenes()` (liste ou
+  mention) ; `src/pages/MenuPublic.tsx` — ligne allergènes toujours affichée dans la fiche dépliée
+  (préfixe traduit séparément, mention traduite) ; `src/lib/langue.ts` — traduction EN de la mention.
+  Saisie commerçant inchangée (elle existait) : cases à cocher des 14 allergènes UE par plat dans
+  `#/menuCarte`, colonne `allergenes` (séparés par `|`) à l'import/export CSV.
+- **Comptes vérifiés :** **81/81 plats avec allergènes renseignés ou mention explicite**
+  (0 liste renseignée, 81 mentions explicites). Aucun allergène inventé.
+- **Tests : 1008 → 1018 (+10, `tests/allergenes-p1-m2.test.ts`)**, suite verte, `npx tsc -p .`
+  propre (typecheck serveur inclus dans `npm test`). Couverture : 81/81, libellé, traduction EN,
+  validation (allergène inconnu refusé), aller-retour CSV avec liste et sans, source `#/menu` et
+  `#/menuCarte`, et aller-retour serveur PUT → GET public des allergènes (`tests/cartiz.test.ts`,
+  ordre normalisé selon `ALLERGENES`).
+- **Revue Codex (2 points, `/tmp/codex-revue-p1-m2.txt`) — tous traités :**
+  1. [Fondé] `t(libelleAllergenes(p))` faisait retomber le préfixe en français en anglais quand la
+     liste était renseignée (chaîne complète absente du dictionnaire) → forme conditionnelle :
+     `t('Allergènes :')` + liste, sinon `t(LIBELLE_ALLERGENES_ABSENTS)` ; testé (préfixe EN).
+  2. [Remarque fondée] Le test des cases à cocher n'était que du source → ajout d'une assertion
+     serveur (PUT menu avec allergènes → GET public les relit) ; le clic de case lui-même reste
+     vérifié par source (pas de moteur de rendu React dans le repo — même pattern que les tests
+     photos). L'échec de `menu-client-p1-c5` signalé par Codex « sans diagnostic » ne se reproduit
+     pas (110/110 ciblés, 1018/1018 complets).
+- **Attent le commerçant :** les allergènes des 81 plats (à saisir dans `#/menuCarte` ou par CSV).
+- **Non vérifié :** rendu visuel réel sur téléphone ; rien touché en production.
+
 ## 11/11/2026 — P1-M1 « Prix à vérifier + hors carte » (AUDIT.md §7)
 - **Contexte :** le commerçant n'a confirmé ni Riz Thaï 8,90 € ni 6 Maki Gold 100,00 € (valeurs
   imprimées sur la carte, §8 n° 5). Les deux prix sont donc **masqués** (`prix: null`, « Prix sur
