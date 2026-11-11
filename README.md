@@ -16,7 +16,8 @@ pour tous les secteurs, sans aucun réglage propre à un secteur.
 >   Avec `DEMO=0` (défaut du serveur), Asian Home Paris démarre **vide** (0 client, 0 avis, 0 tirage).
 >
 > Dans les deux modes : rien n'est publié ni importé depuis Google, aucun SMS / e-mail n'est envoyé, aucun pass Wallet
-> n'est créé, aucun paiement. Ces intégrations sont **préparées mais « à brancher »** (V3) : voir plus bas.
+> n'est créé, aucun paiement. Google Business et les passes Wallet sont **préparés mais « à brancher »** (V3) ;
+> les relances SMS / e-mail sont **branchées via Brevo en mode test** (aucun envoi réel) : voir plus bas.
 
 ## Lancer
 
@@ -51,7 +52,8 @@ Variante avec le serveur de dev Vite : `VITE_API_URL=http://localhost:3001 npm r
 **Fonctionnement en mode API**
 
 - Au démarrage : les dernières données connues (cache du navigateur) s'affichent tout de suite, puis l'app charge
-  le serveur ; rechargement toutes les **10 s** (page visible), au retour au premier plan et après chaque action.
+  le serveur ; rechargement toutes les **30 s** (page visible, P1-P1), au retour au premier plan et après chaque action.
+  La page de jeu, elle, vérifie le statut toutes les 10 s tant que la roue est verrouillée (en attente de validation).
 - **Conflits : le serveur fait foi.** Chaque chargement remplace entièrement les données locales. Aucune action n'est
   appliquée « en local d'abord » : si le serveur ne répond pas, l'action est refusée avec le message « Serveur
   injoignable — vérifiez la connexion » (jamais de fausse réussite) et un bandeau « Hors ligne — dernières données
@@ -67,7 +69,7 @@ Variante avec le serveur de dev Vite : `VITE_API_URL=http://localhost:3001 npm r
 - **Onboarding** : Admin → « + Ajouter un commerce » crée le commerce **et** son PIN en une seule étape, puis ouvre Réglages.
 
 `dist/` est un site statique : il peut être déposé tel quel sur n'importe quel hébergement statique.
-(Aucun hébergement n'a été fait.)
+En pratique il est servi par le serveur lui-même (`npm run build:api`), sur Render.
 
 ## Tester la démo locale depuis un téléphone
 
@@ -107,14 +109,14 @@ problème n'existe plus.
 | Élément | Mode API (serveur) | Démo locale |
 |---|---|---|
 | Données (clients, tampons, tirages, avis) | **Réelles et partagées** sur le serveur ; le comptoir et le téléphone du client voient la même chose. Base : SQLite en local ; en production **Supabase** (prêt, voir ligne suivante) | Fictives, dans ce navigateur (localStorage) |
-| Base de production Supabase | **Prête, projet PAS créé** : schéma + RLS + adaptateur ; migration **exécutée sur un vrai Postgres local** (PGlite, PostgreSQL 18.6) mais **jamais sur Supabase** ; procédure pas à pas dans `server/README.md` | — |
+| Base de production Supabase | **En production depuis le 09/11/2026** : projet `asian-home-fidelite` créé, migrations **0001–0008 appliquées le 10/11/2026** (vérifié : `/sante` → `migrations` { cartiz, programme, relances, mesure } toutes `true`) ; **0009 (auth client) et 0010 (compteurs publics) à appliquer à la mise en production finale** (voir `docs/DEPLOIEMENT.md` § 5 : le code les tolère absentes, en mode dégradé documenté) | — |
 | Carte de fidélité (inscription, tampons, récompense, historique) | **Réel**, décidé par le serveur | Réel dans l'app, local |
 | Anti-doublon client (06…, +33…, 0033…, e-mail) | **Réel**, côté serveur (+ contrainte SQL) | Réel, local |
 | Roulette (1 participation par visite validée le jour même, 1 tirage par jour, lot tiré) | **Réel côté serveur** (`POST /tirages`), code gagnant à 6 caractères vérifiable au comptoir | Tirage dans le navigateur, ne vaut que pour ce navigateur |
 | Accès commerçant | **PIN par commerce** + PIN admin (anti-bruteforce) — pas de vrais comptes | Aucun : tout le monde voit tout |
 | Recherche clients | Réelle : téléphone dans tous les formats, prénoms sans accents | idem |
 | Export CSV des clients | **Réel** : téléchargé depuis le serveur (`/export.csv`, PIN) | Généré dans le navigateur (même format) |
-| Relance des clients inactifs (30 jours) | Liste et message **réels** ; l'**envoi** est à faire soi-même (bouton Copier). UI : « Envoi SMS/e-mail à brancher » | idem |
+| Relance des clients inactifs (30 jours) | Liste et message **réels** ; l'**envoi** passe par Brevo (mode test : rien ne part — « Mode test Brevo actif », journal « Test — rien envoyé ») ; copie du texte possible (bouton Copier) | idem |
 | QR codes (vitrine, carte personnelle) | **Réels**, générés localement ; à imprimer depuis l'adresse publique définitive | Réels, pointent vers ce navigateur |
 | Lien « Laisser un avis Google » | **Réel** (lien direct pour Asian Home Paris, repris du linktr.ee officiel du restaurant) | idem |
 | Avis Google | **À brancher** : aucune connexion à Google, aucun import. Asian Home démarre avec **0 avis** et le message « Connectez Google Business Profile pour importer vos avis » + section « Connecter Google » (étapes). Saisie manuelle possible (« + Saisir un avis reçu ») | Avis fictifs, étiquetés « Démo — avis simulés, aucune connexion à Google » |
@@ -127,24 +129,31 @@ problème n'existe plus.
 | Apparence de la carte | **Réel** : couleurs (contraste ≥ 4,5:1 vérifié), bannière, logo, aperçu en direct ; charte par défaut inchangée | idem |
 | Apple Wallet | **En suspens** (décision du 09/11/2026) : code `.pkpass` prêt (`server/wallet-apple.ts`) mais branché nulle part, refuse sans certificat ; aucun pass | idem |
 | Google Wallet | **À brancher** : génération réelle (JWT signé) derrière la configuration ; `pass.json` répond 501 (pas de compte émetteur). Côté client : encart « Carte Wallet : bientôt », aucun bouton d'ajout | idem, étiqueté démo |
-| SMS / e-mail | **À brancher** : adaptateurs Twilio / Brevo prêts côté serveur, mais aucune clé → 501, **rien n'est envoyé** | Rien n'est envoyé |
+| SMS / e-mail | **Branchés en mode test depuis le 11/11/2026** : compte Brevo créé et activé, clé API « Asian Home Fidelite » créée, expéditeur « Asian Home Paris » validé, expéditeur SMS `ASIANHOME`, 5 variables Render posées (`BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `BREVO_SMS_SENDER`, `BREVO_MODE_TEST=1`) ; `/sante` vérifié le 11/11 à 08h18 : `sms: true, email: true, smsPrestataire: 'Brevo', modeTest: true`. **Aucun envoi réel fait** (mode test : e-mail en sandbox Brevo, SMS simulé). Twilio reste le repli SMS, non configuré. Procédure et recette réelle (accord explicite requis) : `docs/BREVO.md` | Rien n'est envoyé |
 | Paiements | **Absents** | idem |
-| Hébergement | **Pas fait**, rien n'est déployé. Retenu : serveur Node sur **Render Free** (Frankfurt) + base **Supabase Free** (Central EU Frankfurt) = 0 € ; la veille Render ne perd plus de données (elles sont chez Supabase) | — |
-| Limites du gratuit (vérifiées le 09/11/2026) | Supabase : 500 Mo de base, 5 Go d'egress/mois, 2 projets, **pause après 7 jours d'inactivité**, **aucune sauvegarde** ; Render : veille après 15 min, ~1 min de réveil, 750 h/mois. Détails et sources ci-dessous | — |
+| Hébergement | **En ligne depuis le 09/11/2026** : serveur Node sur **Render Free** (Frankfurt) + base **Supabase Free** (Central EU Frankfurt) = 0 € ; **https://asian-home-fidelite.onrender.com** (`/sante` → `"stockage":"supabase"`, `"mode":"production"`). Staging séparé en cours de création (branche `autonome/integration`, voir `docs/DEPLOIEMENT.md`) | — |
+| Limites du gratuit (mesurées le 11/11/2026, P1-P1) | Supabase : 500 Mo de base, 5 Go d'egress/mois, 2 projets, **pause après 7 jours d'inactivité**, **aucune sauvegarde** (export : `npm run sauvegarde`, voir `docs/SAUVEGARDE.md`) ; Render : veille après 15 min, ~1 min de réveil, 750 h/mois. **Egress mesuré** (150 clients, rechargement toutes les 30 s, 12 h/j, 30 j) : **3,04 Go/mois** côté navigateur, **3,50 Go/mois** côté PostgREST (proxy de l'egress Supabase) — sous les 5 Go ; seuil 5 Go vers **~257 clients** (un rechargement différentiel deviendra alors nécessaire). Egress réel du dashboard Supabase : **non lu** (à vérifier dans Database → Usage). Détails et sources ci-dessous | — |
 | Kit de lancement (flyers, étiquettes, adhésif) | Décrit dans l'offre ; QR généré, **impression non faite** | idem |
 
 ### Mise en ligne gratuite : Supabase + Render (résumé — procédure exacte dans `server/README.md`)
 
-Rien n'a été créé ni déployé. Ce que vous aurez à cliquer :
+**Fait le 09/11/2026, en ligne depuis** : projet Supabase créé, service Render créé depuis le Blueprint
+(`render.yaml`), déploiement « Live », `/sante` vérifié. Les étapes ci-dessous restent la référence pour
+recréer l'environnement (ou le staging, voir `docs/DEPLOIEMENT.md`) — elles sont écrites au passé pour la
+production. Ce qui a été cliqué :
 1. **Supabase** : compte → *New project* « asian-home-fidelite », mot de passe de base noté à part (≠ clés API), région
    **Central EU (Frankfurt)**, plan **Free**.
-2. **SQL Editor** : exécuter `supabase/migrations/0001_schema_initial.sql` puis `0002_rls.sql` ; vérifier 5 tables avec RLS.
+2. **SQL Editor** : exécuter `supabase/migrations/0001_schema_initial.sql` puis `0002_rls.sql`, puis
+   `0003_cartiz.sql` à `0008_mesure.sql` (appliquées le 10/11/2026) ; vérifier 14 tables avec RLS
+   (15 après la 0010, qui ajoute `compteurs_publics`).
+   **0009 et 0010 restent à appliquer** à la mise en production finale (voir `docs/DEPLOIEMENT.md` § 5).
 3. Récupérer `SUPABASE_URL` (bouton *Connect*) et la clé secrète `sb_secret_…` (*Settings → API Keys*) — libellés d'après la
    doc du 09/11/2026, à confirmer à l'écran.
 4. **GitHub** : dépôt privé, pousser le code. **Render** : *New → Blueprint* → choisir le dépôt → le fichier `render.yaml`
    (S3) règle tout seul Frankfurt, Free, build `npm ci && npm run build:api`, start `npm run serveur`, `NODE_VERSION=24` →
-   saisir les 4 secrets demandés (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PIN`, `PIN_ASIAN_HOME`) →
-   **Deploy Blueprint**.
+   saisir les 5 secrets demandés (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PIN`, `PIN_ASIAN_HOME`,
+   `SESSION_SECRET`) → **Deploy Blueprint**. Les 5 variables Brevo ont été ajoutées le 11/11/2026
+   (`BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `BREVO_SMS_SENDER`, `BREVO_MODE_TEST=1`).
 5. Vérifier `https://<nom>.onrender.com/api/v1/sante` → `"stockage":"supabase"`, puis refaire le parcours sur un commerce
    de test (inscription → visite → tirage → 2e tirage refusé → export CSV) et le supprimer.
 
@@ -156,8 +165,10 @@ Rien n'a été créé ni déployé. Ce que vous aurez à cliquer :
   indiquée ; réactivable jusqu'à 1 an — un ancien changelog disait 90 jours), **aucune sauvegarde** (export CSV régulier).
 - Supabase Pro (à partir de 25 $/mois) : plus de pause, sauvegardes quotidiennes gardées 7 jours, 8 Go, 250 Go d'egress.
 - Render Free : veille après **15 min** sans visite, réveil **~1 min** (le premier client attend), 750 h/mois.
-- ⚠️ Egress à surveiller : l'écran commerçant recharge tout toutes les 10 s ; estimation ~8 Go/mois (non compressé) avec
-  100 clients et une tablette ouverte 12 h/jour. Négligeable au lancement ; à contrôler dans *Usage* après 1-2 semaines.
+- ⚠️ Egress à surveiller : l'écran commerçant recharge tout toutes les 30 s ; **mesuré le 11/11/2026 (P1-P1,
+  150 clients, 12 h/jour) : 3,04 Go/mois côté navigateur, 3,50 Go/mois côté PostgREST** — sous les 5 Go ;
+  seuil 5 Go vers ~257 clients. Négligeable au lancement ; à contrôler dans *Usage* après 1-2 semaines
+  (l'egress réel du dashboard n'a pas encore été lu).
 - S1 n'avait noté aucun chiffre du gratuit ; les emplacements des clés notés en S1 (« Project Settings → API ») étaient périmés.
 - Données à migrer : **aucune** pour Asian Home (production vide) ; aucun outil d'import automatique n'existe.
 
@@ -169,23 +180,29 @@ Rien n'a été créé ni déployé. Ce que vous aurez à cliquer :
 | Projet Google Cloud approuvé pour les API Business Profile + identifiant OAuth (scope `business.manage`) | idem | **Utilisateur** (éditeur de l'app) |
 | Compte **Apple Developer** (99 $/an), Pass Type ID, certificat + clé de signature | Apple Wallet — **en suspens**, à activer sur décision explicite | **Utilisateur** |
 | Compte **émetteur Google Wallet** + API Google Wallet activée + clé de compte de service | Google Wallet | **Utilisateur** |
-| Compte **prestataire SMS** (Twilio) et/ou **e-mail** (Brevo) + clés API + expéditeur validé | Relances automatiques | **Utilisateur** (le client donne son accord pour l'envoi en son nom) |
-| Compte **Supabase** (plan Free) + projet en région Central EU (Frankfurt) | Base de production | **Utilisateur** (0 € ; Pro 25 $/mois seulement si décidé) |
-| Dépôt **GitHub privé** + compte **Render** (Free Web Service, Frankfurt) | Hébergement du serveur Node | **Utilisateur** (0 €) |
+| Compte **prestataire SMS** (Twilio) et/ou **e-mail** (Brevo) + clés API + expéditeur validé | Relances automatiques | **Fait pour Brevo le 11/11/2026** (compte créé et activé, clé API créée, expéditeur e-mail validé, expéditeur SMS `ASIANHOME`, mode test actif — aucun envoi réel). Twilio (repli SMS) : **non configuré**, non nécessaire tant que Brevo SMS l'est. Recette réelle : accord explicite requis (voir `docs/BREVO.md` §5 B) |
+| Compte **Supabase** (plan Free) + projet en région Central EU (Frankfurt) | Base de production | **Fait le 09/11/2026** (projet `asian-home-fidelite`, 0 € ; Pro 25 $/mois seulement si décidé) |
+| Dépôt **GitHub privé** + compte **Render** (Free Web Service, Frankfurt) | Hébergement du serveur Node | **Fait le 09/11/2026** (dépôt `asian-home-fidelite`, service `asian-home-fidelite` en ligne, 0 €) |
 | **Nom de domaine** (+ HTTPS) | Adresse définitive des QR imprimés | **Utilisateur**, ou le **client** s'il veut son propre domaine |
-| Consentement des clients finaux aux relances (case à cocher à ajouter) | RGPD, avant tout envoi | Recueilli par le **client** au comptoir / dans l'app |
+| Consentement des clients finaux aux relances | RGPD, avant tout envoi | Recueilli dans l'app (case jamais pré-cochée, à l'inscription et en caisse) |
 
-### Envoi SMS / e-mail : à brancher
+### Envoi SMS / e-mail : branché en mode test (Brevo)
 
-- **Prestataires recommandés** (les plus simples à brancher, adaptateurs déjà écrits) : **Twilio** pour les SMS, **Brevo**
-  (ex-Sendinblue, société française) pour les e-mails. SendGrid est une alternative pour l'e-mail (adaptateur non écrit).
-  **Prix : à vérifier sur le site du prestataire** (non vérifiés ici, aucun prix inventé).
-- **Variables d'environnement** : `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` (SMS) ; `BREVO_API_KEY`,
-  `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` (e-mail). Aucune n'est configurée : la route `relance` répond 501.
-- **RGPD** : consentement marketing explicite et préalable du client (champ `consentementRelance`, aucun écran ne le recueille
-  encore → le serveur refuse tout envoi), lien de désinscription dans chaque message (SMS : « STOP : <lien court /d/…> » ;
+- **Prestataire choisi le 10/11/2026 : Brevo** (SMS + e-mail, une seule clé API) ; **Twilio** n'est plus que le
+  repli SMS (adaptateur prêt, non configuré). SendGrid est une alternative pour l'e-mail (adaptateur non écrit).
+  **Tarif SMS : ~0,045 €/SMS estimé le 10/11, page Brevo affichant « à partir de 0,073 €/SMS » le 11/11 — à
+  confirmer dans le compte avant d'acheter des crédits** (voir `docs/BREVO.md` §2).
+- **Variables d'environnement** : `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `BREVO_SMS_SENDER`
+  (+ `BREVO_MODE_TEST=1`) — **posées dans Render le 11/11/2026** ; `/sante` → `sms: true, email: true`,
+  `smsPrestataire: 'Brevo'`, `modeTest: true`. **Aucun envoi réel** tant que `BREVO_MODE_TEST=1` (e-mail en sandbox
+  Brevo, SMS simulé, journal « Test — rien envoyé ») ; retirer la variable pour envoyer pour de vrai, plus tard,
+  avec l'accord explicite de l'utilisateur. Sans prestataire, la route `relance` répond 501.
+- **RGPD** : consentement marketing explicite et préalable du client (champ `consentementRelance`, recueilli par la
+  case jamais pré-cochée à l'inscription publique et en caisse, modifiable sur la fiche client ; sans consentement,
+  le serveur refuse tout envoi), lien de désinscription dans chaque message (SMS : « STOP : <lien court /d/…> » ;
   e-mail : lien en pied), pas d'envoi la nuit ni le dimanche (bonnes pratiques à respecter).
-- Le front reste en **copier-coller** : aucun bouton « Envoyer » n'existe tant qu'aucun prestataire n'est branché.
+- Le front propose **« Envoyer la relance »** sur la fiche client (et le texte à copier pour un envoi manuel) ;
+  sans prestataire configuré, la route répond 501.
 
 ### Données personnelles (RGPD) — affiché aussi dans Plus et Offre
 
@@ -208,10 +225,10 @@ Badge « Démo » : en mode API, il n'apparaît **que** sur les commerces venant
 
 ## Tests
 
-`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` (124 tests : 36 de logique,
-21 du serveur dans `tests/serveur.test.ts`, 24 du front V2 dans `tests/front-v2.test.ts`, 13 des intégrations V3 dans
-`tests/integrations-v3.test.ts`, 16 du stockage Supabase dans `tests/supabase.test.ts`, 9 de la migration SQL exécutée
-sur Postgres dans `tests/migration-pglite.test.ts`, 5 du Blueprint Render dans `tests/render-yaml.test.ts`).
+`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` — **1149 tests
+(11/11/2026, 68 fichiers, suite verte, vérification des types du serveur `typecheck:server` incluse)**.
+`npx tsc -p .` (types du front) n'est pas dans `npm test` : à lancer à part. Le nombre exact
+évolue à chaque lot (voir `JOURNAL.md`) ; le détail par fichier est dans `tests/`.
 Pas de Vitest : Node exécute le TypeScript directement, ça évite une dépendance et ne touche pas au build.
 
 Les tests portent sur la **logique pure** (hors React) :
@@ -248,9 +265,10 @@ Les tests portent sur la **logique pure** (hors React) :
   simultanés, choix SQLite / Supabase selon les variables d'environnement, parcours complet du serveur sur Supabase avec
   les mêmes fonctions métier, migration SQL (contraintes, RLS sans policy), `.env.example` sans vraie clé ;
 - migration SQL (S2) **exécutée par un vrai Postgres** (PGlite = PostgreSQL 18.6 en WebAssembly, en mémoire, sans réseau) :
-  0001 + 0002 passent et sont rejouables, 5 tables avec RLS et aucune policy, anon / authenticated refusés, index
+  0001 à 0010 passent et sont rejouables, 15 tables avec RLS et aucune policy, anon / authenticated refusés, index
   « 1 tirage par jour à Paris » accepté et vérifié autour de minuit (heure d'hiver et d'été), anti-doublon, contraintes,
-  cascade, trigger `version`. Ce n'est **pas** Supabase : à rejouer dans le SQL Editor du vrai projet.
+  cascade, trigger `version`. Ce n'est **pas** Supabase : les migrations 0001–0008 ont ensuite été appliquées dans le
+  vrai projet Supabase (10/11/2026), 0009–0010 restant à appliquer à la mise en production finale.
 
 Preuve HTTP manuelle (V2 + V3) : `npm run serveur` puis `node scripts/preuve-http-v3.mjs` — sortie dans `PREUVE-HTTP-V3.txt`.
 
@@ -275,27 +293,35 @@ Le test E2E vérifie le parcours, pas l'apparence.
 
 ## Limites pour une vraie mise en production
 
-- **Hébergement du serveur** : fait en local seulement. Rien n'est déployé. Choix : **Supabase Free** (base) + **Render Free**
-  (serveur) — schéma, RLS, adaptateur et procédure prêts (S1 + S2), migration exécutée sur un Postgres local (PGlite),
-  **projet pas encore créé** et jamais testé contre un vrai Supabase (voir `server/README.md`, « Supabase »).
-- **Authentification** : un PIN par commerce (partagé par l'équipe) + un PIN admin ; pas de vrais comptes ni de
-  journal « qui a fait quoi ». La validation d'une visite reste un bouton (pas de scan du QR client par le commerçant).
-- **Anti-abus** : vérifié côté serveur (1 tirage par client et par jour, visite du jour obligatoire), mais le
-  téléphone n'est pas vérifié (pas de SMS) : quelqu'un qui connaît le numéro d'un client voit son prénom et ses tampons.
-- **Hors ligne** : pas de file d'attente ; une action faite sans réseau est refusée et doit être refaite.
+- **Hébergement du serveur** : **en ligne depuis le 09/11/2026** (Render Free + Supabase Free, voir ci-dessus).
+  Restent : nom de domaine (voir `docs/DOMAINE.md`), sauvegardes régulières (`npm run sauvegarde`, script prêt —
+  à lancer par l'opérateur, pas d'automatisation), création du staging (voir `docs/DEPLOIEMENT.md`).
+- **Authentification** : un PIN par commerce (partagé par l'équipe) + un PIN admin, échangés contre des jetons de
+  session courts (P0-S1) ; côté client, jeton de carte (P0-S7). Pas de vrais comptes nominatifs, mais le
+  **journal d'audit** trace qui (gérant / membre) a fait quoi. Au comptoir, la visite se valide par un bouton,
+  après scan du QR client ou recherche manuelle (caisse).
+- **Anti-abus** : vérifié côté serveur (1 tirage par client et par jour, visite du jour obligatoire). Le téléphone
+  n'est pas vérifié par SMS : en mode `transition`, connaître le numéro d'un client suffit encore à reprendre sa
+  carte ; en mode `stricte` (production, dès que `SESSION_SECRET` existe), un jeton client est exigé — connaître le
+  numéro seul ne suffit plus à jouer à la place du client (voir `server/README.md`, « Accès client aux cartes »).
+- **Hors ligne** : la **caisse** a une file d'attente (rejouée au retour du réseau, sans double comptage) ; les
+  autres actions faites sans réseau sont refusées et doivent être refaites.
 - **Vraie API Google** : lire les avis et publier les réponses passe par l'API Google Business Profile
-  (étapes exactes dans l'app, page Avis → « Connecter Google », et `server/README.md`). Le lien direct « laisser un avis »
+  (étapes exactes dans l'app, page Avis → « Connecter Google », et `docs/GOOGLE-BUSINESS.md`). Le lien direct « laisser un avis »
   reste le moyen réel de collecter des avis (fait pour Asian Home Paris ; les 2 commerces de démo ont des liens fictifs).
 - **Vrais passes Wallet** : Apple Wallet **en suspens** (Apple Developer 99 $/an, Pass Type ID, certificat de signature,
   clé privée, service web de mise à jour des passes — à activer sur décision explicite) ; Google Wallet : compte émetteur,
   API activée, clé de service, puis signature JWT et mise à jour à chaque tampon (non développées).
-- **Envois SMS / e-mail** : adaptateurs prêts, sans clé ; écran de consentement et vrai lien de désinscription à faire.
-- **Hébergement** : site statique + API + base, nom de domaine, HTTPS, sauvegardes.
-- **RGPD** : bloc d'information ajouté (Plus, Offre, ci-dessus). Restent : politique de confidentialité, recueil du
-  consentement aux relances, bouton de suppression d'un client, registre des traitements, durée de conservation à fixer.
+- **Envois SMS / e-mail** : branchés via Brevo en **mode test** (aucun envoi réel). Restent : la recette réelle
+  (accord explicite de l'utilisateur, `docs/BREVO.md` §5 B) et l'achat de crédits SMS.
+- **Hébergement** : nom de domaine, sauvegardes régulières par l'opérateur (voir ci-dessus).
+- **RGPD** : politique de confidentialité publiée (`#/confidentialite/<commerceId>`), consentement aux relances
+  recueilli (case jamais pré-cochée), suppression d'un client (fiche commerçant + demande depuis la carte),
+  conservation 36 mois par défaut (réglable 6–120). Restent : registre des traitements, règlement de la roulette.
 - **Jeu-concours** : vérifier les règles applicables à une roulette promotionnelle (règlement, conditions,
   pas d'obligation d'achat).
-- **Images et marque** : le logo est aujourd'hui en initiales ; prévoir l'envoi d'un vrai logo.
+- **Images et marque** : le vrai logo est livré (`public/visuels/logo.png`, logo officiel du restaurant). Photos des
+  plats : **11/81** seulement (voir `docs/PHOTOS-MANQUANTES.md`) — les 70 autres sont à fournir par le commerçant.
 
 ## Structure
 
@@ -305,8 +331,11 @@ src/data/       seed.json, valeurs par défaut, persistance locale (depot), mode
                 dépôt API + cache (depotApi), PIN chiffré (coffrePin), tirage serveur (jeuApi)
 src/store.tsx   état de l'app : StoreLocal (démo) ou StoreApi (serveur), choisi par VITE_API_URL
 src/pages/      écrans (tableau de bord, clients, roulette, avis, réglages, offre, admin, pages publiques)
-server/         backend partagé (API /api/v1, SQLite en local ou Supabase en production) — voir server/README.md
+server/         backend partagé (API /api/v1, SQLite en local ou Supabase en production) — voir server/README.md ;
+                `prerendu.ts` (page menu prérendue `/menu/<id>`), `sauvegarde.ts` (export chiffré des 15 tables),
+                `notifications/` (relances Brevo / Twilio), `google-business.ts`, `wallet*.ts`
 supabase/       migrations SQL Supabase (schéma, contraintes, RLS)
-scripts/        générateur du seed, preuves HTTP (preuve-http-v3.mjs)
-tests/          tests node --test
+scripts/        générateur du seed, preuves HTTP (preuve-http-v3.mjs), sauvegarde (`sauvegarde-base.mjs`),
+                retour arrière Render (`rollback-render.mjs`)
+tests/          tests node --test (1149 au 11/11/2026) + E2E Playwright (`tests-e2e/`)
 ```

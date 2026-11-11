@@ -4,20 +4,28 @@ Brevo est le **fournisseur choisi** pour les relances (SMS + e-mail) de l'app As
 Un seul compte, une seule clé API, deux canaux. Twilio reste en repli pour les SMS **seulement si**
 Brevo SMS n'est pas configuré (il n'est plus le prestataire par défaut).
 
-**État réel (10/11/2026)** : le code est écrit et testé contre un Brevo **simulé** (`fetch` injecté,
-`tests/brevo-sms.test.ts`, `tests/relances-p1-b3.test.ts`). **Aucun compte Brevo n'existe, aucune clé
-n'a été créée, aucun envoi réel n'a jamais eu lieu** — en production, tant que les variables ci-dessous
-ne sont pas posées, la route relance répond 501 et rien ne part.
+**État réel (11/11/2026)** : le code est écrit et testé contre un Brevo **simulé** (`fetch` injecté,
+`tests/brevo-sms.test.ts`, `tests/relances-p1-b3.test.ts`). **Le compte Brevo a été créé et activé le 11/11
+au matin** (e-mail + mot de passe, lien de confirmation cliqué, téléphone vérifié par SMS, identité vérifiée
+par e-mail) ; **clé API v3 « Asian Home Fidelite » créée** (accès Complet, expire 11/11/2027, 2FA non
+activée) ; **expéditeur « Asian Home Paris » validé** (Brevo déconseille le
+freemail Gmail pour la délivrabilité, pas de DKIM/DMARC) ; **expéditeur SMS `ASIANHOME`** ; les **5
+variables Render sont posées** (dont `BREVO_MODE_TEST=1`), déploiement « Live » le 11/11 à 08h18 ;
+`/sante` vérifié à 08h18 : `sms: true, email: true, smsPrestataire: 'Brevo', modeTest: true`.
+**Aucun envoi réel n'a jamais eu lieu** (mode test : e-mail en sandbox Brevo, SMS simulé).
+**Non re-vérifié dans ce lot** (lecture de `/sante` en production en délai dépassé, probablement le réveil
+Render — à re-vérifier au prochain passage).
 
-**État au 11/11/2026 (lot P1-B7) :**
-- **Validation simulée vérifiée de bout en bout** (`tests/brevo-production-p1-b7.test.ts`, sans clé ni
+**État au 11/11/2026 (après activation, lot P2-Q5) :**
+- **Validation simulée vérifiée de bout en bout (lot P1-B7**, `tests/brevo-production-p1-b7.test.ts`, sans clé ni
   réseau) : les 5 variables lues depuis l'environnement ; `/sante` combiné `sms: true, email: true,
   smsPrestataire: 'Brevo', modeTest: true` ; relance bienvenue e-mail (sandbox Brevo, en-tête
   `X-Sib-Sandbox: drop`, journal statut `test`) puis SMS (simulé, zéro appel réseau, journal `test`).
-- **Compte Brevo en cours de création côté agent parent** (demande de l'utilisateur : « Crée un compte
-  brevo directement » — création annoncée par l'agent parent, **non vérifiée ici**) — **clés attendues** : tant qu'elles ne sont pas posées dans Render, le critère
-  `/sante` en production (`sms: true, email: true, smsPrestataire: 'Brevo'`) reste **« attend les clés »**,
-  et la recette réelle (§5 B) reste **« attend les clés + l'accord explicite de l'utilisateur »**.
+- **Compte Brevo créé et activé** (voir « État réel » ci-dessus) ; **les 5 variables Render sont posées** ;
+  `/sante` en production vérifié à 08h18 : `sms: true, email: true, smsPrestataire: 'Brevo', modeTest: true`
+  (non re-vérifié dans ce lot — voir ci-dessus).
+- **Recette réelle (§5 B) : « attend l'accord explicite de l'utilisateur »** — aucun envoi réel fait ;
+  pré-requis restants : crédits SMS achetés (§2 : tarif à confirmer dans le compte) et destinataires définis.
 - **Tarif SMS :** la page Brevo affichait le 11/11 un tarif **à partir de 0,073 €/SMS** (signalé par
   l'agent parent, **à confirmer** au moment de l'achat, contre ~0,045 €/SMS estimé le 10/11) — vérifier
   le montant exact dans le compte avant d'acheter des crédits (§2).
@@ -125,10 +133,11 @@ Estimation d'usage : quelques dizaines de relances par mois au lancement → que
    (~4,50 € HT) suffit pour démarrer. Sans crédits, Brevo refuse l'envoi (la route répond 502 et
    le journal des envois marque l'essai « erreur »).
 
-### Étape E — Variables Render (4 variables, voir §4)
+### Étape E — Variables Render (5 variables, voir §4)
 
 1. [dashboard Render](https://dashboard.render.com) → service `asian-home-fidelite` →
-   **Environment** → ajouter les 4 variables (voir §4) → **Save Changes** (le service redéploie).
+   **Environment** → ajouter les 5 variables (voir §4) → **Save Changes** (le service redéploie).
+   **Fait le 11/11/2026** (déploiement « Live » à 08h18).
 2. Aucune variable dans `render.yaml` : les secrets sont posés à la main dans le dashboard
    (ils y sont déjà, `sync: false`).
 
@@ -195,11 +204,12 @@ Prérequis : variables de l'étape E posées, **dont `BREVO_MODE_TEST=1`**.
 **Ne pas faire pendant le développement.** Quand l'utilisateur donne son accord explicite :
 
 **Pré-requis (à cocher avant de retirer le mode test) :**
-- [ ] Compte Brevo créé, clé API `BREVO_API_KEY` posée dans Render (étape B).
-- [ ] Expéditeur e-mail validé chez Brevo, `BREVO_SENDER_EMAIL` posée (étape C).
+- [x] Compte Brevo créé, clé API `BREVO_API_KEY` posée dans Render (fait le 11/11/2026, étape B).
+- [x] Expéditeur e-mail validé chez Brevo, `BREVO_SENDER_EMAIL` posée (fait le 11/11/2026, étape C).
 - [ ] Expéditeur SMS `ASIANHOME` posé (`BREVO_SMS_SENDER`) et **crédits SMS achetés** (sans crédits,
   Brevo refuse l'envoi — 502, journal « erreur »). Tarif à confirmer dans le compte (§2 : ~0,045 €/SMS
-  estimé le 10/11, à partir de 0,073 €/SMS affiché le 11/11).
+  estimé le 10/11, à partir de 0,073 €/SMS affiché le 11/11). **Achat de crédits non confirmé** (à vérifier
+  dans le tableau de bord Brevo avant la recette SMS).
 - [ ] Destinataires définis et consentants : e-mail `yassbybibiche@gmail.com` (l'utilisateur), puis
   1 SMS vers **son propre numéro** (celui vérifié chez Brevo) — **aucun vrai client** ne reçoit quoi
   que ce soit pendant cette recette.

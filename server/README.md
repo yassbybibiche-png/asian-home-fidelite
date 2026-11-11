@@ -17,10 +17,10 @@ voient enfin **les mêmes données**. Une seule instance Node pour tous les comm
 | `server/stockage-supabase.ts` | **S1** : même contrat sur Supabase (API REST PostgREST, clé service_role). |
 | `supabase/migrations/` | **S1** : schéma Postgres (`0001_schema_initial.sql`) et RLS (`0002_rls.sql`). |
 | `server/wallet.ts` | **V3** : Google Wallet préparé, inactif (voir « Intégrations préparées »). |
-| `server/notifications/` | **P1-B3** : relances SMS / e-mail branchées de bout en bout ; **lot « Brancher Brevo »** : SMS via Brevo (Twilio en repli), e-mail via Brevo ; aucun envoi sans clés (501). Voir « SMS / e-mail » et `docs/BREVO.md`. |
+| `server/notifications/` | **P1-B3** : relances SMS / e-mail branchées de bout en bout ; **lot « Brancher Brevo »** : SMS via Brevo (Twilio en repli), e-mail via Brevo ; **compte Brevo créé le 11/11/2026, 5 variables Render posées, mode test actif (`BREVO_MODE_TEST=1`) — aucun envoi réel**. Voir « SMS / e-mail » et `docs/BREVO.md`. |
 | `tests/serveur.test.ts` | Tests HTTP réels (port éphémère, base temporaire, `fetch`), lancés par `npm test`. |
 | `tests/migration-pglite.test.ts` | **S2** : la migration Supabase exécutée par un vrai Postgres local (PGlite, WebAssembly). |
-| `render.yaml` (racine) | **S3** : Blueprint Render du serveur (Free, Frankfurt, build / start, `NODE_VERSION`, 4 secrets `sync: false`). Validé par `tests/render-yaml.test.ts`. |
+| `render.yaml` (racine) | **S3** : Blueprint Render du serveur (Free, Frankfurt, build / start, `NODE_VERSION`, 5 secrets + `CORS_ORIGIN` `sync: false`). Validé par `tests/render-yaml.test.ts`. |
 
 ## Choix de la base : `node:sqlite` (retenu)
 
@@ -179,15 +179,19 @@ doc** (compter quelques minutes, non garanti). Délai pour réactiver : **1 an**
 clés notés en S1 étaient périmés (voir « Variables » ci-dessus), et le délai de restauration trouvé (1 an) diffère de l'ancien
 chiffre de 90 jours qu'on trouve encore en ligne.
 
-**Egress — point à surveiller (estimation, pas une mesure).** Le front en mode API recharge **tout l'état** du commerce
-toutes les 10 s tant qu'un écran commerçant est visible (`INTERVALLE_RECHARGEMENT_MS`, `src/store.tsx`), et le serveur relit
+**Egress — mesuré (P1-P1, 11/11/2026), pas une estimation.** Le front en mode API recharge **tout l'état** du commerce
+toutes les 30 s tant qu'un écran commerçant est visible (`INTERVALLE_RECHARGEMENT_MS`, `src/store.tsx`), et le serveur relit
 alors clients, tirages et avis dans Supabase. Tailles mesurées sur le seed : ~430 octets par client, ~210 par tirage, ~265 par
-avis. Avec 100 clients et 100 tirages, ~65 Ko par rechargement ; une tablette ouverte 12 h/jour = ~4 300 rechargements/jour
-≈ 280 Mo/jour ≈ **8 Go/mois avant compression** — au-dessus des 5 Go. Le `fetch` de Node demande des réponses compressées
-(gzip) ; si l'API Supabase compresse et facture les octets compressés, le volume serait plusieurs fois plus faible —
-**non vérifié** (les pages lues ne le disent pas). Au lancement (0 client) c'est négligeable. **À faire** : regarder l'usage d'egress dans
-le dashboard Supabase (page Usage) après 1 à 2 semaines ; s'il approche 5 Go, passer l'intervalle à 30 ou 60 s (une
-constante) ou fermer l'écran commerçant quand il ne sert pas.
+avis. Mesure locale (vrais octets UTF-8, `tests/egress-p1-p1.test.ts`, 150 clients / 100 visites / journal 100 entrées,
+1 onglet visible 12 h/j, 30 j) : HTTP `/etat` 69 210 o + `/commerces` 1 088 o = 70 298 o par rechargement →
+**3,04 Go/mois côté navigateur, 3,50 Go/mois côté PostgREST** (lignes lues avec les colonnes sélectionnées —
+proxy de l'egress Supabase, pas la mesure dashboard) à 30 s — **sous les 5 Go gratuits**. À 300 clients :
+4,68 Go HTTP / 5,60 Go PostgREST — **seuil 5 Go côté PostgREST vers ~257 clients** : un rechargement différentiel
+deviendra alors nécessaire (non fait : il exigerait un point de reprise côté serveur). La compression P2-Q2
+(gzip/brotli, voir « Compression des réponses ») réduit le flux serveur → navigateur, **pas** l'egress
+Supabase → serveur. La minuterie caisse 15 s (`GET /caisse`, 240 o) ne pèse que 0,02 Go/mois ; un 2e onglet
+double le rechargement périodique. **Reste : l'egress réel dans le dashboard Supabase** (Database → Usage ou
+Settings → Usage — non lu : pas d'accès navigateur sur la VM de développement).
 
 **Taille de base** : quelques centaines d'octets par client, tirage ou avis → 500 Mo représentent des centaines de milliers
 d'enregistrements ; pas un sujet pour un restaurant.
@@ -243,7 +247,7 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 |---|---|---|
 | `POST /sessions` | PIN / code dans le corps | **P0-S1.** `{ role: 'commerce', commerceId, pin }`, `{ role: 'admin', pin }` ou `{ role: 'equipe', commerceId, code }` → 201 `{ jeton, role, commerceId?, membreNom?, expireLe }`. Même anti-bruteforce que les en-têtes (401 / 429), re-hachage scrypt au passage. 503 si `SESSION_SECRET` absente. |
 | `DELETE /sessions` | `X-Session` | **P0-S1.** Révoque le jeton (« Verrouiller ») → `{ ok: true }` ; idempotent ; 401 si jeton absent ou falsifié. |
-| `GET /sante` | public | `{ ok, version, mode, stockage, demo, integrations }` — `integrations` (V3) : `{ googleWallet, appleWallet: 'en_suspens', googleBusinessProfile, sms, email }`, chacun `false` tant que rien n'est configuré ; `smsPrestataire: 'Brevo' \| 'Twilio'` présent seulement si `sms` est `true` (nom du prestataire SMS effectif, pour la page de confidentialité) ; `modeTest: true` présent seulement si `BREVO_MODE_TEST=1` (aucun envoi réel). `migrations` : `{ cartiz, programme, relances }` — `relances` = migration 0007 (table `envois`) appliquée. |
+| `GET /sante` | public | `{ ok, version, mode, stockage, demo, integrations }` — `integrations` (V3) : `{ googleWallet, appleWallet: 'en_suspens', googleBusinessProfile, sms, email }`, chacun `false` tant que rien n'est configuré ; `smsPrestataire: 'Brevo' \| 'Twilio'` présent seulement si `sms` est `true` (nom du prestataire SMS effectif, pour la page de confidentialité) ; `modeTest: true` présent seulement si `BREVO_MODE_TEST=1` (aucun envoi réel). `migrations` : `{ cartiz, programme, relances, mesure }` — `relances` = migration 0007 (table `envois`), `mesure` = migration 0008 (table `evenements_jour`). Les migrations 0009 (auth client) et 0010 (compteurs publics) ne figurent pas dans `/sante` : 0009 se vérifie par `GET /api/v1/sante/acces-client` → `migration: true`, 0010 par `select count(*) from public.compteurs_publics;` sans erreur (voir « Migration 0009 » / « Migration 0010 »). |
 | `GET /commerces` | public | Fiches publiques (jamais de PIN ni de hash). |
 | `GET /commerces/:id` | public | Une fiche publique. |
 | `GET /cartes/:clientId` | public | **Ajout V2** (page `#/carte/:clientId` et état de la roue) : `{ client (sans téléphone ni e-mail), commerce (fiche publique), jeu: { statut: 'pret' \| 'sansVisite' \| 'dejaJoue', lotDuJour, codeDuJour, remisDuJour } }`. P0-U3 : `codeDuJour` = code gagnant du tirage **du jour** de ce client (null si perdant ou pas de tirage). P0-S19 : il n'est servi qu'au titulaire authentifié (jeton client de la carte, `Authorization: Bearer`) — sans jeton : null, même en vue complète (mode transition) ; aucune autre route publique ne renvoie de code en mode strict (en transition, le tirage et l'export RGPD par contact seul renvoient encore des codes — voir « Modes »). 404 inconnue, 409 commerce inactif. P1-C3 : `historiqueLots` = lots gagnés à la roue (20 derniers, perdants exclus) `{ lot, date, statut: 'valable' \| 'remis' \| 'expire' }`, **sans aucun code**. |
@@ -291,7 +295,7 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `POST /commerces/:id/clients` (complément P1-C1) | public ou commerçant | Prénom **optionnel des deux côtés** (`prenom` absent ou `""`) ; seul le téléphone ou l'e-mail est obligatoire. La page de jeu n'envoie plus de prénom : il est demandé après le tirage (route suivante). |
 | `POST /commerces/:id/clients/:clientId/prenom` | public (carte + contact) | **P1-C1.** `{ prenom, contact }` → `{ client }` (carte publique, sans contact). Prénom demandé sur l'écran de gain, **seulement si la carte n'en a pas** : **409** si elle en a déjà un (personne ne renomme la carte d'un autre), **403** si le contact ne correspond pas à la carte (même contrôle que les routes RGPD), 400 vide / > 40 car., 404 carte inconnue. Ne touche ni au tirage ni au jeu du jour. Limite `ficheClientParIp`. |
 | `POST /commerces/:id/clients/:clientId/message-prive` | public (carte + contact) | **P1-C4.** `{ contact, note, texte }` → **201** `{ ok, message: { id, creeLe } }` (ni carte ni contact dans la réponse). Proposé sur l'écran de gain quand le client choisit **3★ ou moins** dans l'app, avant le lien Google (qui reste affiché). Stocké dans `clients.donnees.messagesPrives` (aucune migration), visible par le commerce dans `GET …/etat` (écran #/avis), **jamais renvoyé par `GET /cartes/:id`**, **jamais expédié** (ni SMS ni e-mail). **403** contact différent, 400 note hors 1–5 entier / texte vide / > 1000 car., 404 carte inconnue, **429** au-delà de 3 messages par carte et par jour (20 conservés au plus). Limite `ficheClientParIp` par IP **et** par carte. Effacé avec la fiche (RGPD) et inclus dans l'export individuel. |
-| `POST /commerces/:id/clients/:clientId/relance` | commerçant | **P1-B3.** `{ modele?: 'bienvenue' \| 'proche' \| 'inactif' \| 'anniversaire', canal?: 'sms' \| 'email', message? }` (modèle **ou** message libre ; canal par défaut : téléphone → SMS, sinon e-mail). **501** sans prestataire pour ce canal (cas actuel : rien n'est envoyé) ; **409** sans consentement, sans contact pour ce canal, ou même modèle déjà envoyé à ce client aujourd'hui (Paris) ; **503** migration 0007 absente (pas d'envoi sans anti-doublon) ; **502** prestataire en erreur ; 200 `{ envoye, canal, modele, envoi }`. Chaque tentative, même refusée, est journalisée dans `envois`. |
+| `POST /commerces/:id/clients/:clientId/relance` | commerçant | **P1-B3.** `{ modele?: 'bienvenue' \| 'proche' \| 'inactif' \| 'anniversaire', canal?: 'sms' \| 'email', message? }` (modèle **ou** message libre ; canal par défaut : téléphone → SMS, sinon e-mail). **501** sans prestataire pour ce canal (sans prestataire configuré — en production Brevo est configuré, en mode test : rien de réel ne part) ; **409** sans consentement, sans contact pour ce canal, ou même modèle déjà envoyé à ce client aujourd'hui (Paris) ; **503** migration 0007 absente (pas d'envoi sans anti-doublon) ; **502** prestataire en erreur ; 200 `{ envoye, canal, modele, envoi }`. Chaque tentative, même refusée, est journalisée dans `envois`. |
 | `GET /commerces/:id/envois` | commerçant | **P1-B3.** Journal des relances (200 dernières, `?client=<id>` pour un client) → `{ envois: [{ clientPrenom, date, modele, canal, statut, declencheur, auteur, raison? }], migration }`. Aussi dans `GET …/etat` (`envois`). Jamais le téléphone, l'e-mail ni le texte. |
 | `POST /commerces/:id/stop-sms` | public (signature Twilio) | **P1-B3.** Webhook Twilio « A message comes in » : `Body` = STOP / ARRET / DESINSCRIPTION… (casse et accents ignorés, 1er mot) → consentement du client de ce numéro (`From`) retiré, journalisé ; autre mot : rien. **501** sans Twilio configuré, **403** si `X-Twilio-Signature` est fausse. Répond un TwiML vide. **SMS via Brevo → 501 aussi** (expéditeur alphanumérique : pas de réponse possible ; voir « SMS / e-mail » et `docs/BREVO.md` §6). |
 | `POST /desinscription/:clientId/:jeton` | public (jeton HMAC) | **P1-B3.** Lien de désinscription des e-mails (page `#/desinscription/<clientId>/<jeton>`, bouton « Me désinscrire ») et One-Click `List-Unsubscribe-Post`. Jeton = HMAC du commerce + client (secret tiré une fois, gardé dans `meta`). Idempotent → `{ ok, commerce }` ; 404 lien invalide. |
@@ -587,7 +591,7 @@ compte sur deux compteurs, rangés dans la table `tentatives_auth` (migration 00
 | Seuil | Valeur / min | Routes | Pourquoi cette valeur |
 |---|---|---|---|
 | `lectureParIp` | 120 | `GET /cartes/:id`, `POST /cartes/:id/lus`, `GET /commerces`, `GET /commerces/:id`, `GET /commerces/:id/menu` | plusieurs clients sur le wifi du restaurant (même IP), pages qui se rafraîchissent |
-| `lectureParCarte` | 30 | `GET /cartes/:id` + `POST /cartes/:id/lus` | une carte ouverte se recharge toutes les 10 s (6 / min) ; marge ×5 |
+| `lectureParCarte` | 30 | `GET /cartes/:id` + `POST /cartes/:id/lus` | la page de jeu en attente de validation vérifie le statut toutes les 10 s (6 / min, `INTERVALLE_VERIFICATION_MS`, `src/lib/attenteVisite.ts`) ; la carte publique, elle, se recharge au montage et au retour au premier plan, pas périodiquement ; marge ×5 sur le pire cas |
 | `inscriptionParIp` | 10 | `POST /commerces/:id/clients` sans PIN | une tablée qui s'inscrit d'un coup ; bloque l'inscription en masse |
 | `inscriptionParContact` | 5 | idem, par numéro / e-mail normalisé dans ce commerce | une personne ne s'inscrit qu'une fois ; freine l'énumération (F-12) |
 | `tirageParIp` | 20 | `POST /commerces/:id/tirages` | 1 tirage / jour / client ; laisse une salle pleine jouer |
@@ -612,8 +616,10 @@ une énumération (F-12) :
 
 - **Échantillonnage (volume)** : `journalLectures: { taux }` dans `creerServeur` (défaut **0,1** : 1 lecture
   sur 10) ; 0 = rien, 1 = tout (tests) ; un taux non fini (`NaN`) retombe sur le défaut. À 0,1, une rafale
-  de 100 sondages laisse ~10 lignes — assez pour la détecter, sans noyer les logs en trafic normal (une
-  carte ouverte se recharge toutes les 10 s : 6 lectures/min → < 1 ligne/min en moyenne par carte active).
+  de 100 sondages laisse ~10 lignes — assez pour la détecter, sans noyer les logs en trafic normal (la page
+  de jeu en attente de validation vérifie le statut toutes les 10 s : 6 lectures/min → ~0,6 ligne/min à 0,1 ;
+  la carte publique se recharge au montage et au retour au premier plan, pas périodiquement).
+  En moyenne, moins d'1 ligne/min par carte active.
   **Plafond : 600 lignes/min** (option `plafond`) — au-delà, les lignes sont comptées puis résumées en une
   seule ligne à la minute suivante (`plafond … lignes/min atteint : N ligne(s) supprimée(s)`) : l'attaque
   reste visible par son volume. Pour enquêter sur une attaque en cours, monter le taux (redéploiement) ou
@@ -640,8 +646,9 @@ une énumération (F-12) :
 **Persistance des compteurs publics (P0-S20, migration 0010)** — la limitation reste appliquée **en mémoire** (aucune
 latence ajoutée à la requête) ; un compteur n'est écrit en base qu'à partir de la **moitié de son seuil**
 (`SEUIL_PERSISTANCE_COMPTEURS = 1/2`, `server/app.ts`), en arrière-plan, sans jamais bloquer la requête. En trafic
-normal : **zéro écriture** — une page qui se recharge toutes les 10 s fait 6 lectures/min pour un seuil de 30
-(`lectureParCarte`), 6 < 15. Une ligne = 73 à 92 octets de JSON (mesuré, clé + horodatage + nombre) ; un compteur chaud
+normal : **zéro écriture** — la page de jeu en attente vérifie le statut toutes les 10 s (6 lectures/min),
+sous la moitié du seuil de 30 (`lectureParCarte`, 15) ; les écrans commerçant rechargent l'état toutes les
+30 s via le store (2 lectures/min sur `GET …/etat`, autre compteur). Une ligne = 73 à 92 octets de JSON (mesuré, clé + horodatage + nombre) ; un compteur chaud
 ou bloqué, lui, survit à un redémarrage ou un réveil Render (rechargé au démarrage, fenêtres passées ignorées). Les
 écritures par clé et par fenêtre sont **bornées** : le compteur sature à son seuil (une requête déjà bloquée ne
 ré-écrit pas — au plus `seuil − seuil/2 + 1` écritures par clé et par minute) et **sérialisées par clé** (une écriture
@@ -711,7 +718,34 @@ personnalisé le jour où il existe).
 
 Tous les fichiers statiques ont un `ETag` faible (taille + date de modification) : `If-None-Match` correspondant → 304.
 
-## Mise en production : Supabase (base) + Render Free (serveur) — aucun déploiement n'a été fait
+### Compression des réponses (P2-Q2)
+
+Le serveur compresse lui-même ses réponses (`server/app.ts`, `preparerCorps` / `envoyerCorps`, `node:zlib`) — il ne
+dépend pas du proxy Render (non vérifié) :
+
+- **Codages** : brotli (qualité 5, préféré à qualité égale) ou gzip (niveau 6), selon `Accept-Encoding` (RFC 9110 :
+  l'explicite prime sur le joker `*`, `q=0` = refusé, `q>1` ramené à 1, casse ignorée). Sans `Accept-Encoding`
+  (service worker hors ligne, `fetch` des tests) : réponse d'identité.
+- **Seuil** : 1 024 octets — en dessous, la compression coûte plus qu'elle ne rapporte (en-têtes + CPU).
+  **Types compressibles seulement** : texte (`text/*`, `application/json`, `application/manifest+json`,
+  `application/xml`, `image/svg+xml`) — images et polices déjà compressées ne le sont pas.
+- **Cache** : les variantes compressées des **fichiers statiques** sont gardées en mémoire (clé = chemin absolu +
+  ETag, 128 entrées max, vidage complet au-delà — un déploiement ≈ 25 fichiers) ; les réponses **JSON / CSV** sont
+  recompressées à chaque fois (corps différent à chaque requête).
+- **`Vary: Accept-Encoding`** ajouté (fusionné avec `Vary: Origin` du CORS, jamais remplacé) ; `Content-Encoding`
+  et `Content-Length` (du corps compressé) sont posés. Testé : `tests/compression-p2-q2.test.ts` (choix du codage,
+  seuil, types, cache, `Vary`).
+- **Portée** : la compression réduit le flux **serveur → navigateur**, pas l'egress Supabase → serveur (voir
+  « Egress — mesuré ») : c'est le volume PostgREST qui compte pour les 5 Go gratuits.
+
+### Page menu prérendue et lien court QR (hors `/api`)
+
+| Méthode et chemin | Accès | Effet |
+|---|---|---|
+| `GET /r/:commerceId` | public | **P2-Q3.** Lien court du QR vitrine → 302 vers `/?via=qr#/jouer/<id>`. Le scan est compté **avant** la redirection (compteur anonyme `scan`, migration 0008), même si la page de jeu ne se charge jamais. Commerce inconnu ou en pause : redirection sans compteur. Limite par IP (dépassée : redirection sans comptage, jamais d'erreur). HEAD : sonde, pas comptée. `?via=qr` dit à la page de ne pas re-signaler le scan (sinon double comptage). |
+| `GET /menu/:commerceId` | public | **P2-Q4.** Page menu prérendue (HTML statique, `server/prerendu.ts`) : titre, description, canonical et Open Graph propres à la page, JSON-LD `Menu` (`MenuSection` / `MenuItem`, prix en EUR), plats, descriptions, prix (« Prix sur place » si non confirmé) et allergènes. Cache 5 min (`public, max-age=300`, ETag faible → 304). Commerce en pause → page « Menu indisponible » (200, `noindex`). Commerce inconnu ou `/menu` sans id → 404 (pas la SPA en 200 : pas de soft 404). Tout texte venu du commerçant est échappé (corps ET JSON-LD). Limite par IP comme les autres lectures publiques. Détail : `docs/SEO.md`. |
+
+## Mise en production : Supabase (base) + Render Free (serveur) — en production depuis le 09/11/2026
 
 **Staging et retour arrière : voir `docs/DEPLOIEMENT.md` (P0-S10)** — 2e service `asian-home-fidelite-staging`
 (branche `autonome/integration`, base Supabase de test séparée), retour arrière en une commande
@@ -766,13 +800,20 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
 2. Copier **tout** le contenu de `supabase/migrations/0001_schema_initial.sql` → **Run** → « Success. No rows returned ».
 3. Nouvelle requête, même chose avec `supabase/migrations/0002_rls.sql` → **Run**. **Dans cet ordre** (0002 modifie les
    tables créées par 0001). Les deux fichiers sont rejouables : une erreur → corriger et relancer sans risque.
+   Puis, dans l'ordre, `0003_cartiz.sql` à `0010_compteurs_publics.sql` (chacun : coller → **Run**). Pour la
+   production actuelle, 0001–0008 sont déjà appliquées (10/11/2026) et **0009–0010 restent à appliquer à la mise en
+   production finale** (voir `docs/DEPLOIEMENT.md` § 5) ; pour un nouveau projet ou le staging, appliquer les dix.
 4. Vérifier, dans une nouvelle requête :
    ```sql
    select relname as table_, relrowsecurity as rls
    from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' order by 1;
    ```
-   Attendu : **5 lignes** `avis`, `clients`, `commerces`, `meta`, `tirages`, toutes avec `rls = true`. Le **Table Editor**
-   doit aussi afficher les 5 tables (sans badge d'avertissement « RLS disabled »). Si Supabase propose d'ajouter des
+   Attendu : **15 lignes** (`avis`, `clients`, `commerces`, `compteurs_publics`, `demandes_rattrapage`, `envois`,
+   `equipe`, `evenements_jour`, `journal`, `menus`, `meta`, `parrainages`, `sessions_revoquees`, `tentatives_auth`,
+   `tirages`), toutes avec `rls = true` — **14 lignes** si seules 0001–0008 ont été appliquées (`compteurs_publics`
+   manque : c'est la 0010), 5 lignes seulement (`avis`, `clients`, `commerces`, `meta`, `tirages`)
+   si seules 0001–0002 ont été appliquées. Le **Table Editor**
+   doit aussi afficher les tables (sans badge d'avertissement « RLS disabled »). Si Supabase propose d'ajouter des
    policies : **ne pas en ajouter** (c'est voulu, voir `0002_rls.sql`).
 
 **c. Récupérer les 2 variables** (libellés d'après la doc du 09/11/2026 — **à confirmer à l'écran**)
@@ -834,7 +875,8 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
    le même client est retrouvé (pas de doublon).
 3. Roulette → **Copier le lien de la page de jeu** (ou scanner le QR) et l'ouvrir **sur votre téléphone**, entrer le même
    numéro → « Pour jouer, validez d'abord votre visite du jour au comptoir. »
-4. Sur l'écran commerçant : Clients → **Valider une visite (+1)** → la roue du téléphone se débloque (≤ 10 s) → tourner → un lot et
+4. Sur l'écran commerçant : Clients → **Valider une visite (+1)** → la roue du téléphone se débloque (la page de jeu
+   vérifie le statut toutes les 10 s tant que la roue est verrouillée — en général quelques secondes) → tourner → un lot et
    un **code** ; le même code apparaît côté commerçant (Tableau de bord / Roulette).
 5. Retourner sur la page de jeu → **2e tirage refusé** (« déjà tourné la roue »).
 6. Clients → **Exporter (CSV)** → le fichier s'ouvre dans Excel avec les accents corrects.
@@ -942,18 +984,21 @@ ou par minuteur — la suppression reste un geste du commerçant, avec la cascad
   y est relu au premier usage de chaque clé puis gardé en cache par instance (prévu pour 1 instance Render).
 - Limitation des routes publiques : en mémoire, compteurs chauds ou bloqués persistés en base (P0-S20, migration 0010)
   et rechargés au redémarrage ; fenêtres d'une minute. Pas de CAPTCHA.
-- Pas de comptes utilisateurs : un PIN par commerce, partagé par l'équipe ; pas de journal « qui a fait quoi ».
-- Le client se reconnaît par son téléphone / e-mail sans vérification (pas de SMS de confirmation) : quelqu'un qui
-  connaît le numéro d'un client voit son prénom et ses tampons, et peut jouer à sa place s'il a une visite validée ce jour-là.
+- Pas de comptes utilisateurs nominatifs : un PIN par commerce, partagé par l'équipe ; le **journal d'audit**
+  (table `journal`, migration 0003) trace qui (gérant ou membre d'équipe) a fait quoi et quand.
+- Le client se reconnaît par son téléphone / e-mail sans vérification (pas de SMS de confirmation) : en mode
+  `transition`, quelqu'un qui connaît le numéro d'un client voit son prénom et ses tampons, et peut jouer à sa
+  place s'il a une visite validée ce jour-là. En mode `stricte` (production), un jeton client est exigé : le
+  numéro seul ne suffit plus (voir « Accès client aux cartes »).
 - Pas de route d'import. Suppression d'un client et purge de conservation : voir « RGPD (P1-B6) » (aucune purge
   planifiée autonome : rien ne tourne sur Render Free sans requête).
 - Le code serveur est vérifié par `tsc` (`npm run typecheck:server`, `tsconfig.server.json` + `@types/node`, P0-S21) ; il est couvert aussi par les tests HTTP.
-- Le front en mode API (V2) recharge tout l'état toutes les 10 s : avec le PIN admin, une requête `/etat` par
+- Le front en mode API (V2) recharge tout l'état toutes les 30 s : avec le PIN admin, une requête `/etat` par
   commerce. Suffisant pour quelques commerces ; au-delà, prévoir une route agrégée ou un rechargement incrémental.
 - `GET /cartes/:clientId` (V2) parcourt les commerces pour trouver le client (pas d'index par identifiant seul) :
   sans importance à cette échelle.
 
-## Intégrations préparées (V3) — aucun compte créé ; relances SMS / e-mail branchées en P1-B3 (sans clés)
+## Intégrations préparées (V3) — compte Brevo créé le 11/11/2026 (mode test) ; Google / Wallet : aucun compte
 
 | Fichier | Rôle |
 |---|---|
@@ -1018,13 +1063,20 @@ migration à appliquer, table déjà fermée à `anon` / `authenticated` (RLS, 0
 clé dérivée de `GOOGLE_CLIENT_SECRET` : une copie de la base seule ne livre pas le refresh token. Le client secret reste
 dans la variable d'environnement et ne transite jamais par le front.
 
-### SMS / e-mail — relances branchées (P1-B3), SMS via Brevo (lot « Brancher Brevo »), en attente des clés
+### SMS / e-mail — relances branchées (P1-B3), SMS via Brevo (lot « Brancher Brevo »), compte créé le 11/11/2026, mode test actif
 
-**État réel (10/11/2026)** : tout le parcours est codé et testé contre des prestataires **simulés** ; aucune clé Twilio ni
-Brevo n'existe, donc en production **rien ne part** : la route relance répond 501 et la tentative est journalisée
-« non branché ». Le code d'appel n'a jamais été exécuté contre le vrai Twilio ni le vrai Brevo. **Fournisseur choisi :
-Brevo** (SMS + e-mail, une seule clé API) ; Twilio n'est plus que le repli SMS si Brevo SMS n'est pas configuré.
-Procédure complète de mise en service : **`docs/BREVO.md`** (compte, clé API, expéditeurs, coûts, test).
+**État réel (11/11/2026)** : tout le parcours est codé et testé contre des prestataires **simulés** ; le
+**compte Brevo a été créé et activé le 11/11 au matin** (clé API v3 « Asian Home Fidelite », expéditeur
+« Asian Home Paris » validé, expéditeur SMS `ASIANHOME`), les **5 variables Render
+sont posées** (`BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `BREVO_SMS_SENDER`,
+`BREVO_MODE_TEST=1`), déploiement « Live » le 11/11 à 08h18 ; `/sante` vérifié à 08h18 :
+`integrations.sms: true, email: true, smsPrestataire: 'Brevo', modeTest: true`. **Aucun envoi réel fait**
+(mode test : e-mail en sandbox Brevo, SMS simulé). Twilio reste le repli SMS, **non configuré**.
+**Non re-vérifié dans ce lot** (lecture de `/sante` en production en délai dépassé, probablement le réveil
+Render — à re-vérifier au prochain passage). Le code d'appel n'a jamais été exécuté contre le vrai Twilio
+ni le vrai Brevo en envoi réel. **Fournisseur choisi : Brevo** (SMS + e-mail, une seule clé API) ; Twilio
+n'est plus que le repli SMS si Brevo SMS n'est pas configuré. Procédure complète de mise en service et
+recette réelle (accord explicite requis) : **`docs/BREVO.md`** (compte, clé API, expéditeurs, coûts, test).
 
 **Mode test (consigne du 10/11/2026 : aucun envoi réel pendant le développement)** : `BREVO_MODE_TEST=1` —
 e-mail en sandbox Brevo (`X-Sib-Sandbox: drop` : Brevo valide la requête et répond 201 + `messageId`, rien livré,
@@ -1096,12 +1148,16 @@ l'entonnoir et le test A/B du tableau de bord restent vides (avec un message), *
 coûts des lots, séries visites / tirages / gains et comparaison au mois précédent marchent (ils viennent des tirages et des
 visites déjà en base). Annulation : `0008_mesure.down.sql` (supprime les compteurs et la fonction ; aucune donnée client).
 
-## Migration future (écrite avant S1 — Supabase est désormais préparé et la procédure écrite, voir plus haut)
+## Migration future — OBSOLÈTE (Supabase est la base de production depuis le 09/11/2026)
 
-Supabase ou Firebase seraient la voie suivante quand :
+Ce qui suit décrivait la voie suivante **avant** S1 — elle a eu lieu : Supabase est désormais la base de
+production (`server/stockage-supabase.ts`), pas une migration future. Ce qui resterait, un jour, si les besoins
+dépassent l'architecture actuelle :
+
 - un commerce dépasse **quelques centaines de clients actifs** ou qu'il y a **beaucoup de commerces** (plusieurs instances, sauvegardes gérées) ;
 - on a besoin de **temps réel** (le comptoir voit le tirage au moment où il a lieu, sans rechargement) ;
 - on veut de vrais **comptes** (e-mail / mot de passe par employé) au lieu d'un PIN.
 
-Migration prévue simple : la forme des données (`src/types.ts`) ne change pas ; il faudrait réécrire `server/stockage.ts`
-(ou remplacer le serveur par des fonctions Supabase) en gardant les mêmes routes, et importer les données depuis `fidelite.db`.
+La forme des données (`src/types.ts`) ne changerait pas ; il faudrait alors réécrire `server/stockage.ts`
+(ou remplacer le serveur par des fonctions Supabase) en gardant les mêmes routes, et importer les données
+depuis `fidelite.db` (SQLite de dev — la base de production, elle, est déjà chez Supabase).
