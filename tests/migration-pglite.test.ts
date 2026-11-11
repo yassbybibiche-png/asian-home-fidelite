@@ -282,6 +282,38 @@ describe('Migration Supabase exécutée sur Postgres (PGlite)', () => {
     await db.exec(sql('0008_mesure.sql'))
   })
 
+  test('0010_compteurs_publics : rejouable ; RLS fermée à anon ; upsert + purge ; aucune colonne d’identité ; DOWN', async () => {
+    await db.exec(sql('0010_compteurs_publics.sql'))
+    await db.exec(sql('0010_compteurs_publics.sql'))
+    const colonnes = await db.query<{ column_name: string }>(
+      `select column_name from information_schema.columns where table_schema = 'public' and table_name = 'compteurs_publics' order by ordinal_position`)
+    assert.deepEqual(colonnes.rows.map((r) => r.column_name), ['cle', 'debut', 'n'], 'ni nom, ni code gagnant, ni contenu client — la clé seule (identifiant déjà utilisé par l’anti-bruteforce)')
+    const t = await db.query<{ relrowsecurity: boolean }>(`select relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname = 'compteurs_publics'`)
+    assert.deepEqual(t.rows.map((r) => r.relrowsecurity), [true])
+    assert.equal((await db.query<{ n: number }>(`select count(*)::int as n from pg_policies where schemaname = 'public'`)).rows[0].n, 0)
+    for (const role of ['anon', 'authenticated']) {
+      const { rows } = await db.query<{ ok: boolean }>(`select has_table_privilege($1, 'public.compteurs_publics', 'select') or has_table_privilege($1, 'public.compteurs_publics', 'insert') as ok`, [role])
+      assert.equal(rows[0].ok, false, role)
+    }
+    const { rows } = await db.query<{ ok: boolean }>(`select has_table_privilege('service_role', 'public.compteurs_publics', 'delete') as ok`)
+    assert.equal(rows[0].ok, true)
+    // Upsert sur la clé (comme enregistrerCompteurPublic), puis purge des fenêtres passées.
+    const ecrire = (cle: string, debut: string, n: number) =>
+      db.query(`insert into public.compteurs_publics (cle, debut, n) values ($1, $2, $3) on conflict (cle) do update set debut = excluded.debut, n = excluded.n`, [cle, debut, n])
+    await ecrire('carte:cl-1', '2026-11-11T10:00:00Z', 15)
+    await ecrire('carte:cl-1', '2026-11-11T10:00:00Z', 16)
+    await ecrire('lecture:203.0.113.7', '2026-11-11T09:00:00Z', 60)
+    assert.equal((await db.query<{ n: number }>(`select count(*)::int as n from public.compteurs_publics`)).rows[0].n, 2, 'upsert : une seule ligne par clé')
+    assert.equal((await db.query<{ n: number }>(`select n from public.compteurs_publics where cle = 'carte:cl-1'`)).rows[0].n, 16)
+    assert.equal(await codeErreur(ecrire('carte:cl-2', '2026-11-11T10:00:00Z', -1)), '23514', 'n négatif refusé')
+    await db.query(`delete from public.compteurs_publics where debut < '2026-11-11T10:00:00Z'`)
+    assert.equal((await db.query<{ n: number }>(`select count(*)::int as n from public.compteurs_publics`)).rows[0].n, 1, 'fenêtre passée purgée')
+    await db.exec(sql('0010_compteurs_publics.down.sql'))
+    await db.exec(sql('0010_compteurs_publics.down.sql'))
+    assert.equal((await db.query(`select 1 from pg_class where relnamespace = 'public'::regnamespace and relname = 'compteurs_publics'`)).rows.length, 0)
+    await db.exec(sql('0010_compteurs_publics.sql'))
+  })
+
   test('suppression d’un commerce : clients et tirages supprimés en cascade', async () => {
     await db.query(`delete from public.commerces where id = 'c1'`)
     const { rows } = await db.query<{ n: number }>(

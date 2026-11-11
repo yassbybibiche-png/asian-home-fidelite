@@ -39,7 +39,7 @@ import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurLogo, LIMITES_LOGO, messageTropLourd, urlLogo, validerLogo, type FormatLogo } from '../src/lib/logo.ts'
 import { EVENEMENTS_PUBLICS, ajouterJours, basculerAccroche } from '../src/lib/mesure.ts'
 import { CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, dureeConservationMois, estPurgeable, exportClientCsv, libelleDuree, listePurge, nomFichierExportClient } from '../src/lib/rgpd.ts'
-import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSuppression, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
+import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSuppression, type CompteurPublic, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
@@ -328,9 +328,40 @@ export function lireJetonClient(secret: string, jeton: string): ChargeClient | n
 
 // ---------- Anti-abus des routes publiques (en mémoire, fenêtres fixes d'une minute) ----------
 
-/** Compteurs par clé (`<catégorie>:<ip>`, `carte:<id>`, `inscription:<commerce>:<contact>`…) ; perdus au redémarrage, sans gravité à la minute. */
-function creerCompteursPublics(maintenant: () => Date) {
+/**
+ * Seuil de persistance (P0-S20) : un compteur n'est écrit en base qu'à partir de la moitié de son seuil — en trafic
+ * normal, zéro écriture (une page qui se recharge toutes les 10 s fait 6 lectures/min pour un seuil de 30) ; un
+ * compteur chaud ou bloqué, lui, survit à un redémarrage. Une ligne = 73 à 92 octets de JSON (mesuré) ; les écritures
+ * ne bloquent jamais la requête (en mémoire d'abord, persistance en arrière-plan). Écritures par clé et par fenêtre :
+ * bornées (le compteur sature à son seuil — une requête déjà bloquée ne ré-écrit pas : au plus
+ * `seuil − seuil/2 + 1` écritures) et sérialisées par clé (une écriture ancienne ne peut pas écraser un blocage plus
+ * récent). Une seule instance (Render aujourd'hui) : à plusieurs instances, chaque instance garderait ses propres
+ * compteurs en mémoire — la base ne sert qu'au redémarrage, pas à la limitation distribuée, et l'écriture d'une autre
+ * instance peut encore ramener un compteur en arrière (voir server/README.md).
+ */
+export const SEUIL_PERSISTANCE_COMPTEURS = 1 / 2
+
+/** Persistance des compteurs publics (P0-S20, migration 0010) ; absente = mémoire seulement (comme avant). */
+export interface PersistanceCompteurs {
+  charger: () => Promise<CompteurPublic[]>
+  enregistrer: (c: CompteurPublic, purgerAvant: string) => Promise<void>
+  /** Vrai si la table existe (avertir dès le démarrage quand elle manque) ; absent = on ne sait pas. */
+  schemaPresente?: () => Promise<boolean>
+  /** Supprime les lignes périmées (au démarrage : aucune donnée ne traîne au-delà de sa fenêtre). */
+  purger?: (avant: string) => Promise<void>
+}
+
+/** Compteurs par clé (`<catégorie>:<ip>`, `carte:<id>`, `inscription:<commerce>:<contact>`…) ; perdus au redémarrage sans persistance. */
+function creerCompteursPublics(maintenant: () => Date, persistance?: PersistanceCompteurs) {
   const fenetres = new Map<string, { debut: number; n: number }>()
+  /** Écritures en cours, par clé : les écritures d'une même clé partent dans l'ordre où elles ont été demandées. */
+  const files = new Map<string, Promise<void>>()
+  let averti = false
+  function avertir(e: unknown) {
+    if (averti) return
+    averti = true
+    console.warn(`[securite] compteurs publics comptés en mémoire seulement (perdus au redémarrage) : ${e instanceof Error ? e.message : e}`)
+  }
   return {
     /** Compte une requête ; au-delà de `max` dans la fenêtre en cours → 429 avec Retry-After (secondes restantes). */
     consommer(cle: string, max: number, motif: string) {
@@ -340,15 +371,63 @@ function creerCompteursPublics(maintenant: () => Date) {
         f = { debut: t, n: 0 }
         fenetres.set(cle, f)
       }
-      f.n++
-      if (f.n > max) {
+      // P0-S20 (revue Codex point 1) : le compteur sature à `max` — une requête déjà bloquée ne ré-incrémente pas
+      // et ne ré-écrit pas (le blocage est déjà persisté : l'écriture a eu lieu quand n a atteint `max`) ; sinon
+      // chaque requête bloquée écrirait, sans borne, tant que l'attaque continue.
+      if (f.n >= max) {
         const s = Math.max(1, Math.ceil((f.debut + FENETRE_PUBLIQUE_MS - t) / 1000))
         throw new ErreurHttp(429, `${motif} Réessayez dans ${s} s.`, { 'Retry-After': String(s) })
+      }
+      f.n++
+      // P0-S20 : un compteur chaud est persisté (en arrière-plan, sans bloquer la requête) ; un compteur froid
+      // ne coûte aucune écriture — et ne peut pas provoquer de 429 juste après un redémarrage de toute façon.
+      if (persistance && f.n >= Math.max(1, Math.ceil(max * SEUIL_PERSISTANCE_COMPTEURS))) {
+        const ligne: CompteurPublic = { cle, debut: new Date(f.debut).toISOString(), n: f.n }
+        const purgerAvant = new Date(t - FENETRE_PUBLIQUE_MS).toISOString()
+        // P0-S20 (revue Codex point 4) : écritures sérialisées par clé — les écritures partent en arrière-plan et
+        // leur ordre d'arrivée en base n'est pas garanti ; sans file, une écriture ancienne (n = 15) arrivant après
+        // une récente (n = 30) annulerait le blocage au redémarrage suivant.
+        const precedent = files.get(cle) ?? Promise.resolve()
+        const ecriture = precedent.then(() => persistance.enregistrer(ligne, purgerAvant))
+        const chaine = ecriture.catch(() => undefined)
+        files.set(cle, chaine)
+        void ecriture.catch(avertir)
+        void chaine.then(() => {
+          if (files.get(cle) === chaine) files.delete(cle)
+        })
       }
     },
     purger() {
       const t = maintenant().getTime()
       for (const [cle, f] of fenetres) if (t - f.debut >= FENETRE_PUBLIQUE_MS || t < f.debut) fenetres.delete(cle)
+    },
+    /**
+     * Recharge les compteurs persistés (redémarrage, réveil Render) : fenêtres encore valides seulement. Table
+     * absente ou base indisponible : mémoire seulement, avec un avertissement — jamais de 500 au démarrage.
+     * L'avertissement part dès le démarrage (pas seulement au premier compteur chaud), et les lignes périmées sont
+     * purgées au passage : la clé contient un identifiant (IP, contact, identifiant de carte — comme `tentatives_auth`),
+     * elle ne doit pas traîner au-delà de sa fenêtre d'une minute.
+     */
+    async restaurer() {
+      if (!persistance) return
+      const t = maintenant().getTime()
+      if (persistance.schemaPresente && !(await persistance.schemaPresente().catch(() => false))) {
+        avertir(new ErreurMigrationManquante('compteurs_publics', '0010_compteurs_publics.sql'))
+        return
+      }
+      let lignes: CompteurPublic[]
+      try {
+        lignes = await persistance.charger()
+      } catch (e) {
+        avertir(e)
+        return
+      }
+      for (const l of lignes) {
+        const debut = Date.parse(l.debut)
+        if (!Number.isFinite(debut) || debut > t || t - debut >= FENETRE_PUBLIQUE_MS || !Number.isInteger(l.n) || l.n <= 0) continue
+        fenetres.set(l.cle, { debut, n: l.n })
+      }
+      if (persistance.purger) await persistance.purger(new Date(t - FENETRE_PUBLIQUE_MS).toISOString()).catch(avertir)
     },
   }
 }
@@ -1011,7 +1090,19 @@ export async function creerServeur(o: OptionsServeur) {
   }
   const maintenant = o.maintenant ?? (() => new Date())
   const limiteur = creerLimiteurAuth(st, maintenant)
-  const compteurs = creerCompteursPublics(maintenant)
+  // P0-S20 : persistance des compteurs publics (migration 0010). Table absente : `enregistrer` lève
+  // ErreurMigrationManquante (avertissement une fois, mémoire seulement) ; `charger` renvoie [].
+  const compteurs = creerCompteursPublics(maintenant, {
+    charger: async () => st.compteursPublics(),
+    enregistrer: async (c, purgerAvant) => {
+      if (!(await schemaCompteursPublics())) throw new ErreurMigrationManquante('compteurs_publics', '0010_compteurs_publics.sql')
+      await st.enregistrerCompteurPublic(c, purgerAvant)
+    },
+    schemaPresente: () => schemaCompteursPublics(),
+    purger: async (avant) => {
+      await st.purgerCompteursPublics(avant)
+    },
+  })
   const limites: LimitesPubliques = { ...LIMITES_PUBLIQUES, ...o.limitesPubliques }
   const nettoyage = setInterval(() => {
     compteurs.purger()
@@ -1445,6 +1536,26 @@ export async function creerServeur(o: OptionsServeur) {
     }
     return authClientPresent
   }
+
+  // Même principe pour la migration 0010 (compteurs des limites publiques, P0-S20) ; la persistance s'en sert pour
+  // ne pas écrire dans une table absente, et le chargement au démarrage pour avertir une fois si elle manque.
+  let compteursPublicsPresent = false
+  let compteursPublicsVerifieLe = 0
+  async function schemaCompteursPublics(): Promise<boolean> {
+    if (compteursPublicsPresent || Date.now() - compteursPublicsVerifieLe < 60_000) return compteursPublicsPresent
+    compteursPublicsVerifieLe = Date.now()
+    try {
+      compteursPublicsPresent = await st.schemaCompteursPublics()
+    } catch {
+      compteursPublicsPresent = false
+    }
+    return compteursPublicsPresent
+  }
+
+  // P0-S20 : recharge les compteurs persistés AVANT de servir (redémarrage, réveil Render). Placé ici, après les
+  // helpers de schéma ci-dessus : les compteurs ont été créés plus haut, mais leur restauration attend que ces
+  // vérifications existent (aucune requête n'est servie avant la fin de `creerServeur` de toute façon).
+  await compteurs.restaurer()
 
   /**
    * Mesure anonyme (P2-Q3) : +1 sur le compteur du jour. Jamais bloquant : migration absente, base en panne → l'événement

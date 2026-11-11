@@ -1263,3 +1263,93 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   production est en `stricte` par défaut ; surveiller `GET /sante/acces-client → accesSansJeton` avant tout passage en
   strict forcé. Le front ne prouve pas à lui seul le parcours titulaire authentifié (pas de navigateur sur la VM) :
   relu + typechecké, à vérifier sur téléphone réel (lien comptoir → code affiché).
+
+## 11/11/2026 — P0-S20 : Persistance des compteurs publics (AUDIT.md §7, revue Codex point 6)
+
+- **Choix : persistance en base (pas documentation seule).** Justifié par la mesure : une ligne de compteur = 73
+  octets de JSON (clé courte `lecture:198.51.100.23`) à 92 octets (clé longue
+  `inscription:c-asian-home-paris:0612345678`) ; clé max 45 car. (`carte:cl-<UUID>`). En trafic normal : zéro écriture
+  (une page rechargée toutes les 10 s fait 6 lectures/min pour un seuil de 30). Seuil de persistance = moitié du seuil
+  (`SEUIL_PERSISTANCE_COMPTEURS = 1/2`, exporté depuis `server/app.ts`) : seuls les compteurs « chauds » (≥
+  ceil(max/2)) ou bloqués sont persistés ; un compteur froid ne peut pas provoquer de 429 juste après un redémarrage.
+  La limitation reste appliquée **en mémoire** (aucune latence ajoutée) ; les écritures sont en arrière-plan, sans
+  bloquer la requête.
+- **Migration 0010 (et non 0009).** Le brief disait 0009, mais 0009 est déjà la migration P0-S7 (auth client) : la
+  nouvelle migration est `supabase/migrations/0010_compteurs_publics.sql` (+ `.down.sql`, rejouable). Table
+  `compteurs_publics` (`cle` PK, `debut` timestamptz, `n` ≥ 0 ; index sur `debut` ; RLS activée, aucune policy, seul
+  `service_role` y a droit). **La migration n'est PAS appliquée en production par ce lot** — procédure dans
+  `server/README.md` (§ Migration 0010) : sauvegarde AVANT (par l'opérateur, jamais par un lot automatique), puis SQL
+  Editor ; vérification `select count(*) from public.compteurs_publics;` → 0 ligne.
+- **Implémentation.** `server/stockage.ts` : type `CompteurPublic`, méthodes `compteursPublics()`,
+  `enregistrerCompteurPublic(c, purgerAvant)` (purge puis upsert), `purgerCompteursPublics(avant)`, `schemaCompteursPublics()`
+  (SQLite : table + index + prepared statements). `server/stockage-supabase.ts` : lecture **paginée**
+  (`lireLignesPages`, tri `cle` — PostgREST plafonne à 1 000 lignes), upsert `onConflict: 'cle'`, purge `lt('debut', …)`,
+  mapping `ErreurMigrationManquante` (0009→0010 via `TABLES_0010`). `server/app.ts` : `creerCompteursPublics` réécrit
+  (saturation à `max`, écritures sérialisées par clé, voir revue Codex) ; `restaurer()` au démarrage de `creerServeur`
+  (après les helpers de schéma — pas de TDZ, les `async function schema*` sont hissées ; aucune requête servie avant la
+  fin de `creerServeur` de toute façon) : fenêtres valides seulement, table absente → avertissement `[securite]` dès le
+  démarrage + purge des lignes périmées, jamais de 500. `server/sauvegarde.ts` : 15 tables (ajout `compteurs_publics`,
+  **optionnelle** — voir revue Codex point 5) ; `scripts/restaurer-base.mjs` normalise la table optionnelle absente
+  (ancien export) avant les contrôles de compteurs et `--verifier`.
+- **Tests : 901 → 917 (+16), `npm test` vert, `npx tsc -p.` vert, `npm run build` vert.** Nouveaux :
+  `tests/compteurs-publics-p0-s20.test.ts` (5, HTTP SQLite : seuil de persistance = 1/2 ; compteur chaud survit ;
+  blocage survit + compteur saturé n'écrit plus ; compteur froid perdu sans conséquence ; fenêtre expirée ignorée),
+  `tests/supabase.test.ts` (5, describe P0-S20 : stockage upsert/lecture/purge ; lecture paginée au-delà de 1 000
+  lignes ; sans migration 0010 ; HTTP redémarrage Supabase + avertissement dès le démarrage ; écriture ancienne
+  retardée n'annule pas un blocage récent), `tests/migration-pglite.test.ts` (1, 0010 : rejouable, RLS fermée, upsert,
+  purge, DOWN), `tests/sauvegarde-p0-s5.test.ts` (5 : 15 tables + migrations 0001–0010 ; export avec `compteurs_publics`
+  absente → vide ; ancien export 14 tables restauré ; `compteurs_publics` mal formé refusé ; CLI ancien export avec et
+  sans `--verifier`). Contrôles négatifs vérifiés (chaque test discriminant échoue sans sa correction) : sans
+  `restaurer()` (2 tests de redémarrage), sans saturation (ligne en base > max), sans sérialisation par clé (upsert
+  retardé → n = 2 final), sans table optionnelle (export refusé ; restauration TypeError), sans validation stricte
+  (table mal formée acceptée).
+- **Revue Codex n° 1** (texte `/tmp/codex-revue-p0-s20.txt`, diff `/tmp/codex-p0-s20.diff`) : 0 P0, 6 points, tous
+  fondés et **tous corrigés** (diff des corrections `/tmp/codex-p0-s20-corrections.diff`) :
+  1. [P1] Écritures non bornées après blocage (100 appels, seuil 30 → 86 persistances : `f.n++` sans plafond, persistance
+     avant le 429). Corrigé : compteur saturé à `max`, refus avant toute écriture — au plus `seuil − seuil/2 + 1`
+     écritures par clé et par minute ; test (ligne en base reste à n = 3 après 429 répétés).
+  2. [P1] Données personnelles dans `cle` (IP, contact en clair via `cleContact`, identifiant de carte) — l'affirmation
+     « aucune donnée client » était fausse. Corrigé : documentation et commentaires rectifiés partout (migration,
+     README, tests) — la clé reprend l'identifiant déjà utilisé par l'anti-bruteforce (`tentatives_auth`, 0006), sans
+     nom ni code gagnant ni contenu client ; purge des lignes périmées au démarrage en plus de chaque écriture.
+     Pseudonymisation HMAC non retenue : elle casserait la restauration par clé (la clé lue en base doit correspondre
+     à la clé en mémoire), pour la même classe de données que `tentatives_auth` déjà acceptée.
+  3. [P1] Restauration tronquée à 1 000 compteurs (lecture non paginée, plafond PostgREST). Corrigé : lecture paginée
+     via `lireLignesPages` (P0-S18) + tri déterministe par `cle` ; test à 1 001 lignes.
+  4. [P1] Une écriture ancienne peut annuler un blocage récent (écritures concurrentes en arrière-plan, ordre
+     d'arrivée non garanti — l'écart n'était pas « d'une unité » comme annoncé). Corrigé : file d'écritures par clé
+     (`Map files`, chaîne de promesses, nettoyage après résolution, rejet absorbé sans bloquer la suite) ; test avec
+     upsert retardé de 150 ms (final n = 3).
+  5. [P1] Sauvegarde préalable impossible (15e table obligatoire → l'export avant migration échouait justement parce
+     que la table n'existait pas encore ; anciens exports à 14 tables non restaurables). Corrigé : `compteurs_publics`
+     devient `optionnelle` dans `TABLES_SAUVEGARDE` (exportée vide si absente, ancien export restauré vide) — la règle
+     « jamais de sauvegarde incomplète » reste entière pour les 14 tables métier ; tests unitaires + CLI.
+  6. [P2] Absence de migration silencieuse au démarrage (`ouVide` masquait l'absence, avertissement seulement au
+     premier compteur chaud). Corrigé : `restaurer()` vérifie `schemaPresente()` d'abord et avertit dès le démarrage ;
+     test (capture de `console.warn` au démarrage sans migration).
+- **Revue Codex n° 2** (corrections seules, `/tmp/codex-revue-p0-s20-corrections.txt`) : 2 points, tous fondés et
+  **tous corrigés** :
+  1. [P1] Ancien export sans `compteurs_publics` : `scripts/restaurer-base.mjs` lisait `sauvegarde.tables[nom].length`
+     → TypeError dans la transaction (idem `--verifier`, compteur absent). Corrigé : normalisation de la table
+     optionnelle absente à `[]` / `0` après validation, avant les contrôles ; test CLI d'ancien export avec et sans
+     `--verifier`. Au passage : le message `VÉRIFICATION OK … pour les 14 tables` du script disait encore 14 → 15.
+  2. [P2] Tables optionnelles entièrement exclues de la validation, même présentes mais mal formées
+     (`compteurs_publics: {corrompu: true}` accepté puis traité comme zéro ligne). Corrigé : `validerSauvegarde`
+     n'excuse que l'absence — présente mais non-tableau, la table est refusée comme les autres ; test.
+  La 2e revue confirme par ailleurs : saturation correcte, file par clé nettoyée, pagination triée, tables métier
+  toujours obligatoires, restauration après initialisation des variables de schéma (pas de TDZ).
+- **Incident de suite (flaky, hors lot, 3e occurrence après P0-S14 et P0-S19).** Une suite complète intermédiaire a
+  échoué sur `securite-s4` « définie et valide → démarre sans avertissement CORS » (timeout 20 s au démarrage du
+  serveur en sous-processus) ; le test passe seul, `server/index.ts` et CORS ne sont pas touchés par ce lot. La suite
+  finale est verte en une passe (917/917) — aucun contournement appliqué.
+- **Note de travail (à ne pas reproduire).** Deux `muse.edit` avec `old_text` trop court (`})` seul) ont remplacé la
+  première occurrence du fichier au lieu de la cible (ligne 34 de `supabase.test.ts` corrompue, puis test CLI
+  modifié au mauvais endroit) : réparé à chaque fois par script ciblé + vérification `git diff` ; désormais, tout
+  `old_text` doit contenir assez de contexte unique pour ne correspondre qu'à un seul endroit.
+- **Résiduels.** Une seule instance (Render) : à plusieurs instances, chaque instance garderait ses compteurs en
+  mémoire et l'écriture d'une autre instance peut encore ramener un compteur en arrière (documenté, README §
+  Anti-abus) — la base ne sert qu'au redémarrage, pas à la limitation distribuée. La migration 0010 reste **à
+  appliquer en production** (sauvegarde d'abord, SQL Editor) ; sans elle, tout marche en mémoire seulement, avec
+  l'avertissement dès le démarrage. Le repli mémoire sans migration et le parcours de redémarrage ne sont prouvés que
+  par tests automatisés (pas de navigateur sur la VM) : vérifier les logs Render après application de la 0010
+  (disparition de l'avertissement).

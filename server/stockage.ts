@@ -42,6 +42,17 @@ export interface TentativesAuth {
   derniereTentative: string
 }
 
+/**
+ * Compteur d'une limite publique (migration 0010 : `compteurs_publics`). `cle` = clé du compteur en mémoire
+ * (`lecture:<ip>`, `carte:<id>`, `inscription:<commerce>:<contact>`…) ; `debut` = début ISO de sa fenêtre d'une
+ * minute ; `n` = requêtes dans cette fenêtre. Aucune donnée client : la clé, un horodatage, un nombre.
+ */
+export interface CompteurPublic {
+  cle: string
+  debut: string
+  n: number
+}
+
 type P<T> = T | Promise<T>
 
 /**
@@ -144,6 +155,18 @@ export interface Stockage {
    * Supabase sans elle : les échecs d'accès client sont comptés en mémoire seulement (comme sans la 0006).
    */
   schemaAuthClient(): P<boolean>
+  /**
+   * Compteurs des limites publiques (migration 0010 : `compteurs_publics`) : toutes les lignes, fenêtres passées
+   * comprises (le serveur ne garde que celles de la minute en cours). `enregistrerCompteurPublic` écrit la ligne
+   * entière (upsert sur `cle`) et supprime au passage les lignes dont la fenêtre est antérieure à `purgerAvant`.
+   * Supabase sans la table : lève ErreurMigrationManquante (le serveur se replie alors sur sa mémoire).
+   */
+  compteursPublics(): P<CompteurPublic[]>
+  enregistrerCompteurPublic(c: CompteurPublic, purgerAvant: string): P<void>
+  /** Supprime les lignes dont la fenêtre est antérieure à `avant` (purge au démarrage et à chaque écriture). */
+  purgerCompteursPublics(avant: string): P<void>
+  /** Table de la migration 0010 présente (toujours vrai sous SQLite). */
+  schemaCompteursPublics(): P<boolean>
   /**
    * Journal des envois de relances (migration 0007 : `envois`). Index unique (commerce, client, modèle, jour) sur les
    * lignes `en_cours` / `envoye` : une 2e réservation de la même relance le même jour lève ErreurConflit.
@@ -254,6 +277,10 @@ const SCHEMA = `
     commerce_id TEXT NOT NULL, jour TEXT NOT NULL, type TEXT NOT NULL, n INTEGER NOT NULL,
     PRIMARY KEY (commerce_id, jour, type)
   );
+  CREATE TABLE IF NOT EXISTS compteurs_publics (
+    cle TEXT PRIMARY KEY, debut TEXT NOT NULL, n INTEGER NOT NULL CHECK (n >= 0)
+  );
+  CREATE INDEX IF NOT EXISTS compteurs_publics_debut ON compteurs_publics (debut);
 `
 
 type Ligne = { donnees: string }
@@ -312,6 +339,12 @@ export function ouvrirStockage(fichier: string) {
     ),
     purgerTentativesAuth: db.prepare('DELETE FROM tentatives_auth WHERE derniere_tentative < ? AND (bloque_jusqu_a IS NULL OR bloque_jusqu_a < ?)'),
     effacerTentativesAuth: db.prepare('DELETE FROM tentatives_auth WHERE cle = ?'),
+    compteursPublics: db.prepare('SELECT cle, debut, n FROM compteurs_publics'),
+    majCompteurPublic: db.prepare(
+      `INSERT INTO compteurs_publics (cle, debut, n) VALUES (?, ?, ?)
+       ON CONFLICT (cle) DO UPDATE SET debut = excluded.debut, n = excluded.n`,
+    ),
+    purgerCompteursPublics: db.prepare('DELETE FROM compteurs_publics WHERE debut < ?'),
     ajoutEnvoi: db.prepare('INSERT INTO envois (id, commerce_id, client_id, modele, canal, statut, jour, date, donnees) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     majEnvoi: db.prepare('UPDATE envois SET statut = ?, donnees = ? WHERE id = ? AND commerce_id = ?'),
     envois: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
@@ -402,6 +435,13 @@ export function ouvrirStockage(fichier: string) {
     },
     effacerTentativesAuth: (cle: string) => void q.effacerTentativesAuth.run(cle),
     schemaAuthClient: () => true,
+    compteursPublics: () => (q.compteursPublics.all() as unknown as CompteurPublic[]).map((l) => ({ cle: l.cle, debut: l.debut, n: Number(l.n) })),
+    enregistrerCompteurPublic: (c: CompteurPublic, purgerAvant: string) => {
+      q.purgerCompteursPublics.run(purgerAvant)
+      q.majCompteurPublic.run(c.cle, c.debut, c.n)
+    },
+    purgerCompteursPublics: (avant: string) => void q.purgerCompteursPublics.run(avant),
+    schemaCompteursPublics: () => true,
     ajouterEnvoi: (e: EnvoiRelance) => inserer(q.ajoutEnvoi, e.id, e.commerceId, e.clientId, e.modele, e.canal, e.statut, e.jour, e.date, JSON.stringify(e)),
     majEnvoi: (e: EnvoiRelance) => inserer(q.majEnvoi, e.statut, JSON.stringify(e), e.id, e.commerceId),
     envois: (commerceId: string, limite: number, clientId?: string) =>

@@ -38,6 +38,8 @@ const TABLES_0006 = ['tentatives_auth']
 const TABLES_0007 = ['envois']
 /** 0008_mesure.sql : la table et la fonction d'incrément (appelée par `rpc`, rangée sous le nom de la table). */
 const TABLES_0008 = ['evenements_jour']
+/** 0010_compteurs_publics.sql : la table des compteurs des limites publiques. */
+const TABLES_0010 = ['compteurs_publics']
 /** Lignes lues par requête (P0-S18) : PostgREST (Supabase) plafonne une réponse à 1 000 lignes par défaut — toute
  * lecture de liste passe donc par `lirePages` (boucle `.range()`), sinon listes, exports et statistiques seraient
  * silencieusement incomplets au-delà du plafond. Les lectures d'une seule ligne (`eq('id', …)`, `clientParContact`,
@@ -104,6 +106,7 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
         if (TABLES_0006.includes(table)) throw new ErreurMigrationManquante(table, '0006_tentatives_auth.sql')
         if (TABLES_0007.includes(table)) throw new ErreurMigrationManquante(table, '0007_relances.sql')
         if (TABLES_0008.includes(table)) throw new ErreurMigrationManquante(table, '0008_mesure.sql')
+        if (TABLES_0010.includes(table)) throw new ErreurMigrationManquante(table, '0010_compteurs_publics.sql')
       }
       throw new Error(`Supabase (${table}) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
     }
@@ -312,6 +315,47 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       if (!error) return true
       if (error.code === 'PGRST202' || error.code === '42883') return false
       throw new Error(`Supabase (auth_client_active) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
+    },
+
+    // ---- Compteurs publics (0010_compteurs_publics.sql) : tant que la migration manque, le serveur compte en mémoire ----
+    // Lecture paginée (`lireLignesPages`, P0-S18) : PostgREST plafonne une réponse à 1 000 lignes — sans pagination,
+    // des compteurs chauds ou bloqués ne seraient pas restaurés au-delà du plafond (revue Codex point 3).
+    compteursPublics: async () => {
+      const lignes = await ouVide(
+        lireLignesPages('compteurs_publics', (debut, fin) => sb.from('compteurs_publics').select('cle,debut,n').order('cle').range(debut, fin)),
+        [],
+      )
+      return (lignes as unknown as { cle: string; debut: string; n: number }[]).map((l) => ({ cle: l.cle, debut: l.debut, n: Number(l.n) }))
+    },
+    enregistrerCompteurPublic: async (c, purgerAvant) => {
+      try {
+        // Fenêtres passées : plus utiles, supprimées au passage.
+        await ok('compteurs_publics', sb.from('compteurs_publics').delete().lt('debut', purgerAvant))
+      } catch (err) {
+        if (err instanceof ErreurMigrationManquante) throw err
+        console.warn(`[stockage] nettoyage des compteurs publics reporté : ${err instanceof Error ? err.message : err}`)
+      }
+      await ok(
+        'compteurs_publics',
+        sb.from('compteurs_publics').upsert({ cle: c.cle, debut: c.debut, n: c.n }, { onConflict: 'cle' }),
+      )
+    },
+    purgerCompteursPublics: async (avant) => {
+      try {
+        await ok('compteurs_publics', sb.from('compteurs_publics').delete().lt('debut', avant))
+      } catch (err) {
+        if (err instanceof ErreurMigrationManquante) return // table absente : rien à purger
+        throw err
+      }
+    },
+    schemaCompteursPublics: async () => {
+      try {
+        await ok('compteurs_publics', sb.from('compteurs_publics').select('*').limit(0))
+        return true
+      } catch (e) {
+        if (e instanceof ErreurMigrationManquante) return false
+        throw e
+      }
     },
 
     // ---- Relances (0007_relances.sql) : tant que la migration manque, le journal se lit vide et aucun envoi ne part ----

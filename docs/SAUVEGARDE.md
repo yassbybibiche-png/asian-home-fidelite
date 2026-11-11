@@ -2,7 +2,7 @@
 
 Supabase Free ne fait **aucune sauvegarde** : si la base est perdue (suppression du projet, erreur de manipulation,
 projet en pause jamais réactivé…), clients, tampons, tirages et avis sont perdus. Ce lot ajoute la solution gratuite
-la plus robuste possible avec les accès disponibles : un **export complet des 14 tables par l'API (PostgREST)**, avec
+la plus robuste possible avec les accès disponibles : un **export complet des 15 tables par l'API (PostgREST)**, avec
 la clé `service_role`, compressé et chiffré, et une **restauration vérifiée sur un Postgres local (PGlite)**.
 
 Code : `server/sauvegarde.ts` (logique pure), `scripts/sauvegarde-base.mjs`, `scripts/restaurer-base.mjs`.
@@ -10,21 +10,25 @@ Tests : `tests/sauvegarde-p0-s5.test.ts` (export → restauration → comparaiso
 
 ## 1. Ce que la sauvegarde couvre
 
-- **Les 14 tables** des migrations 0001 à 0008, **toutes les lignes, toutes les colonnes** : `meta`, `commerces`,
+- **Les 15 tables** des migrations 0001 à 0010, **toutes les lignes, toutes les colonnes** : `meta`, `commerces`,
   `clients`, `tirages`, `avis`, `equipe`, `journal`, `menus`, `parrainages`, `demandes_rattrapage`,
-  `sessions_revoquees`, `tentatives_auth`, `envois`, `evenements_jour`.
+  `sessions_revoquees`, `tentatives_auth`, `envois`, `evenements_jour`, `compteurs_publics` (P0-S20 : compteurs des
+  limites publiques — des fenêtres d'une minute, aucune donnée client).
 - Y compris `pin_hash` / `pin_sel` (PIN commerçant), `code_hash` / `code_sel` (codes équipe), les secrets serveur
   rangés dans `meta` (ex. `secret_desinscription`, jetons Google chiffrés), les téléphones et e-mails des clients.
   → **Le fichier de sauvegarde est sensible** : à chiffrer (§ 4) et à traiter comme une donnée personnelle.
-- **Jamais de sauvegarde incomplète** : si une seule table manque (migration non appliquée) ou ne se lit pas, le script
-  s'arrête avec `ERREUR SAUVEGARDE — table « … » absente…` et **n'écrit aucun fichier**. Le fichier est d'abord écrit en
+- **Jamais de sauvegarde incomplète** : si une seule table MÉTIER manque (migration non appliquée) ou ne se lit pas, le script
+  s'arrête avec `ERREUR SAUVEGARDE — table « … » absente…` et **n'écrit aucun fichier**. Seule exception :
+  `compteurs_publics` (P0-S20) — des compteurs éphémères d'une minute, sans valeur métier : absente, elle est exportée
+  vide (c'est ce qui permet de sauvegarder AVANT d'appliquer la migration 0010), et un ancien export à 14 tables se
+  restaure sans elle. Le fichier est d'abord écrit en
   `.tmp` (nom unique par processus) puis publié par un **lien atomique** : jamais de fichier final tronqué, et deux
   sauvegardes dans la même seconde ne peuvent pas s'écraser (la 2e échoue avec « fichier existe déjà »).
 
 ## 2. Ce qu'elle NE couvre PAS (limites honnêtes)
 
 - **Le schéma** (tables, index, contraintes, triggers, RLS, policies, droits) : la source du schéma, ce sont les
-  migrations du dépôt `supabase/migrations/0001…0008` (rejouées avant toute restauration).
+  migrations du dépôt `supabase/migrations/0001…0010` (rejouées avant toute restauration).
 - **La configuration Supabase** : Auth, Storage, clés API, réglages du projet, variables Render. À noter à part.
 - **Pas d'instantané cohérent** : PostgREST lit table par table (pas de transaction commune). Une écriture pendant la
   sauvegarde peut donner, par exemple, un tirage dont le client n'est pas dans le fichier. **Détection, pas
@@ -110,10 +114,10 @@ SAUVEGARDE_CLE_CHIFFREMENT=… node scripts/restaurer-base.mjs sauvegardes/asian
 ```
 
 Le script : décompresse, déchiffre (clé requise si le fichier est chiffré), valide (refus si une table manque),
-vérifie d'abord que la base cible n'est **pas déjà initialisée** (si une des 14 tables y existe, refus immédiat,
+vérifie d'abord que la base cible n'est **pas déjà initialisée** (si une des 15 tables y existe, refus immédiat,
 avant toute migration — pointer par erreur vers une base existante ne la modifie pas), crée une base PGlite
 **en mémoire**, recrée les rôles Supabase (`anon`, `authenticated`, `service_role` BYPASSRLS), rejoue les
-migrations `0001…0008` (les `.down.sql` sont ignorés), puis insère toutes les lignes **dans une seule transaction**
+migrations `0001…0010` (les `.down.sql` sont ignorés), puis insère toutes les lignes **dans une seule transaction**
 (une erreur → tout est annulé, sortie 1). `--verifier` recompte chaque table **dans cette même transaction** et
 compare au fichier : un écart annule la restauration au lieu de laisser des données validées derrière une sortie 1.
 
@@ -121,7 +125,7 @@ compare au fichier : un écart annule la restauration au lieu de laisser des don
 RESTAURATION OK (PGlite en mémoire) — sauvegarde du 2026-11-12T03:00:00.000Z — 1234 lignes
   meta                 3
   …
-VÉRIFICATION OK — compteurs de la base = compteurs du fichier, pour les 14 tables.
+VÉRIFICATION OK — compteurs de la base = compteurs du fichier, pour les 15 tables.
 ```
 
 - `--fichier <dossier>` : base PGlite persistante (doit être vide), pour l'explorer ensuite.
@@ -146,7 +150,7 @@ Volontairement non automatisée : une erreur de cible écraserait la production.
    inscription n'arrive pendant la restauration.
 2. **Choisir la cible** : projet Supabase **vide** (nouveau projet, ou projet de test pour un exercice). Ne restaurer
    par-dessus la production existante que si elle est perdue/corrompue, et après une sauvegarde de son état actuel.
-3. **Schéma** : SQL Editor → exécuter `supabase/migrations/0001…0008` dans l'ordre (sans les `.down.sql`).
+3. **Schéma** : SQL Editor → exécuter `supabase/migrations/0001…0010` dans l'ordre (sans les `.down.sql`).
 4. **Vérifier le fichier** d'abord avec le § 6 (`--verifier`) : il doit passer.
 5. **Obtenir le JSON en clair** (sur un poste sûr, jamais dans le dépôt) : gunzip, puis déchiffrement avec
    `dechiffrerSauvegarde` de `server/sauvegarde.ts` (ex. petit script `node` qui lit le fichier, appelle la fonction avec
