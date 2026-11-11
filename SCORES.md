@@ -158,8 +158,8 @@ ses imports statiques (méthode `fichiersInitiaux` de
 
 ## Couverture de tests
 
-Suite verte : **1149/1149** (`npm test`, typechecks inclus — 1090 après P2-Q2, +59 tests
-P2-Q3 à P2-Q5 ; voir `JOURNAL.md`).
+Suite verte : **1163/1163** (`npm test`, typechecks inclus — 1090 après P2-Q2, +73 tests
+P2-Q3 à P2-Q6 ; voir `JOURNAL.md`).
 
 - Couverture globale : 97,90 % lignes / 91,49 % branches / 93,06 % fonctions
   (`node --test --experimental-test-coverage`, suite verte, 11/11/2026 —
