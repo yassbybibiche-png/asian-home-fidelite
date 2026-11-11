@@ -628,7 +628,8 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
         <MessageDejaJoue
           prenom={joueur.prenom}
           lot={jeu.lotDuJour}
-          // Code re-servi par le serveur (autre téléphone, cache vidé) ; mémoire du téléphone en repli (serveur d'avant P0-U3).
+          // Code re-servi par le serveur au titulaire authentifié seulement (P0-S19 : jeton client, porté par
+          // l'API — sans jeton, `jeu.codeDuJour` vaut null) ; mémoire du téléphone en repli (tirage fait ici).
           code={jeu.codeDuJour ?? (codeDuJour && !codeDuJour.perdant ? codeDuJour.code : undefined)}
           remis={jeu.remisDuJour}
         />

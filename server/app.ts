@@ -2061,10 +2061,14 @@ export async function creerServeur(o: OptionsServeur) {
     }
     if (ressource === 'cartes' && id && !sous && m === 'GET') {
       // PUBLIC (ajout V2) : la carte vue par le client (#/carte/<clientId>) et l'état de son jeu du jour.
-      // Mêmes informations que POST /clients en public : jamais de téléphone ni d'e-mail. Seule exception (P0-U3) : le
-      // code gagnant DU JOUR de ce client, re-servi à son titulaire (autre téléphone, cache vidé) — jamais dans une liste.
+      // Mêmes informations que POST /clients en public : jamais de téléphone ni d'e-mail. P0-S19 : le code gagnant
+      // DU JOUR n'est servi qu'au titulaire authentifié (jeton client valable de CETTE carte) — jamais dans la vue
+      // limitée, jamais non plus dans la vue complète obtenue sans jeton en mode transition : connaître un
+      // `clientId` ne suffit plus à retirer le gain avant son titulaire. Le titulaire sur un autre téléphone /
+      // au cache vidé récupère son code avec un jeton (lien d'accès du comptoir, « Retrouver ma carte », ou
+      // renouvellement du jeton rangé sur son téléphone) ; la réponse de son propre tirage le lui donne aussi.
       // P0-S7 : vue COMPLÈTE avec un jeton client de cette carte (ou en mode transition) ; sinon vue LIMITÉE (tampons,
-      // jeu du jour — `codeDuJour` inchangé jusqu'à P0-S19 —, sans prénom, messages, historique ni demandes). Ancien
+      // jeu du jour sans code, sans prénom, messages, historique ni demandes). Ancien
       // identifiant après la période de grâce, sans jeton : 404, comme une carte inconnue.
       limiterIp(req, 'lecture', limites.lectureParIp)
       compteurs.consommer(`carte:${id}`, limites.lectureParCarte, TROP)
@@ -2083,7 +2087,10 @@ export async function creerServeur(o: OptionsServeur) {
         const jeu = {
           statut: statutJeu(client, tirages, c.id, t),
           lotDuJour: duJour?.lot ?? null,
-          codeDuJour: duJour?.code && !estPerdant(duJour.lot) ? duJour.code : null,
+          // P0-S19 : code gagnant du jour servi UNIQUEMENT au titulaire authentifié (`charge` = jeton client valable
+          // de cette carte). Sans jeton : null, même en vue complète (mode transition) — le lot reste affiché, le
+          // code, lui, ne quitte jamais le serveur sans preuve. Tirage perdant : null, même avec jeton.
+          codeDuJour: charge && duJour?.code && !estPerdant(duJour.lot) ? duJour.code : null,
           remisDuJour: !!duJour?.remis,
         }
         const acces = { vue: complete ? 'complete' : 'limitee', jeton: !!charge, ...infosGrace(id) }

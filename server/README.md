@@ -242,7 +242,7 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `GET /sante` | public | `{ ok, version, mode, stockage, demo, integrations }` — `integrations` (V3) : `{ googleWallet, appleWallet: 'en_suspens', googleBusinessProfile, sms, email }`, chacun `false` tant que rien n'est configuré ; `smsPrestataire: 'Brevo' \| 'Twilio'` présent seulement si `sms` est `true` (nom du prestataire SMS effectif, pour la page de confidentialité) ; `modeTest: true` présent seulement si `BREVO_MODE_TEST=1` (aucun envoi réel). `migrations` : `{ cartiz, programme, relances }` — `relances` = migration 0007 (table `envois`) appliquée. |
 | `GET /commerces` | public | Fiches publiques (jamais de PIN ni de hash). |
 | `GET /commerces/:id` | public | Une fiche publique. |
-| `GET /cartes/:clientId` | public | **Ajout V2** (page `#/carte/:clientId` et état de la roue) : `{ client (sans téléphone ni e-mail), commerce (fiche publique), jeu: { statut: 'pret' \| 'sansVisite' \| 'dejaJoue', lotDuJour, codeDuJour, remisDuJour } }`. P0-U3 : `codeDuJour` = code gagnant du tirage **du jour** de ce client (null si perdant ou pas de tirage), re-servi à son titulaire (autre téléphone, cache vidé) ; aucune autre route publique ne renvoie de code. 404 inconnue, 409 commerce inactif. P1-C3 : `historiqueLots` = lots gagnés à la roue (20 derniers, perdants exclus) `{ lot, date, statut: 'valable' \| 'remis' \| 'expire' }`, **sans aucun code**. |
+| `GET /cartes/:clientId` | public | **Ajout V2** (page `#/carte/:clientId` et état de la roue) : `{ client (sans téléphone ni e-mail), commerce (fiche publique), jeu: { statut: 'pret' \| 'sansVisite' \| 'dejaJoue', lotDuJour, codeDuJour, remisDuJour } }`. P0-U3 : `codeDuJour` = code gagnant du tirage **du jour** de ce client (null si perdant ou pas de tirage). P0-S19 : il n'est servi qu'au titulaire authentifié (jeton client de la carte, `Authorization: Bearer`) — sans jeton : null, même en vue complète (mode transition) ; aucune autre route publique ne renvoie de code en mode strict (en transition, le tirage et l'export RGPD par contact seul renvoient encore des codes — voir « Modes »). 404 inconnue, 409 commerce inactif. P1-C3 : `historiqueLots` = lots gagnés à la roue (20 derniers, perdants exclus) `{ lot, date, statut: 'valable' \| 'remis' \| 'expire' }`, **sans aucun code**. |
 | `POST /cartes/retrouver` | public | **P1-C3** (« Carte introuvable », audit F-12). `{ contact }` → **toujours 202 `{ ok: true, envoi }`**, que le contact ait une carte ou non ; `envoi` = un prestataire est configuré pour ce canal (Brevo pour un numéro comme pour un e-mail, Twilio en repli pour un numéro — état du serveur, déjà public dans `/sante`). Si `envoi`, la recherche et l'envoi du lien (`/c/<id>` en SMS, `#/carte/<id>` en e-mail) se font **après** la réponse (le temps de réponse ne trahit rien) ; 3 envois max par contact et par 24 h. Sans prestataire : rien n'est cherché ni envoyé. 400 si le contact est illisible ; limite `ficheClientParIp`. |
 | `POST /commerces` | admin | `{ nom, type, lienGoogle?, pin, …réglages? }` → crée le commerce (défauts de `nouveauCommerce`). |
 | `PATCH /commerces/:id` | commerçant | Réglages : `nom, type, logo, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, actif`. Tout autre champ → 400. Réapplique les règles d'avis (comme le front). |
@@ -364,7 +364,8 @@ et à tirer la roue à la place du client. Désormais :
   révoquer toute la carte) mais reste à usage unique et tombe à son expiration (15 min).
 - **Ce que le jeton protège** (mode strict ; 401 uniforme sinon, que la carte existe ou non) : `GET /cartes/:id` en vue
   **complète** (sans jeton : vue **limitée** = tampons + jeu du jour, sans prénom, messages, historique, demandes ni
-  contact ; `codeDuJour` reste servi comme avant, retrait prévu en P0-S19, qui pourra s'appuyer sur `acces.jeton`),
+  contact) et, dans tous les modes, le **code gagnant du jour** (`jeu.codeDuJour`, P0-S19 : servi au titulaire
+  authentifié seulement — sans jeton : null, même en vue complète en mode transition) ; aucune autre route publique ne renvoie de code en mode strict.
   `POST /cartes/:id/lus`, `/donnees` et `/suppression` (jeton **et** contact), `…/clients/:id/profil`, `…/rattrapage`
   (demande du client), `…/prenom`, `…/message-prive`, et **`POST …/tirages`** (le joueur est la carte du jeton ; le
   contact du corps n'est plus lu — la règle « 1 tirage par jour après visite validée » est inchangée).
@@ -395,6 +396,10 @@ et à tirer la roue à la place du client. Désormais :
   existant = carte renvoyée **sans** jeton). Utile le temps d'un déploiement (anciens fronts en cache) ; les appels sans
   jeton sont comptés : `GET /api/v1/sante/acces-client` → `{ mode, jetons, migration, graceAnciensLiensJusquAu,
   accesSansJeton }` (route à part : le contenu de `/sante` est figé). Les tests historiques tournent dans ce mode.
+  **Résiduel P0-S19 (revue Codex, points 1–2) :** en transition, un contact seul suffit encore à obtenir des codes —
+  `POST …/tirages` renvoie le code du tirage qu'il vient de faire, et `POST /cartes/:id/donnees` (export RGPD, contact
+  seul) liste les codes de tous les tirages du client. En production le mode est `stricte` par défaut (dès que
+  `SESSION_SECRET` existe) : ces deux routes y exigent alors le jeton, et aucun code ne sort sans authentification.
 
 ### Migration 0009 (portée « client » de l'anti-bruteforce, P0-S7) — à appliquer en production
 

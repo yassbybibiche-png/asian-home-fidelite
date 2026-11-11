@@ -126,10 +126,13 @@ describe('P0-U3 : routes de la caisse (SQLite)', () => {
     assert.equal((await api('POST', `${gains(inconnu)}/remise`, undefined, CODE)).statut, 404)
   })
 
-  test('autre téléphone / cache vidé : GET /cartes/:id re-sert le code du jour ; le 2e tirage reste refusé sans le révéler', async () => {
+  test('autre téléphone / cache vidé (P0-S19) : GET /cartes/:id sans jeton ne re-sert PLUS le code du jour ; le 2e tirage reste refusé sans le révéler', async () => {
     const carte = await api('GET', `/cartes/${lina.id}`)
     assert.equal(carte.statut, 200)
-    assert.deepEqual(carte.contenu.jeu, { statut: 'dejaJoue', lotDuJour: 'Nems offerts', codeDuJour: code, remisDuJour: false })
+    // Le code ne quitte plus le serveur sans jeton client (le titulaire authentifié le reçoit — voir
+    // tests/code-gagnant-p0-s19.test.ts, dont le lien d'accès → jeton → code) ; le lot reste affiché.
+    assert.deepEqual(carte.contenu.jeu, { statut: 'dejaJoue', lotDuJour: 'Nems offerts', codeDuJour: null, remisDuJour: false })
+    assert.ok(!JSON.stringify(carte.contenu).includes(code), 'aucun code sans jeton')
     const encore = await api('POST', `/commerces/${AH}/tirages`, { contact: '06 12 34 56 78' })
     assert.equal(encore.statut, 409)
     assert.match(encore.contenu.erreur, /déjà tourné la roue/)

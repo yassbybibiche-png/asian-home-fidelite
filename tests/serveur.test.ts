@@ -331,7 +331,9 @@ describe('V2 : front ↔ serveur (contrat) et carte publique', () => {
     assert.equal(gagne.secteur?.lot.libelle, gagne.resultat.lot, 'le lot du serveur existe sur la roue')
     const apres = await api.carte(client.id)
     // P0-U3 : le code gagnant du jour est re-servi au titulaire de la carte (jamais celui d'un tirage perdant).
-    const codeDuJour = gagne.resultat.perdant ? null : gagne.resultat.code
+    // P0-S19 : seulement avec son jeton client — ce client du front n'en porte pas ici, donc null (le titulaire
+    // authentifié le reçoit : tests/code-gagnant-p0-s19.test.ts).
+    const codeDuJour = null
     assert.deepEqual(apres.jeu, { statut: 'dejaJoue', lotDuJour: gagne.resultat.lot, codeDuJour, remisDuJour: false })
     assert.doesNotMatch(JSON.stringify(apres), /0612|telephone|email/, 'aucun contact en public')
     if (gagne.resultat.perdant) assert.ok(!JSON.stringify(apres).includes(gagne.resultat.code), 'code d’un tirage perdant jamais publié')

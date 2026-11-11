@@ -121,7 +121,8 @@ export interface AccesCarte {
 interface ReponseCarteCommune {
   /** Vue publique (sans probabilités, règles d'avis, taux de points ni réglages internes du programme). */
   commerce: CommercePublic
-  /** codeDuJour / remisDuJour : absents sur un serveur d'avant P0-U3. */
+  /** codeDuJour / remisDuJour : absents sur un serveur d'avant P0-U3. P0-S19 : `codeDuJour` n'est servi qu'au titulaire
+   * authentifié (jeton client de la carte, `Authorization: Bearer`) — sans jeton : null, même en vue complète. */
   jeu: { statut: StatutJeu; lotDuJour: string | null; codeDuJour?: string | null; remisDuJour?: boolean }
   menuDisponible?: boolean
 }
