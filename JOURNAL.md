@@ -1,5 +1,81 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P2-Q6 « Logs structurés + alertes » (AUDIT.md §7) — livraison partielle : logs + procédure, alerte non branchée
+- **Nouveau `server/logs.ts`** : une ligne JSON par réponse terminée (`console.info`, comme `[securite]` et
+  `[lecture-sensible]`) — `{"type":"requete","niveau":"info"|"avertissement"|"erreur","horodatage":"ISO",
+  "methode","route","statut","dureeMs","ip"}`. Niveau par statut (< 400 info, 4xx avertissement, 5xx erreur) ;
+  horodatage = horloge réelle ; durée = réception → envoi. **Masquage** : requête jetée (`?acces=`, `?q=`) ;
+  chemin normalisé comme le routeur (segments vides supprimés, décodage par segment) ; seuls restent en clair
+  les mots littéraux des routes et l'identifiant d'un commerce CONNU (ensemble chargé au démarrage après
+  `initialiser`, complété à chaque création ; vide en cas d'échec de lecture = masquage maximal) à sa place
+  (après `commerces`, `r`, `menu`) ; tout autre segment (id de carte/client, jeton, code gagnant,
+  téléphone/e-mail/secret glissé dans un chemin 404) est remplacé par son empreinte SHA-256 tronquée
+  (12 car. hex., comme P2-S15). La liste blanche échoue en sécurité : oublier un littéral ne fait que
+  rendre une ligne moins lisible.
+- **Branchement `server/app.ts`** : `res.on('finish')` au centre du gestionnaire HTTP (succès, erreur, 304,
+  redirection, statique), IP lue à la réception, bloc protégé par `try/catch` ; `ipDe` durci (`req.socket?.`).
+  `masquerIdentifiantsChemin` remplacé par le marcheur partagé `cheminMasquePourErreur` (même règle, `…`).
+- **Bug trouvé par la suite pendant le lot, corrigé avant commit** : la 1re version appelait `ipDe(req)` dans
+  le handler `finish`, quand `req.socket` est déjà `null` (corps abandonné après une 413) → `TypeError` non
+  attrapée → processus tué, corps de la 413 vide (test `logo-p1-b5` en échec, 20/21 ; baseline 21/21).
+  Corrigé (IP à la réception + `?.` + `try/catch`), test de régression ajouté (PUT logo > 2 Mo → 413 complète
+  + ligne émise).
+- **Docs `server/README.md`** : section « Logs structurés et alertes » (format, lecture via logs Render /
+  `jq`, alertes à surveiller : 5xx, 429 en rafale, 401 répétés, 404 en rafale, lenteurs — procédure seulement) ;
+  rétention Render vérifiée dans la doc officielle le 11/11 (Hobby 7 jours, 6 000 lignes/min/instance
+  supprimées au-delà) ; exemples `jq` vérifiés sur un log mélangé (pré-filtre `grep '^{'`, tri, filtre
+  dernière heure) ; ligne `/d/:clientId/:jeton` ajoutée à la table des routes (elle y manquait).
+  **Statut honnête : le critère AUDIT.md (« alerte reçue sur staging lors d'un 500 provoqué ») n'est pas
+  atteint** — aucun staging n'existe encore et aucun canal d'alerte n'est choisi (pas d'envoi réel, pas de
+  service tiers payant, pas de webhook, par décision du lot) ; la moitié réalisable est couverte par un test
+  (une 500 réelle émet une ligne de niveau `erreur` — le signal qu'une alerte consommerait). La seconde moitié
+  (alerte réellement reçue sur staging) reste à faire : staging à créer (`docs/DEPLOIEMENT.md` §6) + canal à
+  choisir. **README racine + SCORES.md** : compteurs 1149/68 → 1159/69.
+- **Tests** (`tests/logs-structures-p2-q6.test.ts`, 14 tests) : niveau par statut, masquage (canonique,
+  encodé, segment vide, liste blanche, commerce connu/forgé, `cheminMasquePourErreur` avec séparateurs
+  encodés), ligne complète, une ligne par requête, aucune donnée sensible (téléphone + e-mail créés dans
+  la capture, `console.error` capturé aussi, PIN en assertion déterministe sur la ligne session),
+  régression 413, émission simulée (vrai 500 → ligne `erreur`), régressions commerce forgé / séparateurs
+  encodés (JSON + `console.error` exacts), registre des commerces (POST /commerces → id lisible),
+  route inconnue.
+- **Revue Codex 1re passe (9 points, `/tmp/codex-revue-p2-q6.txt`, verdict « non acceptable en l'état ») — tous corrigés :**
+  1. [Fondé, bloquant] masquage ≠ normalisation du routeur (`%63artes`, `//`, jeton après segment vide) →
+  normalisation dans `routeMasquee` + régressions. 2. [Fondé] segment inconnu gardé en clair (e-mail dans un
+  chemin 404) → liste blanche, tout segment inconnu est masqué. 3. [Fondé] `console.error` incomplet (gains,
+  `/c/`, `/d/`, encodage) → normalisation + motifs ajoutés, format `…` conservé (test P2-S15 inchangé).
+  4. [Fondé] exemples `jq` en échec sur le stdout mélangé + commentaires inexacts → pré-filtre `grep '^{'`,
+  tri réel, filtre dernière heure (vérifiés avec jq 1.7 sur un log mélangé). 5. [Fondé] test PIN
+  probabiliste + téléphone créé hors capture + pas d'e-mail ni de `console.error` → créations dans la capture,
+  e-mail ajouté, `console.error` capturé, PIN en assertion déterministe sur la ligne session. 6. [Suggestion]
+  `finish` ≠ « une ligne par requête » (connexion interrompue = aucune ligne) → « une ligne par réponse
+  terminée » (doc + code) ; pas de gestion `close` (le statut d'une réponse interrompue serait inconnu,
+  une ligne avec un statut deviné tromperait plus qu'elle n'aiderait). 7. [Fondé] volume et rétention
+  approximatifs → taille 150–220 octets (207 mesurés sur une ligne caisse), volume nuancé (store 30 s),
+  rétention Hobby 7 jours + 6 000 lignes/min vérifiées dans la doc Render. 8. [Fondé] `/d/` absent de la
+  table des routes → ligne ajoutée. 9. [Fondé] critère AUDIT non atteint (test d'émission simulée + alerte
+  staging) → test d'émission simulée ajouté (vrai 500 → ligne `erreur`) ; la moitié staging est déclarée
+  non faite (pas de staging, pas de canal), le lot est présenté comme partiel (logs + procédure).
+- **Revue Codex 2e passe (`/tmp/codex-revue-p2-q6-2.txt`) : 7 corrections confirmées, 2 nouveaux points
+  bloquants** — 1) exception `c-…` trop permissive (e-mail forgé `c-alice@example.com` restait en clair,
+  aussi après un `menu` dans un chemin inconnu) ; 2) `console.error` cassait encore les frontières de
+  segments (`%3F`, `%2F`, `%40`). Tous deux corrigés : marcheur partagé `parcourirChemin`
+  (`routeMasquee` + `cheminMasquePourErreur`, masquage segment par segment avant réunion), ensemble des
+  commerces CONNUS (chargé au démarrage après `initialiser`, complété à chaque POST /commerces, vide en
+  cas d'échec de lecture = masquage maximal), ligne du tableau « une ligne par réponse terminée ».
+  Non bloquants de la 2e passe traités : assertions `console.error` exactes (2 lignes, chemins masqués),
+  test du registre après POST /commerces ; « à sa place » approximatif ignoré (un id de commerce connu et
+  public gardé en clair hors position n'est pas une fuite ; valider la grammaire complète des routes est
+  hors périmètre du lot).
+- **Revue Codex 3e passe (`/tmp/codex-revue-p2-q6-3.txt`) : 0 point bloquant, verdict « lot acceptable ».**
+  Les 2 fuites bloquantes de la 2e passe sont corrigées ; le reliquat staging du critère AUDIT est exclu
+  du verdict (déclaré non fait).
+- **Tests : 1149 → 1163 (+14, `tests/logs-structures-p2-q6.test.ts`)**, suite verte, `npx tsc -p .` propre,
+  typecheck serveur inclus dans `npm test`. Aucun test existant modifié (le test P2-S15 sur `console.error`
+  passe inchangé), aucun secret, aucun envoi réel.
+- **Non vérifié.** `/sante` en production non re-vérifié dans ce lot (faits production/Brevo repris de la
+  vérification du 11/11 à 08h18, agent parent) ; alerte réelle sur staging non testée (voir statut honnête
+  ci-dessus) ; egress réel du dashboard Supabase toujours non lu ; achat de crédits SMS Brevo non confirmé.
+
 ## 11/11/2026 — P2-Q5 « Mise à jour README / documentation » (AUDIT.md §7)
 - **README.md racine** : production en ligne depuis le 09/11/2026 (Supabase `asian-home-fidelite`, migrations
   0001–0008 appliquées le 10/11, 0009/0010 à la mise en production finale) ; Brevo branché en mode test depuis le

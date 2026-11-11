@@ -13,6 +13,7 @@ voient enfin **les mêmes données**. Une seule instance Node pour tous les comm
 |---|---|
 | `server/index.ts` | Point d'entrée (`npm run serveur`) : variables d'environnement, fuseau, démarrage. |
 | `server/app.ts` | Routes `/api/v1`, PIN, anti-bruteforce, validation, service du front compilé (CSV : `src/lib/csv.ts`, partagé avec le front depuis la V2). |
+| `server/logs.ts` | **P2-Q6** : logs structurés JSON — une ligne par réponse terminée (niveau, horodatage, route masquée, statut, durée) ; jamais de secret, PIN, jeton, téléphone/e-mail brut ni identifiant de carte ou de client brut (empreinte SHA-256). Voir « Logs structurés et alertes ». |
 | `server/stockage.ts` | Base SQLite (schéma + requêtes) et contrat `Stockage` commun aux deux bases. |
 | `server/stockage-supabase.ts` | **S1** : même contrat sur Supabase (API REST PostgREST, clé service_role). |
 | `supabase/migrations/` | **S1** : schéma Postgres (`0001_schema_initial.sql`) et RLS (`0002_rls.sql`). |
@@ -300,6 +301,7 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `POST /commerces/:id/stop-sms` | public (signature Twilio) | **P1-B3.** Webhook Twilio « A message comes in » : `Body` = STOP / ARRET / DESINSCRIPTION… (casse et accents ignorés, 1er mot) → consentement du client de ce numéro (`From`) retiré, journalisé ; autre mot : rien. **501** sans Twilio configuré, **403** si `X-Twilio-Signature` est fausse. Répond un TwiML vide. **SMS via Brevo → 501 aussi** (expéditeur alphanumérique : pas de réponse possible ; voir « SMS / e-mail » et `docs/BREVO.md` §6). |
 | `POST /desinscription/:clientId/:jeton` | public (jeton HMAC) | **P1-B3.** Lien de désinscription des e-mails (page `#/desinscription/<clientId>/<jeton>`, bouton « Me désinscrire ») et One-Click `List-Unsubscribe-Post`. Jeton = HMAC du commerce + client (secret tiré une fois, gardé dans `meta`). Idempotent → `{ ok, commerce }` ; 404 lien invalide. |
 | `GET /c/:clientId` (hors `/api`) | public | **P1-B3.** Lien court des SMS → 302 vers `/#/carte/<clientId>`. |
+| `GET /d/:clientId/:jeton` (hors `/api`) | public | **P1-B9.** Lien court de désinscription des SMS de relance → 302 vers `/#/desinscription/<clientId>/<jeton>` (le jeton n'est pas vérifié ici : c'est la page qui appelle `POST /api/v1/desinscription/…` après un clic de confirmation). |
 | `GET /commerces/:id/clients/:clientId/export.csv` | commerçant | **P1-B6.** Toutes les données de CE client en CSV (même format que l'export global : `;`, BOM, anti-injection) : profil, contact, tampons, points, visites, récompenses, échanges, tirages (lot, code, remise), rattrapages, consentement (date, origine), messages, relances. Une ligne par donnée : `rubrique;date;libelle;valeur`. Rien d'un autre client (le parrain n'apparaît que par « oui »), jamais de PIN / hash / code équipe ni d'identifiant technique. Journalisé (action `rgpd`). |
 | `DELETE /commerces/:id/clients/:clientId` | commerçant (pas l'équipe) | **P1-B6.** Corps obligatoire `{ "confirmation": "SUPPRIMER" }` (400 sinon). Suppression définitive avec la **cascade** décrite dans « RGPD » ci-dessous → `{ ok, bilan: { client, tirages, journal, parrainages, rattrapages, envois } }`. Journalisé SANS prénom, contact ni identifiant (qui, quand, motif, combien). 404 client inconnu. |
 | `GET /commerces/:id/purge` | commerçant | **P1-B6.** Avertissement avant purge → `{ conservationMois, maintenant, clients: [{ id, prenom, derniereActivite, purgeLe, statut: 'due' \| 'bientot', protection? }] }` : clients dont la date de purge (dernière visite, à défaut inscription, + durée) est passée ou tombe dans les 30 jours. `protection` = raison de ne PAS purger (exclu par le commerce, récompense en attente valable, plat en réserve valable, visite oubliée en attente). |
@@ -662,6 +664,101 @@ base indisponible : comptage **en mémoire** (perdu au redémarrage), avec un av
 démarrage**, jamais de 500. La persistance en base a été préférée à la documentation seule parce que le coût mesuré est
 négligeable en trafic normal (zéro écriture) et borné en attaque (voir la borne ci-dessus, la 429 arrêtant ensuite le
 compteur).
+
+### Logs structurés et alertes (P2-Q6)
+
+**Une ligne JSON par réponse terminée** (`server/logs.ts`, `journaliserRequete`, branché au centre du gestionnaire
+HTTP — `res.on('finish')`, donc une ligne par réponse envoyée, quel que soit le chemin de sortie : succès, erreur,
+304, redirection, page statique). Une connexion interrompue avant la fin de la réponse ne produit aucune ligne
+(son statut serait inconnu). Émise sur stdout (`console.info`, comme les lignes `[securite]` et
+`[lecture-sensible]`) :
+
+```json
+{"type":"requete","niveau":"info","horodatage":"2026-11-11T13:00:00.000Z","methode":"GET","route":"/api/v1/sante","statut":200,"dureeMs":3,"ip":"127.0.0.1"}
+```
+
+| Champ | Contenu |
+|---|---|
+| `type` | Toujours `"requete"` (distingue ces lignes des futures lignes structurées). |
+| `niveau` | `"info"` (statut < 400), `"avertissement"` (4xx), `"erreur"` (5xx). |
+| `horodatage` | ISO 8601, horloge réelle du serveur (pas l'horloge injectable des tests). |
+| `methode`, `route` | Méthode HTTP ; chemin **masqué** (voir ci-dessous), sans requête. |
+| `statut` | Statut HTTP envoyé. |
+| `dureeMs` | Millisecondes entre la réception de la requête et l'envoi de la réponse (entier ≥ 0). |
+| `ip` | IP vue par le serveur (déjà journalisée par les lignes `[securite]`, nécessaire pour enquêter sur une rafale). |
+
+**Ce qui n'y figure jamais** : aucun secret, PIN, jeton, téléphone ou e-mail brut, aucun identifiant de carte
+ou de client brut, aucun code gagnant, aucun en-tête ni corps. La requête (`?…`) est jetée : elle peut porter
+un jeton d'accès (`?acces=…`) ou un contact (`?q=…`). Dans le chemin, seuls restent en clair les mots
+littéraux des routes (relevés du routeur : `sante`, `commerces`, `cartes`, `clients`, `caisse`, `gains`, …)
+et l'identifiant d'un commerce CONNU du serveur (ensemble chargé au démarrage, après la création du commerce
+seed, et complété à chaque création de commerce), mais seulement à sa place (après `commerces`, `r` ou
+`menu`) : un préfixe `c-…` ne prouve pas qu'un segment est un commerce public (un e-mail forgé
+`c-alice@example.com` dans un chemin 404 est masqué). Tout autre segment est remplacé par son empreinte SHA-256 tronquée (12 car. hex., même
+procédé que P2-S15) : identifiant de carte ou de client, jeton, code gagnant — et n'importe quel segment
+inconnu (téléphone, e-mail, secret glissé dans un chemin 404 forgé). La liste blanche échoue en sécurité :
+oublier un mot littéral ne fait que rendre une ligne moins lisible, jamais fuiter. Le chemin est normalisé
+comme le routeur avant d'être masqué (segments vides supprimés, décodage par segment) : un nom encodé
+(`/api/v1/%63artes/<id>`) ou un segment vide (`/api/v1/cartes//<id>`) ne contourne pas le masquage. La
+journalisation ne fait jamais échouer une requête (écriture en `try/catch`, comme P2-S15) : l'IP est lue à
+la réception, quand le socket existe encore — au moment de `finish`, il peut déjà être détruit (corps
+abandonné après une 413, par exemple) et `req.socket` vaut `null` (`ipDe` se replie alors sur `'?'`).
+
+**Volume.** Une ligne par réponse, petite (environ 150 à 220 octets — une ligne caisse représentative atteint
+207 octets) : de l'ordre de quelques milliers de lignes par jour pour un restaurant, davantage si plusieurs
+pages restent ouvertes (le store recharge toutes les 30 s, soit une requête par page ouverte). Sans
+échantillonnage — en trafic normal, un 500 n'est pas manqué par un tirage au sort. (Le journal
+`[lecture-sensible]`, lui, reste échantillonné à 0,1 : il sert à détecter une énumération, pas à compter
+les erreurs.)
+
+**Lire les logs.** En local : stdout du serveur. En production : dashboard Render → service → **Logs**.
+La rétention dépend du forfait du workspace : **7 jours en Hobby (l'offre gratuite)**, 14 jours en Pro,
+30 jours en Scale / Enterprise — et Render supprime les lignes au-delà de **6 000 lignes/minute/instance**
+([docs Render](https://render.com/docs/logging), vérifié le 11/11/2026). En cas d'incident, exporter les logs
+vite ; sous une rafale au-delà de 6 000 lignes/min, des lignes peuvent manquer. Exemples (`jq`, une ligne
+JSON par ligne) — attention, stdout mélange les lignes JSON et les lignes texte (`[securite]`,
+`[lecture-sensible]`, `[serveur]`) : ne garder que les lignes JSON avant `jq`, sinon `jq` échoue sur la
+première ligne texte :
+
+```sh
+# Toutes les erreurs 5xx, les plus récentes d'abord
+grep '^{' logs.txt | jq -s -c 'sort_by(.horodatage) | reverse | .[] | select(.niveau == "erreur")'
+# 429 par IP sur la dernière heure (rafale ?)
+grep '^{' logs.txt | jq -r 'select(.statut == 429 and .horodatage > (now - 3600 | todate)) | .ip' | sort | uniq -c | sort -rn | head
+# 401 sur /sessions par IP (tentatives de PIN)
+grep '^{' logs.txt | jq -r 'select(.statut == 401 and .route == "/api/v1/sessions") | .ip' | sort | uniq -c | sort -rn | head
+# Requêtes les plus lentes
+grep '^{' logs.txt | jq -s 'sort_by(-.dureeMs) | .[0:10] | .[] | "\(.dureeMs)ms \(.methode) \(.route) \(.statut)"'
+```
+
+**Alertes à surveiller — procédure seulement, rien n'est branché.** Aucun envoi automatique d'alerte
+(e-mail, SMS, webhook, service tiers payant type PagerDuty) n'est configuré, volontairement : le critère
+AUDIT.md (« alerte reçue sur staging lors d'un 500 provoqué ») suppose un staging qui n'existe pas encore
+et un canal d'alerte à choisir (coût et bruit à calibrer — une alerte qui sonne à chaque 429 du wifi du
+restaurant ne sert à rien). **Statut honnête : ce lot livre les logs + la procédure, pas l'alerte.**
+La moitié réalisable du critère est couverte par un test : une 500 réelle émet une ligne de niveau
+`erreur` (`tests/logs-structures-p2-q6.test.ts`, « émission simulée ») — c'est le signal qu'une alerte
+consommerait. La seconde moitié (une alerte réellement reçue sur staging lors d'un 500 provoqué) reste
+à faire : elle suppose un staging (à créer, voir `docs/DEPLOIEMENT.md` §6) et un canal choisi. Ce qui est
+en place, c'est le **signal** (les lignes JSON) et la **procédure** ci-dessous ; le branchement d'un canal
+reste à décider (voir « Ce qui n'est pas branché »).
+
+| Signal | Ce que ça veut dire | Que faire |
+|---|---|---|
+| `niveau: "erreur"` (5xx), même une seule ligne | Bug serveur (exception non HTTP, base en panne, migration manquante…) | Noter `horodatage` + `route`, reproduire en local / staging, corriger ; une 5xx sur `POST …/tirages` ou `POST …/caisse/passage` est prioritaire (un client au comptoir). |
+| Beaucoup de `statut: 429` depuis une même `ip` en quelques minutes | Rafale : attaque, ou un client légitime qui martèle (page restée ouverte, boucle) | Croiser avec les lignes `[securite] BLOCAGE` (même IP ?) ; si c'est le wifi du restaurant, vérifier qu'aucun commerçant n'est bloqué par ses propres erreurs de PIN (le blocage se lève seul, 10 min doublées à chaque série, 24 h max). |
+| Beaucoup de `statut: 401` sur `/api/v1/sessions` depuis une même `ip` | Tentatives de PIN / code (brute-force) | Croiser avec `[securite] échec …` / `BLOCAGE` ; rien à faire si le blocage tient (c'est son rôle) ; si un commerçant légitime est bloqué, attendre la fin du blocage (ou le lever en base, voir « Migration 0006 »). |
+| Beaucoup de `statut: 401` sur `/api/v1/cartes/<empreinte>` depuis une même `ip` | Tentatives d'accès à des cartes (jetons falsifiés, liens expirés) | Croiser avec `[lecture-sensible]` (beaucoup d'empreintes distinctes + 404 = sondage, P2-S15) ; en mode `stricte`, c'est le comportement attendu (401 uniforme). |
+| Beaucoup de `statut: 404` sur `/api/v1/cartes/<empreinte>` | Sondage d'identifiants (énumération F-12) | Voir « Journal des lectures sensibles » (détection par empreintes distinctes + 404 depuis une même IP). |
+| `dureeMs` élevé (> 1 000 ms) sur une route, répété | Lenteur (base, Supabase, réveil Render) | Vérifier si c'est le premier appel après une veille Render (~1 min, normal en Free) ou une lenteur durable (dashboard Supabase, taille de base). |
+
+**Routine recommandée (pas une automatisation).** À chaque signalement d'incident (« ça ne marche pas »,
+« je suis bloqué ») : ouvrir les logs Render sur la fenêtre du signalement et filtrer `niveau == "erreur"`
+puis `statut == 429` / `401` pour l'IP concernée. Une fois par semaine : un coup d'œil aux 5xx (une seule
+ligne suffit à justifier une correction). **Ce qui n'est pas branché** : aucune alerte automatique, aucun
+transfert des logs hors Render, aucune rétention longue — les logs Render Free sont éphémères ; pour une
+alerte réelle (e-mail sur 500, webhook sur blocage), il faudra choisir un canal (e-mail de l'opérateur,
+webhook gratuit) et le brancher sur ces lignes, sans toucher à leur format.
 
 ### Migration 0006 (anti-bruteforce persistant) — à appliquer en production
 

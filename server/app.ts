@@ -43,6 +43,7 @@ import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSupp
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { menuAffichePour, pageMenuIndisponible, pageMenuPrerendue, pageNonTrouvee } from './prerendu.ts'
+import { cheminMasquePourErreur, journaliserRequete } from './logs.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
 import {
   chiffrerJetons,
@@ -1211,6 +1212,17 @@ export async function creerServeur(o: OptionsServeur) {
     await st.fermer()
     throw e
   }
+  // P2-Q6 (revue Codex 2e passe, point 1) : identifiants des commerces CONNUS, pour le masquage des logs —
+  // seul un commerce connu reste en clair dans une ligne (un préfixe `c-…` ne prouve rien). Chargé après
+  // `initialiser` (le commerce seed y est créé) ; complété à chaque création (POST /commerces). En cas
+  // d'échec de lecture, l'ensemble reste vide : tous les identifiants de commerce sont alors masqués
+  // (échec en sécurité, le serveur démarre quand même).
+  const idsCommercesConnus = new Set<string>()
+  try {
+    for (const commerce of await st.commerces()) idsCommercesConnus.add(commerce.id)
+  } catch {
+    // Ensemble vide : masquage maximal, pas d'échec de démarrage pour les logs.
+  }
   const maintenant = o.maintenant ?? (() => new Date())
   const limiteur = creerLimiteurAuth(st, maintenant)
   // P0-S20 : persistance des compteurs publics (migration 0010). Table absente : `enregistrer` lève
@@ -1249,7 +1261,7 @@ export async function creerServeur(o: OptionsServeur) {
   })
 
   const ipDe = (req: IncomingMessage) =>
-    (o.derriereProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()) || req.socket.remoteAddress || '?'
+    (o.derriereProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()) || req.socket?.remoteAddress || '?'
 
   /**
    * Journal des lectures sensibles (P2-S15) : un échantillon des lectures `GET /cartes/:id` et
@@ -2532,6 +2544,7 @@ export async function creerServeur(o: OptionsServeur) {
         const base = nouveauCommerce(texte(nom, 'nom', 80, { requis: true }), typeCommerce(type ?? 'autre'), lien(lienGoogle ?? ''))
         const commerce = appliquerReglages(base, reglages, CHAMPS_REGLAGES.filter((k) => !['nom', 'type', 'lienGoogle'].includes(k)))
         await st.ajouterCommerce(commerce, await hacherPin(pinClair))
+        idsCommercesConnus.add(commerce.id) // P2-Q6 : le nouveau commerce reste lisible dans les logs.
         // Réponse à l'admin authentifié : fiche complète, comme PATCH et /etat (le PIN est stocké à part).
         return { statut: 201, json: { commerce } }
       }
@@ -3662,16 +3675,36 @@ export async function creerServeur(o: OptionsServeur) {
   /**
    * Chemin avec identifiants porteurs masqués, pour les logs d'erreur (P2-S15, revue Codex point 2) : un
    * identifiant de carte ou un jeton de désinscription ne doit pas apparaître en clair dans `console.error`
-   * quand une exception non HTTP survient sur ces routes. Le message de l'exception elle-même n'est pas
-   * masqué (les erreurs de stockage n'y incluent pas d'identifiant aujourd'hui).
+   * quand une exception non HTTP survient sur ces routes. Même marche que les logs JSON
+   * (`cheminMasquePourErreur`, `server/logs.ts`), avec `…` au lieu de l'empreinte (format historique).
+   * Le message de l'exception elle-même n'est pas masqué (les erreurs de stockage n'y incluent pas
+   * d'identifiant aujourd'hui).
    */
-  const masquerIdentifiantsChemin = (pathname: string) =>
-    pathname
-      .replace(/(\/cartes\/)[^/?#]+/, '$1…')
-      .replace(/(\/desinscription\/)[^/?#]+\/[^/?#]+/, '$1…/…')
-      .replace(/(\/clients\/)[^/?#]+/, '$1…')
+  const masquerIdentifiantsChemin = (pathname: string) => cheminMasquePourErreur(pathname, idsCommercesConnus)
 
   const serveur = createServer(async (req, res) => {
+    const debutRequete = Date.now()
+    // P2-Q6 : l'IP est lue à la réception, quand le socket existe encore — au moment de `finish` il
+    // peut déjà être détruit (corps abandonné après une 413, par exemple), et `req.socket` vaut `null`.
+    const ipRequete = ipDe(req)
+    // Une ligne JSON par réponse terminée (niveau, horodatage, route masquée, statut, durée). `finish` se
+    // déclenche quand la réponse est envoyée, quel que soit le chemin de sortie (succès, erreur, 304,
+    // redirection, statique) ; la ligne n'est jamais émise deux fois pour une même requête. Une connexion
+    // interrompue avant la fin de la réponse ne produit aucune ligne (son statut serait inconnu). Le bloc
+    // entier est protégé : une défaillance de journalisation ne doit jamais faire échouer une requête.
+    res.on('finish', () => {
+      try {
+        let pathname = '/'
+        try {
+          pathname = new URL(req.url ?? '/', 'http://localhost').pathname
+        } catch {
+          pathname = '/'
+        }
+        journaliserRequete({ methode: req.method ?? '?', pathname, statut: res.statusCode, dureeMs: Date.now() - debutRequete, ip: ipRequete, commercesConnus: idsCommercesConnus })
+      } catch {
+        // La journalisation ne doit jamais faire échouer une requête.
+      }
+    })
     const entetes: Record<string, string> = { ...ENTETES_SECURITE, ...entetesCors(origineCors, req.headers.origin) }
     const url = new URL(req.url ?? '/', 'http://localhost')
     // P2-S15 : le routeur a-t-il répondu (pour ne pas journaliser deux fois une lecture dont l'envoi échoue).
