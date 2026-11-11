@@ -56,8 +56,9 @@ npm run typecheck:server   # = tsc -p tsconfig.server.json
 `tsconfig.server.json` étend `tsconfig.json` (mêmes règles : `strict`, `noUnusedLocals`, `noUnusedParameters`) avec les
 types Node (`@types/node` 24, dépendance de dev) au lieu de `vite/client`, et `lib: ["ES2022"]` sans le DOM (les `fetch`,
 `URL`, `Response`… viennent des types Node). Il inclut `server/` et, par les imports, les fichiers de `src/` partagés
-(`src/lib/*.ts`, `src/types.ts`, `src/data/*`, `seed.json`). À lancer avant chaque commit qui touche `server/` ; pas
-encore branché dans `npm run build` ni dans `npm test`.
+(`src/lib/*.ts`, `src/types.ts`, `src/data/*`, `seed.json`). La vérification est branchée dans `npm test` (elle tourne
+avant les tests) : une erreur de type serveur fait échouer `npm test`. Elle n'est pas branchée dans `npm run build` /
+`build:api` (build Render) — décision volontaire, à trancher à la fusion.
 
 En développement, sans aucune variable : PIN admin `000000`, PIN commerçant d'Asian Home Paris `1234`
 (un avertissement s'affiche au démarrage). **Ces PIN de développement ne sont jamais acceptables en production** :
@@ -669,7 +670,7 @@ oubliée en attente de décision. Chaque purge est journalisée (auteur, date, d
   connaît le numéro d'un client voit son prénom et ses tampons, et peut jouer à sa place s'il a une visite validée ce jour-là.
 - Pas de route d'import. Suppression d'un client et purge de conservation : voir « RGPD (P1-B6) » (aucune purge
   planifiée autonome : rien ne tourne sur Render Free sans requête).
-- Le code serveur n'est pas vérifié par `tsc` (pas de `@types/node` installé, pour ne rien ajouter) : il est couvert par les tests HTTP.
+- Le code serveur est vérifié par `tsc` (`npm run typecheck:server`, `tsconfig.server.json` + `@types/node`, P0-S21) ; il est couvert aussi par les tests HTTP.
 - Le front en mode API (V2) recharge tout l'état toutes les 10 s : avec le PIN admin, une requête `/etat` par
   commerce. Suffisant pour quelques commerces ; au-delà, prévoir une route agrégée ou un rechargement incrémental.
 - `GET /cartes/:clientId` (V2) parcourt les commerces pour trouver le client (pas d'index par identifiant seul) :

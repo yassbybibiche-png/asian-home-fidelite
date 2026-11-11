@@ -836,5 +836,10 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   comportement identique. Aucune erreur dans `server/notifications/` (fichiers Brevo non touchés).
 - **Qualité** : `npm test` 806/806 (806 avant, aucun test ajouté ni modifié), `npm run build` OK,
   `npm run typecheck:server` propre (et il échoue bien sur les 2 erreurs avant correction).
-- **Limites** : la vérification n'est branchée ni dans `npm run build` (Render) ni dans `npm test` — à lancer à la
-  main avant de commiter du code serveur ; `tests/`, `scripts/` et `tests-e2e/` ne sont toujours pas vérifiés par `tsc`.
+- **Limites** : la vérification n'est pas branchée dans `npm run build` / `build:api` (build Render) — décision
+  volontaire, à trancher à la fusion ; `tests/`, `scripts/` et `tests-e2e/` ne sont toujours pas vérifiés par `tsc`.
+- **Revue Codex du code (11/11/2026, `/tmp/codex-revue-p0-s21.txt`)** : aucun bug fonctionnel introduit ;
+  2 remarques, toutes deux traitées : [P2] contrôle facultatif → `typecheck:server` branché dans `npm test`
+  (il tourne avant les tests, ~1 s, et fait échouer `npm test` en cas d'erreur de type serveur) ; [P3] ligne
+  obsolète de `server/README.md` (§ Limites honnêtes) affirmant que le serveur n'était pas vérifié par `tsc` →
+  corrigée. Le `build` Render n'est pas touché (choix explicite, voir ci-dessus).
