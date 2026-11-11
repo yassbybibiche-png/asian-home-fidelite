@@ -1,5 +1,50 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P2-S17 « Rotation des secrets » (AUDIT.md §7, revue Codex point 10)
+- **Procédure documentée** (`docs/SECURITE.md`, nouveau, ~250 lignes, aucun secret réel) : inventaire
+  (SESSION_SECRET, SUPABASE_SERVICE_ROLE_KEY, ADMIN_PIN, PIN commerce, PIN_ASIAN_HOME, codes équipe,
+  GOOGLE_CLIENT_SECRET, BREVO_API_KEY, `secret_desinscription` en `meta`) ; § 2 SESSION_SECRET
+  (déconnexion générale, retour arrière 24 h) ; § 3 SUPABASE_SERVICE_ROLE_KEY (deux parcours : clé
+  `sb_secret_…` à préférer, clé legacy JWT via JWT secret — invalide `anon` aussi) ; § 4 PIN commerce
+  (`PUT /pin`, ne révoque pas les sessions ; PIN dans l'historique Git, commit `eedc463`, P0-S6 —
+  risque accepté par l'utilisateur le 09/11 « laisse comme ça », rien sans son OK explicite ;
+  neutraliser d'abord, purger ensuite) ; § 5 codes équipe (supprimer + recréer invalide les sessions,
+  contrairement au simple changement de code) ; § 6 autres secrets (Brevo : `/sante` ne valide pas la
+  clé, e-mail sandbox authentifié requis ; Google : reconnexion obligatoire ; `secret_desinscription` :
+  suppression en base + redémarrage de toutes les instances, secret mémorisé par instance) ; § 7
+  incident ; § 8 testé / non testé ; § 9 check-list. Règle Render (§ 0) : « Save and deploy » (le
+  build existant suffit), attendre Live ; « Save only » ne déploie pas, un simple Restart reprend les
+  variables du déploiement courant.
+- **Test local** (`tests/rotation-secrets-p2-s17.test.ts`, 2 tests, serveur de test SQLite, aucune
+  variable Render touchée, aucun secret réel) : rotation SESSION_SECRET (même base rouverte avec un
+  nouveau secret — anciens jetons gérant/admin/équipe/client → 401, nouvelle session PIN inchangé →
+  201, état métier conservé : même commerce, même client, mêmes champs prénom/tampons/points, retour
+  arrière vérifié) ; rotation PIN commerce (ancien PIN → 401, nouveau → 201, session d'avant toujours
+  valable).
+- **Revue Codex (10 points, `/tmp/codex-revue-p2-s17.txt`, diff `/tmp/codex-p2-s17.diff`)** : 1. [Fondé,
+  élevée] « Save » / Restart Render ne déploient pas la nouvelle valeur → CORRIGÉ : « Save and
+  deploy » explicite partout (vérifié dans la doc Render). 2. [Fondé, élevée] Supabase : legacy
+  `service_role` vs `sb_secret_…` → CORRIGÉ : deux parcours + vérification que l'ancienne clé est
+  refusée (curl → 401). 3. [Fondé, moyenne] `secret_desinscription` mémorisé par instance → CORRIGÉ :
+  suppression + redémarrage de toutes les instances, ancien lien → 404. 4. [Fondé, moyenne] `/sante`
+  ne valide pas la clé Brevo → CORRIGÉ : e-mail sandbox authentifié avant révocation, SMS simulé non
+  présenté comme validation. 5. [Fondé, moyenne] `POST /sessions` → 201 (pas 200) ; jeton client à
+  vérifier sur `/cartes/<id>` (pas `/etat`, route gérant/admin) → CORRIGÉ partout (doc + tests).
+  6. [Fondé, moyenne] « données intactes » dépassait la preuve → CORRIGÉ : test renforcé (comparaison
+  des champs client, sessions admin/équipe, retour arrière) + wording doc. 7. [Fondé, faible]
+  validation staging restante → CONSERVÉ explicitement (§ 8 + ici) ; AUDIT.md:723 non modifié
+  (document d'audit figé) — à lire « le changement seul ne retire pas la valeur de l'historique ».
+  8. [Fondé, faible] renvois § 7 au lieu de § 6 + lecture des variables → CORRIGÉ (table d'inventaire,
+  § 0). 9. [Non fondé] aucune fuite de secret réel. 10. [Non fondé] mécanismes confirmés + précision
+  ajoutée (§ 5, suppression/recréation membre invalide les sessions).
+- **Tests : 1133 → 1135** (suite complète verte au 2e run ; 1er run : 1134/1135, flake préexistant
+  `cartiz.test.ts:316` — l'UUID aléatoire d'une entrée de journal contient « 9753 », qui est aussi un
+  code de test dans la regex de non-correspondance ; passe seul 34/34, non lié au lot, test non
+  modifié). `npx tsc -p .` OK.
+- **Statut du lot : validation staging restante** — critère AUDIT.md « 1 rotation testée sur staging »
+  non satisfait (tests SQLite locaux uniquement) ; staging inexistant (création navigateur côté agent
+  parent). Aucune rotation réelle faite, aucune variable Render modifiée.
+
 ## 11/11/2026 — P2-S15 « Journal des lectures sensibles » (AUDIT.md §7, F-12)
 - **Journal échantillonné** (`server/app.ts`, `journaliserLectureSensible`, branché au centre du
   gestionnaire HTTP) : `GET /cartes/:id` et `GET /commerces` (liste) journalisés en `console.info`
