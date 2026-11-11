@@ -1461,3 +1461,72 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   § 2). Rien ne prouve que le service existe tant que le `GET /api/v1/sante` du § 2, étape 4, n'a pas été
   fait. La commande de retour arrière n'a jamais été exécutée pour de vrai (simulation + faux serveur
   local seulement) : le premier vrai retour arrière devra être fait sur le staging d'abord.
+
+## 11/11/2026 — P0-U0 : Mesure initiale avant refonte (AUDIT.md §7, revue Codex point 15)
+
+- **Branche** `autonome/p0-u0-mesure-initiale` (depuis `autonome/integration` `de63457`) ;
+  commit `2bf30ca` ; fusion `--no-ff` `8a78ecc` dans `autonome/integration` ; les deux
+  branches poussées sur origin ; `git status` propre.
+- **Tests : 944/944 → 950/950** (219 suites), `npx tsc -p .` vert, `npm run build` vert
+  (0 avertissement). Nouveau : `tests/scores-p0-u0.test.ts` (6 tests) — SCORES.md contient
+  les sections attendues (titres Markdown) et ses chiffres de bundle correspondent à un
+  build frais à 5 % près (JS initial, CSS, total, JS total, chunks, plus gros chunk),
+  avec vérification de l'arithmétique exacte JS + CSS = total.
+- **Fichiers** : `SCORES.md` (nouveau, référence avant/après) ; `scripts/mesurer-scores.mjs`
+  (nouveau, Playwright Pixel 7, Slow 4G + CPU ×4, serveur E2E local) ;
+  `scripts/mesurer-lighthouse.mjs` (nouveau, Lighthouse 13.6.0 épinglé en devDependency) ;
+  `package.json` + `package-lock.json` (ajout `lighthouse` 13.6.0 exact ; aucune
+  dépendance existante modifiée — le lock ne fait qu'ajouter l'arbre Lighthouse).
+- **Mesures (11/11/2026, 5 passes Playwright + 2 passes Lighthouse, serveur local)** :
+  bundle initial 535857 o (JS 471651 + CSS 64206) ; couverture 97,84 % lignes / 91,43 %
+  branches / 92,92 % fonctions ; Lighthouse mobile `#/jouer` 81 (76 à la 1re passe,
+  variance ±5) ; premier affichage `#/jouer` 4,02–4,24 s (seuil < 4 s **non atteint**) ;
+  LCP jouer 4,06–4,18 s (élément `p.titre-carte`) ; scan → lot ~9,0–10,3 s d'étapes
+  (caisse ralentie 6,8–7,9 s) ; taps client 4 clics + 1 saisie, caisse 3 clics + 2 saisies ;
+  DA moyenne 6,1/10 (Jouer 7, Carte 7, Caisse 6, Menu 6, Tableau de bord 6, Clients 6,
+  Roulette 6, Réglages 5). Menu → commande et réservation n'existent pas (dit
+  explicitement). Délai à froid Render (~60 s) non mesuré ; `npm audit` non mesurable
+  sur cette VM (403 `policy_denied`).
+- **1 erreur console, reproductible 5/5** : `GET /api/v1/commerces/<id-client>` → 404 à
+  chaque transition jouer → carte. Cause élucidée (pile d'appel + hash au moment de
+  l'appel + chargement direct sans 404) : `JouerApi` (`src/pages/Jouer.tsx:422`,
+  `api.commerce(param)`) se re-rend une fois avec le nouveau `param` (identifiant
+  client) avant d'être démonté — les deux abonnements `useRoute()` (App et JouerApi)
+  ne se mettent pas à jour dans le même rendu. Aucun impact visible. **À corriger dans
+  un lot ultérieur — pas dans ce lot de mesure.**
+- **Revue Codex** (`/tmp/codex-revue-p0-u0.txt`, diff `/tmp/codex-p0-u0.diff`) : **10 points,
+  tous corrigés** (scripts réécrits, re-mesure complète passes 4–5, Lighthouse relancé
+  avec le script versionné) :
+  1. [Bloquant, fondé] LCP lu trop tôt / périmé sur navigation hash → stabilisation 2 s
+     avant lecture, élément LCP enregistré, menu mesuré aussi par chargement direct
+     (LCP menu par hash : aucune nouvelle entrée ; direct : 1632 ms). Les valeurs
+     4032/4040 ms des passes 2–3 étaient la valeur périmée de `#/jouer`.
+  2. [Bloquant, fondé] Caisse non ralentie (CDP seulement sur le client) → même
+     ralentissement sur chaque page ; validation caisse corrigée de ~1,1–1,6 s à 6,8–7,9 s.
+  3. [Fondé] `VITE_API_URL` hérité → forcé à `/` pour le serveur enfant + garde-fou
+     (toute requête hors origine locale fait échouer la passe).
+  4. [Fondé] Captures back-office « réussies » après échec du déverrouillage → fail-fast
+     + attente du titre de chaque écran ; déverrouillage OK aux passes 4–5.
+  5. [Fondé] Port non vérifié → refus de se brancher sur un serveur déjà présent
+     (port libre exigé) + surveillance `error`/`exit` du serveur enfant.
+  6. [Fondé] Faux positifs dans la cohérence des chiffres → arithmétique exacte
+     JS + CSS = total + vérification JS total / chunks / plus gros chunk.
+  7. [Fondé] Requêtes échouées non collectées sur caisse/back-office → mêmes collecteurs
+     partagés sur toutes les pages.
+  8. [Fondé] Lighthouse non reproductible (script en cache, chemins absolus) →
+     `scripts/mesurer-lighthouse.mjs` versionné + `lighthouse` 13.6.0 épinglé ;
+     méthodes Playwright (CDP direct) et Lighthouse (throttling simulé) documentées
+     comme distinctes.
+  9. [Fondé] Options CLI cassées (`--port` ignoré, `--sortie` buggué) → `parseArgs`
+     + validation du port.
+  10. [Fondé] Sections acceptées par simple mention → ancrage sur les titres Markdown
+      et seuils vérifiés dans le tableau. Plus la remarque de clôture : « à la limite »
+      remplacé par « seuil non atteint » (les 5 premiers affichages dépassent 4 s).
+  Vérifications de Codex confirmées : 471651 + 64206 = 535857 o, totaux d'étapes
+  corrects, moyenne DA 6,125 → 6,1.
+- **Résiduels / non vérifié.** Pas de mesure sur téléphone réel (Lighthouse et parcours
+  à refaire sur le staging, protocole dans SCORES.md) ; le vrai menu 81 plats et le vrai
+  logo n'ont pas été mesurés (commerce de test sans logo ni menu) ; délai à froid Render
+  non mesuré ; `npm audit` à mesurer hors de cette VM. Le 404 jouer → carte est un
+  défaut réel à corriger dans un lot ultérieur (piste : garder `page === 'jouer'` dans
+  `JouerApi` ou unifier l'abonnement `useRoute`).
