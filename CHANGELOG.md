@@ -19,6 +19,43 @@ bundle 601,7 → 450,2 Ko (JS initial), dashboard enrichi + entonnoir, SEO/OG.
 
 ## Boucle d'amélioration continue
 
+### t6 — Bannière de la carte en WebP léger (11/11/2026, fusionné)
+
+Nouveau `public/visuels/hero-plats-petit.webp` (720×480, WebP q75,
+75 588 o, dérivé du vrai `hero-plats.jpg` 1024×683, 177 369 o par Pillow,
+−57 %) servi en premier via `<picture className="block">` dans
+`src/components/CarteFidelite.tsx` (bannière `h-24` de la carte), le JPEG
+restant le repli ; le `<source>` WebP n'est rendu que si la bannière est
+celle par défaut (`banniere === VISUELS.heroPlats`) — une bannière
+configurée par le commerçant garde sa balise `<img>` simple (le
+`<picture>` reste, sans `<source>`) ; constante `VISUELS.heroPlatsPetit`
+dans `src/lib/visuels.ts` ; documenté dans `public/visuels/SOURCES.md`.
+`hero-plats.jpg` reste intact partout. La bannière n'est PAS l'élément LCP
+de `#/carte` (c'est le héros `h-80`) : son gain passe par la concurrence
+réseau — elle partage le tuyau 4G avec le héros.
+Mesures (ponctuelle, nouveau script versionné
+`scripts/mesurer-carte-asian-home.mjs` — parcours complet, 2 mesures :
+transition réelle + chargement direct) : transition réelle — héros affiché
+1 531/1 604 → 1 432/1 365 ms puis 1 375/1 345 ms (moyenne ~1 379 ms,
+**−~190 ms**), bannière affichée 1 919/1 921 → 1 439/1 372 ms puis
+1 382/1 351 ms (moyenne ~1 386 ms, **−~530 ms**), `currentSrc` =
+`hero-plats-petit.webp` ; LCP direct 3 349 ms (moyenne 4 passes avant) →
+~3 176 ms (moyenne 6 passes après, **−~170 ms**) ; chargement direct
+2 656/2 480 ms → 2 503/2 284 ms puis 2 425/2 409 ms puis 2 416/2 487 ms.
+Mesures standard (2 passes) : premier affichage 1 881/1 817 ms, LCP
+1 868/1 800 ms, parcours 6 396/6 577 ms (plats, commerce générique sans
+bannière) ; Lighthouse 78/79 (TBT 740/770 ms) contre 78/80 à t5 (plat).
+Bundle : JS initial 453 485 → 453 667 o (+182 o, +0,04 %), CSS inchangé,
+24 chunks ; 0 erreur console (écouteurs aussi sur la page carte). Tests
+1180 → 1184/1184 (+3 `tests/boucle-t6-banniere.test.ts`, +1 test auto
+dans `tests/visuels.test.ts`), E2E 3/3. Revue Codex t6 (5 points) : fusion
+justifiée ; `<picture>` systématique fondé ; 720 px q75 défendable (une
+variante recadrée 720×180 au ratio de la bannière mériterait un essai —
+candidat t7) ; script corrigé (écouteurs sur la page carte, en-tête,
+mesure de la transition réelle + ABAB) ; gain formulé avec sa réserve
+(direct seulement sans la transition réelle — levée par l'ABAB). Compteur
+de tours sans gain : **0**.
+
 ### t5 — Logo du commerce en WebP léger (11/11/2026, fusionné) — REGARD NEUF
 
 Regard neuf (toutes les 5 itérations) : le protocole standard mesure

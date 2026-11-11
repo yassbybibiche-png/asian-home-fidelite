@@ -154,11 +154,14 @@ export function CarteFidelite({
       style={estCouleur(fond) ? { backgroundColor: fond } : undefined}
     >
       {banniere && (
-        <img
-          src={banniere}
-          alt={banniere === VISUELS.heroPlats ? 'Plateau de plats d’Asian Home Paris vu de dessus : sushis, makis, saumon, nouilles, riz et dessert à la mangue' : ''}
-          className="h-24 w-full object-cover"
-        />
+        <picture className="block">
+          {banniere === VISUELS.heroPlats && <source srcSet={VISUELS.heroPlatsPetit} type="image/webp" />}
+          <img
+            src={banniere}
+            alt={banniere === VISUELS.heroPlats ? 'Plateau de plats d’Asian Home Paris vu de dessus : sushis, makis, saumon, nouilles, riz et dessert à la mangue' : ''}
+            className="h-24 w-full object-cover"
+          />
+        </picture>
       )}
       {/* Recto : bandeau nocturne (noir + magenta profond, filet magenta) façon carte physique. */}
       <div
