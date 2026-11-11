@@ -998,3 +998,56 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   28/28 seul, puis 870/870 sur deux exécutions complètes → instabilité de charge, pas une régression.
 - **Non vérifié (revue Codex)** : la course du point 2 contre un vrai Supabase (simulée par stockage lent) ; le cas
   multi-instance ; le bouton de la fiche client n'est vérifié que par lecture de code (pas d'E2E du back-office).
+
+## 11/11/2026 — P0-S11 : atomicité des écritures Supabase (AUDIT.md § P0-S11, audit F-10, revue Codex points 1 et 12)
+- **Mécanisme retenu : compensation, pas transaction.** PostgREST n'a pas de transaction multi-requêtes ; une fonction
+  RPC transactionnelle générique a été écartée (toute la logique métier réécrite en PL/pgSQL = double implémentation,
+  risque de divergence avec `src/lib/`, aucun gain sur les conflits observés, qui sont des simultanéités déjà
+  tranchables par la base). Détail : `server/README.md` « Atomicité (P0-S11) » et en-tête de `server/stockage-supabase.ts`.
+- **A. Verrou optimiste sur `majCommerce`** : `commerces()` / `commerce()` lisent `id,version,donnees` (la version est
+  mémorisée dans la transaction en cours), `majVersionnee` généralisée à `commerces`. Route PATCH /commerces/:id : le
+  commerce est relu DANS la transaction avant `appliquerReglages` (même comportement : réglages + règles réappliquées
+  aux avis en attente, dans la même transaction). Logo PUT / DELETE : `majCommerce` dans une transaction avec relecture
+  fraîche ; ordre inchangé (PUT : fichier puis adresse ; DELETE : adresse puis fichier). Hors transaction : écriture
+  inconditionnelle (inchangé). SQLite : rien de changé (BEGIN IMMEDIATE + file d'attente) — documenté dans `stockage.ts`.
+- **B. Journal jamais perdu en silence** : `ajouterJournal`, `ajouterParrainage`, `ajouterDemandeRattrapage` ne font
+  plus `console.warn` + continuer ; `ErreurMigrationManquante` remonte. `creerServeur` (après `initialiser`, qui ne
+  journalise rien) refuse de démarrer sous Supabase sans `0003_cartiz.sql` ou `0004_programme.sql` : message nommant
+  la migration et `scripts/sauvegarde-base.mjs`. Pas de garde sous SQLite. Aucune autre suite n'utilise
+  `sans0003` / `sans0004` (grep `tests/`) ; les tests P0-U3 (sans0005 / sans0006) restent verts.
+- **Écart au brief (ajout)** : l'ordre « métier puis journal » à documenter n'était PAS respecté partout. Corrigé :
+  `reglerParrainage` écrivait le parrain, son journal et la trace 0004 AVANT le filleul — un conflit (409) sur le
+  filleul laissait le parrain crédité, et un nouvel essai pouvait le créditer une 2e fois. Il renvoie maintenant
+  `ecrire()`, appelé après l'écriture du filleul (visite, caisse, rattrapage). La caisse écrivait le journal
+  « parrainage » avant le client, et la décision de rattrapage son journal avant le client : remis après.
+  Pas de test dédié à cet ordre (l'entrelacement fautif n'est pas reproductible de façon déterministe avec la barrière
+  du faux PostgREST) ; les tests de parrainage existants restent verts.
+- **C. Aucune migration** : `version` + trigger `incrementer_version` (0001, recréés par la 0003), `journal` (0003),
+  index unique des tirages (0001). Liste figée 0001…0009 du test de sauvegarde inchangée.
+- **Tests** : avant **870/870**. Après : **875/875** (`npm test`, typecheck serveur inclus), `npm run build` et
+  `npx tsc -p .` OK. `+5` dans `tests/supabase.test.ts` : 2 PATCH simultanés → [200, 409] « réessayez », version
+  initiale + 1, une seule valeur retenue, garde `version=eq.<lue>` dans les deux requêtes ; PATCH + PUT logo
+  simultanés → jamais de mélange ; démarrage refusé sans 0003 (`/0003_cartiz/`) et sans 0004 (`/0004_programme/`),
+  accepté sans 0005…0008 ; stockage seul : `majCommerce` conditionné dans une transaction / inconditionnel hors ;
+  `ajouterJournal` sans 0003 et `ajouterParrainage` / `ajouterDemandeRattrapage` sans 0004 → ErreurMigrationManquante.
+  Les 3 tests de verrou échouent sans le correctif (vérifié : verrou retiré → 3 échecs ; relecture dans la transaction
+  retirée → le test PATCH échoue). Écart : la barrière est posée sur les **PATCH** `commerces`, pas sur les GET comme
+  suggéré — avant la lecture dans la transaction, la route lit déjà le commerce et le PIN, puis hache (scrypt) : une
+  barrière GET ne rend pas le test déterministe ; la barrière PATCH garantit que les deux requêtes ont relu la même
+  version avant d'écrire.
+- **Deux tests existants mis à jour (justifiés en commentaire P0-S11)** : « production AVANT la migration 0003 » →
+  le démarrage est désormais refusé (message `0003_cartiz.sql` + sauvegarde), la 2e partie (après migration : /sante
+  `cartiz: true`) est gardée ; « suppression sans migrations » → ne garde que `sans0007` (le bilan reste identique).
+  Non-régression citée (inchangés, verts) : double tirage simultané, double visite, double inscription, idempotence
+  caisse (`actionId`, rejeu `dejaTraite`, journal length 2 dans le test Cartiz), remise de gain unique (P0-U3).
+- **Ce qui reste non atomique** : suite d'écritures interrompue entre deux requêtes (panne réseau / crash) — réglages
+  écrits puis échec sur un avis réévalué, filleul écrit mais parrain pas crédité ; une entrée de journal peut se perdre
+  ainsi (jamais un journal mensonger). Hors périmètre : la route visite historique n'a pas de garde « 1 tampon / jour »
+  (F-11, lot P1-S12) — deux visites séquentielles le même jour restent possibles.
+- **Conséquence production** : si la base live n'a pas la 0003 ou la 0004, le prochain déploiement refusera de
+  démarrer (en principe, Render garde alors l'ancienne version en ligne — non vérifié). À vérifier AVANT de déployer : `GET /api/v1/sante` →
+  `migrations.cartiz` et `migrations.programme` à `true` ; sinon sauvegarde puis migrations. **Vérifié le 11/11/2026**
+  (GET public `https://asian-home-fidelite.onrender.com/api/v1/sante`) : `cartiz: true`, `programme: true` → la garde
+  ne bloquera pas le déploiement.
+- **Non vérifié** : contre un vrai Postgres / Supabase (faux PostgREST seulement) ; le comportement de Render si un
+  démarrage est refusé.

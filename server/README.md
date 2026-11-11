@@ -395,9 +395,10 @@ de portée `client`, remet la contrainte d'origine, garde les versions d'accès)
 
 ### Migration 0003 (modules caisse / points / équipe / messages / menu) — à appliquer en production
 
-La base Supabase en ligne ne se met pas à jour toute seule. Tant que `0003_cartiz.sql` n'est pas exécutée, les nouvelles
-routes qui touchent `equipe`, `journal` ou `menus` répondent 500 (table absente) — **et les routes historiques qui écrivent
-désormais dans le journal (visite, récompense, caisse) aussi**. À faire une fois, dans l'ordre :
+La base Supabase en ligne ne se met pas à jour toute seule. Depuis P0-S11, **le serveur refuse de démarrer** en Supabase
+tant que `0003_cartiz.sql` (journal d'audit) ou `0004_programme.sql` (traces du programme) n'est pas exécutée : message
+explicite nommant la migration (voir « Atomicité (P0-S11) »). Sauvegarde d'abord (`node --env-file=.env
+scripts/sauvegarde-base.mjs`). À faire une fois, dans l'ordre :
 1. supabase.com → projet **asian-home-fidelite** → **SQL Editor** → *New query* ;
 2. coller tout le contenu de `supabase/migrations/0003_cartiz.sql` → **Run** (rejouable : sans risque si exécuté deux fois) ;
 3. vérifier : `select relname, relrowsecurity from pg_class where relname in ('equipe','journal','menus');` → 3 lignes, `true` ;
@@ -412,6 +413,58 @@ curl -s -X POST localhost:3001/api/v1/commerces/c-asian-home-paris/tirages -H 'C
   -H 'Authorization: Bearer <jeton reçu à l’inscription>' -d '{}'   # → 409 tant que la visite du jour n'est pas validée
                                                                     #   (sans jeton : 401 en mode strict)
 ```
+
+## Atomicité (P0-S11, audit F-10)
+
+**SQLite** : rien à faire, rien de changé. `transaction` = `BEGIN IMMEDIATE … COMMIT` (tout ou rien), et les
+transactions passent une par une (file d'attente, `server/stockage.ts`) : aucune autre requête ne s'intercale.
+
+**Supabase** : PostgREST n'offre **pas** de transaction sur plusieurs requêtes HTTP. `transaction` y garde seulement les
+versions lues (une carte par requête) ; chaque écriture est atomique à elle seule, et les écritures sensibles sont
+protégées par la base elle-même :
+
+| Écriture | Protection | Effet d'un conflit |
+| --- | --- | --- |
+| Réglages du commerce (PATCH), logo (PUT / DELETE) — **nouveau P0-S11** | verrou optimiste : commerce relu DANS la transaction, `UPDATE … WHERE id = ? AND version = <lue>` | 0 ligne → 409 « Modification simultanée : réessayez. » ; rien n'est écrasé en silence |
+| Visite, récompense, caisse, avis | même verrou optimiste (clients, avis) | 409 « réessayez », aucun tampon perdu ni compté deux fois |
+| Inscription | contrainte unique `(commerce_id, cle_contact)` | le 2e INSERT est refusé, le serveur relit le client existant |
+| Tirage | index unique `(commerce_id, client_id, jour à Paris)` | 2e tirage du jour refusé (409) |
+| Remise d'un gain | `UPDATE … WHERE donnees->remis IS NULL` | 2e remise refusée (409 « déjà remis ») |
+| Caisse (file hors ligne) | `actionId` idempotent mémorisé dans le client | un rejeu répond `dejaTraite`, rien n'est recompté |
+
+`version` est incrémentée par le trigger `incrementer_version` (0001, recréé par la 0003 pour la base live qui ne
+l'avait pas). Hors `transaction`, ou si la ligne n'a pas été relue dedans, `majCommerce` / `majClient` / `majAvis`
+écrivent sans condition (comportement d'avant) : les routes relisent donc la ligne dans la transaction.
+
+**Ordre d'écriture : métier, puis journal.** Le fait (client, commerce, parrain) est écrit d'abord ; l'entrée de journal
+et les traces d'audit ensuite. Pourquoi : une interruption entre les deux peut **perdre une entrée de journal**, mais
+jamais créer un journal mensonger (action tracée mais pas faite) ni compter deux fois. P0-S11 a remis dans cet ordre
+les trois routes qui ne le respectaient pas : le parrainage (parrain + journal + trace étaient écrits AVANT le filleul :
+un conflit sur le filleul laissait le parrain crédité, et un nouvel essai pouvait le créditer une 2e fois), la caisse
+(journal « parrainage ») et la décision de rattrapage (journal écrit avant le client).
+
+**Garde au démarrage.** Sous Supabase, `creerServeur` refuse de démarrer si la migration `0003_cartiz.sql` (journal)
+ou `0004_programme.sql` (parrainages, demandes de rattrapage) manque — erreur explicite nommant la migration et la
+sauvegarde. `ajouterJournal`, `ajouterParrainage` et `ajouterDemandeRattrapage` ne masquent plus leur absence
+(`ErreurMigrationManquante` remonte, plus de `console.warn` qui continue). Les migrations 0005 à 0009 gardent leur repli
+documenté (mémoire, lecture vide, 503). SQLite crée tout son schéma : pas de garde.
+
+**Aucune migration pour ce lot** : colonne `version` + trigger (0001), table `journal` (0003), index unique des tirages
+(0001) existent déjà. **Avant toute migration** (ici : appliquer la 0003 / 0004 si ce n'est pas fait), une sauvegarde
+par l'opérateur : `node --env-file=.env scripts/sauvegarde-base.mjs` (ou `npm run sauvegarde`, aide : `--aide`,
+procédure : `docs/SAUVEGARDE.md`). Jamais lancée par un lot automatique contre la production.
+
+**Ce qui reste NON atomique (compensation, pas transaction).**
+- Une suite d'écritures interrompue entre deux requêtes HTTP (panne réseau, crash Render) n'est pas annulée : ex. le
+  PATCH d'un commerce enregistre les réglages puis échoue sur un des avis réévalués ; un parrain peut ne pas être
+  crédité si l'écriture du filleul a réussi juste avant la panne ; le logo (fichier puis adresse) garde l'ancien affiché.
+- Compensation choisie : ordre métier-puis-journal, verrous optimistes, contraintes uniques, `actionId` idempotent.
+- Écartée : une fonction RPC transactionnelle générique. Elle réécrirait toute la logique métier (programme,
+  parrainage, niveaux…) en PL/pgSQL — double implémentation, risque de divergence avec `src/lib/` — pour un gain nul sur
+  les conflits réellement observés (simultanéité), déjà tranchés par la base.
+- Hors périmètre : la route visite historique (`POST /clients/:id/visite`) n'a pas de garde « 1 tampon par jour »
+  (audit F-11, lot P1-S12). Deux visites **séquentielles** le même jour restent possibles ; seule la **simultanéité**
+  est tranchée par le verrou optimiste.
 
 ## Sécurité (minimale, assumée)
 

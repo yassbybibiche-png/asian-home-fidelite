@@ -738,6 +738,22 @@ async function initialiser(st: Stockage, o: OptionsServeur) {
   }
 }
 
+/**
+ * P0-S11 : sous Supabase, le journal d'audit (0003) et les traces du programme (0004) ne sont jamais ignorés — le
+ * stockage lève ErreurMigrationManquante sans leurs tables. Plutôt que des 503 au milieu d'une visite (fait métier écrit,
+ * trace refusée), le serveur refuse de démarrer. SQLite crée tout son schéma au démarrage : rien à vérifier.
+ */
+async function exigerMigrationsAudit(st: Stockage) {
+  if (st.type !== 'supabase') return
+  const conseil = 'Faites d’abord une sauvegarde (node scripts/sauvegarde-base.mjs, voir server/README.md), puis appliquez-la dans le SQL Editor de Supabase.'
+  if (!(await st.schemaCartiz())) {
+    throw new Error(`Démarrage refusé : migration supabase/migrations/0003_cartiz.sql absente (journal d’audit). ${conseil}`)
+  }
+  if (!(await st.schemaProgramme())) {
+    throw new Error(`Démarrage refusé : migration supabase/migrations/0004_programme.sql absente (traces de parrainage et de rattrapage). ${conseil}`)
+  }
+}
+
 // ---------- En-têtes HTTP de sécurité (P0-S4, faille F-08) — sur TOUTES les réponses (API, front, erreurs) ----------
 
 /**
@@ -946,6 +962,7 @@ export async function creerServeur(o: OptionsServeur) {
   const st: Stockage = o.supabase ? ouvrirStockageSupabase(o.supabase) : ouvrirStockage(o.fichierDb)
   try {
     await initialiser(st, o)
+    await exigerMigrationsAudit(st)
   } catch (e) {
     await st.fermer()
     throw e
@@ -1698,36 +1715,40 @@ export async function creerServeur(o: OptionsServeur) {
 
   /**
    * Récompense de parrainage après la 1re visite du filleul (jamais à l'inscription).
-   * À appeler dans la transaction du passage, une fois le filleul mis à jour : met à jour le parrain,
-   * journalise des deux côtés et écrit la trace d'audit (0004, ignorée si la migration manque).
-   * Retourne le filleul avec ses points de parrainage, et le texte à ajouter au journal du passage.
+   * À appeler dans la transaction du passage : calcule le filleul avec ses points de parrainage et le texte à ajouter
+   * au journal du passage. Rien n'est écrit ici : `ecrire()` (parrain, journal, trace d'audit 0004) s'appelle APRÈS
+   * l'écriture du filleul (P0-S11) — si le filleul est en conflit (409), le parrain n'est pas crédité, et un nouvel
+   * essai ne peut pas le créditer deux fois.
    */
-  async function reglerParrainage(commerce: Commerce, filleulApres: Client, quand: Date): Promise<{ filleul: Client; texte: string }> {
-    if (!filleulApres.parrainId || filleulApres.parrainagePaye) return { filleul: filleulApres, texte: '' }
+  async function reglerParrainage(commerce: Commerce, filleulApres: Client, quand: Date): Promise<{ filleul: Client; texte: string; ecrire: () => Promise<void> }> {
+    const rien = { filleul: filleulApres, texte: '', ecrire: async () => {} }
+    if (!filleulApres.parrainId || filleulApres.parrainagePaye) return rien
     const parrain = await st.client(commerce.id, filleulApres.parrainId)
-    if (!parrain) return { filleul: filleulApres, texte: '' }
+    if (!parrain) return rien
     const r = parrainageDu(filleulApres, parrain, commerce, quand)
-    if (!r) return { filleul: filleulApres, texte: '' }
+    if (!r) return rien
     const pointsFilleul = soldePoints(r.filleul) - soldePoints(filleulApres)
     const pointsParrain = r.parrain ? soldePoints(r.parrain) - soldePoints(parrain) : 0
     const texte = r.parrain
       ? `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) et +${pointsParrain} points pour ${parrain.prenom} (parrain)`
       : `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) — parrain au plafond annuel, rien pour ${parrain.prenom}`
-    if (r.parrain) {
-      await st.majClient(r.parrain)
-      await journaliser(commerce.id, { type: 'gerant', nom: 'Gérant' }, 'parrainage', texte, r.parrain, quand)
+    const ecrire = async () => {
+      if (r.parrain) {
+        await st.majClient(r.parrain)
+        await journaliser(commerce.id, { type: 'gerant', nom: 'Gérant' }, 'parrainage', texte, r.parrain, quand)
+      }
+      const trace: Parrainage = {
+        id: `pr-${randomUUID()}`,
+        commerceId: commerce.id,
+        parrainId: parrain.id,
+        filleulId: filleulApres.id,
+        date: quand.toISOString(),
+        pointsParrain,
+        pointsFilleul,
+      }
+      await st.ajouterParrainage(trace)
     }
-    const trace: Parrainage = {
-      id: `pr-${randomUUID()}`,
-      commerceId: commerce.id,
-      parrainId: parrain.id,
-      filleulId: filleulApres.id,
-      date: quand.toISOString(),
-      pointsParrain,
-      pointsFilleul,
-    }
-    await st.ajouterParrainage(trace)
-    return { filleul: r.filleul, texte }
+    return { filleul: r.filleul, texte, ecrire }
   }
 
   /** Inscrit le client, ou retrouve celui qui a déjà ce téléphone / e-mail dans ce commerce. */
@@ -2120,14 +2141,20 @@ export async function creerServeur(o: OptionsServeur) {
     if (!sous) {
       if (m === 'PATCH') {
         await exigerCommercant(req, id)
-        const maj = appliquerReglages(commerce, await lireCorps(req), CHAMPS_REGLAGES, jourParis(maintenant()))
+        const corps = await lireCorps(req)
+        const jour = jourParis(maintenant())
         // Comme le front : enregistrer les réglages réapplique les règles aux avis en attente.
-        await st.transaction(async () => {
+        // Commerce relu DANS la transaction (P0-S11) : sous Supabase, sa version y est mémorisée et `majCommerce` écrit
+        // « WHERE version = <lue> » — deux enregistrements simultanés : l'un passe, l'autre 409 « réessayez ».
+        const maj = await st.transaction(async () => {
+          const frais = await commerceOu404(id)
+          const maj = appliquerReglages(frais, corps, CHAMPS_REGLAGES, jour)
           await st.majCommerce(maj)
           for (const a of await st.avis(id)) {
             const r = appliquerRegles(a, maj)
             if (r !== a) await st.majAvis(r)
           }
+          return maj
         })
         return { json: { commerce: maj } }
       }
@@ -2160,15 +2187,22 @@ export async function creerServeur(o: OptionsServeur) {
         const version = createHash('sha256').update(octets).digest('hex').slice(0, 16)
         // Fichier d'abord, adresse ensuite : un échec entre les deux laisse l'ancien logo affiché, jamais une image cassée.
         await ecrireLogo(id, { type: infos.type, version, octets })
-        const maj: Commerce = { ...commerce, logo: urlLogo(id, version) }
-        await st.majCommerce(maj)
+        // Relecture dans la transaction (P0-S11) : verrou optimiste, ne réécrit pas des réglages enregistrés entre-temps.
+        const maj = await st.transaction(async () => {
+          const maj: Commerce = { ...(await commerceOu404(id)), logo: urlLogo(id, version) }
+          await st.majCommerce(maj)
+          return maj
+        })
         return { json: { commerce: maj, logo: { ...infos, octets: octets.length } } }
       }
       if (m === 'DELETE') {
         // « Revenir au logo par défaut » : champ vidé (repli sur public/visuels/logo.png pour Asian Home, initiales sinon).
         await exigerCommercant(req, id)
-        const maj: Commerce = { ...commerce, logo: '' }
-        await st.majCommerce(maj)
+        const maj = await st.transaction(async () => {
+          const maj: Commerce = { ...(await commerceOu404(id)), logo: '' }
+          await st.majCommerce(maj)
+          return maj
+        })
         await ecrireLogo(id, null)
         return { json: { commerce: maj } }
       }
@@ -2255,7 +2289,8 @@ export async function creerServeur(o: OptionsServeur) {
           const regle = await reglerParrainage(commerce, apres, maintenant())
           apres = regle.filleul
           await st.majClient(apres)
-          texteJournal = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`
+          await regle.ecrire()
+          texteJournal =`+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`
           await journaliser(id, auteur, 'passage', texteJournal, apres)
           if (regle.texte) await journaliser(id, auteur, 'parrainage', regle.texte, apres)
           return apres
@@ -2302,6 +2337,8 @@ export async function creerServeur(o: OptionsServeur) {
         let apres: Client
         let details: string
         let journalAction: EntreeJournal['action'] = sousId === 'attente' ? 'recompense' : sousId === 'reserve' ? 'reserve' : sousId
+        // Parrainage éventuel : écrit après le client (P0-S11, métier puis journal).
+        let parrainage: { texte: string; ecrire: () => Promise<void> } | undefined
         if (sousId === 'passage') {
           // Paliers, défi, niveaux (multiplicateur), réserve et parrainage : décidés côté serveur.
           let evenements: EvenementPassage[] = []
@@ -2316,7 +2353,7 @@ export async function creerServeur(o: OptionsServeur) {
           const gagnes = soldePoints(apres) - soldePoints(avant)
           const niveau = niveauClient(apres, commerce)
           details = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${centimes ? ` · ${formaterPrix(centimes)} → +${gagnes} point${gagnes > 1 ? 's' : ''} (solde ${soldePoints(apres)}, ${niveau.nom} ×${niveau.multiplicateur})` : ''}${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`
-          if (regle.texte) await journaliser(id, auteur, 'parrainage', regle.texte, apres, quand)
+          parrainage = regle
         } else if (sousId === 'recompense') {
           if (!recompenseDebloquee(avant, commerce)) throw err(409, `Récompense pas encore débloquée : ${avant.tampons}/${commerce.seuilTampons} tampons.`)
           apres = avecAction(offrirRecompense(avant, commerce, quand), actionId)
@@ -2353,6 +2390,8 @@ export async function creerServeur(o: OptionsServeur) {
           journalAction = 'echange'
         }
         await st.majClient(apres)
+        await parrainage?.ecrire()
+        if (parrainage?.texte) await journaliser(id, auteur, 'parrainage', parrainage.texte, apres, quand)
         await journaliser(id, auteur, journalAction, details, apres, quand)
         return { client: apres, dejaTraite: false }
       })
@@ -2655,6 +2694,7 @@ export async function creerServeur(o: OptionsServeur) {
           ...avant,
           demandesRattrapage: (avant.demandesRattrapage ?? []).map((d) => (d.id === extra ? { ...d, statut: corps.decision === 'valider' ? 'validee' : 'refusee', decideLe: t.toISOString() } : d)),
         }
+        // Client d'abord, parrain et journal ensuite (P0-S11) : un conflit sur le client n'écrit rien d'autre.
         if (corps.decision === 'valider') {
           const raison = rattrapageRecevable(avant, commerce, new Date(demande.date), demande.montantCentimes, t)
           if (raison) throw err(409, raison)
@@ -2662,6 +2702,8 @@ export async function creerServeur(o: OptionsServeur) {
           apres = avecMessages(avecVisite, commerce, 'passage', t)
           const regle = await reglerParrainage(commerce, apres, t)
           apres = regle.filleul
+          await st.majClient(apres)
+          await regle.ecrire()
           await journaliser(
             id,
             { type: 'gerant', nom: 'Gérant' },
@@ -2671,9 +2713,9 @@ export async function creerServeur(o: OptionsServeur) {
             t,
           )
         } else {
+          await st.majClient(apres)
           await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'rattrapage', `Visite oubliée refusée (${new Date(demande.date).toLocaleDateString('fr-FR')})`, apres, t)
         }
-        await st.majClient(apres)
         return apres
       })
       return { json: { client: clientCaisse(client) } }

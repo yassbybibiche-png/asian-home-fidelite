@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 
 import { creerServeur, hacherPinAncien, type OptionsServeur } from '../server/app.ts'
-import { ErreurConflit } from '../server/stockage.ts'
+import { ErreurConflit, ErreurMigrationManquante } from '../server/stockage.ts'
 import { configSupabaseDepuisEnv, ouvrirStockageSupabase } from '../server/stockage-supabase.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import { cleContact, nouveauClient, offrirRecompense, validerVisite } from '../src/lib/fidelite.ts'
@@ -423,6 +423,47 @@ describe('Supabase : adaptateur de stockage (faux PostgREST)', () => {
     assert.deepEqual(f.tables.tirages.map((t) => t.id), ['t1', 't3', 't4'])
   })
 
+  test('P0-S11 : majCommerce conditionné à la version relue dans une transaction ; inconditionnel hors transaction', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    await st.majCommerce({ ...commerce, nom: 'Hors transaction' })
+    assert.equal(f.requetes.at(-1)!.params.get('version'), null, 'hors transaction : pas de garde (comportement inchangé)')
+    // Lecture dans la transaction, écriture concurrente entre-temps → ErreurConflit, la ligne garde l'autre écriture.
+    await assert.rejects(
+      st.transaction(async () => {
+        const lu = (await st.commerce(commerce.id))!
+        await ouvrir(f).majCommerce({ ...lu, nom: 'Autre requête' })
+        await st.majCommerce({ ...lu, nom: 'Perdant' })
+      }),
+      (e: Error) => e instanceof ErreurConflit && /réessayez/.test(e.message),
+    )
+    assert.equal((f.tables.commerces[0].donnees as Commerce).nom, 'Autre requête')
+    // Deux écritures successives dans la même transaction : la version suivie est celle renvoyée par la 1re.
+    await st.transaction(async () => {
+      const lu = (await st.commerce(commerce.id))!
+      await st.majCommerce({ ...lu, nom: 'Un' })
+      await st.majCommerce({ ...lu, nom: 'Deux' })
+    })
+    assert.equal((f.tables.commerces[0].donnees as Commerce).nom, 'Deux')
+  })
+
+  test('P0-S11 : journal et traces programme jamais ignorés — ErreurMigrationManquante sans la 0003 / 0004', async () => {
+    const sans3 = fauxPostgrest({ sans0003: true })
+    const st3 = ouvrir(sans3)
+    await st3.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    const entree = { id: 'jr-1', commerceId: commerce.id, date: '2026-11-11T10:00:00.000Z', action: 'passage' as const, auteur: { type: 'gerant' as const, nom: 'Gérant' }, details: '+1 tampon' }
+    await assert.rejects(Promise.resolve(st3.ajouterJournal(entree)), (e: Error) => e instanceof ErreurMigrationManquante && /0003_cartiz\.sql/.test(e.message))
+
+    const sans4 = fauxPostgrest({ sans0004: true })
+    const st4 = ouvrir(sans4)
+    await st4.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    const p = { id: 'pr-1', commerceId: commerce.id, parrainId: 'cl-a', filleulId: 'cl-b', date: '2026-11-11T10:00:00.000Z', pointsParrain: 50, pointsFilleul: 50 }
+    await assert.rejects(Promise.resolve(st4.ajouterParrainage(p)), (e: Error) => e instanceof ErreurMigrationManquante && /0004_programme\.sql/.test(e.message))
+    const d = { id: 'rt-1', commerceId: commerce.id, clientId: 'cl-b', date: '2026-11-11T10:00:00.000Z', montantCentimes: 0, statut: 'en_attente' as const, creeLe: '2026-11-11T10:00:00.000Z' }
+    await assert.rejects(Promise.resolve(st4.ajouterDemandeRattrapage(d)), ErreurMigrationManquante)
+  })
+
   test('erreur Supabase : message clair, sans la clé', async () => {
     const f = fauxPostgrest()
     const st = ouvrir(f)
@@ -528,28 +569,16 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
     }
   })
 
-  test('production AVANT la migration 0003 : l’existant marche (visite, récompense, état, roue), les nouveautés → 503 explicite', async () => {
+  test('production AVANT la migration 0003 : démarrage refusé (journal d’audit obligatoire) ; après la migration, /sante le dit', async () => {
+    // Mis à jour par P0-S11 : ce test affirmait qu'une visite passait sans la 0003 (journal ignoré en silence). P0-S11
+    // interdit de perdre le journal sans le dire : le serveur refuse désormais de démarrer en Supabase sans la 0003,
+    // avec un message qui nomme la migration et la sauvegarde à faire avant.
     const f = fauxPostgrest({ sans0003: true })
-    const { app, api } = await demarrer(f)
-    try {
-      assert.equal((await api('GET', '/sante')).contenu.migrations.cartiz, false)
-      const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
-      const v = await api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)
-      assert.equal(v.statut, 200, 'la visite reste enregistrée (seule la trace du journal manque)')
-      assert.equal(v.contenu.client.tampons, 1)
-      const etat = await api('GET', `/commerces/${AH}/etat`, undefined, PIN)
-      assert.deepEqual([etat.statut, etat.contenu.membres, etat.contenu.journal], [200, [], []])
-      assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).statut, 201)
-      assert.equal((await api('GET', `/cartes/${c.id}`)).statut, 200)
-      const m = await api('POST', `/commerces/${AH}/equipe`, { nom: 'Mai', code: '2468' }, PIN)
-      assert.equal(m.statut, 503)
-      assert.match(m.contenu.erreur, /0003_cartiz\.sql/)
-      assert.equal((await api('PUT', `/commerces/${AH}/menu`, { categories: [] }, PIN)).statut, 503)
-      assert.equal((await api('GET', `/commerces/${AH}/caisse`, undefined, { 'X-Equipe-Code': '2468' })).statut, 503, 'pas « code incorrect »')
-      assert.equal((await api('GET', `/commerces/${AH}/menu`)).statut, 200)
-    } finally {
-      await app.fermer()
-    }
+    await assert.rejects(demarrer(f), (e: Error) => {
+      assert.match(e.message, /0003_cartiz\.sql/)
+      assert.match(e.message, /sauvegarde-base\.mjs/)
+      return true
+    })
     // Après la migration : /sante le dit.
     const g = fauxPostgrest()
     const apres = await demarrer(g)
@@ -672,6 +701,60 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
     } finally {
       await app.fermer()
     }
+  })
+
+  test('P0-S11 : deux enregistrements simultanés des réglages d’un commerce → 200 + 409, une seule valeur retenue', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const ligne = () => f.tables.commerces.find((c) => c.id === AH)!
+      const versionInitiale = Number(ligne().version)
+      // Les deux PATCH ne partent qu'une fois les deux arrivés : chacun a relu le commerce (même version) dans sa
+      // transaction avant que l'autre n'écrive. Sans verrou, les deux passeraient et le 2e écraserait le 1er en silence.
+      f.barriere('PATCH', 'commerces')
+      const reponses = await Promise.all([7, 8].map((seuilTampons) => api('PATCH', `/commerces/${AH}`, { seuilTampons }, PIN)))
+      assert.deepEqual(reponses.map((r) => r.statut).sort(), [200, 409])
+      assert.match(reponses.find((r) => r.statut === 409)!.contenu.erreur, /réessayez/)
+      const gagnant = reponses.find((r) => r.statut === 200)!.contenu.commerce as Commerce
+      assert.equal(Number(ligne().version), versionInitiale + 1, 'une seule écriture a eu lieu')
+      assert.equal((ligne().donnees as Commerce).seuilTampons, gagnant.seuilTampons)
+      const maj = f.requetes.filter((r) => r.table === 'commerces' && r.methode === 'PATCH')
+      for (const r of maj) assert.equal(r.params.get('version'), `eq.${versionInitiale}`, 'garde de version dans la requête elle-même')
+      // Un nouvel essai (après le 409) relit la version à jour et passe.
+      assert.equal((await api('PATCH', `/commerces/${AH}`, { seuilTampons: 9 }, PIN)).statut, 200)
+      assert.equal((ligne().donnees as Commerce).seuilTampons, 9)
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S11 : logo envoyé pendant un enregistrement des réglages — le verrou empêche d’écraser l’un par l’autre', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const png = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'logo.png')) // vrai PNG 600×600
+      const port = (app.serveur.address() as AddressInfo).port
+      f.barriere('PATCH', 'commerces')
+      const [reglages, logo] = await Promise.all([
+        api('PATCH', `/commerces/${AH}`, { seuilTampons: 6 }, PIN),
+        fetch(`http://127.0.0.1:${port}/api/v1/commerces/${AH}/logo`, { method: 'PUT', headers: PIN, body: png }).then(async (r) => ({ statut: r.status })),
+      ])
+      assert.deepEqual([reglages.statut, logo.statut].sort(), [200, 409])
+      const d = f.tables.commerces.find((c) => c.id === AH)!.donnees as Commerce
+      // Jamais un mélange silencieux : soit les réglages, soit le logo — l'autre a reçu 409 et peut réessayer.
+      assert.equal(reglages.statut === 200, d.seuilTampons === 6)
+      assert.equal(logo.statut === 200, /\/logo\?v=/.test(d.logo ?? ''))
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S11 : démarrage Supabase refusé sans la migration 0003 ou 0004 (journal et traces programme obligatoires)', async () => {
+    await assert.rejects(demarrer(fauxPostgrest({ sans0003: true })), /0003_cartiz/)
+    await assert.rejects(demarrer(fauxPostgrest({ sans0004: true })), /0004_programme/)
+    // Les autres migrations restent facultatives au démarrage (repli documenté) : 0005 à 0008.
+    const { app } = await demarrer(fauxPostgrest({ sans0005: true, sans0006: true, sans0007: true, sans0008: true }))
+    await app.fermer()
   })
 
   test('P0-U3 : code gagnant remis une seule fois (UPDATE conditionnel), même simultanément ; persistant ; sans 0005/0006', async () => {
@@ -1084,8 +1167,11 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
     }
   })
 
-  test('sans les migrations 0003 / 0004 / 0007 : suppression quand même (tables absentes = rien à supprimer), jamais de 500', async () => {
-    const f = fauxPostgrest({ sans0003: true, sans0004: true, sans0007: true })
+  test('sans la migration 0007 : suppression quand même (table absente = rien à supprimer), jamais de 500', async () => {
+    // Mis à jour par P0-S11 : ce test tournait aussi sans 0003 / 0004, mais le serveur refuse désormais de démarrer en
+    // Supabase sans elles (journal et traces du programme jamais perdus en silence). Seule l'absence de la 0007 (envois,
+    // que la suppression lit sans les écrire) reste un état de démarrage possible.
+    const f = fauxPostgrest({ sans0007: true })
     const { app, api } = await demarrer(f)
     try {
       const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
