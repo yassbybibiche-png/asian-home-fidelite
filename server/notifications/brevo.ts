@@ -89,13 +89,15 @@ export function adaptateurBrevo(c: ConfigBrevo | undefined, f: typeof fetch): Ad
  * - Même clé API que l'e-mail (`BREVO_API_KEY`), expéditeur `BREVO_SMS_SENDER` (ex. `ASIANHOME`).
  * - `type: 'transactional'` : les relances partent en transactionnel ; la mention STOP en fin de message les fait
  *   basculer automatiquement en `marketing` côté Brevo (c'est Brevo qui le décide, la mention STOP est obligatoire
- *   en France pour un SMS marketing — nos SMS la portent déjà, voir `MENTION_STOP_SMS`).
+ *   en France pour un SMS marketing — nos SMS la portent, sous la forme `STOP : <lien de désinscription>` (P1-B9),
+ *   voir `mentionDesinscriptionSms`).
  * - Réponse : `{ messageId: <nombre> }` (pas une chaîne comme pour l'e-mail).
  * - LIMITE — pas de réponse STOP possible : avec un expéditeur alphanumérique, le client ne peut pas répondre au
  *   SMS (pas de numéro destinataire) ; Brevo ne reçoit donc aucun STOP sur ces envois. Brevo met bien en liste
  *   noire les contacts qui répondent STOP quand c'est possible (expéditeur numérique), mais ici c'est le
- *   consentement de l'app qui fait foi : retrait depuis la fiche client, lien de désinscription des e-mails, ou
- *   auprès du commerçant. Le webhook `stop-sms` de l'app reste réservé à Twilio (voir `server/app.ts`).
+ *   consentement de l'app qui fait foi : retrait par le lien de désinscription porté par chaque SMS (P1-B9, lien
+ *   court `/d/<client>/<jeton HMAC>` → page #/desinscription, même jeton que les e-mails), depuis la fiche client,
+ *   ou auprès du commerçant. Le webhook `stop-sms` de l'app reste réservé à Twilio (voir `server/app.ts`).
  */
 export function adaptateurBrevoSms(c: ConfigBrevoSms | undefined, f: typeof fetch): Adaptateur {
   return {

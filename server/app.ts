@@ -10,7 +10,7 @@ import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
-import { canalDuClient, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
+import { canalDuClient, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
 import { estPerdant, lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
 import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePrive.ts'
@@ -1713,11 +1713,13 @@ export async function creerServeur(o: OptionsServeur) {
     }
 
     const d = { client, commerce }
+    // Le jeton de désinscription sert aux deux canaux : e-mail (lien long + List-Unsubscribe) et SMS (lien court
+    // /d/… — P1-B9 : « répondez STOP » est impossible avec l'expéditeur alphanumérique Brevo).
+    const jeton = await jetonDesinscription(commerce.id, client.id)
     let message: Message
     if (canal === 'sms') {
-      message = { destinataire, texte: smsRelance(demande.modele, d, lienCourtCarte(site, client.id), demande.libre) }
+      message = { destinataire, texte: smsRelance(demande.modele, d, lienCourtCarte(site, client.id), demande.libre, lienCourtDesinscription(site, client.id, jeton)) }
     } else {
-      const jeton = await jetonDesinscription(commerce.id, client.id)
       const e = emailRelance(demande.modele, d, { carte: lienCarte(site, client.id), desinscription: `${site}/#/desinscription/${client.id}/${jeton}` }, demande.libre)
       message = {
         destinataire,
@@ -2315,8 +2317,8 @@ export async function creerServeur(o: OptionsServeur) {
       throw err(405, 'Méthode non autorisée.')
     }
     if (ressource === 'desinscription' && id && sous && !sousId && m === 'POST') {
-      // PUBLIC — lien de désinscription des e-mails de relance (page #/desinscription/…, et bouton « Se désabonner » des
-      // messageries via List-Unsubscribe-Post). Le corps n'est pas lu (formulaire One-Click ou vide). Idempotent.
+      // PUBLIC — lien de désinscription des relances (page #/desinscription/…, lien des e-mails et lien court /d/…
+      // des SMS, bouton « Se désabonner » des messageries via List-Unsubscribe-Post). Le corps n'est pas lu
       limiterIp(req, 'fiche', limites.ficheClientParIp)
       for (const c of await st.commerces()) {
         if (!(await st.client(c.id, id))) continue
@@ -2328,7 +2330,7 @@ export async function creerServeur(o: OptionsServeur) {
           if (avant.consentementRelance === false) return
           const apres = avecConsentement(avant, false, 'lien-email', maintenant())
           await st.majClient(apres)
-          await journaliser(c.id, { type: 'client', nom: 'Client (lien de désinscription)' }, 'consentement', 'Consentement aux relances retiré : lien de désinscription (e-mail)', apres)
+          await journaliser(c.id, { type: 'client', nom: 'Client (lien de désinscription)' }, 'consentement', 'Consentement aux relances retiré : lien de désinscription', apres)
         })
         return { json: { ok: true, commerce: c.nom } }
       }
@@ -3181,12 +3183,12 @@ export async function creerServeur(o: OptionsServeur) {
       // Twilio non configuré → 501 ; signature X-Twilio-Signature fausse → 403 (personne d'autre ne peut désinscrire).
       // SMS via Brevo → 501 aussi : avec un expéditeur alphanumérique le client ne peut pas répondre au SMS, Brevo
       // gère le STOP dans sa propre base (liste noire) quand une réponse est possible, et l'app ne branche pas de
-      // webhook Brevo pour les réponses ; le consentement se retire depuis la fiche client, le lien de
-      // désinscription des e-mails, ou auprès du commerçant — jamais par cette route.
+      // webhook Brevo pour les réponses ; le consentement se retire par le lien de désinscription porté par chaque
+      // SMS (P1-B9, STOP : <lien court /d/…>), depuis la fiche client, ou auprès du commerçant — jamais par cette route.
       limiterIp(req, 'stop', limites.lectureParIp)
       if (!notifications.statut().sms) throw err(501, 'Réception des réponses STOP à brancher : Twilio n’est pas configuré sur ce serveur. Aucun consentement n’a été modifié.')
       if (notifications.prestataire('sms') === 'Brevo') {
-        throw err(501, 'Réception des réponses STOP non applicable : les SMS partent via Brevo (expéditeur alphanumérique, pas de réponse possible) ; Brevo gère sa propre liste noire et le consentement se retire depuis la fiche client. Aucun consentement n’a été modifié.')
+        throw err(501, 'Réception des réponses STOP non applicable : les SMS partent via Brevo (expéditeur alphanumérique, pas de réponse possible) ; chaque SMS porte un lien de désinscription (STOP : lien en fin de message). Aucun consentement n’a été modifié.')
       }
       const params = await lireFormulaire(req)
       if (!notifications.signatureSmsValide(`${sitePublic(req)}${req.url ?? ''}`, params, enTete(req, 'x-twilio-signature'))) {
@@ -3470,6 +3472,14 @@ export async function creerServeur(o: OptionsServeur) {
         const a = url.searchParams.get('a')
         const acces = a && /^[\w.-]{1,2048}$/.test(a) ? `?acces=${a}` : ''
         res.writeHead(302, { ...entetes, Location: `/#/carte/${court[1]}${acces}`, 'Cache-Control': 'no-store' }).end()
+        return
+      }
+      // Lien court de désinscription des SMS de relance (P1-B9) : /d/<clientId>/<jeton> → la page de désinscription
+      // (#/desinscription/<clientId>/<jeton>). Le jeton n'est pas vérifié ici : c'est la page qui appelle
+      // POST /api/v1/desinscription/… (HMAC, idempotent), après un clic de confirmation.
+      const courtDesinscription = /^\/d\/([\w-]{1,80})\/([A-Za-z0-9_-]{16,64})$/.exec(url.pathname)
+      if (courtDesinscription && (req.method === 'GET' || req.method === 'HEAD')) {
+        res.writeHead(302, { ...entetes, Location: `/#/desinscription/${courtDesinscription[1]}/${courtDesinscription[2]}`, 'Cache-Control': 'no-store' }).end()
         return
       }
       if (!url.pathname.startsWith('/api/v1/') && url.pathname !== '/api/v1') {

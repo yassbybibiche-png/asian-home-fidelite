@@ -111,11 +111,12 @@ describe('Textes honnêtes : rien ne part sans prestataire configuré', () => {
     assert.equal(libelleStatutEnvoi('test'), 'Test — rien envoyé')
   })
 
-  test('mentions : consentement, STOP, lien e-mail ; plus de « aucun écran ne le recueille »', () => {
+  test('mentions : consentement, lien de désinscription SMS et e-mail ; plus de « aucun écran ne le recueille »', () => {
     assert.match(MENTION_ENVOI, /consenti/)
     const rgpd = MENTIONS_RGPD.join(' ')
     assert.match(rgpd, /case non pré-cochée/)
-    assert.match(rgpd, /STOP/)
+    assert.match(rgpd, /lien de désinscription dans chaque SMS et chaque e-mail/)
+    assert.doesNotMatch(rgpd, /répondez STOP|réponse STOP au SMS/i)
     assert.match(rgpd, /Aucun envoi tant qu’aucun prestataire n’est configuré/)
     assert.doesNotMatch(source('src/types.ts'), /Aucun écran ne le recueille/)
     const readme = source('server/README.md')

@@ -218,7 +218,7 @@ export function politiqueConfidentialite(
       titre: 'Finalité',
       lignes: [
         'La carte de fidélité du commerce et la roue du jour.',
-        'Les relances par SMS ou e-mail, uniquement avec votre consentement (case non pré-cochée), retirable à tout moment : lien dans chaque e-mail, réponse STOP au SMS quand il vient d’un numéro, ou auprès du commerce.',
+        'Les relances par SMS ou e-mail, uniquement avec votre consentement (case non pré-cochée), retirable à tout moment : lien de désinscription dans chaque SMS et chaque e-mail, ou auprès du commerce.',
       ],
     },
     {

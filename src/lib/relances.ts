@@ -4,7 +4,10 @@
 //
 // SMS : textes écrits dans l'alphabet GSM 7 bits (pas d'apostrophe typographique, ni ê / â / ç…) pour tenir en
 // 160 caractères = 1 SMS facturé ; un seul caractère hors alphabet ferait passer le message en Unicode (70 car. par SMS).
-// Chaque SMS se termine par la mention STOP (réponse STOP → consentement retiré, route stop-sms du serveur).
+// Chaque SMS se termine par la mention de désinscription `STOP : <lien court>` (P1-B9) : avec l'expéditeur
+// alphanumérique Brevo, le client NE PEUT PAS répondre STOP (pas de numéro destinataire) — le lien, qui ouvre la page
+// #/desinscription/<client>/<jeton HMAC> (même jeton que les e-mails), est le seul mécanisme utilisable. Le lien
+// allonge le SMS : la plupart des relances SMS font désormais 2 segments (facturés 2 SMS).
 // E-mail : objet + corps en texte, lien vers la carte et lien de désinscription en pied de message.
 import type { Client, Commerce, EnvoiRelance, ModeleRelance } from '../types'
 import { tamponsAffiches } from './fidelite.ts'
@@ -38,8 +41,18 @@ export function libelleStatutEnvoi(s: EnvoiRelance['statut']): string {
   }
 }
 
-/** Mention de désinscription de chaque SMS (alphabet GSM : « é » en fait partie). */
-export const MENTION_STOP_SMS = 'STOP : répondez STOP'
+/**
+ * Mention de désinscription de chaque SMS (P1-B9, alphabet GSM : « é » en fait partie).
+ * Le mot STOP est conservé (mention légale des SMS marketing) mais il ne promet plus de réponse : il pointe vers le
+ * lien de désinscription, seul mécanisme utilisable avec un expéditeur alphanumérique (Brevo). Sans lien (appel
+ * direct sans passer par le serveur), repli honnête : désinscription auprès du commerce, jamais « répondez STOP ».
+ */
+export function mentionDesinscriptionSms(lien: string): string {
+  return lien ? `STOP : ${lien}` : 'STOP : désinscription auprès du commerce'
+}
+
+/** Lien court de désinscription, pour les SMS (le serveur redirige `/d/<id>/<jeton>` vers `/#/desinscription/<id>/<jeton>`). */
+export const lienCourtDesinscription = (site: string, clientId: string, jeton: string) => `${site.replace(/\/+$/, '')}/d/${clientId}/${jeton}`
 
 /** Lien court vers la carte, pour les SMS (le serveur redirige `/c/<id>` vers `/#/carte/<id>`). */
 export const lienCourtCarte = (site: string, clientId: string) => `${site.replace(/\/+$/, '')}/c/${clientId}`
@@ -66,8 +79,8 @@ interface Destinataire {
 const restants = ({ client, commerce }: Destinataire) => commerce.seuilTampons - tamponsAffiches(client as Client, commerce)
 const prenomDe = (c: Pick<Client, 'prenom'>) => (c.prenom ?? '').trim()
 
-/** Texte du SMS (mention STOP comprise). `libre` : texte saisi par le gérant, précédé du nom du commerce. */
-export function smsRelance(modele: ModeleRelance | 'libre', d: Destinataire, lienCarte: string, libre = ''): string {
+/** Texte du SMS (mention de désinscription par lien comprise). `libre` : texte saisi par le gérant, précédé du nom du commerce. */
+export function smsRelance(modele: ModeleRelance | 'libre', d: Destinataire, lienCarte: string, libre = '', lienDesinscription = ''): string {
   const p = prenomDe(d.client)
   const n = d.commerce.nom
   const virgule = p ? `${p}, ` : ''
@@ -91,7 +104,7 @@ export function smsRelance(modele: ModeleRelance | 'libre', d: Destinataire, lie
       corps = libre.trim()
       break
   }
-  return `${n} : ${corps} ${MENTION_STOP_SMS}`
+  return `${n} : ${corps} ${mentionDesinscriptionSms(lienDesinscription)}`
 }
 
 export interface EmailRelance {

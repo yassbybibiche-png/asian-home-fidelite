@@ -183,8 +183,8 @@ Rien n'a été créé ni déployé. Ce que vous aurez à cliquer :
 - **Variables d'environnement** : `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` (SMS) ; `BREVO_API_KEY`,
   `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` (e-mail). Aucune n'est configurée : la route `relance` répond 501.
 - **RGPD** : consentement marketing explicite et préalable du client (champ `consentementRelance`, aucun écran ne le recueille
-  encore → le serveur refuse tout envoi), lien / mot-clé de désinscription dans chaque message (« STOP » en SMS déjà ajouté ;
-  un vrai lien géré par le prestataire reste à prévoir), pas d'envoi la nuit ni le dimanche (bonnes pratiques à respecter).
+  encore → le serveur refuse tout envoi), lien de désinscription dans chaque message (SMS : « STOP : <lien court /d/…> » ;
+  e-mail : lien en pied), pas d'envoi la nuit ni le dimanche (bonnes pratiques à respecter).
 - Le front reste en **copier-coller** : aucun bouton « Envoyer » n'existe tant qu'aucun prestataire n'est branché.
 
 ### Données personnelles (RGPD) — affiché aussi dans Plus et Offre

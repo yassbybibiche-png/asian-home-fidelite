@@ -1,4 +1,5 @@
-// P1-B3 — Relances SMS / e-mail de bout en bout : consentement explicite, STOP, lien de désinscription, journal des
+// P1-B3 — Relances SMS / e-mail de bout en bout : consentement explicite, désinscription par lien (SMS : P1-B9, lien
+// court /d/… — « répondez STOP » est impossible avec l'expéditeur alphanumérique Brevo), journal des
 // envois (table `envois`), modèles, anti-doublon du jour, relances automatiques. AUCUN appel réseau réel : les
 // prestataires sont simulés (fetch injecté) ou absents (501). Supabase (avec / sans migration 0007) : supabase.test.ts.
 import { test, describe, after } from 'node:test'
@@ -20,7 +21,8 @@ import {
   inactifARelancer,
   jourParis,
   lienCourtCarte,
-  MENTION_STOP_SMS,
+  lienCourtDesinscription,
+  mentionDesinscriptionSms,
   MODELES_RELANCE,
   modelesSuggeres,
   relanceAutoDue,
@@ -40,31 +42,42 @@ after(() => rmSync(dossier, { recursive: true, force: true }))
 
 // ---------- Modèles (fonctions pures) ----------
 
-describe('Modèles de relance : 4 modèles, SMS court avec STOP, e-mail avec objet + corps', () => {
+describe('Modèles de relance : 4 modèles, SMS avec lien de désinscription, e-mail avec objet + corps', () => {
   const commerce = { nom: 'Asian Home Paris', recompense: 'Un plat offert au 10e repas', seuilTampons: 10 }
   const lien = lienCourtCarte(SITE, 'cl-mhs8k2a1-ab12')
+  const lienDesinscription = lienCourtDesinscription(SITE, 'cl-mhs8k2a1-ab12', 'jeton-test-32-caracteres-0123')
 
   test('les 4 modèles demandés existent', () => {
     assert.deepEqual(MODELES_RELANCE.map((m) => m.modele), ['bienvenue', 'proche', 'inactif', 'anniversaire'])
   })
 
-  test('SMS : nom du commerce, lien vers la carte, mention STOP ; alphabet GSM et 160 caractères max (1 SMS), avec ou sans prénom', () => {
+  test('SMS : nom du commerce, lien vers la carte, mention STOP = lien de désinscription (P1-B9) ; alphabet GSM, 2 segments max', () => {
     assert.equal(lien, `${SITE}/c/cl-mhs8k2a1-ab12`)
+    assert.equal(lienDesinscription, `${SITE}/d/cl-mhs8k2a1-ab12/jeton-test-32-caracteres-0123`)
+    assert.equal(mentionDesinscriptionSms(lienDesinscription), `STOP : ${lienDesinscription}`)
     for (const prenom of ['Lina', '', 'Jean-Christophe']) {
       for (const { modele } of MODELES_RELANCE) {
         for (const tampons of [3, 8, 9, 10]) {
-          const t = smsRelance(modele, { client: { prenom, tampons }, commerce }, lien)
+          const t = smsRelance(modele, { client: { prenom, tampons }, commerce }, lien, '', lienDesinscription)
           assert.ok(t.startsWith('Asian Home Paris : '), t)
           assert.ok(t.includes(lien), t)
-          assert.ok(t.endsWith(MENTION_STOP_SMS), t)
-          assert.match(MENTION_STOP_SMS, /STOP/)
+          assert.ok(t.endsWith(mentionDesinscriptionSms(lienDesinscription)), t)
+          assert.match(mentionDesinscriptionSms(lienDesinscription), /STOP/)
+          // Le texte ne promet plus de réponse STOP : aucun « répondez STOP » nulle part.
+          assert.doesNotMatch(t, /répondez STOP/i, t)
           if (prenom) assert.ok(t.includes(prenom), t)
           const a = analyseSms(t)
           assert.equal(a.gsm7, true, `hors alphabet GSM : ${t}`)
-          assert.ok(a.caracteres <= 160 && a.segments === 1, `${a.caracteres} car. : ${t}`)
+          // Le lien de désinscription allonge le SMS : 2 segments (facturés 2 SMS) au lieu d'1.
+          assert.ok(a.caracteres <= 320 && a.segments <= 2, `${a.caracteres} car., ${a.segments} segments : ${t}`)
         }
       }
     }
+  })
+
+  test('SMS sans lien de désinscription : repli honnête, jamais « répondez STOP »', () => {
+    assert.equal(mentionDesinscriptionSms(''), 'STOP : désinscription auprès du commerce')
+    assert.doesNotMatch(smsRelance('bienvenue', { client: { prenom: 'Lina', tampons: 0 }, commerce }, lien), /répondez STOP/i)
   })
 
   test('SMS « récompense proche » : 8 → plus que 2, 9 → plus que 1 (singulier), 10 → la récompense attend', () => {
@@ -74,8 +87,11 @@ describe('Modèles de relance : 4 modèles, SMS court avec STOP, e-mail avec obj
     assert.match(sms(10), /votre récompense vous attend/)
   })
 
-  test('message libre : précédé du nom du commerce, mention STOP ajoutée', () => {
-    assert.equal(smsRelance('libre', { client: { prenom: 'Lina', tampons: 1 }, commerce }, lien, ' Ce soir, -10 % ! '), `Asian Home Paris : Ce soir, -10 % ! ${MENTION_STOP_SMS}`)
+  test('message libre : précédé du nom du commerce, mention de désinscription par lien ajoutée', () => {
+    assert.equal(
+      smsRelance('libre', { client: { prenom: 'Lina', tampons: 1 }, commerce }, lien, ' Ce soir, -10 % ! ', lienDesinscription),
+      `Asian Home Paris : Ce soir, -10 % ! ${mentionDesinscriptionSms(lienDesinscription)}`,
+    )
   })
 
   test('e-mail : objet + corps vouvoyés, nom du commerce, lien vers la carte, lien de désinscription en pied', () => {
@@ -383,7 +399,11 @@ describe('Relance (route commerçant) et journal des envois', () => {
       assert.equal(s.appels.length, 1)
       const corps = new URLSearchParams(s.appels[0].corps)
       assert.equal(corps.get('To'), '+33611111111')
-      assert.equal(corps.get('Body'), `Asian Home Paris : Lina, plus que 10 tampons avant votre récompense ! ${SITE}/c/${lina.id} ${MENTION_STOP_SMS}`)
+      // P1-B9 : le SMS porte le lien court de désinscription (jeton HMAC, 32 car.), pas « répondez STOP ».
+      const body = corps.get('Body')!
+      assert.ok(body.startsWith(`Asian Home Paris : Lina, plus que 10 tampons avant votre récompense ! ${SITE}/c/${lina.id} STOP : ${SITE}/d/${lina.id}/`), body)
+      assert.doesNotMatch(body, /répondez STOP/i)
+      const jetonSms = /\/d\/[^/]+\/([A-Za-z0-9_-]{32})$/.exec(body)![1]
 
       const doublon = await s.api('POST', `/commerces/${AH}/clients/${lina.id}/relance`, { modele: 'proche' }, PIN)
       assert.equal(doublon.statut, 409)
@@ -496,6 +516,21 @@ describe('Relance (route commerçant) et journal des envois', () => {
       await s.app.fermer()
     }
   })
+
+  test('lien court de désinscription des SMS (P1-B9) : /d/<id>/<jeton> redirige vers la page de désinscription', async () => {
+    const s = await demarrer('lien-court-desinscription.db')
+    try {
+      const jeton = 'a'.repeat(32)
+      const r = await globalThis.fetch(`${s.racine}/d/cl-abc-123/${jeton}`, { redirect: 'manual' })
+      assert.equal(r.status, 302)
+      assert.equal(r.headers.get('location'), `/#/desinscription/cl-abc-123/${jeton}`)
+      // Formats invalides : pas de redirection (le jeton n'est pas vérifié ici, c'est la page qui appelle l'API).
+      assert.equal((await globalThis.fetch(`${s.racine}/d/cl-abc-123/court`, { redirect: 'manual' })).status, 404)
+      assert.equal((await globalThis.fetch(`${s.racine}/d/cl-abc-123/${'a'.repeat(32)}?x=1`, { redirect: 'manual' })).status, 302)
+    } finally {
+      await s.app.fermer()
+    }
+  })
 })
 
 describe('Relances automatiques (inactif 30 jours, anniversaire) à l’ouverture du tableau de bord', () => {
@@ -590,14 +625,25 @@ describe('SMS via Brevo (prioritaire sur Twilio) — lot « Brancher Brevo »', 
       assert.equal(s.appels[0].url, 'https://api.brevo.com/v3/transactionalSMS/send')
       assert.equal(s.appels[0].entetes['api-key'], 'cle-test')
       const corps = JSON.parse(s.appels[0].corps)
-      assert.deepEqual(corps, {
-        sender: 'ASIANHOME',
-        recipient: '+33611111111',
-        content: `Asian Home Paris : Lina, plus que 10 tampons avant votre récompense ! ${SITE}/c/${lina.id} ${MENTION_STOP_SMS}`,
-        type: 'transactional',
-        tag: 'fidelite',
-      })
+      assert.equal(corps.sender, 'ASIANHOME')
+      assert.equal(corps.recipient, '+33611111111')
+      assert.equal(corps.type, 'transactional')
+      assert.equal(corps.tag, 'fidelite')
+      // P1-B9 : le SMS Brevo porte le lien court de désinscription, jamais « répondez STOP » (pas de réponse possible).
+      assert.doesNotMatch(corps.content, /répondez STOP/i, corps.content)
+      const lienSms = new RegExp(`^Asian Home Paris : Lina, plus que 10 tampons avant votre récompense ! ${SITE}/c/${lina.id} STOP : (${SITE}/d/${lina.id}/[A-Za-z0-9_-]{32})$`).exec(corps.content)?.[1]
+      assert.ok(lienSms, corps.content)
       assert.deepEqual((await s.envois()).map((x) => [x.canal, x.statut, x.idPrestataire]), [['sms', 'envoye', '<m1@brevo>']])
+      // De bout en bout : le lien du SMS désinscrit (même jeton HMAC que les e-mails), puis plus de relance.
+      const jetonSms = lienSms.split('/').at(-1)!
+      // Le lien court redirige bien vers la page de désinscription (le retrait lui-même n'a lieu qu'au clic, testé
+      // côté page dans relances-ui-p1-b3 : aucun retrait automatique à l'ouverture du lien).
+      const redirection = await globalThis.fetch(`${s.racine}/d/${lina.id}/${jetonSms}`, { redirect: 'manual' })
+      assert.equal(redirection.status, 302)
+      assert.equal(redirection.headers.get('location'), `/#/desinscription/${lina.id}/${jetonSms}`)
+      assert.equal((await s.api('POST', `/desinscription/${lina.id}/${jetonSms}`)).statut, 200)
+      assert.equal((await s.client(lina.id)).consentementRelance, false)
+      assert.equal((await s.api('POST', `/commerces/${AH}/clients/${lina.id}/relance`, { modele: 'inactif' }, PIN)).statut, 409, 'plus de relance après désinscription par le lien du SMS')
     } finally {
       await s.app.fermer()
     }
