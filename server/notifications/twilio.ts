@@ -1,6 +1,7 @@
 // Adaptateur SMS Twilio (API REST « Messages »). Prêt, jamais exécuté contre Twilio : aucune clé configurée.
 import { createHmac } from 'node:crypto'
 import type { Adaptateur, Message } from './index.ts'
+import { DELAI_PRESTATAIRE_MS } from './delai.ts'
 
 /**
  * Signature d'une requête webhook Twilio (en-tête X-Twilio-Signature, doc Twilio « Webhooks security ») :
@@ -33,7 +34,8 @@ export function configTwilio(env: Record<string, string | undefined>): ConfigTwi
     : undefined
 }
 
-export function adaptateurTwilio(c: ConfigTwilio | undefined, f: typeof fetch): Adaptateur {
+/** `delaiMs` : délai d'expiration de l'appel (voir `delai.ts`), injectable pour les tests. */
+export function adaptateurTwilio(c: ConfigTwilio | undefined, f: typeof fetch, delaiMs = DELAI_PRESTATAIRE_MS): Adaptateur {
   return {
     canal: 'sms',
     prestataire: 'Twilio',
@@ -51,6 +53,7 @@ export function adaptateurTwilio(c: ConfigTwilio | undefined, f: typeof fetch): 
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: corps.toString(),
+        signal: AbortSignal.timeout(delaiMs),
       })
       if (!r.ok) throw new Error(`Twilio a refusé l’envoi (HTTP ${r.status}).`)
       const j = (await r.json()) as { sid?: string }

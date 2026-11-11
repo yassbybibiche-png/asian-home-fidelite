@@ -14,7 +14,7 @@ import { analyserMontant, formaterPrix, passageCeJour, pointsPourMontant, soldeP
 import { niveauClient, reserveUtilisable } from '../lib/programme'
 import { correspondRecherche } from '../lib/recherche'
 import { nomAffiche } from '../lib/inscriptionJeu'
-import { clientIdDepuisQr, creerFileCaisse, libelleFile, nouvelIdAction, type ActionCaisse, type EtatFile, type Envoi, type TypeActionCaisse } from '../lib/fileCaisse'
+import { classerErreur, clientIdDepuisQr, creerFileCaisse, libelleFile, nouvelIdAction, type ActionCaisse, type EtatFile, type Envoi, type TypeActionCaisse } from '../lib/fileCaisse'
 import { LogoCommerce, MessageErreur } from '../components/ui'
 import { ScannerQr } from '../components/ScannerQr'
 import { SqueletteCaisse } from '../components/Squelette'
@@ -231,12 +231,10 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
         reponses.current.set(a.id, r.client)
         return { ok: true }
       } catch (e) {
-        // Réseau coupé, code changé ou session expirée entre-temps : l'action reste en file (rien n'est perdu ni compté).
-        if (e instanceof ErreurApi && (e.horsLigne || e.statut === 401 || e.statut === 429)) {
-          if (e.horsLigne) setEnLigne(false)
-          return { ok: false, reseau: true }
-        }
-        return { ok: false, reseau: false, erreur: messageErreur(e) }
+        // Réseau coupé, code changé, session expirée ou erreur serveur (5xx : l'action a peut-être été enregistrée) :
+        // l'action reste en file et sera rejouée avec le même identifiant (jamais comptée deux fois). Autre 4xx = refus.
+        if (e instanceof ErreurApi && e.horsLigne) setEnLigne(false)
+        return classerErreur(e, messageErreur)
       }
     },
     [api, commerceId],
@@ -367,7 +365,7 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
     const refus = e.refusees.find((r) => r.action.id === a.id)
     const apres = reponses.current.get(a.id)
     if (refus) return { statut: 'refus' as const, message: refus.erreur }
-    if (e.attente.some((x) => x.id === a.id)) return { statut: 'attente' as const, message: `${LIBELLES[type]} gardé sur cet appareil (hors ligne) : il sera envoyé au retour du réseau.` }
+    if (e.attente.some((x) => x.id === a.id)) return { statut: 'attente' as const, message: `${LIBELLES[type]} gardé sur cet appareil (hors ligne ou serveur sans réponse sûre) : il sera renvoyé automatiquement, sans double comptage.` }
     return { statut: 'ok' as const, client: apres }
   }
 

@@ -92,6 +92,15 @@ export interface Stockage {
   clients(commerceId: string): P<Client[]>
   client(commerceId: string, id: string): P<Client | undefined>
   clientParContact(commerceId: string, contact: { telephone?: string; email?: string }): P<Client | undefined>
+  /**
+   * Recherche caisse par numéro (point Codex 8) : filtrée en base sur `cle_contact`, sans lire tous les clients.
+   * Renvoie, dans l'ordre de `clients()`, un SUR-ENSEMBLE des clients que `correspondRecherche(c, saisie)` accepte
+   * quand `chiffresRecherche(saisie) === chiffres` (`texte` = saisie sans espaces autour, en minuscules) : clé qui
+   * contient `chiffres` (téléphone) ou `texte` (e-mail : la clé d'un client e-mail est son e-mail en minuscules),
+   * prénom contenant un chiffre, et client ayant à la fois téléphone et e-mail (sa clé est l'e-mail : son numéro
+   * n'est pas dans la colonne). L'appelant refiltre avec `correspondRecherche` : résultats, ordre et total identiques.
+   */
+  clientsCandidatsNumero(commerceId: string, chiffres: string, texte: string): P<Client[]>
   ajouterClient(c: Client): P<void>
   majClient(c: Client): P<void>
   tirages(commerceId: string): P<Tirage[]>
@@ -130,6 +139,8 @@ export interface Stockage {
    * Supabase sans les tables lève ErreurMigrationManquante ; le serveur refuse de démarrer en Supabase sans la 0004.
    */
   ajouterParrainage(p: Parrainage): P<void>
+  /** Trace de parrainage de ce filleul, s'il y en a une (point Codex 2 : trace présente = règlement terminé). */
+  parrainageDuFilleul(commerceId: string, filleulId: string): P<Parrainage | undefined>
   ajouterDemandeRattrapage(d: DemandeRattrapageTrace): P<void>
   /** Tables de la migration 0004 présentes (toujours vrai sous SQLite). */
   schemaProgramme(): P<boolean>
@@ -305,6 +316,13 @@ export function ouvrirStockage(fichier: string) {
     clients: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? ORDER BY rowid'),
     client: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? AND id = ?'),
     clientParCle: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? AND cle_contact = ?'),
+    // `instr` (et non LIKE) : sous-chaîne exacte, sensible à la casse comme `includes` (clés déjà en minuscules).
+    candidatsNumero: db.prepare(
+      `SELECT donnees FROM clients WHERE commerce_id = ? AND (instr(cle_contact, ?) > 0 OR instr(cle_contact, ?) > 0
+        OR json_extract(donnees, '$.prenom') GLOB '*[0-9]*'
+        OR (json_extract(donnees, '$.telephone') IS NOT NULL AND json_extract(donnees, '$.email') IS NOT NULL))
+       ORDER BY rowid`,
+    ),
     ajoutClient: db.prepare('INSERT INTO clients (id, commerce_id, cle_contact, donnees) VALUES (?, ?, ?, ?)'),
     majClient: db.prepare('UPDATE clients SET donnees = ? WHERE id = ?'),
     tirages: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? ORDER BY date DESC'),
@@ -326,6 +344,7 @@ export function ouvrirStockage(fichier: string) {
     menu: db.prepare('SELECT donnees FROM menus WHERE commerce_id = ?'),
     majMenu: db.prepare('INSERT INTO menus (commerce_id, donnees) VALUES (?, ?) ON CONFLICT (commerce_id) DO UPDATE SET donnees = excluded.donnees'),
     ajoutParrainage: db.prepare('INSERT INTO parrainages (id, commerce_id, parrain_id, filleul_id, date, donnees) VALUES (?, ?, ?, ?, ?, ?)'),
+    parrainageFilleul: db.prepare('SELECT donnees FROM parrainages WHERE commerce_id = ? AND filleul_id = ? LIMIT 1'),
     ajoutRattrapage: db.prepare('INSERT INTO demandes_rattrapage (id, commerce_id, client_id, date, donnees) VALUES (?, ?, ?, ?, ?)'),
     revoquerSession: db.prepare('INSERT INTO sessions_revoquees (jti, expire_le) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING'),
     purgerRevocations: db.prepare('DELETE FROM sessions_revoquees WHERE expire_le < ?'),
@@ -386,6 +405,7 @@ export function ouvrirStockage(fichier: string) {
     /** Déduplication : même règle que le front (`cleContact` : 0033 / +33 / 06…, e-mail en minuscules). */
     clientParContact: (commerceId: string, contact: { telephone?: string; email?: string }) =>
       lire<Client>(q.clientParCle.all(commerceId, cleContact(contact)))[0],
+    clientsCandidatsNumero: (commerceId: string, chiffres: string, texte: string) => lire<Client>(q.candidatsNumero.all(commerceId, chiffres, texte)),
     ajouterClient: (c: Client) => inserer(q.ajoutClient, c.id, c.commerceId, cleContact(c), JSON.stringify(c)),
     majClient: (c: Client) => void q.majClient.run(JSON.stringify(c), c.id),
 
@@ -417,6 +437,7 @@ export function ouvrirStockage(fichier: string) {
     majMenu: (m: Menu) => void q.majMenu.run(m.commerceId, JSON.stringify(m)),
     schemaCartiz: () => true,
     ajouterParrainage: (p: Parrainage) => inserer(q.ajoutParrainage, p.id, p.commerceId, p.parrainId, p.filleulId, p.date, JSON.stringify(p)),
+    parrainageDuFilleul: (commerceId: string, filleulId: string) => lire<Parrainage>(q.parrainageFilleul.all(commerceId, filleulId))[0],
     ajouterDemandeRattrapage: (d: DemandeRattrapageTrace) => inserer(q.ajoutRattrapage, d.id, d.commerceId, d.clientId, d.date, JSON.stringify(d)),
     schemaProgramme: () => true,
     // Dates ISO UTC (`toISOString`) : l'ordre alphabétique est l'ordre chronologique.

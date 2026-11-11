@@ -2,7 +2,10 @@
 // Une action faite sans réseau est rangée dans le localStorage avec un identifiant unique ; à la reconnexion elle est
 // envoyée au serveur, qui la reconnaît (idempotence) : rejouer une action déjà reçue ne donne JAMAIS un 2e tampon.
 // Le serveur reste seul juge : une action refusée (déjà un passage ce jour-là, solde insuffisant…) est retirée de la
-// file et affichée comme refusée — jamais comptée comme réussie.
+// file et affichée comme refusée — jamais comptée comme réussie. Une erreur serveur (5xx) n'est pas un refus : l'issue
+// est inconnue, l'action reste en file et sera rejouée (voir `classerErreur`).
+
+import { ErreurApi } from '../data/api.ts'
 
 type Stockage = Pick<Storage, 'getItem' | 'setItem'>
 
@@ -31,8 +34,22 @@ export interface EtatFile {
   refusees: ActionRefusee[]
 }
 
-/** Résultat d'un envoi : `reseau` = serveur injoignable (on garde l'action), `refus` = refus définitif du serveur. */
+/**
+ * Résultat d'un envoi : `reseau` = issue inconnue ou réessayable (on garde l'action, elle sera rejouée avec le même
+ * identifiant), `refus` = refus définitif du serveur (rien n'a été enregistré).
+ */
 export type Envoi = { ok: true } | { ok: false; reseau: true } | { ok: false; reseau: false; erreur: string }
+
+/**
+ * Classe l'échec d'un envoi. Gardées en file : hors ligne, 401 (code changé / session expirée), 429 (trop de requêtes)
+ * et toute erreur 5xx — une 5xx est AMBIGUË (le serveur a pu enregistrer l'action avant d'échouer, par ex. sur le
+ * journal) : la rejouer est sûr (le serveur reconnaît l'identifiant et répond `dejaTraite`), l'afficher « rien n'a été
+ * enregistré » ne l'est pas. Les autres 4xx sont des refus définitifs.
+ */
+export function classerErreur(e: unknown, message: (e: unknown) => string): Envoi {
+  if (e instanceof ErreurApi && (e.horsLigne || e.statut === 401 || e.statut === 429 || e.statut >= 500)) return { ok: false, reseau: true }
+  return { ok: false, reseau: false, erreur: message(e) }
+}
 
 export function creerFileCaisse(stockage: Stockage | null, cle: string) {
   let memoire: EtatFile = { attente: [], refusees: [] }

@@ -46,6 +46,15 @@ const TABLES_0010 = ['compteurs_publics']
  * `journal` / `envois` à limite explicite) gardent `lire` (une requête). */
 const PAGE = 1000
 
+/**
+ * Valeur de la COLONNE `envois.statut` (point Codex 10, sans migration) : la contrainte CHECK de 0007 n'accepte que
+ * en_cours / envoye / refuse / erreur / non_branche. Les statuts venus après (`test`, `incertain`) sont rangés sous
+ * `erreur` dans la colonne — hors de l'index unique anti-doublon (en_cours / envoye), comme eux — et le vrai statut
+ * reste dans `donnees`, seule source relue par l'app (`envois` lit `donnees`, `relanceAutoDue` voit donc `incertain`).
+ */
+const STATUTS_COLONNE_0007: readonly string[] = ['en_cours', 'envoye', 'refuse', 'erreur', 'non_branche']
+export const statutColonneEnvoi = (s: EnvoiRelance['statut']): string => (STATUTS_COLONNE_0007.includes(s) ? s : 'erreur')
+
 /** Lecture d'une table de la migration 0003 : vide tant que la migration n'est pas appliquée (l'existant continue de marcher). */
 async function ouVide<T>(lecture: Promise<T>, vide: T): Promise<T> {
   try {
@@ -183,6 +192,20 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     /** Déduplication : même règle que le front (`cleContact` : 0033 / +33 / 06…, e-mail en minuscules). */
     clientParContact: async (commerceId, contact) =>
       (await lire<Client>('clients', sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).eq('cle_contact', cleContact(contact))))[0],
+    // Point Codex 8 : filtre poussé à PostgREST (seules les lignes candidates voyagent), même tri que `clients`. Les
+    // valeurs sont entre guillemets (la saisie peut contenir « ( ) . ») ; ni « * » ni « % » ni « _ » n'y passent
+    // (`chiffresRecherche` n'accepte que chiffres, espaces, + . - ( ) /).
+    clientsCandidatsNumero: (commerceId, chiffres, texte) => {
+      const filtre = [
+        `cle_contact.like."*${chiffres}*"`,
+        `cle_contact.like."*${texte}*"`,
+        'donnees->>prenom.match."[0-9]"',
+        'and(donnees->>telephone.not.is.null,donnees->>email.not.is.null)',
+      ].join(',')
+      return lirePages<Client>('clients', (debut, fin) =>
+        sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).or(filtre).order('ordre').range(debut, fin),
+      )
+    },
     ajouterClient: async (c) =>
       void (await ok('clients', sb.from('clients').insert({ id: c.id, commerce_id: c.commerceId, cle_contact: cleContact(c), donnees: c }))),
     majClient: (c) => majVersionnee('clients', c.id, c),
@@ -258,6 +281,8 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     // ---- Programme (0004_programme.sql) : traces d'audit. Sans la migration : ErreurMigrationManquante (P0-S11) ----
     ajouterParrainage: async (p: Parrainage) =>
       void (await ok('parrainages', sb.from('parrainages').insert({ id: p.id, commerce_id: p.commerceId, parrain_id: p.parrainId, filleul_id: p.filleulId, date: p.date, donnees: p }))),
+    parrainageDuFilleul: async (commerceId, filleulId) =>
+      (await lire<Parrainage>('parrainages', sb.from('parrainages').select('donnees').eq('commerce_id', commerceId).eq('filleul_id', filleulId).limit(1)))[0],
     ajouterDemandeRattrapage: async (d: DemandeRattrapageTrace) =>
       void (await ok('demandes_rattrapage', sb.from('demandes_rattrapage').insert({ id: d.id, commerce_id: d.commerceId, client_id: d.clientId, date: d.date, donnees: d }))),
     schemaProgramme: async () => {
@@ -362,9 +387,9 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     ajouterEnvoi: async (e) =>
       void (await ok(
         'envois',
-        sb.from('envois').insert({ id: e.id, commerce_id: e.commerceId, client_id: e.clientId, modele: e.modele, canal: e.canal, statut: e.statut, jour: e.jour, date: e.date, donnees: e }),
+        sb.from('envois').insert({ id: e.id, commerce_id: e.commerceId, client_id: e.clientId, modele: e.modele, canal: e.canal, statut: statutColonneEnvoi(e.statut), jour: e.jour, date: e.date, donnees: e }),
       )),
-    majEnvoi: async (e) => void (await ok('envois', sb.from('envois').update({ statut: e.statut, donnees: e }).eq('id', e.id).eq('commerce_id', e.commerceId))),
+    majEnvoi: async (e) => void (await ok('envois', sb.from('envois').update({ statut: statutColonneEnvoi(e.statut), donnees: e }).eq('id', e.id).eq('commerce_id', e.commerceId))),
     envois: (commerceId, limite, clientId) => {
       let requete = sb.from('envois').select('donnees').eq('commerce_id', commerceId)
       if (clientId) requete = requete.eq('client_id', clientId)

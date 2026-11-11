@@ -38,6 +38,8 @@ export function libelleStatutEnvoi(s: EnvoiRelance['statut']): string {
       return 'Non branché (501) — rien envoyé'
     case 'test':
       return 'Test — rien envoyé'
+    case 'incertain':
+      return 'Incertain — peut-être envoyé (pas de renvoi automatique)'
   }
 }
 
@@ -234,7 +236,20 @@ export function modelesSuggeres(client: Client, commerce: Pick<Commerce, 'seuilT
   return r
 }
 
-const occupe = (e: Pick<EnvoiRelance, 'statut'>) => e.statut === 'envoye' || e.statut === 'en_cours'
+// `incertain` (point Codex 10) : le message a peut-être été livré → même prudence qu'`envoye` pour l'automatique.
+const occupe = (e: Pick<EnvoiRelance, 'statut'>) => e.statut === 'envoye' || e.statut === 'en_cours' || e.statut === 'incertain'
+
+/**
+ * Revue Codex finale, point 5 : ce modèle a-t-il déjà été tenté automatiquement aujourd'hui et refusé par le
+ * prestataire (`erreur`) ? Une tournée interrompue puis reprise ne doit pas rappeler le prestataire pour ce client
+ * (règle du point 9 : échec prestataire = pas de nouvelle tentative automatique). Gardé hors de `relanceAutoDue`, qui
+ * dit si la relance est due selon les règles métier (une erreur d'un autre jour ne compte pas) ; seule la tournée
+ * (`lancerRelancesAuto`) l'utilise, le renvoi manuel du commerçant n'y passe pas.
+ */
+export function echecAutoDuJour(modele: ModeleRelance, envoisDuClient: Pick<EnvoiRelance, 'modele' | 'statut' | 'jour' | 'declencheur'>[], maintenant: Date): boolean {
+  const jour = jourParis(maintenant)
+  return envoisDuClient.some((e) => e.declencheur === 'auto' && e.modele === modele && e.statut === 'erreur' && e.jour === jour)
+}
 
 /**
  * Relance automatique due pour ce client (déjà filtrée sur le consentement par le serveur) ?
