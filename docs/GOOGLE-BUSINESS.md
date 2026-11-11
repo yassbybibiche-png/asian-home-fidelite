@@ -7,6 +7,50 @@ réponses**. Côté app, tout est prêt (lot P1-B4) ; ce qui manque se fait chez
 > Tant que les variables ci-dessous ne sont pas renseignées sur Render, l’écran Avis reste en mode « à brancher » :
 > les avis se recopient à la main et les réponses se collent à la main sur Google. Aucun appel n’est fait à Google.
 
+## État au 11/11/2026 (lot P1-B8)
+
+- **Code vérifié contre un Google simulé** (`tests/avis-google-p1-b4.test.ts`, `tests/google-business-p1-b8.test.ts`,
+  fetch injecté, jamais contre Google) : OAuth, import (déduplication, brouillons préservés, auto 5★ seule
+  publiée d'office), publication après validation manuelle, déconnexion.
+- **Garde-fous ajoutés (P1-B8)** : réponse vide → 400 « Réponse vide… » (fonction `publierReponseGoogle` ;
+  via la route, le refus est un 409 « brouillon non validé », `refusPublication`) ; réponse > **4 096 octets**
+  (limite Google, pas des caractères — vérifié le 11/11/2026) → 400 explicite (l'app plafonne déjà ses
+  réponses à 2 000 caractères, front + route PATCH avis) ; identifiant d'avis mal formé (`?`, `#`, `..`
+  refusés) → 400 ; fiche invalide dans `listerAvisGoogle` → 409 ; `GOOGLE_BUSINESS_LOCATION`
+  mal renseignée → **409 explicite** à l'import, avant tout appel à Google (même le rafraîchissement du
+  jeton) — elle n'est plus ignorée silencieusement.
+- **Configuration, approbation et recette réelle : « attend le compte ».** Aucun projet Google Cloud, aucune
+  demande d'accès, aucune clé — la procédure complète est ci-dessous (§ étapes 1–7 + recette) ; elle exige le
+  compte Google propriétaire/gestionnaire de la fiche et l'accord du restaurant. **Rien n'est publié sans ce compte.**
+
+## Recette réelle (à faire avec le compte du restaurant — « attend le compte »)
+
+Pré-requis : étapes 1–6 ci-dessous terminées (projet approuvé par Google, API activées, variables Render posées,
+`/sante` → `"googleBusinessProfile": true`).
+
+1. **Connexion** : écran **Avis** → **Connecter Google** → choisir le compte propriétaire/gestionnaire de la
+   fiche, accepter. Attendu : l'écran affiche « Google est connecté » ; le journal note
+   « Google Business Profile connecté ».
+2. **Import** : **avant le premier import de recette, désactiver la règle « réponse auto aux 5★ »**
+   (**Réglages** → réponses aux avis) : sinon, l'import publie d'office les réponses auto des avis 5★
+   postés après la connexion — la recette ne doit publier qu'une seule réponse, relue (étape 3). Puis
+   **Importer les avis Google**. Attendu : bilan « N nouvel(s) avis, … » ; chaque avis importé
+   porte la source « Google » ; importer deux fois ne crée **aucun doublon** ; les avis saisis à la main et
+   les brouillons en cours sont intacts ; une réponse déjà présente sur Google est reprise telle quelle.
+   Réactiver la règle ensuite si le commerce la veut.
+3. **Réponse de test (1 seule)** : sur un avis importé, relire le brouillon, « Marquer comme répondu », puis
+   **Publier sur Google**. Attendu : la réponse apparaît sur la fiche Google (à vérifier sur Google) ;
+   l'écran affiche « Réponse publiée sur Google … ». Ne publier **qu'une seule réponse de test**, relue —
+   les anciens 5★ gardent leur réponse préparée, publiable d'un tap (la règle auto désactivée à l'étape 2
+   empêche toute publication en rafale à l'import).
+4. **Déconnexion (optionnel, pour vérifier la réversibilité)** : **Déconnecter Google** → la révocation est
+   demandée chez Google (**best-effort** : confirmée seulement si l'écran l'indique — la route répond
+   `revoque: false` si Google ne confirme pas) et les jetons sont effacés dans tous les cas ; les avis
+   importés restent dans l'app ; l'import suivant répond 409 « Google n'est pas connecté ».
+5. Si l'import répond « accès aux API Business Profile non accordé » ou « quota dépassé » : la demande de
+   l'étape 2 n'est pas (encore) approuvée, ou les API de l'étape 3 ne sont pas activées (quotas à 0
+   requête/minute = pas approuvé, 300 = approuvé).
+
 Légende : ✅ = vérifié dans la documentation officielle de Google le 10/11/2026 · ⚠️ **à vérifier** = non vérifié (à
 confirmer au moment de la démarche, Google change régulièrement ses écrans).
 
@@ -162,4 +206,5 @@ pas (encore) approuvée, ou les API de l’étape 3 ne sont pas activées.
 | Réponse | `PUT https://mybusiness.googleapis.com/v4/accounts/{a}/locations/{l}/reviews/{r}/reply` `{ "comment": … }` | ✅ |
 
 Routes de l’app : voir `server/README.md` (section Google Business Profile). Code : `server/google-business.ts`,
-`src/lib/avis.ts` ; tests : `tests/avis-google-p1-b4.test.ts` (Google simulé, aucun appel réel).
+`src/lib/avis.ts`, `src/pages/Avis.tsx` (réponse plafonnée à 2 000 caractères côté front) ;
+tests : `tests/avis-google-p1-b4.test.ts` et `tests/google-business-p1-b8.test.ts` (Google simulé, aucun appel réel).

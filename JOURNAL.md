@@ -1,5 +1,38 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P1-B8 « Google Business (configuration + recette) » (AUDIT.md §7, revue Codex point 9)
+- **Ce lot ne crée ni projet Cloud, ni clé, ni publication réelle.** Les fonctions et routes existaient déjà
+  (P1-B4) ; le lot ajoute des garde-fous côté code, vérifie le code contre un Google simulé et documente la
+  configuration + la recette réelle, qui attendent le compte Google du restaurant.
+- **Garde-fous** (`server/google-business.ts`, `server/app.ts`, `src/pages/Avis.tsx`) : réponse vide → 400
+  (helper ; 409 « brouillon non validé » via la route) ; réponse > **4 096 octets** (limite Google, vérifiée
+  le 11/11/2026 dans la référence API — pas des caractères) → 400 ; identifiant d'avis / fiche mal formés
+  (`?`, `#`, `..` refusés) → 400 / 409 ; `GOOGLE_BUSINESS_LOCATION` mal renseignée → **409 explicite** à
+  l'import, **avant tout appel à Google** (même le rafraîchissement du jeton) ; champ de réponse plafonné
+  à 2 000 caractères côté front (comme la route PATCH avis).
+- **Tests** (`tests/google-business-p1-b8.test.ts`, 10 tests, Google simulé, jamais contre Google) : gardes
+  unitaires (dont multi-octets aux frontières : 1 400 × « 漢 » = 4 200 octets refusés, 2 048 × « é » =
+  4 096 octets acceptés), `emplacementAImporter`, import serveur avec `GOOGLE_BUSINESS_LOCATION` invalide
+  (409, zéro appel à Google même jeton expiré) puis valable (1 avis importé), écran + doc.
+- **docs/GOOGLE-BUSINESS.md** : état au 11/11/2026 ; recette réelle en 5 étapes (connexion, import, 1 réponse
+  de test, déconnexion optionnelle, diagnostic 403/quota) marquée **« attend le compte »** ; consigne ajoutée
+  : **désactiver la règle auto 5★ avant le premier import de recette** (sinon l'import publie d'office les
+  réponses auto des 5★ postés après la connexion) ; révocation présentée comme best-effort.
+- **Revue Codex (7 points, `/tmp/p1-b8-revue-codex.md`) — 6 fondés, corrigés :** 1. [Majeur] limite en
+  octets, pas en caractères (vérifié dans la référence Google) → `Buffer.byteLength`, messages/doc/tests
+  corrigés. 2. [Majeur] recette « une seule réponse » non garantie (auto 5★ à l'import) → désactivation de
+  la règle documentée dans la recette. 3. [Mineur] regex acceptant `?`, `#`, `..` → segments restreints
+  (`[A-Za-z0-9][A-Za-z0-9._-]*`, 1er caractère alphanumérique). 4. [Mineur] révocation présentée comme
+  certaine → best-effort explicité. 5. [Remarque] « réponse vide → 400 » = helper, pas la route (409) →
+  précisé dans la doc. 6. [Remarque] `accesGoogle` (rafraîchissement) précédait la validation → validation
+  déplacée avant tout appel Google + test jeton expiré. Point 7 (remarque : statuts cohérents, front,
+  aucun appel réel) : rien à corriger.
+- **Tests : 1056 → 1066 (+10)**, suite verte, `npx tsc -p .` propre, typecheck serveur inclus dans
+  `npm test`. Aucun test existant modifié, aucun secret, aucun appel réel à Google.
+- **Non vérifié (attend le compte Google du restaurant + son accord) :** projet Cloud, OAuth, approbation
+  Google, variables Render, import réel + 1 réponse de test sur la vraie fiche (procédure § « Recette
+  réelle » de docs/GOOGLE-BUSINESS.md).
+
 ## 11/11/2026 — P1-B7 « Brevo en production » (AUDIT.md §7, revue Codex point 8)
 - **Ce lot ne crée ni compte Brevo, ni clé, ni envoi réel.** Le code Brevo existait déjà (commit `4862968`) ;
   le lot vérifie la validation **simulée** de bout en bout et documente la recette réelle autorisée.
