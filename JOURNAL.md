@@ -1,5 +1,63 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P2-Q1 « Accessibilité / textes » (AUDIT.md §7 ; lot déjà fusionné 1e40b68 : vérification + trous)
+- **Vérification de l'état livré** : P2-Q1 et P2-Q2 étaient déjà fusionnés dans `autonome/integration` — le
+  travail consiste en une vérification de l'état livré + le comblement des trous restants, pas une refonte.
+- **Vouvoiement** (`tests/vouvoiement-couverture-p2-q1.test.ts`, nouveau, 14 tests) : détecteur unit-testable
+  (normalisation `’`→`'`, frontière Unicode, impératifs en début de phrase sensibles à la casse — un fragment
+  minuscule comme `saisis dans l’app` est un participe, pas un impératif ; liste d'autorisation `['Partage']`)
+  appliqué aux littéraux, gabarits et textes JSX bruts, commentaires exclus ; aucune faute en base.
+- **Couverture EN** : analyseur syntaxique des appels `t(` (extraction du 1er argument à parenthèses équilibrées,
+  découpe des ternaires imbriqués, reconstruction des gabarits avec substitution des constantes, résolution des
+  identifiants via les `export const … = '…'` de `src/`, cas dynamiques couverts par des branches dédiées) ;
+  chaque clé du dictionnaire effectif doit être utilisée (remplace le plancher 191). Trous trouvés et corrigés :
+  `MESSAGE_MODE_SERVEUR` ; toute la page `#/desinscription` (titres, phrases, bouton, phrase « fait » avec
+  modèle `{commerce}` — préposition traduite séparément : ` de ` / ` from ` selon `langue`) ; bandeau parrainage
+  `#/jouer` ; instructions « Garder ma carte » (en-tête ternaire + étapes via `t(e)`) ; libellés du profil
+  `#/carte` (suffixe ` — enregistré : {valeur}`) ; `‹ Retour`, chargement et sous-titre de `#/confidentialite` ;
+  confirmations/erreurs des formulaires du programme ; compteur de demandes en attente ; annonce des nouveaux
+  tampons ; `aria-label` « Progression du défi » ; historique traduit par type à l'affichage (`libelleHistorique`,
+  `historiqueCarte()` reste en français, contrat testé) ; expiration datée traduite par adaptateur `expirationLot`
+  (appel `texteExpiration(r.expireLe, maintenant)` conservé, épinglé par `carte-pwa-p1-c3.test.ts:312`) ;
+  branche EN du détail des badges (branche FR conservée, épinglée par `menu-client-p1-c5.test.ts:246`).
+  Clés mortes retirées : `10/11/12/13 chiffres sur 10` (inatteignables) ; `0 chiffre sur 10` ajouté (tapé `+`).
+  Dictionnaire initial : 191 → 247 clés ; effectif (avec les 19 enregistrées) : 266 clés.
+  `PAGES_TRADUITES` étendu à `['jouer', 'carte', 'menu', 'desinscription', 'confidentialite']` (langue mémorisée,
+  sans commutateur sur les 2 nouvelles) ; la caisse reste en français par conception.
+- **Contrastes** : gris-600 `#4b5563` retenu = 6,94:1 sur fond clair, 7,56:1 sur blanc, 7,13:1 sur ivoire —
+  plus fort que la suggestion de l'audit (`#5f6b7a`, 4,99:1) ; le gris-500 ne reste qu'en placeholder /
+  désactivé / rail d'interrupteur (contrôle par occurrence, pas par comptage de lignes). Documenté dans
+  `src/theme.ts` (ratios hex exacts ; valeurs OKLCH Tailwind 4 : écart d'environ 0,01 au plus).
+- **Tailles** : aucune `font-size` < 12 px dans les feuilles CSS et `index.html` ; `text-xs` = 12,75 px
+  (base 17 px) ; interrupteur 44×64 px ; cases 24 px dans zone 44×44.
+- **Bundle (trou P2-Q2 bouché ici)** : le bundle initial dépassait le seuil de 80 % (483 174 o pour 481 376 o
+  autorisés, +8 601 o vs la base 474 573 o : dictionnaire ~7 300 o + code ~1 300 o). Correction : 19 clés des
+  pages différées enregistrées par `enregistrerTraductions()` au chargement de leur page (désinscription 10,
+  confidentialité 5 dont `Ce lien ne correspond à aucun commerce.` partagée avec le menu, badges du menu 4) ;
+  les 8 étapes « Garder ma carte » sorties du dictionnaire vers `etapesEcranAccueilLangue()` (FR identique,
+  EN traduite) ; l'en-tête « Garder ma carte » en modèle `{appareil}` (3 clés → 1). Les clés `t('…')`
+  littérales de MenuPublic restent dans le dictionnaire initial (test `identite-accessibilite-p2-q1` les
+  scanne par regex). Bundle initial : **483 174 → 480 933 o** (index 352 857, ui 127 477), sous le seuil
+  avec 443 o de marge.
+- **Revues Codex (3 passes, `node_modules/.cache/p2-q1/revue-codex*.txt`)** : 1re passe 9 points, 2e passe
+  9 points, 3e passe 0 bloquant / 0 majeur / 2 mineurs — tous fondés et corrigés : analyseur incomplet
+  (apostrophe JSX, interpolations imbriquées), `Every Mondays` → `Every {jour}, members:`, branche EN du
+  détail des badges, textes français sur `#/carte`, historique en français, `Langue.tsx` forçant le français
+  hors jouer/carte/menu, ` de Asian Home` injecté en EN, `0 digit out of 10` → `0 digits out of 10`,
+  `lang="fr"` sur le corps de la politique de confidentialité (texte légal français, même en mode EN).
+  Non fondés, ignorés avec raison : ratios OKLCH (ratios hex exacts, formulation corrigée), paramètres `{x}`
+  cohérents, `carte-pwa-p1-c3.test.ts:312` n'exige que la présence de l'appel `texteExpiration`.
+- **Tests : 1083 → 1085 (+2)**, suite verte, `npx tsc -p .` propre, typecheck serveur inclus dans `npm test`.
+  Aucun test existant modifié, aucune fonction supprimée. Commit `3e522a6`, fusion `--no-ff` `1408a85`,
+  branches `autonome/p2-q1-accessibilite` et `autonome/integration` poussées.
+- **Non vérifié :** rendu visuel EN sur téléphone réel (vérifié par logique pure + tests source seulement) ;
+  le premier rendu EN des pages différées dépend de l'évaluation du module lazy avant le rendu (vérifié par
+  lecture du code + test de couverture, pas par un rendu navigateur).
+- **Résidus documentés (pas des oublis) :** données du commerce jamais traduites (noms de plats, libellés de
+  lots, description, `★ Signature`, `Démo`) ; corps de la politique = texte légal (français) ; messages
+  d'erreur du serveur en français (API en français) ; le dictionnaire EN pourrait à terme être chargé à la
+  demande (import dynamique) pour alléger encore le bundle initial — piste P2-Q2, hors scope P2-Q1.
+
 ## 11/11/2026 — P1-G1 « RGPD : rappel de purge » (AUDIT.md §7)
 - **Rappel périodique** : le tableau de bord affiche le résumé de purge (`resumeRappelPurge`, `src/lib/rgpd.ts` —
   `{ aPurger, bientot, proteges }`, compteurs disjoints, calculé depuis `listePurge` sur les clients déjà chargés,
