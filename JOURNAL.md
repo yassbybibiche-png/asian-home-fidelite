@@ -1,5 +1,43 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P1-M3 « Photos des plats » — PRÉPARATION SEULEMENT (AUDIT.md §7)
+- **Contexte :** le lot complet est impossible sans les photos du restaurant — aucune photo
+  fournie (`assets/source/photos/` ne contient que son `README.md`), jamais de photos clients
+  Google. Ce lot vérifie et consolide l'existant et produit l'inventaire exact à fournir au
+  commerçant : `docs/PHOTOS-MANQUANTES.md`.
+- **Inventaire vérifié (script + tests) :** 81 plats — **11 avec photo vérifiée, 70 sans photo**.
+  Avec photo : 9 WebP du PDF officiel (légendées par le restaurant) + Loc Lac + Mango Stick.
+  Fiches des plats : 372 739 o au total, chacune ≤ 250 Ko ; vignettes : 47 070 o.
+  Sans photo : liste exacte des 70 noms par catégorie dans `docs/PHOTOS-MANQUANTES.md`, avec les
+  raisons connues (Love Bao : légende PDF douteuse ; Tiramisu : deux bocaux ; 6 Maki Gold : aucune
+  photo ; boissons : non attribuables ; variantes makis/california/sashimi/sushi : 36 plats,
+  icônes minuscules) et le mode de dépôt (`assets/source/photos/`, `plat-<nom>.jpg`).
+- **Correction — photo détachée :** `menu-makis.jpg` (partagée entre 8 Maki Tiger et 8 Maki
+  Chicken Dragon, contribution client sur lacarte.menu, impossible de dire quel plat elle montre)
+  a été **détachée des deux plats** (`src/data/menu-reel.ts`) : 13 → 11 plats photographiés,
+  68 → 70 sans photo. Le fichier est gardé, non rattaché, en attendant 2 photos distinctes du
+  commerçant (ou sa confirmation du plat montré). Les 2 autres fichiers non rattachés
+  (`menu-nouilles-crevettes.jpg`, `menu-plat-riz.jpg`) restent tels quels, documentés.
+  `public/visuels/SOURCES.md` et `docs/MENU-OFFICIEL-2026-11-10.md` mis à jour.
+- **Tests : 1018 → 1027 (+9, `tests/photos-manquantes-p1-m3.test.ts` + correctifs revue)**,
+  suite verte, `npx tsc -p .` propre (typecheck serveur inclus dans `npm test`). Couverture :
+  comptes 11/70/81 + listes exactes, chaque photo existe et pèse ≤ 250 Ko, total fiches ≤ 400 Ko,
+  aucune photo partagée entre plats, les 3 fichiers non rattachés le restent, aucune image en
+  attente dans `assets/source/photos/`, doc cohérente avec le code (noms, comptes, poids).
+- **Revue Codex (3 points, `/tmp/codex-revue-p1-m3.txt`) — tous traités :**
+  1. [Fondé] Le détachement ne couvrait que la carte de repli ; un menu enregistré avant le lot
+     avec `menu-makis.jpg` l'affichait encore → `retirerPhotosDetachees()` appliqué dans `#/menu`
+     à tout menu affiché (même pattern que le masque des prix P1-M1) ; testé.
+  2. [Fondé] « Variantes makis / california / sashimi / sushi (28 plats) » faux : 36 plats
+     (7+6+6+4+5+4+4) → corrigé dans le doc (le total 70 restait exact).
+  3. [Fondé] « Les 2 spécialités sans photo » : en réalité 3 (avec 6 Maki Gold) → priorité
+     reformulée dans le doc.
+- **Attent le commerçant :** les photos des 70 plats (liste exacte dans `docs/PHOTOS-MANQUANTES.md`),
+  en priorité les 3 spécialités sans photo, Love Bao, puis entrées et variantes ; confirmations
+  du plat montré par `menu-nouilles-crevettes.jpg` et `menu-makis.jpg`.
+- **Non vérifié :** rendu visuel réel des photos sur téléphone (vérification par en-têtes/tailles
+  seulement) ; rien touché en production.
+
 ## 11/11/2026 — P1-M2 « Allergènes » (AUDIT.md §7)
 - **Contexte :** le commerçant n'a fourni AUCUN allergène (0/81 renseigné) : rien n'est inventé.
   Chaque fiche de plat dépliée affiche désormais la mention explicite « Allergènes : demander en

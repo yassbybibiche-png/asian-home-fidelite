@@ -9,7 +9,7 @@ import { badgesPlat, boutonsMenu, categorieEffective, categorieMidi, estHeureMen
 import { LogoCommerce, PiedPublic } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
 import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
-import { estSignature, masquerPrixNonConfirmes, menuReelAsianHome } from '../data/menu-reel'
+import { estSignature, masquerPrixNonConfirmes, menuReelAsianHome, retirerPhotosDetachees } from '../data/menu-reel'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
 
@@ -78,9 +78,10 @@ export function MenuAffiche({
   const menuEnregistre = menu.categories.some((c) => c.produits.length > 0)
   const asianHome = estAsianHome(commerce)
   const repliReel = !menuEnregistre && asianHome
-  // P1-M1 : les prix imprimés non confirmés sont masqués quel que soit le menu affiché
-  // (carte de repli ou menu enregistré avant le lot) — jamais 8,90 € / 100,00 € sans confirmation.
-  const menuAffiche = useMemo(() => masquerPrixNonConfirmes(repliReel ? menuReelAsianHome() : menu), [repliReel, menu])
+  // P1-M1 + P1-M3 : les prix imprimés non confirmés sont masqués et les photos détachées retirées,
+  // quel que soit le menu affiché (carte de repli ou menu enregistré avant le lot) — jamais 8,90 € /
+  // 100,00 € sans confirmation, jamais la photo makis partagée sur un plat nommé.
+  const menuAffiche = useMemo(() => retirerPhotosDetachees(masquerPrixNonConfirmes(repliReel ? menuReelAsianHome() : menu)), [repliReel, menu])
   const bandeauPrix = useMemo(() => bandeauPrixManquants(menuAffiche), [menuAffiche])
   const categories = useMemo(
     () => filtrerMenu(menuAffiche.categories.filter((c) => c.produits.length), recherche),

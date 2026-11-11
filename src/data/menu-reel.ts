@@ -17,7 +17,11 @@
 //
 // - 9 plats (PHOTOS_PDF, lot P1-B2) : photos recadrées du PDF de la carte, chacune
 //   légendée du nom du plat par le restaurant (fiche + vignette WebP).
-// - Loc Lac, Mango Stick, 8 Maki Tiger / Chicken Dragon : photos existantes gardées.
+// - Loc Lac, Mango Stick : photos existantes gardées.
+// - 8 Maki Tiger / 8 Maki Chicken Dragon : SANS photo depuis P1-M3 — la photo partagée
+//   `menu-makis.jpg` (contribution client sur lacarte.menu, un seul rouleau pour deux plats
+//   différents, impossible de dire lequel elle montre) a été détachée ; le fichier est gardé,
+//   non rattaché, en attendant 2 photos distinctes du commerçant (voir docs/PHOTOS-MANQUANTES.md).
 // - Sans photo, faute de photo qui montre CE plat : Love Bao (légende du PDF douteuse),
 //   6 Maki Gold, Tiramisu, boissons, variantes makis / california / sashimi / sushi.
 // - menu-nouilles-crevettes.jpg (ancienne photo PROBABLE de Mi Prat) et
@@ -25,7 +29,7 @@
 // - Ids : les plats déjà présents dans l'ancien menu gardent leur id `reel-cN-pM` ;
 //   les nouveaux plats ont un id `reel-o-…`.
 import type { Menu, Produit } from '../types'
-import { ID_ASIAN_HOME, PHOTOS_PDF } from '../lib/visuels.ts'
+import { ID_ASIAN_HOME, PHOTOS_PDF, VISUELS } from '../lib/visuels.ts'
 
 /** Plats signature mis en avant (best-sellers cités dans les avis et sur Instagram). */
 export const PLATS_SIGNATURE = ['Dynamite', 'Thaï-sty Krusty', 'Love Bao', 'Loc Lac', '8 Maki Chicken Dragon', '8 Maki Tiger'] as const
@@ -60,6 +64,28 @@ export function masquerPrixNonConfirmes(menu: Menu): Menu {
     categories: menu.categories.map((c) => ({
       ...c,
       produits: c.produits.map((p) => (estPrixNonConfirme(p.nom, p.prix) ? { ...p, prix: null } : p)),
+    })),
+  }
+}
+
+/**
+ * Photos détachées (P1-M3) : ne doivent plus s'afficher sur un plat nommé, même si un menu
+ * enregistré avant le lot les contient encore. Pour l'instant, la seule est `menu-makis.jpg`
+ * (photo partagée entre 8 Maki Tiger et 8 Maki Chicken Dragon, contribution client, impossible
+ * de dire quel plat elle montre). Ne modifie pas le menu d'origine.
+ */
+export const PHOTOS_DETACHEES = [VISUELS.menuMakis] as const
+
+export function retirerPhotosDetachees(menu: Menu): Menu {
+  return {
+    ...menu,
+    categories: menu.categories.map((c) => ({
+      ...c,
+      produits: c.produits.map((p) => {
+        if (!p.photo || !(PHOTOS_DETACHEES as readonly string[]).includes(p.photo)) return p
+        const { photo: _photo, photoVignette: _vignette, ...reste } = p
+        return reste
+      }),
     })),
   }
 }
@@ -240,13 +266,12 @@ export function menuReelAsianHome(): Menu {
         id: 'reel-cat-4',
         nom: 'Spécialités du chef',
         produits: [
-          plat('reel-c4-p10', '8 Maki Tiger', 1390, 'Crevette tempura, avocat, cheese, recouvert de saumon mi-cuit, avocat, mayonnaise spicy.', '/visuels/menu-makis.jpg'),
+          plat('reel-c4-p10', '8 Maki Tiger', 1390, 'Crevette tempura, avocat, cheese, recouvert de saumon mi-cuit, avocat, mayonnaise spicy.'),
           plat(
             'reel-c4-p9',
             '8 Maki Chicken Dragon',
             1390,
             "Poulet croustillant, avocat, cheese, sauce chili thaï, recouvert d'avocat, mayonnaise spicy et oignon frit.",
-            '/visuels/menu-makis.jpg',
           ),
           // P1-M1 : prix imprimé 100,00 € non confirmé par le commerçant → masqué (« Prix sur place »).
           // Valeur imprimée conservée dans PRIX_A_CONFIRMER, jamais affichée.
