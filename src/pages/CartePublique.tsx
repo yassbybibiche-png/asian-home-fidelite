@@ -152,11 +152,14 @@ function Carte({
     <div className="mx-auto max-w-md space-y-4 px-4 pt-2 pb-10">
       <CommutateurLangue />
       {estAsianHome(commerce) && (
-        <img
-          src={VISUELS.tableSushis}
-          alt="Table dressée chez Asian Home Paris : bao buns, plateau de sushis et cocktails"
-          className="h-80 w-full rounded-3xl object-cover shadow-relief ring-1 ring-gray-900/5"
-        />
+        <picture className="block">
+          <source srcSet={VISUELS.tableSushisPetit} type="image/webp" />
+          <img
+            src={VISUELS.tableSushis}
+            alt="Table dressée chez Asian Home Paris : bao buns, plateau de sushis et cocktails"
+            className="h-80 w-full rounded-3xl object-cover shadow-relief ring-1 ring-gray-900/5"
+          />
+        </picture>
       )}
       <CarteFidelite client={client} commerce={commerce} animer gainDuJour={gainDuJour} />
       {lienCourt && <LienCourt lien={lienCourt} />}

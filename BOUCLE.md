@@ -377,3 +377,79 @@ LCP, hors chemin critique — confirmé par mesure) ; beacon `evenements`
 (post-LCP, sans effet).
 **Décision : ANNULÉ** — aucun changement tenté. Tours sans gain
 consécutifs : **1**. Branche supprimée sans fusion.
+
+### Tour 4 — `autonome/boucle-t4-menu-images` (fusionné)
+
+Sujet : la photo d'en-tête du vrai menu (`table-sushis.jpg`, 788×1400,
+195 989 o, affichée ~390×224 en `object-cover`) est l'élément LCP de
+`#/menu` pour Asian Home — mesuré 1 949 → 3 404 ms de transfert à froid.
+Changement : nouveau `public/visuels/table-sushis-petit.webp` (720×1279,
+WebP q75, 95 494 o, Pillow, −51 %) servi en premier via `<picture>` (repli
+JPEG inchangé) dans `MenuPublic.tsx` (héros, `h-56`) ET `CartePublique.tsx`
+(bannière, `h-80`) — même visuel, même motif, un seul changement ;
+constante `VISUELS.tableSushisPetit` dans `src/lib/visuels.ts` ; documenté
+dans `public/visuels/SOURCES.md`. `table-sushis.jpg` reste intact partout.
+Le héros n'est PAS préchargé dans le SW : 95 Ko, seuls les petits visuels
+de marque sont préchargés ; les photos de contenu sont mises en cache à la
+première visite, comme les photos de plats (`public/sw.js` identique à t2,
+aucune modification nette). Hors ligne, le héros peut manquer s'il n'a pas
+déjà été mis en cache par une visite en ligne (ou après éviction) — après
+mise en cache, il reste disponible ; dégradation acceptable pour une photo
+d'ambiance. Justification du non-préchargement par Lighthouse non démontrée
+(séries trop petites et dispersées — revue Codex t4) ; la décision repose
+sur la cohérence avec les photos de plats, pas sur le TBT.
+Mesure ponctuelle (le protocole standard utilise un commerce générique, sans
+visuels : le héros n'y apparaît pas) — script `node_modules/.cache/profil-t4/
+mesurer-menu-asian-home.mjs`, commerce nommé « Asian Home Paris », Pixel 7,
+Slow 4G + CPU ×4, SW bloqués, cache désactivé, navigateur relancé par passe :
+**LCP menu 3 428 / 3 376 ms → 3 076 / 2 892 ms** (moyenne 3 402 → 2 984 ms,
+−418 ms, 2 passes sur 2 ; héros WebP 2 065 → 3 044 ms, 95 794 o transférés ;
+plus aucun `table-sushis.jpg` dans le journal). Sans le blocage des SW, le SW
+intercepte les images (`transferSize: 0`) et masque leur coût réseau réel —
+c'est pourquoi le protocole standard bloque les SW. Confirmation avec le
+script versionné (`scripts/mesurer-menu-asian-home.mjs`) : 2 912 / 2 960 ms.
+Mesures standard (2 passes) : premier affichage `#/jouer` 1 896 / 1 895 ms ;
+LCP 1 872 / 1 844 ms ; parcours 6 738 / 6 854 ms ; ouverture carte 616 / 684 ms ;
+menu direct 1 610 / 1 773 ms ; menu hash 900 / 895 ms ; 0 erreur console,
+0 requête échouée. Lighthouse t4 (9 passes) : 78, 76, 75, 81, 77, 74, 80, 79,
+80 (moyenne 77,8 ; TBT 680–1 030 ms) contre t2 : 84/81 (TBT 590/720). ABAB
+décisif : `git stash -u` (code t4 retiré), rebuild, Lighthouse **81 (TBT
+670 ms) / 82 (TBT 650 ms)** ; `git stash pop`, rebuild, **79 (TBT 810 ms) /
+80 (TBT 750 ms)** dans la même fenêtre. Différence propre au tour ≈ 1–2
+points, ~100 ms de TBT — dans le bruit (±5 points, ±150 ms). Le creux des
+premières passes (74–76) était de la variance hôte (VM partagée 1,5 CPU) +
+petit échantillon à t2 (2 passes). Aucun processus parasite trouvé
+(`ps aux` : seul le daemon hatch, 5,2 % CPU ; aucun port 43xx en écoute).
+Bundle : JS initial 453 028 → 453 181 o (+153 o, +0,03 %), CSS 70 766 o
+inchangé, total 523 794 → 523 947 o, 24 chunks.
+Tests : suite complète **1176/1176** (1171 + 4 `tests/boucle-t4-hero.test.ts`
++ 1 test auto : `tests/visuels.test.ts` génère un test par entrée `VISUELS`,
+et le tour ajoute `tableSushisPetit` — écart de compteur corrigé en cours de
+tour : README/SCORES annonçaient 1175, la suite réelle était 1176 ; le test
+`documentation-p2-q5` ne recoupe que README vs SCORES et le nombre de
+fichiers, pas le total absolu — le compteur doit être vérifié à chaque tour).
+E2E 3/3. Le test P1-C5 (`menu-client-p1-c5.test.ts:235`) passe SANS
+modification : la regex lit toujours la balise `<img>` de repli.
+Revue Codex t4 (5 points) : 1. `<picture>` fondés, avec `className="block"`
+à ajouter sur les deux `<picture>` — **corrigé** (l'élément inline perdait
+la marge verticale `space-y-*` du parent) ; hauteur 1279 épinglée dans le
+test — **corrigé** ; le test « WebP valide » surpromet (pas de décodage
+complet) — **noté** : le décodage est prouvé par la mesure (le WebP est
+l'élément LCP dans les 4 passes après) ; 2. non-préchargement fondé,
+justification Lighthouse non démontrée — **corrigé dans la documentation**
+(précision hors ligne : manque seulement s'il n'a pas déjà été mis en
+cache) ; 3. mesure ponctuelle fondée comme preuve ciblée à froid —
+**corrigé** : script versionné dans `scripts/mesurer-menu-asian-home.mjs`
+(au lieu de `node_modules/.cache` seul) ; gain formulé comme résultat
+observé sur 2 passes (+2 de confirmation), pas comme gain garanti en
+production ; la mesure ne couvre ni le SW actif ni une visite chaude ;
+4. fusion malgré Lighthouse fondée, avec incertitude explicite — le signal
+ABAB défavorable (−2 points, TBT 660 → 780 ms) est **conservé tel quel**
+dans `SCORES.md`, pas effacé ; une annulation exigerait une régression
+reproductible mieux établie ; 5. 720 px q75 fondé (1,85 px source / px CSS
+à 390 px ; 480 px = 1,23) — **gardé** ; `SOURCES.md` indiquait encore
+2268×4032 pour le JPEG livré en 788×1400 — **corrigé**.
+**Décision : FUSIONNÉ** (gain menu LCP −418 ms moyen, 2/2 passes, bien
+au-delà du bruit ; `#/jouer` Playwright plat ; effet propre du tour sur
+Lighthouse ≈ 0–2 points d'après l'ABAB ; bundle +0,03 % ; 0 erreur).
+Tours sans gain consécutifs : **1** (t3).

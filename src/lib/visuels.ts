@@ -19,6 +19,9 @@ export const VISUELS = {
   heroPlats: '/visuels/hero-plats.jpg',
   /** Table dressée : bao buns, plateau de sushis, cocktails. */
   tableSushis: '/visuels/table-sushis.jpg',
+  /** Même table dressée, 720 px de large (WebP q75, ~95 Ko) pour l'en-tête du menu et de la carte —
+      le JPEG 788×1400 (196 Ko) reste le repli (boucle t4 : il est l'élément LCP du vrai menu). */
+  tableSushisPetit: '/visuels/table-sushis-petit.webp',
   /** Cocktails signature Kohsamui / Tokyo / Piña Colada. */
   cocktails: '/visuels/cocktails.jpg',
   /** Salle du restaurant : plafond d'ombrelles, tables dressées, sans personne. */

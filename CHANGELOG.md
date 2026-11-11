@@ -19,6 +19,47 @@ bundle 601,7 → 450,2 Ko (JS initial), dashboard enrichi + entonnoir, SEO/OG.
 
 ## Boucle d'amélioration continue
 
+### t4 — Héros du menu optimisé (11/11/2026, fusionné)
+
+Nouveau `public/visuels/table-sushis-petit.webp` (720×1279, WebP q75,
+95 494 o, dérivé du vrai `table-sushis.jpg` 788×1400, 195 989 o par Pillow,
+−51 %) servi en premier via `<picture className="block">` (repli JPEG
+inchangé) dans `src/pages/MenuPublic.tsx` (héros du menu, `h-56`) ET
+`src/pages/CartePublique.tsx` (bannière de la carte, `h-80`) — même visuel,
+même motif, un seul changement ; constante `VISUELS.tableSushisPetit`
+ajoutée dans `src/lib/visuels.ts` ; documenté dans
+`public/visuels/SOURCES.md` (dimensions corrigées : `table-sushis.jpg` est
+788×1400 sur disque, l'original Instagram 2268×4032). `table-sushis.jpg`
+reste intact partout (repli, OG, SOURCES.md). Le héros n'est PAS préchargé
+par le service worker (95 Ko — seuls les petits visuels de marque sont
+préchargés ; les photos de contenu sont mises en cache à la première
+visite, comme les photos de plats) ; hors ligne, le héros peut manquer s'il
+n'a pas déjà été mis en cache. Le préchargement n'a pas été retenu : avec
+préchargement Lighthouse 78/76/75 (TBT 850–1 030 ms), sans 81/77/74/80 —
+mais les séries sont trop petites et dispersées pour établir que le
+préchargement augmente le TBT (revue Codex t4).
+Mesures (2 passes Playwright standard + 2 passes Lighthouse officielles +
+mesure ponctuelle, même protocole) : LCP `#/menu` Asian Home
+**3 428/3 376 ms → 3 076/2 892 ms** (moyenne −418 ms, 2 passes sur 2 ; +
+2 passes de confirmation 2 912/2 960 ms) — script versionné
+`scripts/mesurer-menu-asian-home.mjs` (commerce « Asian Home Paris », SW
+bloqués, cache désactivé) ; `#/jouer` plat (premier affichage 1 896/1 895 ms,
+LCP 1 872/1 844 ms, parcours 6 738/6 854 ms, ouverture carte 616/684 ms) ;
+Lighthouse 84/81 → **78/76** (TBT 590/720 → 850/1 030 ms) — réserve ABAB
+conservée dans `SCORES.md` : sans le tour 81/82 (TBT 650/670 ms), avec le
+tour 79/80 (TBT 750/810 ms) dans la même fenêtre ; effet propre ≈ −2 points,
+dans le bruit, signal conservé tel quel. Bundle : JS initial 453 028 →
+453 181 o (+153 o, +0,03 %), CSS 70 766 o inchangé, total 523 794 →
+523 947 o, 24 chunks ; 0 erreur console, 0 requête échouée. Tests 1171 →
+1176/1176 (+4 `tests/boucle-t4-hero.test.ts`, +1 test auto dans
+`tests/visuels.test.ts` — une entrée `VISUELS` = un test). E2E 3/3. Revue
+Codex t4 (5 points) : fusion raisonnable après une petite correction
+(`className="block"` sur les deux `<picture>` — l'élément inline perdait
+la marge verticale `space-y-*` du parent ; hauteur 1279 épinglée dans le
+test ; dimensions `table-sushis.jpg` corrigées dans SOURCES.md ; script de
+mesure versionné) ; aucun motif d'annulation. Compteur de tours sans gain :
+reste à 1 (t3).
+
 ### t1 — QR code différé hors du bundle initial (11/11/2026, fusionné)
 
 `QrCode` déménage de `components/ui.tsx` vers `components/QrCode.tsx` ;

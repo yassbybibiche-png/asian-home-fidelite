@@ -225,8 +225,8 @@ Badge « Démo » : en mode API, il n'apparaît **que** sur les commerces venant
 
 ## Tests
 
-`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` — **1171 tests
-(11/11/2026, 71 fichiers, suite verte, vérification des types du serveur `typecheck:server` incluse)**.
+`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` — **1176 tests
+(11/11/2026, 72 fichiers, suite verte, vérification des types du serveur `typecheck:server` incluse)**.
 `npx tsc -p .` (types du front) n'est pas dans `npm test` : à lancer à part. Le nombre exact
 évolue à chaque lot (voir `JOURNAL.md`) ; le détail par fichier est dans `tests/`.
 Pas de Vitest : Node exécute le TypeScript directement, ça évite une dépendance et ne touche pas au build.
@@ -337,5 +337,5 @@ server/         backend partagé (API /api/v1, SQLite en local ou Supabase en pr
 supabase/       migrations SQL Supabase (schéma, contraintes, RLS)
 scripts/        générateur du seed, preuves HTTP (preuve-http-v3.mjs), sauvegarde (`sauvegarde-base.mjs`),
                 retour arrière Render (`rollback-render.mjs`)
-tests/          tests node --test (1171 au 11/11/2026) + E2E Playwright (`tests-e2e/`)
+tests/          tests node --test (1176 au 11/11/2026) + E2E Playwright (`tests-e2e/`)
 ```
