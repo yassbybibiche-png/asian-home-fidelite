@@ -8,6 +8,7 @@ import { analyserContact, messageRelance, recompenseDebloquee, tamponsAffiches }
 import { correspondRecherche } from '../lib/recherche'
 import { etatSaisieContact, nomAffiche } from '../lib/inscriptionJeu'
 import { MENTION_ENVOI } from '../lib/integrations'
+import { passageCeJour } from '../lib/points'
 import { pageClients, TAILLE_PAGE_CLIENTS } from '../lib/ecransCommercant'
 import { BoutonCopier, EnTete, MessageErreur, telecharger, Vide } from '../components/ui'
 
@@ -411,7 +412,7 @@ function LigneClient({ client: c }: { client: Client }) {
       <div className="mt-3 flex gap-2">
         <button
           className="bouton min-h-11 flex-1 py-2"
-          disabled={enCours}
+          disabled={enCours || passageCeJour(c, new Date())}
           onClick={async () => {
             // Le « ✓ » ne s'affiche qu'une fois la visite réellement enregistrée.
             if (!(await executer(() => validerVisite(c.id))).ok) return
@@ -427,6 +428,7 @@ function LigneClient({ client: c }: { client: Client }) {
           </a>
         )}
       </div>
+      {passageCeJour(c, new Date()) && <p className="mt-2 text-sm text-gray-700">Déjà un passage aujourd’hui : 1 tampon par jour maximum.</p>}
       {erreur && (
         <div className="mt-2">
           <MessageErreur>Visite non enregistrée : {erreur}</MessageErreur>

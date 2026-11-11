@@ -1,5 +1,33 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P1-S12 « Garde 1 tampon/jour sur `visite` » (AUDIT.md §7, F-11)
+- **Décision (gardée, pas supprimée) :** la route historique `POST /commerces/:id/clients/:id/visite` reste — c'est le
+  passage rapide sans achat des écrans FicheClient (« Valider une visite (+1 tampon) ») et Clients (« Valider une
+  visite (+1) »), distinct de l'écran caisse (code équipe + montant). La caisse avec montant 0 donnerait le même
+  résultat, mais supprimer la route retirerait un geste commerçant existant (`api.visite`, utilisé par les deux écrans).
+- **Garde :** la branche `visite` de `server/app.ts` appelle désormais `passageAvecProgramme()` (la même fonction que la
+  caisse), 409 « 1 tampon par jour maximum » sinon — refus avant toute écriture (client, parrainage, journal). Import
+  `appliquerVisiteProgramme` retiré de `app.ts` (plus utilisé). Front : bouton désactivé + avertissement « Déjà un
+  passage aujourd’hui : 1 tampon par jour maximum. » sur FicheClient ET Clients (même texte que la caisse).
+- **Découverte en testant :** le test « journal d'audit » de `cartiz.test.ts` s'appuyait sans le savoir sur le bug — la
+  `visite` du gérant y créditait un 2e tampon le même jour (Lina avait déjà un passage le 11, action hors ligne
+  rejouée `faitLe` 11h30). La visite d'audit est déplacée au lendemain (12). C'est la preuve que le bug était réel.
+- **Montages de tests adaptés (6 échecs initiaux, horloges figées, aucune assertion métier affaiblie) :** les visites
+  accumulées le même jour sont étalées d'un jour par visite — `serveur.test.ts` (« récompense » : 10/11/12, « le
+  lendemain » devient le 13 ; CSV inchangé `;2;5;`), `programme.test.ts` (« niveaux » : 10 visites du 9 au 18,
+  passage le 19 ; « profil progressif » : 2e visite le lendemain), `auth-client-p0-s7.test.ts` (2e visite +24 h,
+  jeton valable 30 jours), `supabase.test.ts` (« parcours » : visites 9/10/11, `horloge` du describe en `let`,
+  restaurée en `finally` ; le double-`visite` simultané reste [200, 409] « réessayez » via le verrou optimiste).
+- **Revue Codex (2 points, `/tmp/p1-s12-revue-codex.md`) — tous deux fondés, corrigés :**
+  1. [Majeur] `passageCeJour` (front) comparait les jours dans le fuseau du navigateur, la garde serveur à Paris
+     (`server/index.ts` force `TZ=Europe/Paris`) — bouton désactivé à la mauvaise heure hors fuseau parisien.
+     → nouveau comparateur partagé `memeJourParis()` (`src/lib/points.ts`, jours `Europe/Paris` explicites via
+     `Intl`), utilisé par `passageCeJour` (front + `enregistrerPassage`) et par la garde serveur (`passageAvecProgramme`
+     et `rattrapageRecevable` dans `programme.ts`, qui ne dépendent plus du TZ du processus) ; test ajouté.
+  2. [Mineur] Liste Clients : bouton désactivé sans explication → même avertissement que la caisse et la fiche.
+- **Tests : 1046 → 1048 (+2 : garde `visite` de bout en bout dans `cartiz.test.ts`, jours Paris dans le même
+  fichier)**, suite verte, typechecks inclus dans `npm test`.
+
 ## 11/11/2026 — P1-B9 « Désinscription SMS utilisable » (AUDIT.md §7, revue Codex point 7 — BLOQUANT avant toute activation SMS)
 - **Contexte :** chaque SMS de relance se terminait par `STOP : répondez STOP`, alors que l'expéditeur alphanumérique
   Brevo (`ASIANHOME`) ne reçoit aucune réponse — texte trompeur, aucun mécanisme de désinscription utilisable par SMS.

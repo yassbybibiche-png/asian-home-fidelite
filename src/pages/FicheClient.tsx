@@ -7,7 +7,7 @@ import { MENTION_ENVOI } from '../lib/integrations'
 import { JournalEnvois } from './Messages'
 import { recompenseDebloquee } from '../lib/fidelite'
 import { nomAffiche } from '../lib/inscriptionJeu'
-import { soldePoints, formaterPrix } from '../lib/points'
+import { passageCeJour, soldePoints, formaterPrix } from '../lib/points'
 import { analyserAnniversaire, anniversaireAffiche } from '../lib/messages'
 import { nouvelIdAction } from '../lib/fileCaisse'
 import { dateCourte, dateRelative } from '../lib/format'
@@ -469,7 +469,7 @@ export default function FicheClient() {
         <h2 className="titre-carte">En caisse</h2>
         <button
           className="bouton w-full"
-          disabled={enCours}
+          disabled={enCours || passageCeJour(client, new Date())}
           onClick={async () => {
             if (!(await executer(() => validerVisite(client.id))).ok) return
             annoncer(
@@ -481,6 +481,7 @@ export default function FicheClient() {
         >
           Valider une visite (+1 tampon)
         </button>
+        {passageCeJour(client, new Date()) && <p className="text-sm text-gray-700">Déjà un passage aujourd’hui : 1 tampon par jour maximum.</p>}
         {debloquee && (
           <button
             className="bouton w-full bg-green-700 hover:bg-green-800 active:bg-green-900"
