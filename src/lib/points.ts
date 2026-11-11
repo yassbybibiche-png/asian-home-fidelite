@@ -4,8 +4,17 @@ import type { Client, Commerce, EchangePoints, RecompensePoints } from '../types
 import { validerVisite } from './fidelite.ts'
 
 export const EUROS_PAR_POINT_DEFAUT = 1
-/** Nombre d'identifiants d'actions gardés par client pour l'idempotence (file hors ligne). */
-export const ACTIONS_MEMORISEES = 50
+/**
+ * Nombre d'identifiants d'actions gardés par client pour l'idempotence (file hors ligne).
+ * Point Codex 7 : le plafond doit couvrir toute la fenêtre de rejeu. Le serveur refuse (400, `quandAction`) une
+ * action datée de plus de 72 h ; une action de la file est donc rejouée au plus 72 h après avoir été faite, et un
+ * identifiant n'a besoin d'être retenu que tant que les actions plus récentes du même client tiennent dans le
+ * plafond. Un client reçoit quelques actions de caisse par jour au plus (1 passage par jour, quelques remises ou
+ * échanges) : 500 en 72 h est hors d'atteinte, contre 50 qui pouvait être dépassé et laisser un échange débiter
+ * deux fois. Coût borné : 500 × 80 caractères max (`idAction`) ≈ 40 ko dans le pire cas, jamais servi au front
+ * (retiré par `clientCaisse` / `cartePublique`).
+ */
+export const ACTIONS_MEMORISEES = 500
 
 export function eurosParPoint(commerce: Pick<Commerce, 'eurosParPoint'>): number {
   const e = commerce.eurosParPoint

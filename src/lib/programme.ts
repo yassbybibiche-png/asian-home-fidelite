@@ -4,7 +4,7 @@
 // Toute la configuration vit sur le commerce (`programme`, tout optionnel) : absent = défauts ci-dessous,
 // un commerce existant sans configuration voit donc les défauts s'appliquer sans rien casser.
 import type { Client, Commerce, ConfigProgramme, DefiEnCours, Palier, RecompenseEnAttente, Reserve } from '../types'
-import { memeJourParis, pointsPourMontant, soldePoints } from './points.ts'
+import { ACTIONS_MEMORISEES, memeJourParis, pointsPourMontant, soldePoints } from './points.ts'
 import { validerVisite } from './fidelite.ts'
 
 export const JOUR = 24 * 60 * 60 * 1000
@@ -540,7 +540,7 @@ export function appliquerVisiteProgramme(client: Client, commerce: Commerce, cen
     ...apresVisite,
     points: soldePoints(client) + gagnes,
     depenseCentimes: (client.depenseCentimes ?? 0) + Math.max(0, Math.round(centimes)),
-    ...(actionId ? { actionsTraitees: [...(client.actionsTraitees ?? []), actionId].slice(-50) } : {}),
+    ...(actionId ? { actionsTraitees: [...(client.actionsTraitees ?? []), actionId].slice(-ACTIONS_MEMORISEES) } : {}),
   }
   const evenements: EvenementPassage[] = []
   const iso = quand.toISOString()
