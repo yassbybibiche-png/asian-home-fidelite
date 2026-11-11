@@ -95,6 +95,33 @@ justification et mesure avant/après, vit dans `CHANGELOG.md`.
   son transfert (~6–8 Ko brotli) et son analyse (~quelques ms) — le rendre
   asynchrone ferait passer `seedRecale` en async et se propagerait au store
   et aux tests, pour un gain attendu < 50 ms. Pas de fait nouveau sans mesure.
+  Confirmé par la chronologie du tour 3 : le seed vit dans `ui-*.js`, qui
+  finit de se télécharger à 809 ms contre 1 152 ms pour `index-*.js` — il est
+  hors du chemin critique ; le retirer ne déplacerait pas le LCP (gain
+  résiduel ~10 ms d'analyse). Écart définitif en mode API.
+- **Coquille statique de `#/jouer` au lieu du squelette** : examiné et ÉCARTÉ
+  (boucle t3). L'idée : rendre le titre (`p.titre-carte`, élément LCP) et le
+  formulaire dès le premier rendu, avant le retour de l'API commerce
+  (chronologie t3 : API 1 476 → 1 638 ms, LCP 1 844 ms — gain estimé
+  −~300–400 ms de LCP). Écarté : le test `tests/chargement-p0-u1.test.ts`
+  épingle la ligne exacte `<SqueletteJeu libelle={t('Un instant, la roue
+  arrive.')} />` dans `src/pages/Jouer.tsx` et la pureté du squelette (aucun
+  état/effet/appel, un seul import de type) — ce test n'est pas faux, il
+  consigne une décision P0-U1 délibérée (squelettes sur les 4 écrans, pas de
+  texte « Chargement… » nu). Remplacer le squelette par une coquille serait
+  un changement produit, pas une correction : il relève d'une décision
+  utilisateur/coordinateur, pas de la boucle. Proposé dans `RAPPORT.md`.
+- **Lecture anticipée du coffre / fetch commerce plus tôt** : examiné et
+  ÉCARTÉ (boucle t3). Le fetch commerce démarre à 1 476 ms, après le montage
+  React et la lecture du coffre chiffré (`lireCoffreBorne`, IndexedDB) dans
+  `demarrer()` — la démarrer au niveau module ne gagnerait que ~50–100 ms
+  (sous le bruit de mesure ± ~0,2 s) en touchant le chemin de démarrage
+  sécurisé (accès + gardes de concurrence P0-S7/P0-S11). Gain insuffisant
+  pour le risque.
+- **Beacon `evenements` (POST P2-Q3, mesure anonyme)** : examiné et ÉCARTÉ
+  (boucle t3). Il part à 1 811 ms, après le LCP (1 844 ms), 325 o, terminé à
+  1 990 ms — TTI 2,6–2,8 s : aucun effet sur LCP, TBT ou TTI. Le différer ne
+  changerait rien de mesurable.
 
 ## Journal des tours
 
@@ -135,6 +162,38 @@ réel (1171/1171).
 **Décision : FUSIONNÉ** — premier affichage et LCP en baisse sur les
 2 passes au-delà du bruit, parcours en baisse, Lighthouse plat, aucune
 régression au-delà du bruit.
+
+### Tour 3 — `autonome/boucle-t3-tbt` (annulé — aucun levier au-dessus du bruit)
+
+Sujet : le TBT reste le levier n° 1 (Lighthouse 590/720 ms, `styleLayout`
+634 ms + `scriptEvaluation` 611 ms, passe 1 t2). Investigation sans
+changement de code — chronologie d'une passe (`node_modules/.cache/profil-t3/chronologie.mjs`,
+même protocole Slow 4G + CPU ×4) : FCP 648 ms ; `index-*.js` 220 → 1 152 ms
+(932 ms, 103 Ko transférés — le chemin critique) ; `ui-*.js` 220 → 809 ms ;
+CSS 222 → 602 ms ; DOM prêt / chargé 1 346 / 1 347 ms ; API commerce
+1 476 → 1 638 ms (162 ms) ; LCP 1 844 ms (`p.titre-carte`) — rendu +
+peinture après l'API ≈ 200 ms. Analyse des chunks (build avec sourcemaps,
+`node_modules/.cache/analyse-chunks/dist`) : JS initial 453 Ko =
+`index-*.js` 354 785 o (React+ReactDOM ~moitié + App + Jouer/Caisse/
+CartePublique épinglées par P2-Q2) + `ui-*.js` 97 727 o (store, router, API,
+`seed.json`) + runtimes ; les 61 KiB `unused-javascript` de Lighthouse sont
+le code Caisse + CartePublique, épinglés par P2-Q2 (caisse hors ligne après
+une seule visite — décision produit, pas un test faux). Graphe d'imports
+vérifié : chaque module de l'entrée est importé par Jouer, Caisse ou
+CartePublique (ou `main.tsx`/`api.ts`/store) — aucun poids mort. DOM :
+117 nœuds seulement ; la roue tourne en `transform` composité (60 fps, sans
+repeindre) — pas la cause du style/layout. Leviers examinés et écartés
+(détail § « Leviers examinés et ÉCARTÉS ») : coquille statique au lieu du
+squelette (gain estimé −~300–400 ms de LCP, mais renverse la décision
+P0-U1 — test `chargement-p0-u1` non faux, décision produit à trancher par
+l'utilisateur) ; lecture anticipée du coffre (~50–100 ms, sous le bruit,
+chemin de démarrage sécurisé) ; `seed.json` dynamique (~0 ms sur le LCP,
+hors chemin critique — confirmé par mesure) ; beacon `evenements`
+(post-LCP, sans effet).
+**Décision : ANNULÉ** — aucun changement tenté : tous les leviers
+restants sont sous le bruit de mesure (± ~0,2 s) ou bloqués par une
+décision produit délibérée. Tours sans gain consécutifs : **1**.
+Branche `autonome/boucle-t3-tbt` supprimée sans fusion.
 
 ### Test épinglé par le tour 2 — preuve et validation Codex requise
 
@@ -295,3 +354,26 @@ réel (1171/1171).
 **Décision : FUSIONNÉ** — premier affichage et LCP en baisse sur les
 2 passes au-delà du bruit, parcours en baisse, Lighthouse plat, aucune
 régression au-delà du bruit.
+
+### Tour 3 — `autonome/boucle-t3-tbt` (annulé — aucun levier au-dessus du bruit)
+
+Sujet : le TBT reste le levier n° 1 (Lighthouse 590/720 ms). Investigation
+sans changement de code — chronologie d'une passe
+(`node_modules/.cache/profil-t3/chronologie.mjs`) : FCP 648 ms ;
+`index-*.js` 220 → 1 152 ms (932 ms, 103 Ko transférés — le chemin critique) ;
+`ui-*.js` 220 → 809 ms ; DOM prêt 1 346 ms ; API commerce 1 476 → 1 638 ms ;
+LCP 1 844 ms. Analyse des chunks (build avec sourcemaps) : JS initial
+453 Ko = `index-*.js` 354 785 o (React+ReactDOM ~moitié + pages épinglées
+P2-Q2) + `ui-*.js` 97 727 o (store, `seed.json`) + runtimes ; les 61 KiB
+`unused-javascript` sont le code Caisse + CartePublique, épinglés par P2-Q2.
+Graphe d'imports vérifié : aucun poids mort dans l'entrée. DOM 117 nœuds ;
+roue en `transform` composité — pas la cause du style/layout. Leviers
+écartés (détail § « Leviers examinés et ÉCARTÉS ») : coquille statique au
+lieu du squelette (gain estimé −~300–400 ms de LCP, mais renverse la
+décision P0-U1 — décision produit à trancher par l'utilisateur, proposée
+dans `RAPPORT.md`) ; lecture anticipée du coffre (~50–100 ms, sous le
+bruit, chemin de démarrage sécurisé) ; `seed.json` dynamique (~0 ms sur le
+LCP, hors chemin critique — confirmé par mesure) ; beacon `evenements`
+(post-LCP, sans effet).
+**Décision : ANNULÉ** — aucun changement tenté. Tours sans gain
+consécutifs : **1**. Branche supprimée sans fusion.
