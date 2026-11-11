@@ -165,10 +165,21 @@ describe('#/menuCarte : sauvegarde CSV avant remplacement, export, import (sourc
   const source = readFileSync(new URL('../src/pages/MenuCarte.tsx', import.meta.url), 'utf8')
 
   test('le remplacement télécharge d’abord le menu actuel (si non vide), puis demande confirmation', () => {
-    const remplacer = source.slice(source.indexOf('function remplacer('), source.indexOf('async function importerCsv'))
+    const remplacer = source.slice(source.indexOf('function remplacer('), source.indexOf('function appliquerRemplacement('))
     assert.ok(remplacer.includes('if (editeurNonVide)'))
-    assert.ok(remplacer.indexOf('telechargerMenuCsv(categories!)') < remplacer.indexOf('window.confirm'))
-    assert.ok(remplacer.indexOf('window.confirm') < remplacer.indexOf('setCategories('))
+    // P1-C7 : plus de window.confirm — la sauvegarde CSV part avant la modale <Confirmation>, le remplacement
+    // (setCategories) n'a lieu que dans appliquerRemplacement(), appelé par le bouton de confirmation.
+    assert.ok(remplacer.indexOf('telechargerMenuCsv(categories!)') < remplacer.indexOf('setRemplacement({'))
+    assert.doesNotMatch(remplacer, /setCategories\(/)
+    // Le `return` après setRemplacement est critique : sans lui, la branche non vide appliquerait le
+    // remplacement immédiatement ; appliquerRemplacement n'est appelé que là (éditeur vide) et par la modale.
+    assert.ok(remplacer.indexOf('setRemplacement({') < remplacer.indexOf('return'))
+    assert.ok(remplacer.indexOf('return') < remplacer.indexOf('appliquerRemplacement(nouvelles)'))
+    assert.equal(source.match(/appliquerRemplacement\(/g)?.length, 3, 'définition + 2 appels (éditeur vide, confirmation)')
+    assert.doesNotMatch(source, /window\.confirm/)
+    const appliquer = source.slice(source.indexOf('function appliquerRemplacement('), source.indexOf('const recapRemplacement'))
+    assert.match(appliquer, /setCategories\(versEdition\(nouvelles\)\)/)
+    assert.match(source, /onConfirmer=\{\(\) => appliquerRemplacement\(remplacement\.nouvelles\)\}/)
   })
   test('« Charger la carte officielle » et l’import CSV passent par remplacer() ; seul « Enregistrer » publie', () => {
     assert.match(source, /onClick=\{\(\) => remplacer\(menuReelAsianHome\(\)\.categories/)

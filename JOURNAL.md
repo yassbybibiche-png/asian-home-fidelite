@@ -1,5 +1,70 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P1-C7 « Écrans commerçant (finitions) » (AUDIT.md §7)
+- **Contexte :** l'AUDIT listait pour P1-C7 : 8 `window.confirm()`, aide « encore X tampons »,
+  bouton « Saisir le prénom » si caméra refusée, découpe Réglages, pagination Clients.
+  Vérification faite au début du lot : l'aide tampons, le repli « Saisir le prénom » et la
+  pagination Clients (« Charger plus » au-delà de 50) étaient **déjà livrés en P1-C6**
+  (tests `ecrans-commercant-p1-c6.test.ts`) — rien à refaire, vérifiés en non-régression.
+  Restait : **10 `window.confirm()` hors démo** (l'AUDIT en comptait 8 — 2 de plus trouvés :
+  suppression de catégorie dans MenuCarte, déconnexion des appareils dans CartePublique) +
+  la découpe Réglages (9 fieldsets, pas 8).
+- **Remplacements (10, tous par `<Confirmation>`, modale `dialog` déjà utilisée à la caisse) :**
+  FicheClient ×3 (échange de points — récapitulatif « echange » réutilisé ; consentement
+  relances — nouveau type « consentement » ; refus de visite oubliée — nouveau type
+  « rattrapage-refus »), Equipe (retrait d'un membre), Avis (déconnexion Google), Messages
+  (dépôt du message ciblé), MenuCarte ×2 (remplacement du menu — la sauvegarde CSV part
+  **avant** la modale, le remplacement n'a lieu que sur confirmation ou éditeur vide ;
+  suppression de catégorie), CartePublique ×2 (demande de suppression RGPD, déconnexion de
+  tous les appareils). Seul `window.confirm()` restant : la réinitialisation de la **démo**
+  (Admin.tsx, 1 occurrence). `Caisse.tsx` : branche `else` restreinte aux 4 variantes
+  caisse (les 2 nouveaux types sont réservés à la fiche client — exigé par `tsc`).
+- **Réglages découpés en 6 onglets** (Commerce, Fidélité, Roulette, Messages, Carte, Données),
+  **un seul formulaire, un seul bouton Enregistrer** : 9 fieldsets conservés, 26 champs
+  (input/select/textarea) inchangés — 2 fieldsets déplacés pour des onglets thématiques
+  contigus (« Points » après « Programme », « Réponses aux avis » après « Messages
+  automatiques »). Onglets accessibles : `tablist`/`tab`/`tabpanel` + `aria-controls`,
+  roving tabindex, flèches/Début/Fin ; validation native : un champ invalide dans un onglet
+  masqué bascule sur son onglet puis est focalisé (`onInvalid`, revue Codex point 1).
+- **Évolution rédactionnelle (revue Codex point 7, documentée) :** les récapitulatifs ne
+  reprennent pas mot pour mot les anciens confirms — le prénom figure dans la ligne
+  « Client » du récapitulatif (pas dans le titre), et le refus de rattrapage ajoute
+  l'avertissement « classée sans crédit de tampon ni de points » (conséquence réelle,
+  implicite avant). Aucun prix, probabilité ni texte légal touché.
+- **Tests : 1032 → 1044 (+12, `tests/ecrans-commercant-p1-c7.test.ts`)**, suite verte,
+  `npx tsc -p .` propre (typecheck serveur inclus dans `npm test`). Couverture :
+  97,90 % / 91,49 % / 93,06 % ; `ecransCommercant.ts` 100 %. **2 tests existants adaptés
+  (propriété conservée, mécanisme changé — le lot remplace l'implémentation qu'ils
+  épinglaient) :** `menu-officiel.test.ts` (ordre CSV → modale → remplacement ; `return`
+  critique et 3 occurrences d'`appliquerRemplacement` vérifiés) et
+  `relances-ui-p1-b3.test.ts` (confirmation branchée sur `changerConsentement` dans le
+  composant Relances, un seul `majClient`). Aucun autre test modifié.
+- **Revue Codex (9 points, `/tmp/codex-revue-p1-c7.txt`, diff `/tmp/codex-p1-c7.diff`) —
+  verdict initial « bloquant », tous traités :**
+  1. [Fondé, bloquant] Validation native bloquée dans un onglet masqué (`lienGoogle`
+     `type="url"`, `nom` required) → `onInvalid` : bascule sur l'onglet du champ puis
+     focus ; test ajouté.
+  2. [Fondé] Navigation clavier des onglets incomplète → roving tabindex + flèches /
+     Début / Fin avec déplacement du focus ; test ajouté.
+  3. [Fondé, partiellement] Tests par fragments ne prouvant pas « agit seulement après
+     confirmation » → resserrement au plus près du mécanisme (Relances scopée au
+     composant, `majClient` unique après lecture de la demande ; MenuCarte : `return` +
+     comptage des appels) ; un test comportemental avec API espionnée demanderait un
+     harnais de rendu que le repo n'a pas pour ces pages — non fait, dit ici.
+  4. [Fondé] Test Menu affaibli → `return` critique + 3 occurrences
+     d'`appliquerRemplacement` vérifiés (définition + éditeur vide + confirmation).
+  5. [Fondé] Test Relances trop large → scopé au composant Relances, `majClient`
+     unique et après lecture de la demande.
+  6. [Fondé] Ordre/inventaire Réglages insuffisamment testés → légendes exactes par
+     panneau + inventaire 26 champs vérifiés (26 avant comme après).
+  7. [Remarque] Récapitulatifs reformulés → évolution documentée ci-dessus.
+  8. [Fondé] Exception Admin trop large → exactement 1 occurrence, celle de la démo.
+  9. [Fondé, aucune correction] Aucun défaut d'exécution dans les 10 remplacements ;
+     correctif Caisse et imports validés.
+- **Non vérifié :** rendu visuel des modales et des onglets sur téléphone réel (vérification
+  par tests + `tsc` seulement) ; test comportemental avec API espionnée (voir point 3) ;
+  découpe des onglets à valider avec le commerçant (AUDIT §7) ; rien touché en production.
+
 ## 11/11/2026 — P1-U1 « Mesure du parcours comptoir » (AUDIT.md §7)
 - **Contexte :** re-mesure après refonte (noir+magenta, corps sombres), même protocole que
   P0-U0 : `scripts/mesurer-scores.mjs` (Pixel 7, Slow 4G + CPU ×4, serveur local),

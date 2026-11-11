@@ -17,6 +17,7 @@ import { configRattrapage, peutCompleterProfil } from '../lib/programme'
 import { nomFichierExportClient } from '../lib/rgpd'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
+import { Confirmation } from '../components/Confirmation'
 
 /** Texte traduit dans la langue choisie (pages clientes). */
 function Traduit({ texte }: { texte: string }) {
@@ -450,6 +451,7 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
   const [message, setMessage] = useState('')
   const [erreur, setErreur] = useState('')
   const [enCours, setEnCours] = useState(false)
+  const [demande, setDemande] = useState(false)
 
   const { t } = useLangue()
 
@@ -458,17 +460,29 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
     setErreur('')
     setMessage('')
     if (!contact.trim()) return setErreur('Indiquez le téléphone ou l’e-mail donné à l’inscription.')
-    if (action === 'suppression' && !window.confirm('Demander la suppression de votre carte et de toutes vos données (tampons, points, historique) ? Le restaurant la supprimera définitivement.')) return
+    if (action === 'suppression') return setDemande(true)
     setEnCours(true)
     try {
-      if (action === 'donnees') {
-        telecharger(nomFichierExportClient(client.id), await api.donneesCarte(client.id, contact.trim()))
-        setMessage('Vos données ont été téléchargées (fichier CSV, lisible dans un tableur).')
-      } else {
-        await api.demanderSuppression(client.id, contact.trim())
-        setMessage('Demande enregistrée : le restaurant supprimera votre carte et vos données.')
-        onMaj()
-      }
+      telecharger(nomFichierExportClient(client.id), await api.donneesCarte(client.id, contact.trim()))
+      setMessage('Vos données ont été téléchargées (fichier CSV, lisible dans un tableur).')
+    } catch (err) {
+      setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
+    } finally {
+      setEnCours(false)
+    }
+  }
+
+  async function confirmerSuppression() {
+    if (enCours) return
+    setDemande(false)
+    setErreur('')
+    setMessage('')
+    if (!contact.trim()) return setErreur('Indiquez le téléphone ou l’e-mail donné à l’inscription.')
+    setEnCours(true)
+    try {
+      await api.demanderSuppression(client.id, contact.trim())
+      setMessage('Demande enregistrée : le restaurant supprimera votre carte et vos données.')
+      onMaj()
     } catch (err) {
       setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
     } finally {
@@ -502,6 +516,19 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
             {t('Demander la suppression')}
           </button>
         </div>
+        {demande && (
+          <Confirmation
+            recap={{
+              titre: 'Demander la suppression ?',
+              lignes: [['Données', 'Carte, tampons, points, historique']],
+              confirmer: 'Demander la suppression',
+              avertissement: 'Le restaurant la supprimera définitivement.',
+            }}
+            enCours={enCours}
+            onConfirmer={() => void confirmerSuppression()}
+            onAnnuler={() => setDemande(false)}
+          />
+        )}
         {message && <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">{message}</p>}
         {erreur && <MessageErreur>{erreur}</MessageErreur>}
       </div>
@@ -587,11 +614,12 @@ function BandeauGrace({ jusquAu }: { jusquAu: string }) {
 function DeconnecterAppareils({ api, clientId, jeton, onFait }: { api: ClientApi; clientId: string; jeton: string | null; onFait(): void }) {
   const [enCours, setEnCours] = useState(false)
   const [erreur, setErreur] = useState('')
+  const [demande, setDemande] = useState(false)
   const { t } = useLangue()
 
   async function agir() {
     if (!jeton || enCours) return
-    if (!window.confirm(t('Déconnecter cette carte de tous les téléphones, celui-ci compris ? Pour la rouvrir en entier, il faudra un lien d’accès du comptoir.'))) return
+    setDemande(false)
     setEnCours(true)
     setErreur('')
     try {
@@ -609,9 +637,22 @@ function DeconnecterAppareils({ api, clientId, jeton, onFait }: { api: ClientApi
       <summary className="titre-carte min-h-11 cursor-pointer">{t('Sécurité de ma carte')}</summary>
       <div className="mt-3 space-y-3">
         <p className="text-sm text-gray-600">{t('Téléphone perdu ou carte ouverte ailleurs ? Déconnectez-la partout : seul un lien d’accès du comptoir la rouvrira.')}</p>
-        <button type="button" className="bouton-secondaire min-h-11 w-full" disabled={enCours || !jeton} onClick={() => void agir()}>
+        <button type="button" className="bouton-secondaire min-h-11 w-full" disabled={enCours || !jeton} onClick={() => setDemande(true)}>
           {t('Déconnecter tous mes appareils')}
         </button>
+        {demande && (
+          <Confirmation
+            recap={{
+              titre: t('Déconnecter tous mes appareils'),
+              lignes: [['Téléphones', 'Tous, celui-ci compris']],
+              confirmer: t('Déconnecter tous mes appareils'),
+              avertissement: t('Déconnecter cette carte de tous les téléphones, celui-ci compris ? Pour la rouvrir en entier, il faudra un lien d’accès du comptoir.'),
+            }}
+            enCours={enCours}
+            onConfirmer={() => void agir()}
+            onAnnuler={() => setDemande(false)}
+          />
+        )}
         {erreur && <MessageErreur>{erreur}</MessageErreur>}
       </div>
     </details>

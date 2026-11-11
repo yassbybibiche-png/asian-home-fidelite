@@ -14,6 +14,8 @@ import { dateCourte, dateRelative } from '../lib/format'
 import { CarteFidelite } from '../components/CarteFidelite'
 import { EncartWallet, EnTete, MessageErreur, QrCode, telecharger, Vide } from '../components/ui'
 import { datePurge, dureeConservationMois, libelleDuree, nomFichierExportClient, protectionPurge } from '../lib/rgpd'
+import { recapitulatif, type DemandeConfirmation } from '../lib/ecransCommercant'
+import { Confirmation } from '../components/Confirmation'
 
 /** Mode serveur : points (échange contre le catalogue), historique des échanges, anniversaire, plat préféré. */
 function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: Commerce }) {
@@ -22,8 +24,17 @@ function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: 
   const [anniv, setAnniv] = useState(anniversaireAffiche(client.anniversaire))
   const [plat, setPlat] = useState(client.platPrefere ?? '')
   const [annonce, setAnnonce] = useState('')
+  const [demande, setDemande] = useState<DemandeConfirmation | null>(null)
   const valeur = analyserAnniversaire(anniv)
   const solde = soldePoints(client)
+
+  async function confirmerEchange() {
+    const d = demande
+    setDemande(null)
+    if (!d || d.type !== 'echange') return
+    const res = await executer(() => avecPin((a, api) => api.actionCaisse(commerce.id, a, 'echange', { clientId: client.id, recompenseId: d.recompense.id, actionId: nouvelIdAction() })))
+    if (res.ok) setAnnonce(`✓ Échange enregistré : ${d.recompense.nom}`)
+  }
 
   async function enregistrerAnniv(e: FormEvent) {
     e.preventDefault()
@@ -45,11 +56,7 @@ function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: 
               <button
                 className="bouton-secondaire min-h-12 w-full justify-between"
                 disabled={enCours || solde < r.cout}
-                onClick={async () => {
-                  if (!window.confirm(`Échanger ${r.cout} points contre « ${r.nom} » ?`)) return
-                  const res = await executer(() => avecPin((a, api) => api.actionCaisse(commerce.id, a, 'echange', { clientId: client.id, recompenseId: r.id, actionId: nouvelIdAction() })))
-                  if (res.ok) setAnnonce(`✓ Échange enregistré : ${r.nom}`)
-                }}
+                onClick={() => setDemande({ type: 'echange', recompense: r })}
               >
                 <span>Échanger : {r.nom}</span>
                 <span className="tabular-nums">{r.cout} pts</span>
@@ -96,6 +103,7 @@ function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: 
           {annonce}
         </p>
       )}
+      {demande && <Confirmation recap={recapitulatif(demande, client, commerce)} enCours={enCours} onConfirmer={() => void confirmerEchange()} onAnnuler={() => setDemande(null)} />}
     </section>
   )
 }
@@ -113,16 +121,17 @@ function Relances({ client, commerce }: { client: Client; commerce: Commerce }) 
   const { envois } = useDonneesCommerce()
   const { executer, enCours, erreur } = useAction()
   const [annonce, setAnnonce] = useState('')
+  const [demande, setDemande] = useState<DemandeConfirmation | null>(null)
   const [modele, setModele] = useState<ModeleRelance>(() => modelesSuggeres(client, commerce, new Date())[0] ?? 'bienvenue')
   const consenti = client.consentementRelance === true
   const canal = canalDuClient(client)
   const duClient = envois.filter((e) => e.clientId === client.id)
 
-  async function changerConsentement(valeur: boolean) {
-    const question = valeur
-      ? `${client.prenom} accepte-t-il (elle) de recevoir vos relances par SMS ou e-mail ? Ne cochez que si le client vous l’a dit.`
-      : `Retirer le consentement de ${client.prenom} ? Plus aucune relance ne lui sera envoyée.`
-    if (!window.confirm(question)) return
+  async function changerConsentement() {
+    const d = demande
+    setDemande(null)
+    if (!d || d.type !== 'consentement') return
+    const valeur = d.valeur
     setAnnonce('')
     const r = await executer(() => avecPin((a, api) => api.majClient(commerce.id, a, client.id, { consentementRelance: valeur })))
     if (r.ok) setAnnonce(valeur ? '✓ Consentement enregistré.' : '✓ Consentement retiré : plus aucune relance ne partira.')
@@ -148,7 +157,7 @@ function Relances({ client, commerce }: { client: Client; commerce: Commerce }) 
           </span>
         )}
       </p>
-      <button className="bouton-secondaire w-full" disabled={enCours} onClick={() => void changerConsentement(!consenti)}>
+      <button className="bouton-secondaire w-full" disabled={enCours} onClick={() => setDemande({ type: 'consentement', valeur: !consenti })}>
         {consenti ? 'Retirer le consentement' : 'Le client accepte les relances'}
       </button>
       {consenti && canal && (
@@ -180,6 +189,7 @@ function Relances({ client, commerce }: { client: Client; commerce: Commerce }) 
         <h3 className="etiquette">Envois à ce client</h3>
         <JournalEnvois envois={duClient} avecClient={false} />
       </div>
+      {demande && <Confirmation recap={recapitulatif(demande, client, commerce)} enCours={enCours} onConfirmer={() => void changerConsentement()} onAnnuler={() => setDemande(null)} />}
     </section>
   )
 }
@@ -189,8 +199,17 @@ function Rattrapages({ client, commerce }: { client: Client; commerce: Commerce 
   const { avecPin } = useStore()
   const { executer, enCours, erreur } = useAction()
   const [annonce, setAnnonce] = useState('')
+  const [demande, setDemande] = useState<DemandeConfirmation | null>(null)
   const enAttente = (client.demandesRattrapage ?? []).filter((d) => d.statut === 'en_attente')
   if (!enAttente.length) return null
+
+  async function confirmerRefus() {
+    const d = demande
+    setDemande(null)
+    if (!d || d.type !== 'rattrapage-refus') return
+    const r = await executer(() => avecPin((a, api) => api.deciderRattrapage(commerce.id, a, client.id, d.id, 'refuser')))
+    if (r.ok) setAnnonce('Demande refusée.')
+  }
   return (
     <section className="carte space-y-3">
       <h2 className="titre-carte">Visites oubliées à valider</h2>
@@ -217,11 +236,9 @@ function Rattrapages({ client, commerce }: { client: Client; commerce: Commerce 
               <button
                 className="bouton-secondaire min-h-11 flex-1"
                 disabled={enCours}
-                onClick={async () => {
-                  if (!window.confirm('Refuser cette visite oubliée ?')) return
-                  const r = await executer(() => avecPin((a, api) => api.deciderRattrapage(commerce.id, a, client.id, d.id, 'refuser')))
-                  if (r.ok) setAnnonce('Demande refusée.')
-                }}
+                onClick={() =>
+                  setDemande({ type: 'rattrapage-refus', id: d.id, date: new Date(d.date).toLocaleDateString('fr-FR'), montant: formaterPrix(d.montantCentimes) })
+                }
               >
                 Refuser
               </button>
@@ -235,6 +252,7 @@ function Rattrapages({ client, commerce }: { client: Client; commerce: Commerce 
           {annonce}
         </p>
       )}
+      {demande && <Confirmation recap={recapitulatif(demande, client, commerce)} enCours={enCours} onConfirmer={() => void confirmerRefus()} onAnnuler={() => setDemande(null)} />}
     </section>
   )
 }

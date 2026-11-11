@@ -10,7 +10,8 @@ import { ETAPES_CONNEXION_GOOGLE, GUIDE_GOOGLE_BUSINESS, TEXTE_AVIS_DEMO, TEXTE_
 import { BadgeDemo, EnTete, Etoiles, MessageErreur, Vide } from '../components/ui'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { messagesPrivesDuCommerce, type MessagePriveCommerce } from '../lib/messagePrive'
-import { googleDejaLu, marquerGoogleLu } from '../lib/ecransCommercant'
+import { googleDejaLu, marquerGoogleLu, type Recapitulatif } from '../lib/ecransCommercant'
+import { Confirmation } from '../components/Confirmation'
 
 /** État Google Business Profile (P1-B4) : null = non configuré sur le serveur, mode local ou état inconnu. */
 const ContexteGoogle = createContext<{ etat: EtatGoogle | null; relire(): void }>({ etat: null, relire: () => {} })
@@ -230,6 +231,7 @@ function ConnecterGoogle() {
   const branche = !!etat?.configure
   // Replié une fois lu (P1-C6) : mémorisé sur l'appareil, le badge d'état reste visible dans le titre.
   const [lu, setLu] = useState(() => googleDejaLu(stockageLocal(), commerce.id))
+  const [demande, setDemande] = useState(false)
   const marquerLu = () => {
     marquerGoogleLu(stockageLocal(), commerce.id)
     setLu(true)
@@ -253,8 +255,15 @@ function ConnecterGoogle() {
     }
   }
   async function deconnecter() {
-    if (!window.confirm('Déconnecter Google ? Les avis déjà importés restent dans l’app.')) return
+    setDemande(false)
     if ((await executer(() => avecPin((a, api) => api.deconnecterGoogle(commerce.id, a)))).ok) relire()
+  }
+
+  const recapDeconnexion: Recapitulatif = {
+    titre: 'Déconnecter Google ?',
+    lignes: [['Avis importés', 'Restent dans l’app']],
+    confirmer: 'Déconnecter Google',
+    avertissement: 'Les avis déjà importés restent dans l’app.',
   }
 
   return (
@@ -273,9 +282,10 @@ function ConnecterGoogle() {
               <button className="bouton w-full" disabled={enCours} onClick={() => void importer()}>
                 {enCours ? 'Import…' : 'Importer les avis Google'}
               </button>
-              <button className="bouton-secondaire w-full" disabled={enCours} onClick={() => void deconnecter()}>
+              <button className="bouton-secondaire w-full" disabled={enCours} onClick={() => setDemande(true)}>
                 Déconnecter Google
               </button>
+              {demande && <Confirmation recap={recapDeconnexion} enCours={enCours} onConfirmer={() => void deconnecter()} onAnnuler={() => setDemande(false)} />}
             </>
           ) : (
             <>

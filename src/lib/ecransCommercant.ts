@@ -30,6 +30,8 @@ export type DemandeConfirmation =
   | { type: 'recompense' }
   | { type: 'attente'; attente: Pick<RecompenseEnAttente, 'id' | 'libelle'> }
   | { type: 'reserve' }
+  | { type: 'consentement'; valeur: boolean }
+  | { type: 'rattrapage-refus'; id: string; date: string; montant: string }
 
 export function recapitulatif(
   d: DemandeConfirmation,
@@ -67,6 +69,37 @@ export function recapitulatif(
       return { titre: 'Remettre la récompense ?', lignes: [['Client', qui], ['Récompense', d.attente.libelle]], confirmer: 'Remettre la récompense' }
     case 'reserve':
       return { titre: 'Utiliser le plat en réserve ?', lignes: [['Client', qui], ['Récompense', 'Plat en réserve']], confirmer: 'Utiliser le plat en réserve' }
+    case 'consentement':
+      return d.valeur
+        ? {
+            titre: 'Le client accepte les relances ?',
+            lignes: [
+              ['Client', qui],
+              ['Relances', 'SMS ou e-mail'],
+            ],
+            confirmer: 'Enregistrer le consentement',
+            avertissement: 'Ne cochez que si le client vous l’a dit.',
+          }
+        : {
+            titre: 'Retirer le consentement ?',
+            lignes: [
+              ['Client', qui],
+              ['Relances', 'Plus aucune relance'],
+            ],
+            confirmer: 'Retirer le consentement',
+            avertissement: 'Plus aucune relance ne lui sera envoyée.',
+          }
+    case 'rattrapage-refus':
+      return {
+        titre: 'Refuser cette visite oubliée ?',
+        lignes: [
+          ['Client', qui],
+          ['Visite', d.date],
+          ['Montant', d.montant],
+        ],
+        confirmer: 'Refuser la visite',
+        avertissement: 'La demande sera classée sans crédit de tampon ni de points.',
+      }
   }
 }
 

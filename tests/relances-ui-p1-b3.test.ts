@@ -61,7 +61,16 @@ describe('Consentement : case non pré-cochée, envoyée seulement si cochée', 
     const s = source('src/pages/FicheClient.tsx')
     assert.match(s, /api\.majClient\(commerce\.id, a, client\.id, \{ consentementRelance: valeur \}\)/)
     assert.match(s, /Retirer le consentement/)
-    assert.match(s, /window\.confirm\(question\)/)
+    // P1-C7 : plus de window.confirm — la demande passe par la modale <Confirmation> (récapitulatif « consentement »),
+    // branchée sur changerConsentement dans le composant Relances (pas seulement « quelque part » dans le fichier).
+    assert.doesNotMatch(s, /window\.confirm/)
+    assert.match(s, /setDemande\(\{ type: 'consentement', valeur: !consenti \}\)/)
+    const relances = s.slice(s.indexOf('function Relances('), s.indexOf('function Rattrapages('))
+    assert.match(relances, /<Confirmation recap=\{recapitulatif\(demande, client, commerce\)\} enCours=\{enCours\} onConfirmer=\{\(\) => void changerConsentement\(\)\}/)
+    assert.match(relances, /async function changerConsentement\(\) \{/)
+    const changer = relances.slice(relances.indexOf('async function changerConsentement()'), relances.indexOf('async function relancer()'))
+    assert.ok(changer.indexOf('const d = demande') < changer.indexOf('api.majClient('), 'majClient seulement après lecture de la demande confirmée')
+    assert.equal(relances.match(/api\.majClient\(/g)?.length, 1, 'un seul appel majClient dans Relances')
     assert.match(s, /api\.relancer\(commerce\.id, a, client\.id, \{ modele \}\)/)
     assert.match(s, /<JournalEnvois envois=\{duClient\}/)
     // Mode test : l'annonce dit explicitement que rien n'a été envoyé.
