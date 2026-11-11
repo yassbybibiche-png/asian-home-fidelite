@@ -92,6 +92,15 @@ export interface Stockage {
   clients(commerceId: string): P<Client[]>
   client(commerceId: string, id: string): P<Client | undefined>
   clientParContact(commerceId: string, contact: { telephone?: string; email?: string }): P<Client | undefined>
+  /**
+   * Recherche caisse par numéro (point Codex 8) : filtrée en base sur `cle_contact`, sans lire tous les clients.
+   * Renvoie, dans l'ordre de `clients()`, un SUR-ENSEMBLE des clients que `correspondRecherche(c, saisie)` accepte
+   * quand `chiffresRecherche(saisie) === chiffres` (`texte` = saisie sans espaces autour, en minuscules) : clé qui
+   * contient `chiffres` (téléphone) ou `texte` (e-mail : la clé d'un client e-mail est son e-mail en minuscules),
+   * prénom contenant un chiffre, et client ayant à la fois téléphone et e-mail (sa clé est l'e-mail : son numéro
+   * n'est pas dans la colonne). L'appelant refiltre avec `correspondRecherche` : résultats, ordre et total identiques.
+   */
+  clientsCandidatsNumero(commerceId: string, chiffres: string, texte: string): P<Client[]>
   ajouterClient(c: Client): P<void>
   majClient(c: Client): P<void>
   tirages(commerceId: string): P<Tirage[]>
@@ -307,6 +316,13 @@ export function ouvrirStockage(fichier: string) {
     clients: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? ORDER BY rowid'),
     client: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? AND id = ?'),
     clientParCle: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? AND cle_contact = ?'),
+    // `instr` (et non LIKE) : sous-chaîne exacte, sensible à la casse comme `includes` (clés déjà en minuscules).
+    candidatsNumero: db.prepare(
+      `SELECT donnees FROM clients WHERE commerce_id = ? AND (instr(cle_contact, ?) > 0 OR instr(cle_contact, ?) > 0
+        OR json_extract(donnees, '$.prenom') GLOB '*[0-9]*'
+        OR (json_extract(donnees, '$.telephone') IS NOT NULL AND json_extract(donnees, '$.email') IS NOT NULL))
+       ORDER BY rowid`,
+    ),
     ajoutClient: db.prepare('INSERT INTO clients (id, commerce_id, cle_contact, donnees) VALUES (?, ?, ?, ?)'),
     majClient: db.prepare('UPDATE clients SET donnees = ? WHERE id = ?'),
     tirages: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? ORDER BY date DESC'),
@@ -389,6 +405,7 @@ export function ouvrirStockage(fichier: string) {
     /** Déduplication : même règle que le front (`cleContact` : 0033 / +33 / 06…, e-mail en minuscules). */
     clientParContact: (commerceId: string, contact: { telephone?: string; email?: string }) =>
       lire<Client>(q.clientParCle.all(commerceId, cleContact(contact)))[0],
+    clientsCandidatsNumero: (commerceId: string, chiffres: string, texte: string) => lire<Client>(q.candidatsNumero.all(commerceId, chiffres, texte)),
     ajouterClient: (c: Client) => inserer(q.ajoutClient, c.id, c.commerceId, cleContact(c), JSON.stringify(c)),
     majClient: (c: Client) => void q.majClient.run(JSON.stringify(c), c.id),
 

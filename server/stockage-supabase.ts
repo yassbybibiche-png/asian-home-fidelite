@@ -192,6 +192,20 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     /** Déduplication : même règle que le front (`cleContact` : 0033 / +33 / 06…, e-mail en minuscules). */
     clientParContact: async (commerceId, contact) =>
       (await lire<Client>('clients', sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).eq('cle_contact', cleContact(contact))))[0],
+    // Point Codex 8 : filtre poussé à PostgREST (seules les lignes candidates voyagent), même tri que `clients`. Les
+    // valeurs sont entre guillemets (la saisie peut contenir « ( ) . ») ; ni « * » ni « % » ni « _ » n'y passent
+    // (`chiffresRecherche` n'accepte que chiffres, espaces, + . - ( ) /).
+    clientsCandidatsNumero: (commerceId, chiffres, texte) => {
+      const filtre = [
+        `cle_contact.like."*${chiffres}*"`,
+        `cle_contact.like."*${texte}*"`,
+        'donnees->>prenom.match."[0-9]"',
+        'and(donnees->>telephone.not.is.null,donnees->>email.not.is.null)',
+      ].join(',')
+      return lirePages<Client>('clients', (debut, fin) =>
+        sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).or(filtre).order('ordre').range(debut, fin),
+      )
+    },
     ajouterClient: async (c) =>
       void (await ok('clients', sb.from('clients').insert({ id: c.id, commerce_id: c.commerceId, cle_contact: cleContact(c), donnees: c }))),
     majClient: (c) => majVersionnee('clients', c.id, c),

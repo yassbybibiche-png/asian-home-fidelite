@@ -18,7 +18,7 @@ import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePriv
 import { clientsEnCsv } from '../src/lib/csv.ts'
 import { actionDejaTraitee, avecAction, echangerPoints, formaterPrix, soldePoints } from '../src/lib/points.ts'
 import { analyserAnniversaire, clientsCibles, deposerMessage, genererMessages, marquerLus, TYPES_MESSAGES, type Cible, type Evenement } from '../src/lib/messages.ts'
-import { correspondRecherche } from '../src/lib/recherche.ts'
+import { chiffresRecherche, correspondRecherche } from '../src/lib/recherche.ts'
 import {
   appliquerInscription,
   appliquerRattrapageValide,
@@ -2937,11 +2937,16 @@ export async function creerServeur(o: OptionsServeur) {
       exigerActif(commerce)
       // P0-S14 — vue caisse minimale : plus jamais la liste des clients ni le journal. Sans `q`, aucun client ;
       // avec `?q=`, seuls les clients correspondants, paginés côté serveur. La fiche complète d'un client s'obtient
-      // à la demande (GET …/caisse/clients/:id : scan QR ou sélection). La recherche filtre côté serveur sur tous
-      // les clients du commerce (lecture paginée complète, P0-S18) : ce qui est minimisé, c'est ce qui quitte le
-      // serveur vers la tablette de l'équipe, pas le travail du serveur.
+      // à la demande (GET …/caisse/clients/:id : scan QR ou sélection). La recherche par nom / e-mail filtre côté
+      // serveur sur tous les clients du commerce (lecture paginée complète, P0-S18).
       const { q, page, limite } = pageRecherche(new URL(req.url ?? '/', 'http://localhost').searchParams)
-      const trouves = q ? (await st.clients(id)).filter((c) => correspondRecherche(c, q)) : []
+      // Point Codex 8 : une saisie de numéro (`chiffresRecherche` non nul : chiffres, espaces, + . - ( ) / seulement)
+      // ne lit en base que les candidats (`clientsCandidatsNumero`, sur-ensemble filtré sur `cle_contact`) au lieu de
+      // tous les clients ; nom, e-mail ou saisie mixte : balayage complet comme avant. Dans les deux cas le filtre final
+      // est `correspondRecherche` : mêmes résultats, même ordre, même total.
+      const chiffres = q ? chiffresRecherche(q) : null
+      const candidats = !q ? [] : chiffres ? await st.clientsCandidatsNumero(id, chiffres, q.trim().toLowerCase()) : await st.clients(id)
+      const trouves = candidats.filter((c) => correspondRecherche(c, q))
       const total = trouves.length
       const clients = trouves.slice((page - 1) * limite, page * limite).map(clientCaisseEquipe)
       return { json: { auteur, commerce: commerceCaisse(commerce), clients, total, page, limite } }
