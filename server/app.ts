@@ -21,7 +21,6 @@ import { correspondRecherche } from '../src/lib/recherche.ts'
 import {
   appliquerInscription,
   appliquerRattrapageValide,
-  appliquerVisiteProgramme,
   consommerRecompenseEnAttente,
   genererCodeParrainage,
   niveauClient,
@@ -2564,10 +2563,16 @@ export async function creerServeur(o: OptionsServeur) {
         let texteJournal: string
         if (action === 'visite') {
           // Passage sans montant : paliers, défi, niveau et parrainage s'appliquent comme en caisse.
-          // Sans la garde « 1 tampon par jour » de la caisse : cette route historique (« Valider une visite »
-          // depuis la fiche client) l'a toujours autorisé, et le front affiche déjà l'avertissement.
+          // P1-S12 — même garde « 1 tampon par jour » que la caisse (`passageAvecProgramme`) : la route historique
+          // l'autorisait, un 2e appel le même jour créditait un 2e tampon. La route est gardée (pas supprimée) :
+          // le bouton « Valider une visite » de la fiche client est le passage rapide sans achat, distinct de
+          // l'écran caisse (qui demande le code équipe et un montant).
           let evenements: EvenementPassage[] = []
-          ;({ client: apres, evenements } = appliquerVisiteProgramme(avant, commerce, 0, maintenant()))
+          try {
+            ;({ client: apres, evenements } = passageAvecProgramme(avant, commerce, 0, maintenant()))
+          } catch (e) {
+            throw err(409, (e as Error).message)
+          }
           apres = avecMessages(apres, commerce, 'passage')
           const regle = await reglerParrainage(commerce, apres, maintenant())
           apres = regle.filleul

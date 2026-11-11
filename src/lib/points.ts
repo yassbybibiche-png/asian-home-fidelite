@@ -41,12 +41,18 @@ const memoriser = (c: Client, actionId?: string): string[] | undefined =>
 
 export const actionDejaTraitee = (c: Client, actionId?: string) => !!actionId && (c.actionsTraitees ?? []).includes(actionId)
 
-/** Même jour calendaire (heure locale : Europe/Paris côté serveur). */
-function memeJour(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+/**
+ * Même jour calendaire **à Paris** (revue Codex P1-S12) : le jour de la garde « 1 tampon par jour » est celui du
+ * commerce, pas celui du fuseau du navigateur — un téléphone en voyage (ou un serveur sans TZ forcée) ne doit pas
+ * désactiver le bouton à la mauvaise heure. Même définition que le serveur (`server/index.ts` force `TZ` à
+ * Europe/Paris ; `programme.ts` utilise ce même comparateur).
+ */
+export const memeJourParis = (a: Date, b: Date): boolean => {
+  const jour = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' })
+  return jour.format(a) === jour.format(b)
 }
 
-export const passageCeJour = (c: Client, jour: Date) => c.visites.some((v) => memeJour(new Date(v), jour))
+export const passageCeJour = (c: Client, jour: Date) => c.visites.some((v) => memeJourParis(new Date(v), jour))
 
 /**
  * Passage en caisse : 1 tampon (règle existante `validerVisite`) + points pour le montant.

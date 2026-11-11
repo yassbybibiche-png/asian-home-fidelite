@@ -421,8 +421,12 @@ describe('Serveur : programme de fidélité', () => {
 
   test('niveaux : 10 visites → Habitué ×1,5 sur le passage suivant', async () => {
     const c = (await srv.api('POST', `/commerces/${AH}/clients`, { prenom: 'Habitue', contact: '06 88 88 88 88' }, pin)).contenu.client as Client
-    for (let i = 0; i < 10; i++) assert.equal((await srv.api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, pin)).statut, 200)
-    horloge = new Date(2026, 10, 10, 12, 0) // jour suivant : la garde « 1 tampon par jour » de la caisse s'applique
+    // P1-S12 : 1 tampon par jour — les 10 visites sont 10 jours différents (9 au 18).
+    for (let i = 0; i < 10; i++) {
+      horloge = new Date(2026, 10, 9 + i, 12, 0)
+      assert.equal((await srv.api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, pin)).statut, 200)
+    }
+    horloge = new Date(2026, 10, 19, 12, 0) // jour suivant : la garde « 1 tampon par jour » de la caisse s'applique
     const passage = await srv.api('POST', `/commerces/${AH}/caisse/passage`, { clientId: c.id, montantCentimes: 2000, actionId: 'act-niv-1' }, { 'X-Commerce-PIN': '1234' })
     assert.equal(passage.statut, 200)
     assert.equal(passage.contenu.client.points, 50 + 30, '50 bienvenue + 20 € × 1,5')
@@ -499,7 +503,9 @@ describe('Serveur : programme de fidélité', () => {
     const c = (await srv.api('POST', `/commerces/${AH}/clients`, { prenom: 'Profil', contact: '06 14 14 14 14' }, pin)).contenu.client as Client
     assert.equal((await srv.api('POST', `/commerces/${AH}/clients/${c.id}/profil`, { anniversaire: '21/03', platPrefere: 'Satay' })).statut, 409)
     await srv.api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, pin)
+    horloge = new Date(2026, 10, 10, 12, 0) // P1-S12 : la 2e visite est le lendemain (1 tampon par jour)
     await srv.api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, pin)
+    horloge = new Date(2026, 10, 9, 12, 0)
     const r = await srv.api('POST', `/commerces/${AH}/clients/${c.id}/profil`, { anniversaire: '21/03', platPrefere: 'Satay' })
     assert.equal(r.statut, 200)
     assert.equal(r.contenu.client.anniversaire, '03-21')

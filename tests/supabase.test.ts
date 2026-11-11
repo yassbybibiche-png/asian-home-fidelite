@@ -489,7 +489,7 @@ describe('Supabase : adaptateur de stockage (faux PostgREST)', () => {
 describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () => {
   const dossier = mkdtempSync(join(tmpdir(), 'fidelite-supabase-'))
   after(() => rmSync(dossier, { recursive: true, force: true }))
-  const horloge = new Date(2026, 10, 9, 12, 0)
+  let horloge = new Date(2026, 10, 9, 12, 0) // `let` : le test « parcours » avance d'un jour par visite (P1-S12).
 
   async function demarrer(f: ReturnType<typeof fauxPostgrest> | undefined, options: Partial<OptionsServeur> = {}) {
     const app = await creerServeur({
@@ -658,9 +658,11 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).statut, 409)
       assert.equal(f.tables.tirages.length, 1)
 
-      // Seuil 2 : 3 visites → récompense → 1 tampon reporté.
+      // Seuil 2 : 3 visites → récompense → 1 tampon reporté. P1-S12 : 1 tampon par jour — une visite par jour.
       assert.equal((await api('PATCH', `/commerces/${AH}`, { seuilTampons: 2 }, PIN)).statut, 200)
+      horloge = new Date(2026, 10, 10, 12, 0)
       await api('POST', `/commerces/${AH}/clients/${id}/visite`, undefined, PIN)
+      horloge = new Date(2026, 10, 11, 12, 0)
       await api('POST', `/commerces/${AH}/clients/${id}/visite`, undefined, PIN)
       const { commerce, clients } = await etat()
       assert.equal(clients[0].tampons, 3)
@@ -671,6 +673,7 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.equal((await api('POST', `/commerces/${AH}/clients/${id}/recompense`, undefined, PIN)).statut, 409)
       assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, { 'X-Commerce-PIN': '9999' })).statut, 401)
     } finally {
+      horloge = new Date(2026, 10, 9, 12, 0)
       await app.fermer()
     }
   })

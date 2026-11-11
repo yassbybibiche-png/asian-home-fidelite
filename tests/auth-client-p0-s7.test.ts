@@ -198,7 +198,11 @@ describe('P0-S7 : serveur en mode strict', () => {
     assert.equal((await s.api('POST', `/commerces/${AH}/clients/${client.id}/profil`, { platPrefere: 'Nems' }, b)).statut, 409)
     assert.notEqual((await s.api('POST', `/commerces/${AH}/clients/${client.id}/rattrapage`, { date: s.horloge.t.toISOString(), montantCentimes: 1000 }, b)).statut, 401)
     await s.visite(client.id)
+    // P1-S12 : 1 tampon par jour — la 2e visite est le lendemain (jeton valable 30 jours, pas d'expiration ici).
+    const avant = s.horloge.t
+    s.horloge.t = new Date(avant.getTime() + 24 * 3600_000)
     await s.visite(client.id)
+    s.horloge.t = avant
     assert.equal((await s.api('POST', `/commerces/${AH}/clients/${client.id}/profil`, { platPrefere: 'Nems' }, b)).statut, 200)
     // RGPD : le jeton ne dispense pas du contact (403 sans), et le contact ne suffit pas sans jeton (401).
     assert.equal((await s.api('POST', `/cartes/${client.id}/donnees`, { contact: '0699999999' }, b)).statut, 403)
