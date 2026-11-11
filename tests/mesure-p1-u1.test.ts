@@ -25,7 +25,10 @@ describe('P1-U1 : re-mesure après refonte (SCORES.md)', () => {
   })
 
   test('parcours scan → lot P1-U1 : 2 passes, totaux extraits du tableau et re-calculés', () => {
-    const section = scores.split('### Re-mesure P1-U1 (11/11/2026 ~08:45 UTC, 2 passes, même protocole)')[1].split('## Cohérence DA')[0]
+    // Boucle t2 : l'extraction est bornée à la prochaine sous-section — sans borne, elle
+    // englobait toutes les sous-sections du parcours (P2-Q2, t0, t1, t2) et comptait aussi
+    // leurs tables 2 passes. L'exigence est inchangée : seul le tableau P1-U1 est lu.
+    const section = scores.split('### Re-mesure P1-U1 (11/11/2026 ~08:45 UTC, 2 passes, même protocole)')[1].split('### Re-mesure')[0]
     assert.ok(section, 'sous-section parcours P1-U1 absente')
     // Lignes « | Étape | <passe 1> ms | <passe 2> ms | » ; le total est re-calculé, pas recopié.
     const lignes = [...section.matchAll(/^\| ([^|]+) \| \*{0,2}(\d+) ms\*{0,2} \| \*{0,2}(\d+) ms\*{0,2} \|$/gm)]

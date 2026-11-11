@@ -255,6 +255,17 @@ describe('P2-Q2 : build Vite découpé', () => {
     assert.ok((await (await sw.requete(reglages))!).ok)
   })
 
+  test('fichiers préchargés (boucle t2) : servis hors ligne sans visite préalable — le préchargement remplit CACHE_APP, `fichier()` doit aussi le consulter', async () => {
+    const sw = serviceWorker()
+    await sw.evenement('install')
+    // Réseau coupé AVANT toute requête : seul le préchargement a rempli les caches.
+    sw.reseau.enLigne = false
+    for (const f of ['/visuels/logo-petit.webp', '/visuels/logo.png', '/icones/icone-192.png', '/hors-ligne.css', '/manifest.webmanifest']) {
+      const r = await sw.requete(f)
+      assert.ok(r && r.ok, `${f} : absent hors ligne après installation seule`)
+    }
+  })
+
   // ---------- En-têtes de cache sur le build ----------
 
   test('serveur : chaque fichier du build (y compris les pages différées) en immutable 1 an + ETag → 304 ; index.html et sw.js en no-cache', async () => {

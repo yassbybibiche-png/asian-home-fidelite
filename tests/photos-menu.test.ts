@@ -66,7 +66,10 @@ describe('Fichiers WebP livrés (public/visuels/menu-*.webp)', () => {
     }
   })
   test('aucun autre menu-*.webp que les 18 attendus', () => {
-    const presents = readdirSync(new URL('../public/visuels/', import.meta.url)).filter((f) => f.endsWith('.webp'))
+    // Boucle t2 : le dossier contient aussi logo-petit.webp (variante du logo, pas une photo de
+    // menu) — le filtre porte sur le préfixe menu-, l'exigence est inchangée : les 18 attendus
+    // doivent exister et tout menu-*.webp supplémentaire fait échouer le test.
+    const presents = readdirSync(new URL('../public/visuels/', import.meta.url)).filter((f) => f.startsWith('menu-') && f.endsWith('.webp'))
     assert.deepEqual(presents.sort(), [...FICHIERS].sort())
   })
   test('le script d’extraction couvre exactement ces 9 plats', () => {

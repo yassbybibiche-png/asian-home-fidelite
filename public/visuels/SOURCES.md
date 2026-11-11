@@ -6,6 +6,7 @@ Les fichiers sont servis localement par l'app (pas de hotlink).
 | Fichier | Contenu | Source |
 |---|---|---|
 | `logo.png` (600×600) | Logo officiel ASIAN HOUSE (chapeau conique, blanc sur noir) | Page Facebook Asian House Paris (fb.com, photo 424198893163205) |
+| `logo-petit.webp` (192×192, 4 900 o) | Même logo, réduit pour l'écran de chargement (affiché à 96×96) — dérivé de `logo.png` par redimensionnement (Pillow, WebP q80), boucle t2 | Dérivé de `logo.png` ci-dessus, pas une nouvelle source |
 | `hero-plats.jpg` (1024×683) | Plateau de plats vu de dessus : sushis, makis, saumon, nouilles, riz, dessert mangue | Page Facebook Asian House Paris (photo 424198889829872) |
 | `table-sushis.jpg` (2268×4032) | Table dressée : bao buns, plateau de sushis, cocktails, gobelet « ASIAN HOME » | Instagram @asianhomeparis — affiche du reel C0mvZW_iQ24 |
 | `cocktails.jpg` (640×1136) | Cocktails signature Koh Samui / Tokyo / Piña Colada (texte de la publication inclus dans l'image) | Instagram @asianhomeparis — affiche du reel DY2lhwmIIN1 |

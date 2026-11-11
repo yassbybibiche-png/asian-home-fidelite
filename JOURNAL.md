@@ -1,5 +1,30 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — Boucle t2 « Logo de chargement optimisé » (fusionné dans `autonome/integration`)
+- **Changement** : nouveau `public/visuels/logo-petit.webp` (192×192, WebP q80,
+  4 900 o, dérivé du vrai logo par Pillow) servi en premier via `<picture>`
+  dans `index.html` (repli `logo.png` inchangé) ; ajouté au préchargement du
+  service worker ; documenté dans `public/visuels/SOURCES.md`. `logo.png`
+  reste intact partout (logo du commerce, repli, fixtures).
+- **Mesures (2 passes Playwright + 2 Lighthouse)** : premier affichage
+  2 355/2 232/2 235 → 2 078/1 861 ms (moyenne −304 ms), LCP 2 340/2 220/2 224 →
+  2 028/1 812 ms (moyenne −341 ms), parcours 7 213/6 971/6 987 → 6 141/6 277 ms
+  (la validation en caisse gagne aussi) ; Lighthouse 80/85 → 84/81 (plat),
+  LCP Lighthouse 2,9/2,8 → 2,3/2,2 s, TBT 620/450 → 590/720 ms (mixte) ;
+  bundle inchangé ; 0 erreur console. Détail dans `SCORES.md`.
+- **Tests : 1166 → 1171/1171** (+4 `tests/boucle-t2-logo.test.ts`, +1 test SW
+  dans `performance-bundle-p2-q2.test.ts`), E2E 3/3. **Correctif SW (revue
+  Codex, fondé)** : `fichier()` ne consultait que `CACHE_FICHIERS` — les
+  fichiers préchargés n'étaient pas servis hors ligne ; repli `caches.match`
+  ajouté (test de régression vérifié : échoue sans le correctif).
+  **Tests épinglés corrigés après preuve et validation Codex** :
+  `photos-menu.test.ts:68` (filtre `menu-`, exigence inchangée) et
+  `mesure-p1-u1.test.ts:27` (extraction bornée à la sous-section — voir
+  `BOUCLE.md`). **Revue Codex 5 points** : repli SW, commentaire de repli,
+  dimensions WebP, mentions anticipées (corrigés), test menu (légitime).
+- **Non vérifié.** Téléphone réel, à froid Render, `npm audit` (403 VM) —
+  inchangé.
+
 ## 11/11/2026 — Boucle t1 « QR code différé » (fusionné dans `autonome/integration`)
 - **Changement** : `QrCode` déménage de `components/ui.tsx` vers
   `components/QrCode.tsx` ; `CarteFidelite` le charge en différé (`React.lazy`

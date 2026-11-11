@@ -86,6 +86,93 @@ justification et mesure avant/après, vit dans `CHANGELOG.md`.
   `tests/chargement-p0-u1.test.ts` épingle le chemin dans l'écran de chargement
   et l'existence du fichier. Une variante optimisée séparée reste envisageable
   (nouveau fichier, `logo.png` intact) — à mesurer comme un tour à part entière.
+  → Retenu comme tour 2 sous forme `<picture>` (source WebP + repli PNG) :
+  le test P0-U1 continue de passer sans modification (il lit la balise `<img>`
+  de repli), `logo.png` reste intact partout ailleurs.
+- **`seed.json` en import dynamique (délocaliser le seed du bundle initial)**
+  : examiné et ÉCARTÉ (boucle t2). Le seed (27 Ko de sources) n'est parcouru
+  qu'en mode local (`seedRecale`, `depot.ts`) ; en mode API il ne coûte que
+  son transfert (~6–8 Ko brotli) et son analyse (~quelques ms) — le rendre
+  asynchrone ferait passer `seedRecale` en async et se propagerait au store
+  et aux tests, pour un gain attendu < 50 ms. Pas de fait nouveau sans mesure.
+
+## Journal des tours
+
+### Tour 2 — `autonome/boucle-t2-logo-chargement` (fusionné)
+
+Sujet : l'écran de chargement (`index.html`, affiché avant le JS) charge
+`/visuels/logo.png` (600×600, 74 451 o) affiché à 96×96 — 31 % des octets du
+premier affichage, en concurrence avec le JS sur la 4G lente. Nouveau fichier
+`public/visuels/logo-petit.webp` (192×192, WebP q80, ~4,9 Ko, généré depuis le
+vrai logo par Pillow) servi en premier via `<picture>` (repli PNG inchangé) ;
+ajouté au préchargement du service worker ; documenté dans
+`public/visuels/SOURCES.md`. `logo.png` reste intact (logo du commerce, repli,
+fixtures de tests). Hypothèse : premier affichage −~0,2–0,3 s en Slow 4G,
+LCP en baisse, Lighthouse +1–3 points, TBT plat. Vérification : le journal des
+requêtes de la mesure t2 doit montrer `logo-petit.webp` et plus `logo.png` sur
+`#/jouer`. Résultat mesuré (voir SCORES.md § « Re-mesure boucle t2 ») :
+premier affichage 2 355/2 232/2 235 → 2 078/1 861 ms (moyenne −304 ms), LCP
+2 340/2 220/2 224 → 2 028/1 812 ms (moyenne −341 ms), parcours 7 213/6 971/
+6 987 → 6 141/6 277 ms (la validation en caisse gagne aussi : chaque
+chargement de page affiche l'écran de chargement) ; Lighthouse 80/85 → 84/81
+(plat, bruit), LCP Lighthouse 2,9/2,8 → 2,3/2,2 s, TBT 620/450 → 590/720 ms
+(mixte, aucun gain établi) ; bundle inchangé (pas de JS) ; 0 erreur console,
+0 requête échouée ; journal des requêtes : `logo-petit.webp` servi, plus
+aucun `logo.png` sur `#/jouer`. **Tests épinglés** : `photos-menu.test.ts:68`
+(filtre `menu-` — preuve ci-dessous, revue Codex t2 point 3 : légitime) et
+`mesure-p1-u1.test.ts:27` (extraction bornée à la sous-section — preuve
+ci-dessous, revue Codex ciblée : légitime, aucune assertion retirée).
+**Revue Codex t2 (5 points)** : 1. défaut hors ligne du SW — `fichier()` ne
+consultait que `CACHE_FICHIERS`, le préchargement (`CACHE_APP`) n'était pas
+servi hors ligne → repli `caches.match` ajouté + test de régression (vérifié :
+échoue sans le correctif, passe avec) ; 2. `<picture>` correct, mais le PNG
+n'est pas un repli en cas d'échec de chargement → commentaire du test corrigé
+(repli = format, pas hors ligne) ; 3. correction du test menu légitime
+(appliquée) ; 4. lecture des dimensions WebP fragile mais correcte pour ce
+fichier → assertions chunk `VP8 ` + signature de trame ajoutées ; 5. mentions
+« suite verte » anticipées dans README/SCORES → corrigées après le passage
+réel (1171/1171).
+**Décision : FUSIONNÉ** — premier affichage et LCP en baisse sur les
+2 passes au-delà du bruit, parcours en baisse, Lighthouse plat, aucune
+régression au-delà du bruit.
+
+### Test épinglé par le tour 2 — preuve et validation Codex requise
+
+Le tour 2 casse `tests/photos-menu.test.ts:68`, qui liste tous les `.webp` de
+`public/visuels/` et exige l'égalité stricte avec les 18 fichiers du menu :
+`assert.deepEqual(presents.sort(), [...FICHIERS].sort())`. Preuve que le test
+est faux dans sa prémisse, pas dans son exigence :
+- l'exigence (« exactement les 18 `menu-*.webp` attendus, aucun autre ») est
+  intacte : `logo-petit.webp` n'est pas un `menu-*.webp` (ni par son nom, ni
+  par son rôle — variante du logo pour l'écran de chargement) ;
+- seule sa prémisse (« tout `.webp` du dossier est une photo de menu ») est
+  caduque depuis l'ajout d'un logo dérivé dans le même dossier ;
+- la correction proposée (une ligne : filtrer `f.startsWith('menu-')` avant
+  la comparaison) conserve exactement l'exigence — le nom du test lui-même
+  (« aucun autre menu-*.webp que les 18 attendus ») décrit le filtre.
+Séquence réelle : preuve documentée ici, puis revue Codex du tour (validation
+demandée), puis correction appliquée.
+
+### Second test épinglé par le tour 2 — preuve et validation Codex requise
+
+La mise à jour de `SCORES.md` pour le tour 2 casse `tests/mesure-p1-u1.test.ts:27`
+(« parcours scan → lot P1-U1 » : `5 lignes attendues (4 étapes + total), lues : 10`).
+Preuve que le test est faux dans sa prémisse, pas dans son exigence :
+- l'exigence (« l'arithmétique du tableau P1-U1 : 4 étapes + total re-calculé,
+  totaux < 30 s ») est intacte : le tableau P1-U1 lui-même n'a pas bougé ;
+- sa prémisse (« une seule table 2 passes entre le titre P1-U1 et
+  `## Cohérence DA` ») est caduque : l'extraction
+  `split('### Re-mesure P1-U1 …')[1].split('## Cohérence DA')[0]` englobe
+  TOUTES les sous-sections du parcours (P2-Q2, t0, t1, t2) ; elle ne passait
+  jusque-là que parce que les tables P2-Q2/t0 utilisent un format qui ne
+  correspond pas à la regex (`\d+ ms` sans espace) — la table t2, en nombres
+  pleins comme P1-U1, fait passer le compte à 10 lignes ;
+- la correction proposée (une ligne : borner l'extraction à la prochaine
+  sous-section, `split('### Re-mesure')[0]` après le titre P1-U1) conserve
+  exactement l'exigence — elle ne lit plus que le tableau P1-U1 — et rend le
+  test robuste aux tours suivants.
+Séquence réelle : preuve documentée ici, puis revue Codex ciblée (validation
+demandée), puis correction appliquée.
 
 ## Baseline t0 (11/11/2026 ~14:35 UTC, HEAD `7395522`, `autonome/integration`)
 
@@ -145,7 +232,7 @@ puis correction appliquée.
 
 ## Journal des tours
 
-### Tour 1 — `autonome/boucle-t1-qrcode-differe` (en cours)
+### Tour 1 — `autonome/boucle-t1-qrcode-differe` (fusionné)
 
 Sujet : sortir `qrcode-generator` du bundle initial — `QrCode` déménage de
 `components/ui.tsx` vers `components/QrCode.tsx`, chargé en différé
@@ -175,3 +262,36 @@ fausser les mesures du tour) ; 5. incohérence de documentation (affirmations
 anticipées) → libellés corrigés, résultats actualisés après exécution réelle.
 **Décision : FUSIONNÉ** — bundle −5,9 %, TBT en baisse sur les 2 passes,
 Lighthouse en hausse sur les 2 passes, aucune régression au-delà du bruit.
+
+### Tour 2 — `autonome/boucle-t2-logo-chargement` (fusionné)
+
+Sujet : l'écran de chargement chargeait `/visuels/logo.png` (600×600,
+74 451 o) affiché à 96×96 — 31 % des octets du premier affichage. Nouveau
+`public/visuels/logo-petit.webp` (192×192, WebP q80, 4 900 o, dérivé du vrai
+logo par Pillow) servi en premier via `<picture>` (repli PNG inchangé) ;
+ajouté au préchargement du service worker ; documenté dans
+`public/visuels/SOURCES.md`. Hypothèse : premier affichage −~0,2–0,3 s en
+Slow 4G, LCP en baisse, Lighthouse +1–3 points, TBT plat. Résultat mesuré
+(voir SCORES.md § « Re-mesure boucle t2 ») : premier affichage
+2 355/2 232/2 235 → 2 078/1 861 ms (moyenne −304 ms), LCP 2 340/2 220/2 224 →
+2 028/1 812 ms (moyenne −341 ms), parcours 7 213/6 971/6 987 → 6 141/6 277 ms
+(la validation en caisse gagne aussi : chaque chargement de page affiche
+l'écran de chargement) ; Lighthouse 80/85 → 84/81 (plat, bruit), LCP
+Lighthouse 2,9/2,8 → 2,3/2,2 s, TBT 620/450 → 590/720 ms (mixte) ; bundle
+inchangé ; 0 erreur console, 0 requête échouée ; journal des requêtes :
+`logo-petit.webp` servi, plus aucun `logo.png` sur `#/jouer`.
+**Tests épinglés** : `photos-menu.test.ts:68` (filtre `menu-` — preuve
+ci-dessus, revue Codex t2 point 3 : légitime) et `mesure-p1-u1.test.ts:27`
+(extraction bornée à la sous-section — preuve ci-dessus, revue Codex ciblée :
+légitime, aucune assertion retirée).
+**Revue Codex t2 (5 points)** : 1. défaut hors ligne du SW — `fichier()` ne
+consultait que `CACHE_FICHIERS` → repli `caches.match` ajouté + test de
+régression (vérifié : échoue sans le correctif, passe avec) ; 2. `<picture>`
+correct, PNG pas un repli en cas d'échec de chargement → commentaire du test
+corrigé ; 3. correction du test menu légitime (appliquée) ; 4. lecture des
+dimensions WebP fragile mais correcte → assertions chunk `VP8 ` + signature
+ajoutées ; 5. mentions « suite verte » anticipées → corrigées après le passage
+réel (1171/1171).
+**Décision : FUSIONNÉ** — premier affichage et LCP en baisse sur les
+2 passes au-delà du bruit, parcours en baisse, Lighthouse plat, aucune
+régression au-delà du bruit.
