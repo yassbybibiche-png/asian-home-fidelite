@@ -4,7 +4,7 @@ import { useRoute } from '../router'
 import type { CommercePublic, Menu } from '../types'
 import { ErreurApi } from '../data/api'
 import { formaterPrix } from '../lib/points'
-import { bandeauPrixManquants, filtrerMenu } from '../lib/menu'
+import { bandeauPrixManquants, filtrerMenu, libelleAllergenes } from '../lib/menu'
 import { badgesPlat, boutonsMenu, categorieEffective, categorieMidi, estHeureMenuMidi, LIBELLES_BADGES, MENTION_BADGE_DEDUIT } from '../lib/menuClient'
 import { LogoCommerce, PiedPublic } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
@@ -275,7 +275,9 @@ export function MenuAffiche({
                                     {badges.map((b) => LIBELLES_BADGES[b]).join(' · ')} — {MENTION_BADGE_DEDUIT} auprès de l’équipe.
                                   </p>
                                 )}
-                                {p.allergenes.length > 0 && <p className="text-sm text-gray-600">{t('Allergènes :')} {p.allergenes.join(', ')}</p>}
+                                {/* P1-M2 : la ligne allergènes est toujours affichée — la liste si elle est
+                                    renseignée, sinon la mention explicite « demander en caisse ». */}
+                                <p className="text-sm text-gray-600">{t(libelleAllergenes(p))}</p>
                                 {signature && <p className="text-sm font-semibold text-magenta-700">{t('★ Plat signature — l’un des best-sellers du restaurant.')}</p>}
                               </div>
                             )}
