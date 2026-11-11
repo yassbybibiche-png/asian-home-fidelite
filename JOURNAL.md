@@ -817,3 +817,29 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   5 variables Render (dont `BREVO_MODE_TEST=1` tant que la consigne « mode test uniquement » s'applique),
   vérification en mode test (voir `docs/BREVO.md` §5 A). Le test d'envoi réel se fera plus tard, hors
   développement, avec l'accord explicite de l'utilisateur (`docs/BREVO.md` §5 B).
+
+## 11/11/2026 — P0-S21 : contrôle TypeScript du serveur (AUDIT.md § P0-S21, revue Codex point 13)
+- **Constat** : `tsconfig.json` n'inclut que `src/` ; `server/` (~4 600 lignes) n'était jamais vérifié par `tsc`
+  (Node et `npm test` suppriment les types sans les contrôler).
+- **Config** : nouveau `tsconfig.server.json`, qui étend `tsconfig.json` et ne change que `types: ["node"]` (au lieu
+  de `vite/client`), `lib: ["ES2022"]` (sans DOM : le serveur n'en a pas besoin, `fetch` / `URL` / `Response` /
+  `Buffer` viennent de `@types/node`, aucun conflit) et `include: ["server"]`. Les fichiers partagés importés
+  (`src/types.ts`, `src/lib/*.ts`, `src/data/*`, `seed.json`) sont vérifiés au passage, sans DOM : ils passent.
+  **Aucune règle assouplie** : `strict`, `noUnusedLocals`, `noUnusedParameters` gardés. `tsconfig.json` et le
+  script `build` inchangés.
+- **Dépendance** : `@types/node` `^24.19.2` en `devDependencies` (`npm install --save-dev @types/node@^24`, réseau OK).
+- **Script** : `npm run typecheck:server` (= `tsc -p tsconfig.server.json`).
+- **Erreurs trouvées : 2**, toutes deux `TS2345` dans `server/app.ts` (routes `POST …/clients` et `POST …/tirages`) :
+  `corps.parrain` (`unknown`, corps JSON non validé) passé au paramètre `parrainCode?: string` de
+  `inscrireOuRetrouver`. **Pas un vrai bug** : la fonction teste déjà `typeof parrainCode === 'string'` avant
+  usage (une valeur non-chaîne est ignorée). Correction de type seule : paramètre élargi à `parrainCode?: unknown`,
+  comportement identique. Aucune erreur dans `server/notifications/` (fichiers Brevo non touchés).
+- **Qualité** : `npm test` 806/806 (806 avant, aucun test ajouté ni modifié), `npm run build` OK,
+  `npm run typecheck:server` propre (et il échoue bien sur les 2 erreurs avant correction).
+- **Limites** : la vérification n'est pas branchée dans `npm run build` / `build:api` (build Render) — décision
+  volontaire, à trancher à la fusion ; `tests/`, `scripts/` et `tests-e2e/` ne sont toujours pas vérifiés par `tsc`.
+- **Revue Codex du code (11/11/2026, `/tmp/codex-revue-p0-s21.txt`)** : aucun bug fonctionnel introduit ;
+  2 remarques, toutes deux traitées : [P2] contrôle facultatif → `typecheck:server` branché dans `npm test`
+  (il tourne avant les tests, ~1 s, et fait échouer `npm test` en cas d'erreur de type serveur) ; [P3] ligne
+  obsolète de `server/README.md` (§ Limites honnêtes) affirmant que le serveur n'était pas vérifié par `tsc` →
+  corrigée. Le `build` Render n'est pas touché (choix explicite, voir ci-dessus).

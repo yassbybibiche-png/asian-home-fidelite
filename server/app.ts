@@ -1525,7 +1525,7 @@ export async function creerServeur(o: OptionsServeur) {
    * garde son choix (sinon n'importe qui connaissant son numéro pourrait le réabonner après un STOP) — le gérant peut le
    * modifier sur la fiche.
    */
-  async function inscrireOuRetrouver(commerce: Commerce, prenom: string, contactSaisi: unknown, parrainCode?: string, consentement = false) {
+  async function inscrireOuRetrouver(commerce: Commerce, prenom: string, contactSaisi: unknown, parrainCode?: unknown, consentement = false) {
     const commerceId = commerce.id
     const contact = contactOuErreur(contactSaisi)
     const existant = await st.clientParContact(commerceId, contact)
