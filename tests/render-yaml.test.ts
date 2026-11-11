@@ -82,9 +82,9 @@ describe('render.yaml (Blueprint Render, phase S3)', () => {
     assert.deepEqual(lireYamlSimple('# c\nx:\n  - k: "24"\n    s: false\n  - k: b\n'), { x: [{ k: '24', s: false }, { k: 'b' }] })
   })
 
-  test('YAML valide : un service web Node Free à Frankfurt, commandes de la procédure S2', () => {
+  test('YAML valide : deux services web Node Free à Frankfurt, commandes de la procédure S2', () => {
     assert.deepEqual(Object.keys(bp), ['services'])
-    assert.equal(bp.services.length, 1)
+    assert.equal(bp.services.length, 2)
     const s = bp.services[0]
     assert.equal(s.type, 'web')
     assert.equal(s.runtime, 'node', '`runtime` (le champ `env` est déprécié)')
@@ -96,15 +96,26 @@ describe('render.yaml (Blueprint Render, phase S3)', () => {
     assert.equal(s.branch, undefined, 'pas de branche en dur : celle choisie à la création du Blueprint')
   })
 
-  test('variables : NODE_VERSION=24 et exactement les 5 secrets + CORS_ORIGIN en `sync: false`, sans valeur', () => {
-    const vars = bp.services[0].envVars as Record<string, Valeur>[]
-    assert.deepEqual(vars.find((v) => v.key === 'NODE_VERSION'), { key: 'NODE_VERSION', value: '24' })
-    const secrets = vars.filter((v) => v.key !== 'NODE_VERSION')
-    assert.deepEqual(secrets.map((v) => v.key), ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ADMIN_PIN', 'PIN_ASIAN_HOME', 'SESSION_SECRET', 'CORS_ORIGIN'])
-    for (const v of secrets) assert.deepEqual(v, { key: v.key, sync: false }, `${v.key} : aucune valeur dans le fichier`)
-    // Jamais en production (voir server/README.md) ; NODE_ENV=production au build retirerait les devDependencies.
-    for (const interdite of ['DEMO', 'DB_FILE', 'NODE_ENV', 'PORT', 'SUPABASE_ANON_KEY']) {
-      assert.ok(!vars.some((v) => v.key === interdite), `${interdite} ne doit pas être dans render.yaml`)
+  test('P0-S10 : 2e service = staging (branche autonome/integration, mêmes commandes, même santé)', () => {
+    const [prod, staging] = bp.services
+    assert.equal(staging.name, 'asian-home-fidelite-staging')
+    assert.equal(staging.branch, 'autonome/integration', 'le staging suit autonome/integration, la production ne suit que master')
+    for (const cle of ['type', 'runtime', 'plan', 'region', 'buildCommand', 'startCommand', 'healthCheckPath']) {
+      assert.equal(staging[cle], prod[cle], cle)
+    }
+  })
+
+  test('variables : NODE_VERSION=24 et exactement les 5 secrets + CORS_ORIGIN en `sync: false`, sans valeur, sur chaque service', () => {
+    for (const service of bp.services) {
+      const vars = service.envVars as Record<string, Valeur>[]
+      assert.deepEqual(vars.find((v) => v.key === 'NODE_VERSION'), { key: 'NODE_VERSION', value: '24' })
+      const secrets = vars.filter((v) => v.key !== 'NODE_VERSION')
+      assert.deepEqual(secrets.map((v) => v.key), ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ADMIN_PIN', 'PIN_ASIAN_HOME', 'SESSION_SECRET', 'CORS_ORIGIN'])
+      for (const v of secrets) assert.deepEqual(v, { key: v.key, sync: false }, `${v.key} : aucune valeur dans le fichier`)
+      // Jamais en production (voir server/README.md) ; NODE_ENV=production au build retirerait les devDependencies.
+      for (const interdite of ['DEMO', 'DB_FILE', 'NODE_ENV', 'PORT', 'SUPABASE_ANON_KEY']) {
+        assert.ok(!vars.some((v) => v.key === interdite), `${interdite} ne doit pas être dans render.yaml`)
+      }
     }
   })
 
@@ -115,7 +126,7 @@ describe('render.yaml (Blueprint Render, phase S3)', () => {
     assert.doesNotMatch(code, /\b\d{4,}\b/, 'aucun nombre de 4 chiffres ou plus (PIN) hors commentaires')
     assert.doesNotMatch(code, /^\s*(generateValue|fromDatabase|fromService)\s*:/m)
     const valeurs = TEXTE.split('\n').filter((l) => /^\s*value\s*:/.test(l))
-    assert.deepEqual(valeurs.map((l) => l.trim()), ['value: "24"'], 'une seule valeur en dur : NODE_VERSION')
+    assert.deepEqual(valeurs.map((l) => l.trim()), ['value: "24"', 'value: "24"'], 'une seule valeur en dur par service : NODE_VERSION')
   })
 
   test('cohérent avec le dépôt : scripts npm, .env.api, lockfile, version de Node', () => {
