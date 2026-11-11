@@ -1,5 +1,58 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P1-U1 « Mesure du parcours comptoir » (AUDIT.md §7)
+- **Contexte :** re-mesure après refonte (noir+magenta, corps sombres), même protocole que
+  P0-U0 : `scripts/mesurer-scores.mjs` (Pixel 7, Slow 4G + CPU ×4, serveur local),
+  2 passes + Lighthouse 2 passes (`node_modules/.cache/mesure-p1-u1/`,
+  `resultats-passe1.json`, `resultats-passe2.json`, `lighthouse-passe1.json`,
+  `lighthouse-passe2.json`, 9 captures passe 2). **Aucun changement de code de
+  production dans ce lot** — SCORES.md + 5 tests de cohérence seulement.
+- **Résultats (2 passes) :** premier affichage `#/jouer` 4 241 / 4 043 ms (LCP 4 224 /
+  4 016 ms, `p.titre-carte`) — seuil < 4 s toujours non atteint ; parcours scan → lot
+  8 727 / 9 155 ms d'étapes (inscription 1 054 / 994, validation caisse 6 720 / 6 926,
+  vérification 366 / 312, tirage 587 / 923 ms), taps identiques (client 4 clics +
+  1 saisie, caisse 3 clics + 2 saisies) ; Lighthouse 79 (score identique sur les
+  deux passes ; FCP 1,1 s, LCP 4,6 s, TBT 240 / 270 ms, CLS 0, SI 1,1 s, TTI 4,7 /
+  4,8 s) — était 81 à P0-U0, 16 points sous le seuil ≥ 95 ; 0 erreur console,
+  0 requête échouée (2 passes) ; bundle frais JS initial 472745 o + CSS 70664 o =
+  543409 o (22 chunks, plus gros 349378 o) ; couverture 97,89 % / 91,48 % / 93,06 % ;
+  DA moyenne **8,0/10 inchangée** (client 9/10 ×3, commerçant 7–8/10).
+- **Critère < 30 s à chaud : étapes scriptées sous 30 s, vérifié** (8,7–9,2 s) ; le
+  critère complet avec gestes et attente humains **n'est pas vérifié** (pas de
+  téléphone réel sur cette VM — protocole téléphone documenté dans SCORES.md,
+  § « Protocole téléphone réel », à exécuter sur staging). À froid Render (~60 s) :
+  non mesuré (estimation). `npm audit` re-tenté : même 403 `policy_denied`, non
+  mesurable sur cette VM.
+- **Tests : 1027 → 1032 (+5, `tests/mesure-p1-u1.test.ts` — totaux du parcours et
+  moyenne DA re-calculés depuis les tableaux du document, pas des constantes)**,
+  suite verte, `npx tsc -p .` propre (typecheck serveur inclus dans `npm test`).
+  Aucun test existant modifié.
+- **Revue Codex (10 points, `/tmp/codex-revue-p1-u1.txt`, diff
+  `/tmp/codex-p1-u1.diff`) — verdict « corrections mineures », toutes traitées :**
+  1. [Fondé, aucune correction] Arithmétique exacte vérifiée (parcours, bundle, DA).
+  2. [Fondé] « 2 passes identiques » → « score identique sur les deux passes »
+     (les métriques TBT/TTI diffèrent).
+  3. [Fondé] Seuil « vérifié » avec gestes humains inclus → reformulé : étapes
+     scriptées sous 30 s, vérifié ; critère complet non vérifié (test adapté).
+  4. [Fondé] Écart bundle (+641 o CSS) attribué aux hashes sans preuve → « cause
+     non établie » (lots P0-S11/P1-M2/P1-M3 entre les deux mesures, non isolés) +
+     build documenté distinct de celui servi aux passes Playwright.
+  5. [Fondé] « Aucun écart significatif » sans statistique → « échantillon
+     insuffisant pour conclure » ; « ±5 » → écart observé de 5 points entre les
+     deux passes P0-U0 ; tirage 587 → 923 ms noté comme variabilité.
+  6. [Fondé] Test additionnant des constantes → totaux et moyenne DA désormais
+     extraits des tableaux de SCORES.md et re-calculés.
+  7. [Fondé, aucune correction] Test P0-U0 reste cohérent (premières occurrences).
+  8. [Fondé] Colonne « Mesure initiale » mélangeant P0-U0/P0-D1/P1-D2 → renommée
+     « Référence antérieure (lot précisé par métrique) », lot annoté par cellule.
+  9. [Fondé] Protocole téléphone contradictoire (à chaud sur « autre téléphone »
+     au cache non réchauffé) → même téléphone, même navigateur, 2e compte de test ;
+     « pas de navigateur pilotable » → navigateur simulé Playwright.
+  10. [Fondé] Règle de fusion (amélioration exigée) incompatible avec un lot de
+      mesure → note ajoutée : ce lot documente une re-mesure.
+- **Non vérifié :** téléphone réel (375 px, 4G, à chaud et à froid) ; délai à froid
+  Render ; `npm audit` ; rien touché en production.
+
 ## 11/11/2026 — P1-M3 « Photos des plats » — PRÉPARATION SEULEMENT (AUDIT.md §7)
 - **Contexte :** le lot complet est impossible sans les photos du restaurant — aucune photo
   fournie (`assets/source/photos/` ne contient que son `README.md`), jamais de photos clients

@@ -23,6 +23,19 @@ dossier. Erreurs console : **0**, 0 requête échouée. Une 1re passe (~07:59 UT
 révélé 2 régressions de contraste par les captures (corps de carte sombre, carte de
 gain claire) — corrigées avant cette 2e passe (voir § DA après P1-D2).
 
+**Re-mesure P1-U1 (11/11/2026 ~08:45 UTC, 2 passes)** : même protocole que P0-U0
+(script `scripts/mesurer-scores.mjs`, Pixel 7, Slow 4G + CPU ×4, serveur local),
+sortie `--sortie node_modules/.cache/mesure-p1-u1/resultats-passe<N>.json` (captures
+dans le même dossier, 9 écrans, écrasées par la passe 2 — les 2 JSON gardent les
+chiffres des 2 passes) ; Lighthouse 2 passes
+(`lighthouse-passe1.json`, `lighthouse-passe2.json`). **Aucun changement de code
+dans ce lot** : c'est une mesure après refonte, à comparer à P0-U0 (avant refonte)
+et à P1-D2 (1 passe). Résultat : temps, taps et DA quasi identiques à P1-D2 —
+premier affichage 4 043–4 241 ms, parcours scan → lot 8 727–9 155 ms d'étapes
+(taps identiques : client 4 clics + 1 saisie, caisse 3 clics + 2 saisies),
+Lighthouse 79/79, 0 erreur console, DA moyenne 8,0/10 inchangée. Le détail chiffré
+est dans les sections ci-dessous (« Re-mesure P1-U1 » sous chaque métrique).
+
 ## Protocole
 
 - **Appareil simulé** : Pixel 7 (Playwright), `reducedMotion: reduce`, service workers bloqués.
@@ -62,33 +75,62 @@ gain claire) — corrigées avant cette 2e passe (voir § DA après P1-D2).
   Pas de mesure sur téléphone réel — à remplacer par la mesure téléphone
   (protocole : même parcours sur le staging, chronomètre + comptage des taps à la main).
 
-## Bundle (build frais, mode par défaut, 11/11/2026 — après P1-D2)
+## Protocole téléphone réel (P1-U1 — non exécuté sur cette VM, à faire sur staging)
+
+Pas de téléphone réel accessible depuis cette VM ; les mesures disponibles utilisent
+un navigateur simulé piloté par Playwright. Pour la mesure téléphone demandée par
+l'AUDIT §7, sur le staging (jamais la production) :
+
+1. Téléphone Android ou iPhone, écran 375 px de large, réseau 4G (désactiver le Wi-Fi),
+   cache et données du navigateur effacés avant la passe à froid.
+2. À froid : ouvrir le QR (ou le lien `#/jouer/<id>`) et chronométrer jusqu'au titre
+   visible, puis jusqu'au gain affiché ; noter chaque tap (1 tap = 1 toucher,
+   1 champ rempli = 1 saisie) et chaque seconde d'attente humaine entre le scan
+   client et la validation en caisse.
+3. À chaud : refaire le même parcours sur le même téléphone et le même navigateur,
+   sans effacer le cache, avec un second compte de test (le cache du téléphone n'est
+   réchauffé que sur le téléphone qui a servi à la passe à froid).
+4. Noter séparément : premier affichage, inscription, validation caisse, vérification,
+   tirage, ouverture de la carte — mêmes étapes que le script local, pour comparer.
+5. Relever les erreurs console via le navigateur distant (Chrome DevTools USB) ou,
+   à défaut, noter tout écran blanc / blocage visible.
+
+## Bundle (build frais, mode par défaut, 11/11/2026 — après P1-U1)
 
 Définition unique : **JS initial non gzipé** = script d'entrée de `index.html` +
 ses imports statiques (méthode `fichiersInitiaux` de
 `tests/performance-bundle-p2-q2.test.ts`, pas les `import()` dynamiques) ;
 **CSS** = la feuille de `dist/assets` ; **total** = JS initial + CSS.
 
-- JS initial non gzipé : 472715 o (461,6 Ko) — `index-BypZqGmo.js` 349423 o +
-  `ui-oc7O8buj.js` 122693 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
-- CSS non gzipé : 70023 o (68,4 Ko) — `index-BYKLO0nG.css`.
-- Total initial : 542738 o (530,0 Ko).
-- JS total (tous chunks) : 780925 o (762,6 Ko) ; 22 chunks ; plus gros chunk : 349423 o
+- JS initial non gzipé : 472745 o (461,6 Ko) — `index-TM4EXuNe.js` 349378 o +
+  `ui-DKQTem2F.js` 122768 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
+- CSS non gzipé : 70664 o (69,0 Ko) — `index-DfTpbo0F.css`.
+- Total initial : 543409 o (530,7 Ko).
+- JS total (tous chunks) : 782164 o (763,8 Ko) ; 22 chunks ; plus gros chunk : 349378 o
   (limite test : 500 000 o — respectée).
 - Repères historiques : avant P2-Q2 601720 o ; après P2-Q2 450,2 Ko (JS initial).
   Le JS initial a repris ~10 Ko depuis (lots P0-S10 et suivants). Après P0-D1 :
   JS initial 472531 o, CSS 65273 o, total 537804 o — le CSS gagne 4750 o avec les
   règles `.page-client` de P1-D2 (+7,3 %), le JS initial +184 o (+0,04 %).
+  Après P1-D2 : JS initial 472715 o, CSS 70023 o, total 542738 o.
+  Après P1-U1 (re-mesure, aucun changement de code dans ce lot) : JS initial 472745 o
+  (+30 o, +0,01 %), CSS 70664 o (+641 o, +0,9 %), total +671 o vs P1-D2 — cause non
+  établie (les lots P0-S11, P1-M2 et P1-M3 sont passés entre les deux mesures, sans
+  isolation du bundle par lot). Le bundle documenté ici provient d'un build frais
+  distinct de celui servi aux deux passes Playwright (le serveur E2E construit
+  son propre bundle).
 - Avertissements de build : 0 (aucun « chunk > 500 kB », aucune erreur).
 
 ## Couverture de tests
 
-Suite verte : **1006/1006** (`npm test`, typechecks inclus — 988 avant P1-D2, +18 corps
-sombres côté client, dont 2 correctifs revue Codex).
+Suite verte : **1032/1032** (`npm test`, typechecks inclus — 1027 avant P1-U1, +5 tests
+de cohérence de la mesure, `tests/mesure-p1-u1.test.ts`).
 
-- Couverture globale : 97,84 % lignes / 91,43 % branches / 92,92 % fonctions
-  (`node --test --experimental-test-coverage`, suite verte, 11/11/2026).
-- Fichiers les plus faibles : `pwa.ts` 55,00 %, `router.ts` 83,52 %, `points.ts` 83,75 %.
+- Couverture globale : 97,89 % lignes / 91,48 % branches / 93,06 % fonctions
+  (`node --test --experimental-test-coverage`, suite verte, 11/11/2026 —
+  était 97,84 % / 91,43 % / 92,92 % après P1-D2).
+- Fichiers les plus faibles : `pwa.ts` 55,00 %, `router.ts` 83,52 %, `points.ts` 83,75 %
+  (inchangés depuis P1-D2).
 
 ## Erreurs console
 
@@ -130,17 +172,30 @@ taps identiques : client 4 clics + 1 saisie, caisse 3 clics + 2 saisies) ; ouver
 de la carte 791 ms ; premier affichage `#/menu` 987 ms par hash, 1799 ms en
 chargement direct (LCP 1796 ms). Temps proches des passes 4–5 (premier affichage
 4020–4238 ms, LCP 4056–4176 ms ; 2e passe P1-D2 : 4251 ms et 4224 ms, légèrement
-au-dessus) — comparaison non concluante sur une seule passe, aucun écart significatif
-observé. Captures richesse (même dossier, script
+au-dessus) — comparaison non concluante sur une seule passe ; échantillon
+insuffisant pour conclure à une amélioration, une régression ou une stabilité. Captures richesse (même dossier, script
 copié de P0-D1) : 0 erreur console, 0 requête échouée ; roue à 8 secteurs lisible
 sur fond sombre, vrai menu 81 plats en fiches sombres, carte couleur perso ivoire
 (`#fbf8f3`) avec bandeau `#d1006f` inchangée.
+
+**Re-mesure P1-U1 (11/11/2026 ~08:45 UTC, 2 passes, `node_modules/.cache/mesure-p1-u1/`,
+`resultats-passe1.json` + `resultats-passe2.json`) : 0 erreur console, 0 requête
+échouée, sur les 2 passes.** Temps des 2 passes : premier affichage `#/jouer`
+4 241 / 4 043 ms (LCP 4 224 / 4 016 ms, élément `p.titre-carte`) ; parcours
+scan → lot 8 727 / 9 155 ms d'étapes (taps identiques) ; ouverture de la carte
+559 / 515 ms ; premier affichage `#/menu` 964 / 905 ms par hash, 1 379 / 1 382 ms
+en chargement direct (LCP 1 368 / 1 388 ms). Temps proches de P1-D2 (1 passe,
+4 251 ms / 4 224 ms ; parcours 8 572 ms) — échantillon insuffisant pour conclure
+à une amélioration, une régression ou une stabilité ; les écarts observés peuvent
+relever de la variabilité de mesure. Captures : 9 écrans, passe 2 (la passe 1 n'a gardé
+que son JSON).
 
 ## npm audit
 
 **Non mesurable sur cette VM** : `npm audit` retourne 403 `policy_denied` sur
 `registry.npmjs.org/-/npm/v1/security/audits/quick` (politique réseau de la VM).
 À mesurer ailleurs (poste de développement ou CI) avant de conclure.
+Re-tenté le 11/11/2026 (P1-U1) : même 403, inchangé.
 
 ## Temps de premier affichage (4G simulée)
 
@@ -163,6 +218,28 @@ sur fond sombre, vrai menu 81 plats en fiches sombres, carte couleur perso ivoir
   étaient la valeur périmée de `#/jouer`, pas celle du menu.
 - Délai à froid Render (~60 s, plan gratuit en veille) : **non mesuré** (estimation).
 
+### Re-mesure P1-U1 (11/11/2026 ~08:45 UTC, 2 passes)
+
+| Page | Passe 1 | Passe 2 |
+| --- | --- | --- |
+| `#/jouer` — premier affichage (titre visible) | 4241 ms | 4043 ms |
+| `#/jouer` — navigation : réponse / DOM prêt / chargé | 157 / 3625 / 3627 ms | 152 / 3537 / 3539 ms |
+| `#/jouer` — LCP | 4224 ms (`p.titre-carte`) | 4016 ms (`p.titre-carte`) |
+| `#/menu` — premier affichage (par hash) | 964 ms | 905 ms |
+| `#/menu` — premier affichage (chargement direct) | 1379 ms | 1382 ms |
+| `#/menu` — LCP (chargement direct) | 1368 ms (`p.text-center`) | 1388 ms (`p.text-center`) |
+
+- Premier affichage `#/jouer` : 4 043–4 241 ms — **seuil < 4 s toujours non atteint**
+  (4,02–4,24 s à P0-U0, 4 251 ms à P1-D2) ; la passe 2 (4 043 ms) frôle le seuil
+  sans le passer. LCP `#/jouer` : 4 016–4 224 ms, toujours > 2,5 s.
+- Menu par hash : LCP sans nouvelle entrée (0, comme aux passes 4–5) ; par chargement
+  direct : 1 368–1 388 ms (était 1 632 ms à P0-U0, 1 796 ms à P1-D2 — échantillon
+  insuffisant pour conclure à une amélioration ; les écarts peuvent relever de la
+  variabilité de mesure).
+- Délai à froid Render (~60 s) : **toujours non mesuré** (estimation) ; à froid
+  téléphone réel : **non mesuré** (pas de téléphone sur cette VM — protocole
+  documenté plus haut, à exécuter sur staging).
+
 ## Lighthouse (mobile, local, `#/jouer`, 11/11/2026)
 
 - **Score performance : 81** (2e passe, script versionné ; 76 à la 1re passe —
@@ -177,6 +254,22 @@ sur fond sombre, vrai menu 81 plats en fiches sombres, carte couleur perso ivoir
 Cohérent avec les mesures Playwright (premier affichage ~4,1 s, LCP ~4,1 s). Le point
 faible est le LCP (~4,5 s). Mesuré sur `#/jouer` seulement (page critique) ; pas de
 mesure Lighthouse sur téléphone réel.
+
+### Re-mesure P1-U1 (11/11/2026, 2 passes)
+
+- **Score performance : 79** (score identique sur les deux passes — était 81 à P0-U0,
+  76 à la 1re passe P0-U0 ; écart observé de 5 points entre les deux passes P0-U0,
+  pas une incertitude « ±5 » — échantillon insuffisant pour conclure à une
+  régression ; 16 points sous le seuil ≥ 95)
+- First Contentful Paint : 1,1 s (2 passes)
+- Largest Contentful Paint : 4,6 s (2 passes)
+- Total Blocking Time : 240 / 270 ms
+- Cumulative Layout Shift : 0 (2 passes)
+- Speed Index : 1,1 s (2 passes)
+- Time to Interactive : 4,7 / 4,8 s
+
+Cohérent avec les mesures Playwright P1-U1 (premier affichage 4,0–4,2 s,
+LCP 4,0–4,2 s). Le point faible reste le LCP (~4,6 s). Seuil ≥ 95 toujours loin.
 
 ## Parcours scan → lot (à chaud, 4G simulée)
 
@@ -200,6 +293,31 @@ validation en caisse — le vrai temps humain est plus long) :
 - **Menu → commande et réservation : n'existent pas dans l'app** (commande avec
   paiement écartée par décision, pas de réservation) — aucun parcours à mesurer,
   rien n'est inventé ici.
+
+### Re-mesure P1-U1 (11/11/2026 ~08:45 UTC, 2 passes, même protocole)
+
+| Étape | Passe 1 | Passe 2 |
+| --- | --- | --- |
+| Inscription (saisie téléphone + « C'est parti ») | 1054 ms | 994 ms |
+| Validation en caisse (code équipe + recherche + passage) | 6720 ms | 6926 ms |
+| Vérification côté client (« C'est validé ? ») | 366 ms | 312 ms |
+| Tirage (clic roue → gain affiché) | 587 ms | 923 ms |
+| **Total des étapes** | **8727 ms** | **9155 ms** |
+
+- Arithmétique : passe 1, 1 054 + 6 720 + 366 + 587 = 8 727 ms ; passe 2,
+  994 + 6 926 + 312 + 923 = 9 155 ms.
+- **Taps identiques** aux 5 passes P0-U0 et à P1-D2 : client **4 clics + 1 saisie** ;
+  caisse **3 clics + 2 saisies**. La validation en caisse domine toujours le parcours
+  (6,7–6,9 s, caisse en Slow 4G + CPU ×4 comme le client).
+- Ouverture de la carte après le gain : 559 / 515 ms.
+- Tirage 587 → 923 ms entre les 2 passes (+57 %) : variabilité de mesure, échantillon
+  trop petit pour conclure à une amélioration ou une régression.
+- **Parcours < 30 s à chaud : étapes scriptées sous 30 s, vérifié** (8,7–9,2 s) ;
+  le critère complet avec gestes et attente humains **n'est pas vérifié**
+  (pas de téléphone réel — protocole documenté plus haut). Le temps humain réel
+  (le client attend que la caisse valide) s'ajoute : **non mesuré**.
+  À froid (Render en veille ~60 s + cache vide) : **non mesuré**,
+  estimation seulement.
 
 ## Cohérence DA /10 par écran (cible : NOIR + MAGENTA, registre de la carte)
 
@@ -277,17 +395,44 @@ seuil strict « pas de régression vs 535857 o » de 1,28 % : l'écart est le CS
 règles P1-D2 elles-mêmes (+4 750 o ; JS initial +0,04 %) — accepté et documenté,
 pas nié.
 
+## Cohérence DA /10 par écran — après P1-U1 (re-mesure 11/11/2026 ~08:45 UTC, 2 passes)
+
+Noté sur les captures Pixel 7 de `node_modules/.cache/mesure-p1-u1/` (passe 2 ;
+même commerce de test, sans logo ni menu — mêmes limites que la mesure initiale).
+Aucun changement de code entre P1-D2 et P1-U1 : les notes sont re-vérifiées, pas
+re-calculées sur une nouveauté.
+
+| Écran | Note | Justification (une ligne) |
+| --- | --- | --- |
+| Jouer | 9/10 | Corps sombre cohérent, roue magenta, champ sombre et carte de gain sombre ; bloc initiales « M1 » sans logo, libellé de lot vertical sur la roue à 2 lots. |
+| Carte | 9/10 | Page sombre, carte objet clair ivoire/blanc posée dessus, tampons et progression lisibles ; encart palier rouge conservé. |
+| Caisse | 7/10 | Inchangée (comptoir clair, hors périmètre P1-D2) ; bouton primaire magenta, vert de validation conservé, bouton « Vérifier » gris terne. |
+| Menu public | 9/10 | Héros noir+magenta, état vide sombre lisible ; commerce de test sans menu (pas le vrai menu 81 plats). |
+| Tableau de bord | 8/10 | Inchangé ; en-tête noir, liserés magenta, navigation mobile magenta ; fond clair, serif/sans-serif mélangés. |
+| Clients | 8/10 | Inchangé ; bouton primaire, pilule sélectionnée, progression et navigation magenta ; fond clair. |
+| Roulette (back-office) | 7/10 | Inchangée ; QR net, bouton primaire magenta, navigation magenta ; fond clair, formulaire inchangé. |
+| Réglages | 7/10 | Inchangé ; bouton « Enregistrer » magenta, logo magenta, formulaire gris/blanc, une seule longue page (découpe prévue au lot P1-C7). |
+
+**Moyenne : 8,0/10 (inchangée depuis P1-D2).** Les trois écrans client sont à 9/10 ;
+la cible globale ≥ 9/10 n'est pas atteinte parce que les écrans commerçant (7–8/10)
+restent clairs par choix (lisibilité de travail) — le lot P1-C7 (finitions écrans
+commerçant) est le prochain levier, sans toucher aux corps sombres côté client.
+
 ## Seuils de réussite (définis avant la refonte)
 
-| Parcours / métrique | Seuil | Mesure initiale |
-| --- | --- | --- |
-| Scan → lot, à chaud (gestes humains inclus) | < 30 s (critère AUDIT P1-U1) | ~9,0–10,3 s d'étapes scriptées (hors attente humaine) |
-| Premier affichage `#/jouer` en Slow 4G | < 4 s | 4,02–4,24 s (seuil non atteint) |
-| LCP `#/jouer` | < 2,5 s | 4,06–4,18 s |
-| Lighthouse mobile `#/jouer` | ≥ 95 (critère d'arrêt de la boucle) | 81 (76 à la 1re passe) |
-| Erreurs console | 0 | 0 (re-mesure P0-D1 : 0 erreur, 0 requête échouée — seuil atteint) |
-| Bundle initial (JS + CSS, non gzipé) | pas de régression vs 535857 o | 542738 o (+1,28 % vs 535857 o — seuil strict dépassé : +4 750 o de CSS, ce sont les règles P1-D2 elles-mêmes ; JS initial +184 o (+0,04 %) ; écart accepté et documenté, voir § DA après P1-D2) |
-| Note DA moyenne | ≥ 9/10 | 8,0/10 (était 7,6/10 — écrans client 9/10, écrans commerçant 7–8/10 inchangés, voir § DA après P1-D2) |
+| Parcours / métrique | Seuil | Référence antérieure (lot précisé par métrique) | Après P1-U1 (11/11/2026, 2 passes) |
+| --- | --- | --- | --- |
+| Scan → lot, à chaud (gestes humains inclus) | < 30 s (critère AUDIT P1-U1) | P0-U0 : ~9,0–10,3 s d'étapes scriptées (hors attente humaine) | Étapes scriptées : 8,7–9,2 s, sous 30 s ; critère avec gestes et attente humains : non vérifié |
+| Premier affichage `#/jouer` en Slow 4G | < 4 s | P0-U0 : 4,02–4,24 s (seuil non atteint) | 4,04–4,24 s (seuil non atteint) |
+| LCP `#/jouer` | < 2,5 s | P0-U0 : 4,06–4,18 s | 4,02–4,22 s |
+| Lighthouse mobile `#/jouer` | ≥ 95 (critère d'arrêt de la boucle) | P0-U0 : 81 (76 à la 1re passe) | 79 (score identique sur les deux passes) |
+| Erreurs console | 0 | P0-D1 : 0 erreur, 0 requête échouée — seuil atteint | 0 erreur, 0 requête échouée (2 passes — seuil atteint) |
+| Bundle initial (JS + CSS, non gzipé) | pas de régression vs 535857 o | P1-D2 : 542738 o (+1,28 % vs 535857 o — seuil strict dépassé : +4 750 o de CSS, ce sont les règles P1-D2 elles-mêmes ; JS initial +184 o (+0,04 %) ; écart accepté et documenté, voir § DA après P1-D2) | 543409 o (+1,41 % vs 535857 o ; +671 o vs P1-D2, cause non établie ; écart accepté et documenté, voir § Bundle) |
+| Note DA moyenne | ≥ 9/10 | P1-D2 : 8,0/10 (était 7,6/10 après P0-D1, 6,1/10 à P0-U0 — écrans client 9/10, écrans commerçant 7–8/10 inchangés, voir § DA après P1-D2) | 8,0/10 (inchangée — écrans client 9/10, écrans commerçant 7–8/10, voir § DA après P1-U1) |
+
+Ce lot (P1-U1) documente une re-mesure : il ne démontre pas une amélioration et ne
+valide pas encore le critère P1-U1 sur téléphone réel. La règle ci-dessous concerne
+les lots de modification issus de la boucle.
 
 Un tour de la boucle d'amélioration ne fusionne que s'il améliore au moins une
 de ces métriques sans régresser les autres (AUDIT.md §7, boucle continue).
