@@ -263,6 +263,8 @@ describe('P0-S5 : CLI sauvegarde-base.mjs / restaurer-base.mjs', () => {
   let serveur: Server
   let url = ''
   let absente: string | undefined
+  /** Plafond de lignes par réponse du faux PostgREST (1 000 comme Supabase ; modifiable par test pour simuler un plafond plus bas). */
+  let plafond = 1000
   const requetes: string[] = []
   const dossiers: string[] = []
   const dossier = () => {
@@ -294,8 +296,10 @@ describe('P0-S5 : CLI sauvegarde-base.mjs / restaurer-base.mjs', () => {
         return
       }
       const offset = Number(u.searchParams.get('offset') ?? 0)
-      const limit = Math.min(Number(u.searchParams.get('limit') ?? 1000), 1000)
-      res.end(JSON.stringify(tables[table].slice(offset, offset + limit)))
+      const tranche = tables[table].slice(offset, offset + Math.min(Number(u.searchParams.get('limit') ?? 1000), plafond))
+      // Compteur exact (PostgREST : en-tête Content-Range) — le script le vérifie à chaque page.
+      res.setHeader('content-range', tranche.length ? `${offset}-${offset + tranche.length - 1}/${tables[table].length}` : `*/${tables[table].length}`)
+      res.end(JSON.stringify(tranche))
     })
     await new Promise<void>((ok) => serveur.listen(0, '127.0.0.1', ok))
     url = `http://127.0.0.1:${(serveur.address() as { port: number }).port}`
@@ -401,6 +405,67 @@ describe('P0-S5 : CLI sauvegarde-base.mjs / restaurer-base.mjs', () => {
       sansSecret(s)
     } finally {
       absente = undefined
+    }
+  })
+
+  test('plafond API inférieur à 1 000 → export refusé (compteur exact), aucun fichier (revue Codex P0-S5)', async () => {
+    const dir = dossier()
+    plafond = 500 // le journal a 1 501 lignes : la 1re page n'en rend que 500, le compteur dit 1 501
+    try {
+      const s = await lancer('sauvegarde-base.mjs', ['--dir', dir], envSupabase())
+      assert.equal(s.code, 1)
+      assert.match(s.stderr, /table « journal » : 500 lignes lues pour 1501 comptées/)
+      assert.doesNotMatch(s.stdout, /SAUVEGARDE OK/)
+      assert.deepEqual(readdirSync(dir), [])
+      sansSecret(s)
+    } finally {
+      plafond = 1000
+    }
+  })
+
+  test('restauration : cible déjà initialisée refusée avant toute modification, données intactes (revue Codex P0-S5)', async () => {
+    const dir = dossier()
+    const sauvegardeDir = dossier()
+    const s = await lancer('sauvegarde-base.mjs', ['--dir', sauvegardeDir], envSupabase())
+    assert.equal(s.code, 0, s.stderr)
+    const [f] = readdirSync(sauvegardeDir)
+    const cible = join(dir, 'pglite')
+    const ok = await lancer('restaurer-base.mjs', [join(sauvegardeDir, f), '--cible', 'pglite', '--fichier', cible])
+    assert.equal(ok.code, 0, ok.stderr)
+    const refuse = await lancer('restaurer-base.mjs', [join(sauvegardeDir, f), '--cible', 'pglite', '--fichier', cible])
+    assert.equal(refuse.code, 1)
+    assert.match(refuse.stderr, /cible est déjà initialisée/)
+    // La 2e tentative n'a rien modifié : les lignes de la 1re restauration sont toujours là.
+    const db = new PGlite(cible)
+    try {
+      assert.equal((await db.query<{ n: number }>('select count(*)::int as n from public.clients')).rows[0].n, 2)
+      assert.equal((await db.query<{ n: number }>('select count(*)::int as n from public.journal')).rows[0].n, 1501)
+    } finally {
+      await db.close()
+    }
+  })
+
+  test('--verifier en échec : transaction annulée, cible vide (revue Codex P0-S5)', async () => {
+    const dir = dossier()
+    const sauvegardeDir = dossier()
+    const s = await lancer('sauvegarde-base.mjs', ['--dir', sauvegardeDir], envSupabase())
+    assert.equal(s.code, 0, s.stderr)
+    const [f] = readdirSync(sauvegardeDir)
+    const faussee = JSON.parse(gunzipSync(readFileSync(join(sauvegardeDir, f))).toString('utf8')) as Sauvegarde
+    faussee.compteurs.clients = 999 // compteur falsifié : la base restaurée ne peut pas l'égaler
+    const chemin = join(dir, 'faussee.json.gz')
+    writeFileSync(chemin, gzipSync(JSON.stringify(faussee)))
+    const cible = join(dir, 'pglite')
+    const r = await lancer('restaurer-base.mjs', [chemin, '--cible', 'pglite', '--fichier', cible, '--verifier'])
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /vérification échouée — clients : base 2, fichier 2, compteur 999/)
+    // Échec DANS la transaction : le schéma existe (migrations rejouées) mais aucune ligne n'est validée.
+    const db = new PGlite(cible)
+    try {
+      assert.equal((await db.query<{ n: number }>('select count(*)::int as n from public.clients')).rows[0].n, 0)
+      assert.equal((await db.query<{ n: number }>('select count(*)::int as n from public.journal')).rows[0].n, 0)
+    } finally {
+      await db.close()
     }
   })
 

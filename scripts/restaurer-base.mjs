@@ -25,6 +25,7 @@ Usage : node scripts/restaurer-base.mjs <fichier-sauvegarde> --cible pglite [--f
 
   --cible pglite         seule cible acceptée (une cible Supabase / Postgres est REFUSÉE dans cette version)
   --fichier <dossier>    base PGlite persistante (dossier) ; défaut : en mémoire, perdue à la fin
+                       le dossier doit être nouveau (aucune des 14 tables ne doit y exister)
   --verifier             après restauration, recompte chaque table dans la base et compare au fichier (écart → sortie 1)
   --aide, --help         cette aide
 
@@ -86,39 +87,49 @@ async function principal() {
   const { PGlite } = await import('@electric-sql/pglite')
   const db = o.fichierPglite ? new PGlite(resolve(o.fichierPglite)) : new PGlite()
   try {
+    // Cible déjà initialisée ? Vérifié AVANT de rejouer les migrations (revue Codex P0-S5) : pointer par erreur
+    // vers une base existante ne doit rien y modifier — ni fonctions, ni triggers, ni droits.
+    const noms = TABLES_SAUVEGARDE.map((t) => t.nom)
+    const presentes = await db.query(
+      `select tablename from pg_tables where schemaname = 'public' and tablename in (${noms.map((_, i) => `$${i + 1}`).join(', ')})`,
+      noms,
+    )
+    if (presentes.rows.length) {
+      throw new Error(`la base PGlite cible est déjà initialisée (table « ${presentes.rows[0].tablename} » présente) : utilisez un nouveau dossier.`)
+    }
+
     const roles = await db.query(`select count(*)::int as n from pg_roles where rolname in ('anon', 'authenticated', 'service_role')`)
     if (roles.rows[0].n === 0) await db.exec(SQL_ROLES_SUPABASE)
     for (const f of migrationsARejouer(readdirSync(MIGRATIONS))) await db.exec(readFileSync(join(MIGRATIONS, f), 'utf8'))
 
-    // Base cible vide exigée : restaurer par-dessus des données existantes donnerait un mélange invérifiable.
-    for (const { nom } of TABLES_SAUVEGARDE) {
-      const { rows } = await db.query(`select count(*)::int as n from public.${nom}`)
-      if (rows[0].n > 0) throw new Error(`la base PGlite cible n’est pas vide (table « ${nom} ») : utilisez un nouveau dossier.`)
-    }
-
-    // Une seule transaction : la moindre erreur annule tout (aucune donnée partielle).
-    const compteurs = await db.transaction((tx) => restaurerSauvegarde(sauvegarde, ecrireTableSql((sql, p) => tx.query(sql, p))))
-
-    for (const { nom } of TABLES_SAUVEGARDE) {
-      if (compteurs[nom] !== sauvegarde.tables[nom].length) {
-        throw new Error(`table « ${nom} » : ${compteurs[nom]} ligne(s) écrite(s) pour ${sauvegarde.tables[nom].length} dans le fichier.`)
+    // Une seule transaction : la moindre erreur annule tout (aucune donnée partielle). Les contrôles de compteurs
+    // et `--verifier` sont DANS la transaction (revue Codex P0-S5) : un échec de vérification annule la restauration
+    // au lieu de laisser des données validées derrière une sortie 1.
+    const compteurs = await db.transaction(async (tx) => {
+      const c = await restaurerSauvegarde(sauvegarde, ecrireTableSql((sql, p) => tx.query(sql, p)))
+      for (const { nom } of TABLES_SAUVEGARDE) {
+        if (c[nom] !== sauvegarde.tables[nom].length) {
+          throw new Error(`table « ${nom} » : ${c[nom]} ligne(s) écrite(s) pour ${sauvegarde.tables[nom].length} dans le fichier.`)
+        }
       }
-    }
+      if (o.verifier) {
+        const ecarts = []
+        for (const { nom } of TABLES_SAUVEGARDE) {
+          const { rows } = await tx.query(`select count(*)::int as n from public.${nom}`)
+          if (rows[0].n !== sauvegarde.compteurs?.[nom] || rows[0].n !== sauvegarde.tables[nom].length) {
+            ecarts.push(`${nom} : base ${rows[0].n}, fichier ${sauvegarde.tables[nom].length}, compteur ${sauvegarde.compteurs?.[nom]}`)
+          }
+        }
+        if (ecarts.length) throw new Error(`vérification échouée — ${ecarts.join(' ; ')}`)
+      }
+      return c
+    })
+
     const total = Object.values(compteurs).reduce((a, b) => a + b, 0)
     console.log(`RESTAURATION OK (PGlite ${o.fichierPglite ? resolve(o.fichierPglite) : 'en mémoire'}) — sauvegarde du ${sauvegarde.creeLe} — ${total} lignes`)
     for (const { nom } of TABLES_SAUVEGARDE) console.log(`  ${nom.padEnd(20)} ${compteurs[nom]}`)
 
-    if (o.verifier) {
-      const ecarts = []
-      for (const { nom } of TABLES_SAUVEGARDE) {
-        const { rows } = await db.query(`select count(*)::int as n from public.${nom}`)
-        if (rows[0].n !== sauvegarde.compteurs?.[nom] || rows[0].n !== sauvegarde.tables[nom].length) {
-          ecarts.push(`${nom} : base ${rows[0].n}, fichier ${sauvegarde.tables[nom].length}, compteur ${sauvegarde.compteurs?.[nom]}`)
-        }
-      }
-      if (ecarts.length) throw new Error(`vérification échouée — ${ecarts.join(' ; ')}`)
-      console.log('VÉRIFICATION OK — compteurs de la base = compteurs du fichier, pour les 14 tables.')
-    }
+    if (o.verifier) console.log('VÉRIFICATION OK — compteurs de la base = compteurs du fichier, pour les 14 tables.')
   } finally {
     await db.close()
   }

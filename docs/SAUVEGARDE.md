@@ -18,7 +18,8 @@ Tests : `tests/sauvegarde-p0-s5.test.ts` (export → restauration → comparaiso
   → **Le fichier de sauvegarde est sensible** : à chiffrer (§ 4) et à traiter comme une donnée personnelle.
 - **Jamais de sauvegarde incomplète** : si une seule table manque (migration non appliquée) ou ne se lit pas, le script
   s'arrête avec `ERREUR SAUVEGARDE — table « … » absente…` et **n'écrit aucun fichier**. Le fichier est d'abord écrit en
-  `.tmp` puis renommé : jamais de fichier final tronqué.
+  `.tmp` (nom unique par processus) puis publié par un **lien atomique** : jamais de fichier final tronqué, et deux
+  sauvegardes dans la même seconde ne peuvent pas s'écraser (la 2e échoue avec « fichier existe déjà »).
 
 ## 2. Ce qu'elle NE couvre PAS (limites honnêtes)
 
@@ -26,9 +27,13 @@ Tests : `tests/sauvegarde-p0-s5.test.ts` (export → restauration → comparaiso
   migrations du dépôt `supabase/migrations/0001…0008` (rejouées avant toute restauration).
 - **La configuration Supabase** : Auth, Storage, clés API, réglages du projet, variables Render. À noter à part.
 - **Pas d'instantané cohérent** : PostgREST lit table par table (pas de transaction commune). Une écriture pendant la
-  sauvegarde peut donner, par exemple, un tirage dont le client n'est pas dans le fichier. Conséquence : la restauration
-  échoue **bruyamment** (clé étrangère, transaction annulée), jamais en silence. Parade : sauvegarder **restaurant fermé**
-  (la nuit), et vérifier chaque sauvegarde par une restauration PGlite (§ 6).
+  sauvegarde peut donner, par exemple, un tirage dont le client n'est pas dans le fichier. **Détection, pas
+  prévention** : chaque page demande le compteur exact de sa table (`count: 'exact'`) ; si le compteur change d'une
+  page à l'autre (écriture / suppression concurrente) ou si le total lu diffère du compteur (plafond PostgREST
+  configuré sous 1 000, ligne perdue entre deux pages), l'export est **refusé** et aucun fichier n'est écrit. Reste
+  un cas non détecté par les compteurs : une ligne modifiée entre deux lectures (même nombre de lignes, contenu
+  changé) — d'où la parade : sauvegarder **restaurant fermé** (la nuit), et vérifier chaque sauvegarde par une
+  restauration PGlite (§ 6).
 - **La restauration testée l'est sur PGlite** (Postgres en WebAssembly, local) : elle prouve que le fichier contient
   toutes les données et qu'elles se rechargent dans le schéma des migrations, avec leurs contraintes. Elle **ne valide
   PAS** la restauration complète d'un environnement Supabase (PostgREST, rôles réels, version de Postgres différente,
@@ -81,7 +86,9 @@ Rétention — supprimé : asian-home-2026-10-10T030000.json.gz
 
 - Fichier : `asian-home-AAAA-MM-JJTHHMMSS.json.gz` (heure **UTC**), dans `SAUVEGARDE_DIR` (défaut `<dépôt>/sauvegardes/`,
   gitignoré), droits `600`.
-- Lecture page par page (1 000 lignes, plafond PostgREST), triée sur la clé de chaque table, jusqu'à épuisement.
+- Lecture page par page (1 000 lignes, plafond PostgREST), triée sur la clé de chaque table, jusqu'à épuisement,
+  avec **vérification du compteur exact à chaque page** (§ 2) : un compteur qui bouge ou un total incomplet refuse
+  l'export au lieu d'écrire une sauvegarde tronquée.
 - La rétention ne touche **que** les fichiers au nom `asian-home-<horodatage>.json.gz` du dossier ; jamais autre chose.
 
 **Planifier (quotidien, à faire par l'opérateur)** — rien n'est planifié par ce lot. Exemple sur une machine allumée la
@@ -102,10 +109,13 @@ fichiers.
 SAUVEGARDE_CLE_CHIFFREMENT=… node scripts/restaurer-base.mjs sauvegardes/asian-home-2026-11-12T030000.json.gz --cible pglite --verifier
 ```
 
-Le script : décompresse, déchiffre (clé requise si le fichier est chiffré), valide (refus si une table manque), crée une
-base PGlite **en mémoire**, recrée les rôles Supabase (`anon`, `authenticated`, `service_role` BYPASSRLS), rejoue les
+Le script : décompresse, déchiffre (clé requise si le fichier est chiffré), valide (refus si une table manque),
+vérifie d'abord que la base cible n'est **pas déjà initialisée** (si une des 14 tables y existe, refus immédiat,
+avant toute migration — pointer par erreur vers une base existante ne la modifie pas), crée une base PGlite
+**en mémoire**, recrée les rôles Supabase (`anon`, `authenticated`, `service_role` BYPASSRLS), rejoue les
 migrations `0001…0008` (les `.down.sql` sont ignorés), puis insère toutes les lignes **dans une seule transaction**
-(une erreur → tout est annulé, sortie 1). `--verifier` recompte chaque table dans la base et compare au fichier.
+(une erreur → tout est annulé, sortie 1). `--verifier` recompte chaque table **dans cette même transaction** et
+compare au fichier : un écart annule la restauration au lieu de laisser des données validées derrière une sortie 1.
 
 ```
 RESTAURATION OK (PGlite en mémoire) — sauvegarde du 2026-11-12T03:00:00.000Z — 1234 lignes
@@ -149,10 +159,15 @@ Volontairement non automatisée : une erreur de cible écraserait la production.
    ```sql
    insert into public.clients (id, ordre, commerce_id, cle_contact, donnees, version) overriding system value
    select id, ordre, commerce_id, cle_contact, donnees, version
-   from jsonb_populate_recordset(null::public.clients, '<JSON>'::jsonb)
+   from jsonb_populate_recordset(null::public.clients, $sauvegarde$<JSON>$sauvegarde$::jsonb)
    on conflict (id) do update set commerce_id = excluded.commerce_id, cle_contact = excluded.cle_contact,
      donnees = excluded.donnees, version = excluded.version;
    ```
+
+   Le JSON est entre **délimiteurs dollar** (`$sauvegarde$…$sauvegarde$`), pas entre apostrophes : une valeur comme
+   `L'entrée` (apostrophe) casserait une chaîne SQL `'...'` et doit donc être collée telle quelle entre les
+   délimiteurs dollar. Si le JSON contenait lui-même `$sauvegarde$` (quasi impossible en pratique), choisir un autre
+   nom de délimiteur (ex. `$sauvegarde2$`).
 
    Clés de conflit : `id` sauf `meta` et `tentatives_auth` (`cle`), `menus` (`commerce_id`), `sessions_revoquees`
    (`jti`), `evenements_jour` (`commerce_id, jour, type`). `overriding system value` seulement pour les tables avec

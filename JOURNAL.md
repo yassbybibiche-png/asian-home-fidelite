@@ -851,12 +851,11 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
 - **Fait** : `server/sauvegarde.ts` (logique pure : 14 tables dans l'ordre des clés étrangères avec clé de conflit,
   export qui ÉCHOUE si une table manque, validation, restauration qui refuse un fichier incomplet, adaptateurs SQL
   lecture / upsert via `jsonb_populate_recordset`, AES-256-GCM avec clé de fichier HKDF + sel + IV aléatoires,
-  rétention pure) ; `scripts/sauvegarde-base.mjs` (PostgREST paginé par 1 000, gzip, chiffrement si clé, écriture
-  `.tmp` puis renommage, rétention, `SAUVEGARDE OK` / `ERREUR SAUVEGARDE` + sortie 1, aucun secret affiché) ;
+  rétention pure) ; `scripts/sauvegarde-base.mjs` (PostgREST paginé par 1 000, compteur exact vérifié à chaque page, gzip, chiffrement si clé, écriture
+  `.tmp` unique puis lien atomique, rétention, `SAUVEGARDE OK` / `ERREUR SAUVEGARDE` + sortie 1, aucun secret affiché) ;
   `scripts/restaurer-base.mjs` (PGlite seulement, migrations 0001–0008 sans `.down.sql`, une transaction, base cible
   vide exigée, `--verifier` ; toute cible Supabase / Postgres refusée sans afficher le DSN). Le `.mjs` importe
-  directement le `.ts` (type-stripping Node 24) : vérifié, pas de duplication. `npm run sauvegarde` / `npm run restaurer`.
-- **Choix RLS** : rôles Supabase recréés avant les migrations (comme `tests/migration-pglite.test.ts`), restauration en
+  directement le `.ts` (type-stripping Node 24) : vérifié, pas de duplication. `npm run sauvegarde` / `npm run restaurer`.- **Choix RLS** : rôles Supabase recréés avant les migrations (comme `tests/migration-pglite.test.ts`), restauration en
   propriétaire des tables (non filtré par la RLS, aucune table en FORCE) → rien à désactiver. Colonnes `ordre` (identity)
   réinsérées telles quelles (OVERRIDING SYSTEM VALUE) puis séquence recalée.
 - **Tests** : `tests/sauvegarde-p0-s5.test.ts`, **21 tests** — export depuis une PGlite remplie (≥ 1 ligne dans les
@@ -866,11 +865,21 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   CLI de bout en bout contre un faux PostgREST local (1 501 lignes de journal → pagination, chiffré, puis
   `restaurer-base.mjs --verifier`), `--aide`, variables absentes, table absente → aucun fichier, rétention sur disque.
   `npm test` **827/827** (806 avant, +21), typecheck serveur inclus, `npm run build` OK.
+- **Revue Codex (6 points, tous corrigés, +3 tests → 830/830)** : [P1] export tronqué si le plafond PostgREST est
+  < 1 000 → chaque page demande désormais le compteur exact (`count: 'exact'`) et l'export est refusé si le total lu
+  diffère du compteur ; [P1] ligne perdue par pagination par décalage si suppression concurrente → même compteur
+  vérifié à chaque page (il doit rester identique, sinon refus) + doc corrigée (l'affirmation « la restauration
+  échoue bruyamment, jamais en silence » surestimait les contraintes : une ligne supprimée entre deux pages ne
+  viole aucune clé étrangère) ; [P1] procédure de restauration Supabase (§ 8) cassée par les apostrophes
+  (`'<JSON>'`) → JSON collé entre délimiteurs dollar `$sauvegarde$…$sauvegarde$` ; [P2] `--verifier` après commit →
+  recompte désormais DANS la transaction (un écart annule la restauration) ; [P2] migrations rejouées avant le
+  contrôle de cible vide → la cible déjà initialisée est refusée AVANT toute migration ; [P2] deux sauvegardes
+  dans la même seconde → écriture `.tmp` unique par processus + lien atomique (`linkSync`, EEXIST = refus explicite).
 - **RPO / RTO** : RPO 24 h si sauvegarde quotidienne (lancée par l'opérateur : rien n'est planifié par ce lot) ;
   RTO estimé 1–2 h (restauration manuelle vers Supabase, `docs/SAUVEGARDE.md` § 8). Rétention 30 jours / 30 fichiers.
 - **Limites** : jamais exécuté contre la vraie base (consigne + pas d'accès réseau) ; PostgREST ne donne pas
-  d'instantané cohérent entre tables (sauvegarder restaurant fermé ; une incohérence fait échouer la restauration
-  bruyamment) ; schéma / RLS / config Supabase non sauvegardés (source = migrations) ; restauration validée sur PGlite
+  d'instantané cohérent entre tables (sauvegarder restaurant fermé ; une écriture concurrente est détectée par le
+  compteur exact et fait refuser l'export, jamais de fichier tronqué) ; schéma / RLS / config Supabase non sauvegardés (source = migrations) ; restauration validée sur PGlite
   seulement, pas sur un projet Supabase ; pas d'alerte automatique d'échec ; copie hors VM à faire par l'opérateur.
 - **Décisions en attente (utilisateur)** : Supabase Pro 25 $/mois (sauvegardes quotidiennes 7 j) non acheté ;
   mot de passe Postgres pour un `pg_dump` en complément ; planification + copie hors VM ; exercice de restauration

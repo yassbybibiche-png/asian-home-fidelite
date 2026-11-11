@@ -5,7 +5,8 @@
 // Node 24 retire les types à la volée : ce script .mjs importe directement la logique pure de server/sauvegarde.ts
 // (comme `npm run serveur` lance server/index.ts). Aucune dépendance en plus de @supabase/supabase-js.
 // Jamais de secret dans les logs : ni la clé service_role ni la clé de chiffrement ne sont affichées, même tronquées.
-import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, readdirSync, rmSync, writeFileSync, linkSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import {
@@ -90,22 +91,39 @@ async function principal() {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   })
 
-  /** Lit une table page par page (1 000 lignes), triée sur sa clé pour une pagination stable, jusqu'à épuisement. */
+  /**
+   * Lit une table page par page (1 000 lignes), triée sur sa clé pour une pagination stable, jusqu'à épuisement.
+   * Vérification d'intégrité (revue Codex P0-S5) : chaque page demande le compteur exact (`count: 'exact'`, en-tête
+   * Content-Range de PostgREST). Si le compteur change d'une page à l'autre (écriture / suppression concurrente) ou
+   * si le total lu diffère du compteur (plafond PostgREST configuré sous 1 000, ou ligne perdue entre deux pages),
+   * l'export est REFUSÉ : jamais de sauvegarde silencieusement incomplète.
+   */
   async function lireTable(table) {
     const { cle } = TABLES_SAUVEGARDE.find((t) => t.nom === table)
     const lignes = []
+    let totalAttendu
     for (let debut = 0; ; debut += PAGE) {
-      let requete = sb.from(table).select(COLONNES_SAUVEGARDE)
+      let requete = sb.from(table).select(COLONNES_SAUVEGARDE, { count: 'exact' })
       for (const c of cle) requete = requete.order(c, { ascending: true })
-      const { data, error } = await requete.range(debut, debut + PAGE - 1)
+      const { data, count, error } = await requete.range(debut, debut + PAGE - 1)
       if (error) {
         const e = new Error(error.code === 'PGRST205' || error.code === '42P01'
           ? `table inconnue « ${table} »` : `Supabase (${table}) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
         e.code = error.code
         throw e
       }
+      if (count == null) throw new Error(`table « ${table} » : compteur exact indisponible (en-tête Content-Range absent) — sauvegarde refusée.`)
+      if (totalAttendu === undefined) totalAttendu = count
+      else if (count !== totalAttendu) {
+        throw new Error(`table « ${table} » : ${totalAttendu} lignes comptées puis ${count} — écriture concurrente pendant l'export, sauvegarde refusée (relancer restaurant fermé).`)
+      }
       lignes.push(...data)
-      if (data.length < PAGE) return lignes
+      if (data.length < PAGE) {
+        if (lignes.length !== totalAttendu) {
+          throw new Error(`table « ${table} » : ${lignes.length} lignes lues pour ${totalAttendu} comptées — plafond PostgREST inférieur à ${PAGE} ou ligne perdue entre deux pages, sauvegarde refusée.`)
+        }
+        return lignes
+      }
     }
   }
 
@@ -123,15 +141,19 @@ async function principal() {
   mkdirSync(dossier, { recursive: true })
   const nom = `asian-home-${horodatage(new Date(sauvegarde.creeLe))}.json.gz`
   const final = join(dossier, nom)
-  if (existsSync(final)) throw new Error(`le fichier ${nom} existe déjà (deux sauvegardes dans la même seconde ?).`)
-  // Écriture en .tmp puis renommage : jamais de fichier final partiel.
-  const temporaire = `${final}.tmp`
+  // Écriture en .tmp (nom unique par processus) puis lien atomique : jamais de fichier final partiel, et deux
+  // sauvegardes dans la même seconde ne peuvent plus s'écraser (linkSync échoue EEXIST si le nom existe déjà).
+  const temporaire = `${final}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
   try {
     writeFileSync(temporaire, gzipSync(Buffer.from(contenu, 'utf8')), { mode: 0o600 })
-    renameSync(temporaire, final)
-  } catch (e) {
+    try {
+      linkSync(temporaire, final)
+    } catch (e) {
+      if (e.code === 'EEXIST') throw new Error(`le fichier ${nom} existe déjà (deux sauvegardes dans la même seconde ?).`)
+      throw e
+    }
+  } finally {
     rmSync(temporaire, { force: true })
-    throw e
   }
 
   const total = Object.values(sauvegarde.compteurs).reduce((a, b) => a + b, 0)
