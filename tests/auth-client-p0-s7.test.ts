@@ -499,7 +499,8 @@ describe('P0-S7 : mode transition (défaut) et configuration', () => {
       const { client, jeton } = await s.inscrire('0613131313')
       assert.ok(jeton, 'nouvelle carte : jeton quand même')
       const existant = await s.api('POST', `/commerces/${AH}/clients`, { contact: '0613131313' })
-      assert.equal(existant.statut, 200)
+      // P2-S13 — oracle fermé (changement de contrat) : la reprise publique répond 201 comme la création.
+      assert.equal(existant.statut, 201)
       assert.equal(existant.contenu.client.id, client.id)
       assert.equal(existant.contenu.jeton, undefined, 'jamais de jeton pour un contact existant')
       assert.equal((await s.api('GET', `/cartes/${client.id}`)).contenu.acces.vue, 'complete')

@@ -2659,20 +2659,28 @@ export async function creerServeur(o: OptionsServeur) {
       // Consentement aux relances : case séparée, jamais pré-cochée ; absent = pas de consentement.
       const consentement = corps.consentementRelance == null ? false : booleen(corps.consentementRelance, 'consentementRelance')
       const { client, existant } = await st.transaction(() => inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain, consentement))
+      // Commerçant (PIN) : le personnel voit déjà tous les clients — `existant` et 200/201 restent (tests serveur).
       if (commercant) return { statut: existant ? 200 : 201, json: { client, existant } }
-      // P0-S7 — contact déjà inscrit, sans preuve : jamais la carte d'un autre (mode strict). Le refus dit seulement que
-      // ce contact a une carte DANS CE COMMERCE (inhérent à une inscription sans code à usage unique), borné par les
-      // limites par IP / par contact et compté comme échec d'accès. Mode transition : comme avant, carte sans jeton.
+      // P2-S13 — signaux uniformisés côté public : la réponse a le MÊME statut 201 et la MÊME forme `{ client }`
+      // que le contact ait déjà une carte ou non, sans champ `existant`. Nouvelle carte : son jeton (1re preuve,
+      // sur le téléphone qui vient de s'inscrire). Carte existante : PAS de jeton — le titulaire la retrouve par
+      // « Retrouver ma carte » ou un lien du comptoir, comme en mode strict.
+      // Résiduels documentés (revue Codex P2-S13, points 1–2) : la présence du jeton distingue une création
+      // d'une reprise pour qui observe la réponse, et la carte renvoyée permet de lire `jeu.statut` sans jeton
+      // en mode transition (trou préexistant P0-S7, fermé en mode strict, production) — fermeture complète
+      // impossible tant que l'amorçage du jeton se fait en ligne ; bornés par les limites par IP / par contact
+      // et le journal P2-S15. Mode strict : inchangé (409 sans aucune donnée, P0-S7) — le 409 lui-même y reste
+      // un signal d'existence, pour la même raison.
       if (existant) {
         if (modeAuthClient === 'stricte') {
           await limiteur.echec([[cleClientIp(req), MAX_ECHECS_CLIENT_IP]], 'client')
           throw err(409, CONTACT_DEJA_INSCRIT)
         }
         accesSansJeton++
-        return { statut: 200, json: { client: cartePublique(client), existant } }
+        return { statut: 201, json: { client: cartePublique(client) } }
       }
       // Nouvelle carte : son jeton client (1re preuve = celui qui vient de s'inscrire sur ce téléphone).
-      return { statut: 201, json: { client: cartePublique(client), existant, ...(o.secretSession ? await accesClient(id, client.id) : {}) } }
+      return { statut: 201, json: { client: cartePublique(client), ...(o.secretSession ? await accesClient(id, client.id) : {}) } }
     }
 
     if (sous === 'clients' && sousId && m === 'POST' && (action === 'visite' || action === 'recompense')) {
@@ -3347,13 +3355,20 @@ export async function creerServeur(o: OptionsServeur) {
       if (charge) compteurs.consommer(`tirage:${id}:${charge.cid}`, limites.tirageParContact, 'Trop de tentatives pour ce contact.')
       else limiterContact('tirage', id, corps.contact, limites.tirageParContact)
       const prenom = corps.prenom == null ? '' : texte(corps.prenom, 'prenom', 40)
-      const dejaJoue = 'Vous avez déjà tourné la roue aujourd’hui. Revenez lors de votre prochaine visite !'
+      // P2-S13 — message de refus uniformisé : UN SEUL message (409), identique que le client ait déjà joué
+      // aujourd'hui ou n'ait pas encore validé sa visite — LE MESSAGE ne distingue plus les deux cas. Le
+      // titulaire, lui, connaît déjà la raison précise via `jeu.statut` de GET /cartes/:id (MessageSansVisite /
+      // MessageDejaJoue sur #/jouer) ; ce message ne fait que rappeler les deux issues possibles. Les deux
+      // formulations historiques sont conservées à l'intérieur (« valider votre visite », « déjà tourné la roue »)
+      // pour que le conseil reste utile au client légitime. Résiduel (revue Codex P2-S13, point 2) : en mode
+      // transition, `jeu.statut` se lit sans jeton sur la carte — la fermeture complète du statut vient du
+      // mode strict (production), pas de ce message.
+      const refusJeu = 'Vous ne pouvez pas jouer pour le moment : faites valider votre visite du jour au comptoir — si vous avez déjà tourné la roue aujourd’hui, revenez lors de votre prochaine visite.'
       const resultat = await st.transaction(async () => {
         const client = charge ? await clientOu401(id, charge.cid) : (await inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain)).client
         const t = maintenant()
         const statut = statutJeu(client, await st.tiragesClient(id, client.id), id, t)
-        if (statut === 'dejaJoue') return { refus: dejaJoue }
-        if (statut === 'sansVisite') return { refus: 'Pour jouer, faites d’abord valider votre visite du jour au comptoir.' }
+        if (statut === 'dejaJoue' || statut === 'sansVisite') return { refus: refusJeu }
         const jouables = lotsJouables(commerce.lots)
         if (!jouables.length) return { refus: 'Aucun lot n’est configuré pour le moment.' }
         const lot = jouables[tirerLot(commerce.lots)].libelle
@@ -3361,8 +3376,8 @@ export async function creerServeur(o: OptionsServeur) {
         try {
           await st.ajouterTirage(tirage)
         } catch (e) {
-          // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e.
-          if (e instanceof ErreurConflit) return { refus: dejaJoue }
+          // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e — même message unique.
+          if (e instanceof ErreurConflit) return { refus: refusJeu }
           throw e
         }
         return { tirage }

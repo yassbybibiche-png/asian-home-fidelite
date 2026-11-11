@@ -1,5 +1,46 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P2-S13 « Oracles d'énumération » (AUDIT.md §7, F-12)
+- **Changement de contrat (public, délibéré — 5 assertions existantes mises à jour, pas affaiblies)** :
+  `POST /commerces/:id/clients` public répond désormais 201 + `{ client }` (sans téléphone ni e-mail) que
+  le contact ait déjà une carte ou non — même statut, même forme, plus de champ `existant`. Nouvelle carte :
+  jeton client remis (amorçage sur le téléphone qui s'inscrit) ; carte existante : pas de jeton (le
+  titulaire la retrouve par « Retrouver ma carte » ou un lien du comptoir). Commerçant (PIN) inchangé
+  (201/200 + `existant`, il voit déjà les clients) ; mode strict inchangé (409 sans aucune donnée, P0-S7).
+  Assertions mises à jour : `tests/supabase.test.ts` (reprise publique [200, true] → 201 sans `existant`
+  ni jeton ; double inscription simultanée [200, 201] → [201, 201]), `tests/relances-p1-b3.test.ts`
+  (200 + `existant` → 201 sans `existant` ni jeton), `tests/securite-s2.test.ts` (reprises 201 ; + égalité
+  des ids, revue Codex point 6), `tests/auth-client-p0-s7.test.ts` (reprise transition 200 → 201).
+- **Tirage : message 409 UNIQUE** (`server/app.ts`, `refusJeu`) — identique sans visite ou déjà joué (y
+  compris le conflit de course, index unique) ; les deux formulations historiques sont conservées à
+  l'intérieur (« faites valider votre visite du jour au comptoir », « déjà tourné la roue aujourd'hui »)
+  pour que le conseil reste utile. Le front (`Jouer.tsx`) n'a pas eu besoin de changer : il affiche le
+  message tel quel et l'UI précise vient de `jeu.statut` (GET /cartes/:id → MessageSansVisite /
+  MessageDejaJoue). Type `inscrirePublic` nettoyé (`src/data/api.ts`, plus d'`existant` en public).
+- **404 vs 409 (revu, sans changement de code)** : carte inconnue → 404, carte existante + mauvais contact
+  → 403 sur les routes RGPD ; `prenom` 404/409/403 et `jeu.statut` sur GET /cartes/:id conservés — tous
+  épinglés par des tests existants et protégés par des identifiants UUID non énumérables ; documentés
+  comme résiduels (voir ci-dessous). `server/README.md` mis à jour (table des routes).
+- **Revue Codex (6 points, `/tmp/codex-revue-p2-s13.txt`, diff `/tmp/codex-p2-s13.diff`)** : 1. [Fondé,
+  élevée] le jeton distingue création et reprise → CORRIGÉ en requalification honnête : le lot est une
+  RÉDUCTION des signaux, pas une fermeture complète ; résiduel explicité dans le code, le README et les
+  tests (assertions `jeton` présent/absent libellées « résiduel documenté »). 2. [Fondé, élevée] la carte
+  renvoyée en reprise permet de lire `jeu.statut` sans jeton en mode transition → NON CORRIGÉ par du code
+  (la reprise doit renvoyer la carte pour que le front transition joue sans jeton ; la fermeture vient du
+  mode strict, production) — documenté comme résiduel préexistant P0-S7. 3. [Fondé, moyenne] les nouveaux
+  tests prétendaient une indistinguabilité complète → CORRIGÉ : intitulés et commentaires reformulés
+  (garantie = même statut + même forme, pas indistinguabilité), résiduel asserté explicitement.
+  4. [Fondé, faible] timing non uniformisé → NON CORRIGÉ : non mesuré, non prétendu (JOURNAL). 5. [Non
+  fondé] le front gère le 201 sans jeton (lecture conditionnelle, Jouer.tsx:630) → aucun changement ; la
+  suggestion d'un test front est couverte par le test serveur (forme de la réponse reprise).
+  6. [Faible réserve] `securite-s2` ne prouvait plus la déduplication par les seuls statuts → CORRIGÉ
+  (égalité des ids ajoutée) ; + test ajouté : double inscription simultanée → 1 client, UN SEUL jeton.
+- **Tests : 1119 → 1124 (+5, `tests/oracles-p2-s13.test.ts`)**, suite verte, `npx tsc -p .` propre
+  (typecheck serveur inclus dans `npm test`). **Non vérifié** : timing création vs reprise non mesuré ;
+  fermeture complète de l'oracle d'inscription impossible tant que l'amorçage du jeton se fait en ligne
+  (il faudrait une vérification du contact hors bande pour les créations aussi — changement de parcours,
+  hors lot) ; en mode strict, le 409 lui-même reste un signal d'existence.
+
 ## 11/11/2026 — P2-Q4 « Domaine + SEO » (AUDIT.md §7 ; lot déjà en partie livré : prérendu à faire, domaine non acheté)
 - **État initial trouvé** : P2-Q4 déjà en grande partie livré dans `autonome/integration`
   (commits `4f9e942`/`6ec5744`/`2f37e77` : JSON-LD Restaurant, robots/sitemap, `docs/DOMAINE.md`,
