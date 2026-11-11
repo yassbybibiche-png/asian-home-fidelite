@@ -1,5 +1,51 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P2-Q5 « Mise à jour README / documentation » (AUDIT.md §7)
+- **README.md racine** : production en ligne depuis le 09/11/2026 (Supabase `asian-home-fidelite`, migrations
+  0001–0008 appliquées le 10/11, 0009/0010 à la mise en production finale) ; Brevo branché en mode test depuis le
+  11/11 (compte créé et activé, 5 variables Render, `/sante` vérifié à 08h18 : `sms: true, email: true`,
+  `smsPrestataire: 'Brevo', modeTest: true`, aucun envoi réel) ; polling store 30 s (P1-P1, boucle Jouer 10 s
+  en attente) ; egress mesuré 3,04 Go/mois (navigateur) / 3,50 Go/mois (PostgREST), seuil 5 Go vers ~257 clients ;
+  tests 1149/1149, 68 fichiers ; section « Limites » réécrite (hébergement en ligne, journal d'audit, jeton client
+  en mode strict, file hors ligne caisse, consentement recueilli, vrai logo, photos 11/81).
+- **server/README.md** : egress mesuré (remplace l'estimation ~8 Go/mois) ; compression P2-Q2 (brotli q5 / gzip n6,
+  seuil 1 Ko, cache 128 entrées, `Vary: Accept-Encoding`) ; routes `/r/` (P2-Q3) et `/menu/` prérendu (P2-Q4) ;
+  `/sante` : 4 clés `migrations` dont `mesure` (0008), 0009/0010 hors `/sante` ; procédure de création : 14 tables
+  après 0001–0008, 15 après 0010 ; 5 secrets Render + `CORS_ORIGIN` ; titre « aucun déploiement » corrigé ;
+  « Migration future » marquée obsolète (Supabase est la base de production) ; limites honnêtes (journal d'audit,
+  mode strict client).
+- **docs/BREVO.md** : état au 11/11 (compte créé et activé, 5 variables posées, `/sante` vérifié à 08h18) ; étape E
+  « 5 variables » ; pré-requis §5 B cochés (compte, clé, expéditeur) sauf crédits SMS (achat non confirmé) et
+  destinataires. **docs/SEO.md** : sitemap `/` + `/menu/c-asian-home-paris` (plus de fragments). **SCORES.md** :
+  couverture 1149/1149.
+- **Tests** (`tests/documentation-p2-q5.test.ts`, 14 tests) : gardes documentaires — absence des affirmations
+  périmées et des contradictions connues, présence des faits à jour, total recoupé README ↔ SCORES.md (jamais codé
+  en dur), nombre de fichiers compté, cache compression recoupé avec `server/app.ts`.
+- **Revue Codex 1re passe (10 points, `/tmp/codex-revue-p2-q5.txt`, verdict « non acceptable ») — tous corrigés :**
+  1. [Fondé] « 4 tables RLS » ambigu + 15 tables après 0001–0008 → 4 clés `/sante.migrations`, 14 tables (15 après
+  0010). 2. [Fondé] titre « aucun déploiement n'a été fait » → « en production depuis le 09/11/2026 ».
+  3. [Fondé] « en attente des clés » + « (cas actuel : rien n'est envoyé) » → Brevo configuré, mode test.
+  4. [Fondé] consentement « aucun écran ne le recueille » + « aucun bouton Envoyer » → recueilli (Jouer, caisse),
+  « Envoyer la relance » sur la fiche client. 5. [Fondé] carte publique « rechargée toutes les 30 s » →
+  montage/retour au premier plan, pas de minuterie (`CartePublique.tsx` sans `setInterval`) ; 30 s = store,
+  10 s = boucle Jouer. 6. [Fondé] adresse Gmail de l'utilisateur retirée des 3 ajouts du lot (elle préexistait
+  dans AUDIT.md, JOURNAL.md, `tests/brevo-production-p1-b7.test.ts`, `docs/BREVO.md` §5 B — conservés, la
+  recette réelle a besoin d'un destinataire réel). 7. [Fondé] compteurs 1135/67 périmés dès l'ajout des tests →
+  1149/68 ; `npm test` inclut `typecheck:server` mais pas `tsc -p .` (vérifié `package.json`). 8. [Fondé]
+  gardes trop faibles → recoupements dynamiques + gardes anti-contradiction + cache recoupé avec le code.
+  9. [Fondé] ligne `/sante` étalée → une seule ligne physique. 10. [Fondé] « 4 secrets » → 5 secrets +
+  `CORS_ORIGIN` (`render.yaml`).
+- **Revue Codex 2e passe (`/tmp/codex-revue-p2-q5-2.txt`) : 0 point, verdict « lot acceptable ».**
+  (La 2e passe n'a pas pu certifier les 1149 réussites — sa propre exécution interrompue — mais la suite complète
+  a tourné ici : 1149/1149, voir ci-dessous.)
+- **Tests : 1135 → 1149 (+14, `tests/documentation-p2-q5.test.ts`)**, suite verte, `npx tsc -p .` propre,
+  typecheck serveur inclus dans `npm test`. Aucun test existant modifié, aucun secret, aucun envoi réel.
+- **Non vérifié.** `/sante` en production non re-vérifié dans ce lot (lecture en délai dépassé, probablement le
+  réveil Render — faits Brevo/production repris de la vérification du 11/11 à 08h18, agent parent) ; egress réel
+  du dashboard Supabase toujours non lu ; achat de crédits SMS Brevo non confirmé ; `docs/DEPLOIEMENT.md`,
+  `docs/GOOGLE-BUSINESS.md`, `docs/DOMAINE.md`, `docs/TESTS-AB.md`, `docs/PHOTOS-MANQUANTES.md`,
+  `docs/SAUVEGARDE.md`, `docs/SECURITE.md` relus et jugés à jour (aucune modification).
+
 ## 11/11/2026 — P2-S17 « Rotation des secrets » (AUDIT.md §7, revue Codex point 10)
 - **Procédure documentée** (`docs/SECURITE.md`, nouveau, ~250 lignes, aucun secret réel) : inventaire
   (SESSION_SECRET, SUPABASE_SERVICE_ROLE_KEY, ADMIN_PIN, PIN commerce, PIN_ASIAN_HOME, codes équipe,

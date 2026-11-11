@@ -15,7 +15,7 @@ liens WhatsApp / Facebook / X) et dans `public/` :
 | Favicon | `public/favicon.ico` (16/32/48), `public/icones/favicon-32.png` | Générés depuis `public/visuels/logo.png` ; l'icône 192 px et l'icône Apple (P1-C3) restent |
 | Données structurées | index.html, bloc `application/ld+json` | `Restaurant` : nom, adresse, téléphone, horaires (tous les jours 11h30-14h30 et 18h30-23h30), cuisines, halal, lien du menu, Instagram |
 | `robots.txt` | public/ | Tout autorisé sauf `/api/`, lien vers le sitemap |
-| `sitemap.xml` | public/ | `/`, `/#/menu`, `/#/jouer` |
+| `sitemap.xml` | public/ | `/`, `/menu/c-asian-home-paris` (adresse prérendue P2-Q4 — plus de fragment : Google ignore tout ce qui suit « # » ; la page de jeu n'est pas listée, elle n'est pas prérendable) |
 
 Faits du JSON-LD : **uniquement** ceux déjà présents dans le code (seed `coordonnees`, `CONTACT_ASIAN_HOME` de
 `src/lib/menuClient.ts`, sous-titre de `MenuPublic.tsx`). Volontairement absents : coordonnées GPS, gamme de prix,
