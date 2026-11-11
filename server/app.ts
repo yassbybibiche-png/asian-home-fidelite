@@ -42,6 +42,7 @@ import { CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, dureeConservationMois, es
 import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSuppression, type CompteurPublic, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
+import { menuAffichePour, pageMenuIndisponible, pageMenuPrerendue, pageNonTrouvee } from './prerendu.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
 import {
   chiffrerJetons,
@@ -1673,6 +1674,10 @@ export async function creerServeur(o: OptionsServeur) {
   // helpers de schéma ci-dessus : les compteurs ont été créés plus haut, mais leur restauration attend que ces
   // vérifications existent (aucune requête n'est servie avant la fin de `creerServeur` de toute façon).
   await compteurs.restaurer()
+
+  /** Cache des pages de menu prérendues (P2-Q4) : par commerce, 5 min (TTL) ; 64 entrées au plus. Déclaré ici (par
+   *  serveur, pas au niveau du module) pour que les tests gardent des serveurs indépendants. */
+  const cachePrerendu = new Map<string, { html: string; etag: string; statut: number; expire: number }>()
 
   /**
    * Mesure anonyme (P2-Q3) : +1 sur le compteur du jour. Jamais bloquant : migration absente, base en panne → l'événement
@@ -3633,6 +3638,65 @@ export async function creerServeur(o: OptionsServeur) {
           }
         }
         res.writeHead(302, { ...entetes, Location: `/?via=qr#/jouer/${courtJeu[1]}`, 'Cache-Control': 'no-store' }).end()
+        return
+      }
+      // Page publique prérendue (P2-Q4) : /menu/<commerceId> — le menu en HTML statique, lisible par les moteurs
+      // de recherche (la SPA vit dans le fragment, invisible d'eux). Rendu à la demande, cache 5 min en mémoire
+      // (le menu change rarement ; un changement met 5 min à apparaître ici comme chez les robots) ; ETag faible
+      // sur le contenu (304 si repris). Limite par IP comme les autres lectures publiques. Commerce inconnu (ou
+      // /menu sans id) : 404, pas la SPA en 200 (soft 404) ; commerce en pause : page « indisponible » (noindex).
+      const pageMenu = /^\/menu(?:\/([\w-]{1,80}))?$/.exec(url.pathname)
+      if (pageMenu && (req.method === 'GET' || req.method === 'HEAD')) {
+        limiterIp(req, 'lecture', limites.lectureParIp)
+        const site = sitePublic(req)
+        const id = pageMenu[1]
+        let page = id ? cachePrerendu.get(id) : undefined
+        if (page && page.expire <= Date.now()) {
+          cachePrerendu.delete(id)
+          page = undefined
+        }
+        if (!page) {
+          let html: string
+          let statut = 200
+          if (!id) {
+            html = pageNonTrouvee(site)
+            statut = 404
+          } else {
+            let commerce: Commerce | null = null
+            try {
+              commerce = (await st.commerce(id)) ?? null
+            } catch {
+              commerce = null
+            }
+            if (!commerce) {
+              html = pageNonTrouvee(site)
+              statut = 404
+            } else if (!commerce.actif) {
+              html = pageMenuIndisponible(commerce, site)
+            } else {
+              const menuStocke = (await st.menu(id)) ?? { commerceId: id, categories: [], majLe: '' }
+              html = pageMenuPrerendue(commerce, menuAffichePour(commerce, menuStocke), site)
+            }
+          }
+          const etagPage = `W/"${createHash('sha256').update(html).digest('hex').slice(0, 16)}"`
+          page = { html, etag: etagPage, statut, expire: Date.now() + 300_000 }
+          if (statut === 200 && id) {
+            if (cachePrerendu.size >= 64) cachePrerendu.clear()
+            cachePrerendu.set(id, page)
+          }
+        }
+        const cache = page.statut === 200 ? 'public, max-age=300' : 'no-store'
+        const communs = { ...entetes, 'Cache-Control': cache, ETag: page.etag }
+        if (etagCorrespond(req.headers['if-none-match'], page.etag)) {
+          res.writeHead(304, communs).end()
+          return
+        }
+        if (req.method === 'HEAD') {
+          const prep = preparerCorps(req, communs, 'text/html; charset=utf-8', Buffer.from(page.html))
+          res.writeHead(page.statut, prep.entetes).end()
+          return
+        }
+        envoyerCorps(req, res, page.statut, communs, 'text/html; charset=utf-8', Buffer.from(page.html))
         return
       }
       if (!url.pathname.startsWith('/api/v1/') && url.pathname !== '/api/v1') {
