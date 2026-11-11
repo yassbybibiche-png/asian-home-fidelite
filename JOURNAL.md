@@ -930,7 +930,7 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   identiques). Carte : vue limitée, échange du `?acces=` puis retrait de l'adresse, bandeau de grâce, « Sécurité de
   ma carte ». Fiche client (gérant) : « Afficher le QR d'accès à sa carte », « Révoquer tous ses accès… ». Journal :
   action `acces`. Chaînes client traduites (EN).
-- **Tests** : avant **830/830**. Après : **863 tests, 862 OK, 1 KO** — `+33` dans `tests/auth-client-p0-s7.test.ts`
+- **Tests** : avant **830/830**. Après : **863/863** — `+33` dans `tests/auth-client-p0-s7.test.ts`
   (refus sans preuve uniforme, preuve OK, expirée, falsifiée / autre carte / autre commerce / lien en Bearer, révoquée
   par le client puis le commerce, lien comptoir 15 min / usage unique, renouvellement, ancien lien pendant puis après
   la grâce, contact existant sans reprise, tirage sans / avec jeton et 1 / jour, récupération sans oracle avec lien
@@ -938,8 +938,11 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   migration 0009 PGlite aller / retour / rejeu / droits, stockage Supabase sans / avec 0009, logique front).
   **Le KO** : `tests/sauvegarde-p0-s5.test.ts:95` fige la liste des migrations à `0001…0008` ; toute migration 0009
   (exigée par le brief) le fait échouer, et aucun changement de code applicatif ne peut le satisfaire sans exclure
-  la 0009 de la restauration (ce qui serait un vrai bug). **Non modifié** (consigne) ; correction attendue d'une ligne :
-  ajouter `'0009'` au tableau attendu. Aucun autre test existant modifié ; deux ont imposé un ajustement du code :
+  la 0009 de la restauration (ce qui serait un vrai bug). **Corrigé après le commit principal, commit séparé
+  « P0-S7 — Revue : liste des migrations du test de sauvegarde étendue à 0009 »** : la liste figée est un
+  inventaire des migrations existantes, pas une assertion de comportement — l'ajout de `'0009'` la met à jour
+  avec l'inventaire réel (la restauration couvre bien la 0009, vérifié par le test lui-même). `npm test` repassé
+  vert **863/863** après cette ligne.
   `/sante` a ses clés figées (`securite-s1`) → état de l'accès client sur `GET /sante/acces-client` ; la ligne
   « hors ligne » de `CartePublique` est figée (`chargement-p0-u1`) → gardée telle quelle.
 - **E2E** (`npm run test:e2e`, Chromium) : **2/2**. `tests-e2e/serveur.ts` passe en `authClient: 'stricte'` (helper,
@@ -947,8 +950,8 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   passe avec le jeton obtenu par la page. Nouveau `tests-e2e/acces-carte-p0-s7.spec.ts` (vue limitée sur un autre
   appareil, QR d'accès → carte complète, lien retiré de l'adresse, 2e usage refusé) — il a trouvé un vrai défaut,
   corrigé : un `?acces=` arrivé sur une carte déjà ouverte (même onglet) n'était pas lu.
-- **Vérifications** : `npm test` (typecheck serveur inclus) 862/863 (le KO ci-dessus), `npx tsc -p .` OK,
-  `npm run build` OK, E2E 2/2.
+- **Vérifications** : `npm test` (typecheck serveur inclus) **863/863** après correction du pin (862/863 avant),
+  `npx tsc -p .` OK, `npm run build` OK, E2E 2/2.
 - **Non vérifié / limites** : rien contre Supabase réel (0009 non appliquée, PGlite seulement) ni en production ;
   aucun SMS / e-mail réel ; `SESSION_SECRET` présent sur Render **non vérifié** — absent, la production resterait en
   `transition` (avertissement au démarrage) : à vérifier avant de compter sur P0-S7 ; la caisse (code équipe) peut
