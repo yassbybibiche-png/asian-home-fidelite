@@ -1,5 +1,6 @@
 # Blueprint Render (phase Supabase S3) — serveur Asian Home Fidélité (API /api/v1 + front en mode API).
-# Mode d'emploi : server/README.md, « Mise en production », étape d (Render → New → Blueprint).
+# Mode d'emploi : server/README.md, « Mise en production », étape d (Render → New → Blueprint), et
+# docs/DEPLOIEMENT.md (staging, retour arrière). P0-S10 (11/11/2026) : 2e service de staging.
 # Champs vérifiés le 09/11/2026 sur https://render.com/docs/blueprint-spec.
 # AUCUN secret ici : les variables `sync: false` sont demandées par Render à la création du Blueprint
 # (et seulement à ce moment-là ; plus tard, elles se modifient dans Environment du service).
@@ -7,6 +8,14 @@ services:
   - type: web
     name: asian-home-fidelite
     runtime: node
+    # P0-U6 (11/11/2026) — plan Free conservé, DÉCISION documentée dans docs/DEPLOIEMENT.md § 7 :
+    # l'écran d'attente honnête (« Le serveur se réveille, ~1 min ») remplace le correctif technique.
+    # L'option payante reste isolée ici, sans effet tant que le plan n'est pas changé : passer au plan
+    # Starter (~7 $/mois, indicatif — à confirmer dans le dashboard avant tout achat, voir
+    # docs/DEPLOIEMENT.md § 7) = changer `plan: free` ci-dessous en `plan: starter` (dashboard Render,
+    # moyen de paiement requis) — NE PAS le faire sans décision explicite. Le keep-alive (ping régulier
+    # pour empêcher la veille) est ÉCARTÉ : il consommerait les 750 h gratuites partagées et n'est pas
+    # garanti (même section). Aucun changement de plan n'est appliqué par ce commentaire.
     plan: free
     region: frankfurt
     # Pas de `branch` : Render prend la branche choisie à la création du Blueprint.
@@ -38,3 +47,37 @@ services:
     # Volontairement absents : PORT (fourni par Render), NODE_ENV (la variable RENDER active déjà la production ;
     # NODE_ENV=production au build ferait sauter les devDependencies nécessaires à `npm run build:api`),
     # TZ / TRUST_PROXY (réglés par le serveur), DEMO et DB_FILE (jamais en production).
+  # P0-S10 — STAGING : même code, même build, autre branche, AUTRE BASE (projet Supabase de test, jamais la
+  # production). Les variables ont les mêmes noms mais des VALEURS différentes, à saisir dans le dashboard
+  # (docs/DEPLOIEMENT.md § 1) : SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY du projet de test, PINs de test
+  # (ADMIN_PIN et PIN_ASIAN_HOME différents de la production), SESSION_SECRET régénéré, CORS_ORIGIN =
+  # https://asian-home-fidelite-staging.onrender.com. Plan Free : 750 h/mois par espace de travail pour
+  # TOUS les services gratuits réunis (production + staging allumés en permanence = ~744 h chacun : à deux,
+  # le quota est dépassé — voir docs/DEPLOIEMENT.md § 1, « Coût et quota Free »).
+  - type: web
+    name: asian-home-fidelite-staging
+    runtime: node
+    plan: free
+    region: frankfurt
+    # Branche suivie par le staging : les fusions dans autonome/integration redéploient le staging
+    # automatiquement (autoDeploy par défaut). La production, elle, ne suit que master.
+    branch: autonome/integration
+    buildCommand: npm ci && npm run build:api
+    startCommand: npm run serveur
+    healthCheckPath: /api/v1/sante
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ADMIN_PIN
+        sync: false
+      - key: PIN_ASIAN_HOME
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+    # Mêmes absences volontaires que la production (PORT, NODE_ENV, TZ / TRUST_PROXY, DEMO, DB_FILE).

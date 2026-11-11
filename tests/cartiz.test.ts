@@ -9,7 +9,7 @@ import type { AddressInfo } from 'node:net'
 
 import { creerServeur, type OptionsServeur } from '../server/app.ts'
 import type { CategorieMenu, Client, EntreeJournal } from '../src/types.ts'
-import { analyserMontant, pointsPourMontant } from '../src/lib/points.ts'
+import { analyserMontant, memeJourParis, passageCeJour, pointsPourMontant } from '../src/lib/points.ts'
 import { clientIdDepuisQr, creerFileCaisse, libelleFile, type ActionCaisse, type Envoi } from '../src/lib/fileCaisse.ts'
 import { analyserAnniversaire, clientsCibles, genererMessages } from '../src/lib/messages.ts'
 import { contraste, problemesApparence } from '../src/lib/apparence.ts'
@@ -55,6 +55,15 @@ describe('Points (logique)', () => {
     assert.equal(analyserMontant(''), 0)
     assert.equal(analyserMontant('abc'), null)
     assert.equal(analyserMontant('1,234'), null)
+  })
+  test('passageCeJour : jour calendaire à Paris, pas le fuseau du navigateur (revue Codex P1-S12)', () => {
+    // Visite à 22h30 UTC = 23h30 à Paris le 9 novembre (CET, UTC+1).
+    const client = { visites: ['2026-11-09T22:30:00.000Z'] } as Client
+    assert.equal(passageCeJour(client, new Date('2026-11-09T22:45:00.000Z')), true, '23h45 à Paris le 9 : même jour')
+    // 23h30 UTC = 00h30 à Paris le 10 : jour différent à Paris (même jour en UTC).
+    assert.equal(passageCeJour(client, new Date('2026-11-09T23:30:00.000Z')), false)
+    assert.equal(memeJourParis(new Date('2026-11-09T22:30:00.000Z'), new Date('2026-11-09T23:30:00.000Z')), false)
+    assert.equal(memeJourParis(new Date('2026-11-09T22:30:00.000Z'), new Date('2026-11-09T22:45:00.000Z')), true)
   })
 })
 
@@ -233,10 +242,11 @@ describe('Équipe, caisse, points, audit (serveur)', () => {
 
   test('caisse : code équipe exigé (mauvais code 401), le code identifie le membre', async () => {
     assert.equal((await srv.api('GET', `/commerces/${AH}/caisse`, undefined, { 'X-Equipe-Code': '0000' })).statut, 401)
-    const r = await srv.api('GET', `/commerces/${AH}/caisse`, undefined, CODE)
+    const r = await srv.api('GET', `/commerces/${AH}/caisse?q=Lina`, undefined, CODE)
     assert.equal(r.statut, 200)
     assert.deepEqual(r.contenu.auteur, { type: 'membre', id: membreId, nom: 'Mai' })
     assert.ok(r.contenu.clients.some((c: Client) => c.id === lina.id))
+    assert.equal((await srv.api('GET', `/commerces/${AH}/caisse`, undefined, CODE)).contenu.clients.length, 0, 'P0-S14 : sans recherche, aucun client')
   })
 
   test('passage avec montant → 1 tampon + points ; 2e passage le même jour refusé ; réglage 1 point / 2 €', async () => {
@@ -275,7 +285,7 @@ describe('Équipe, caisse, points, audit (serveur)', () => {
     const trop = await srv.api('POST', `/commerces/${AH}/caisse/echange`, { clientId: lina.id, recompenseId: 'rp-menu', actionId: 'act-echange-0' }, CODE)
     assert.equal(trop.statut, 409)
     assert.match(trop.contenu.erreur, /Solde insuffisant/)
-    const avant = (await srv.api('GET', `/commerces/${AH}/caisse`, undefined, CODE)).contenu.clients.find((c: Client) => c.id === lina.id).points
+    const avant = (await srv.api('GET', `/commerces/${AH}/caisse/clients/${lina.id}`, undefined, CODE)).contenu.client.points
     const ok = await srv.api('POST', `/commerces/${AH}/caisse/echange`, { clientId: lina.id, recompenseId: 'rp-nems', actionId: 'act-echange-1' }, CODE)
     assert.equal(ok.statut, 200)
     const e = ok.contenu.client.echangesPoints.at(-1)
@@ -292,6 +302,9 @@ describe('Équipe, caisse, points, audit (serveur)', () => {
   })
 
   test('journal d’audit : membre, client, action, date — jamais le code ; gérant tracé aussi', async () => {
+    // P1-S12 : Lina a déjà un passage le 11 (action hors ligne rejouée, `faitLe` 11h30) — la visite du gérant, qui
+    // alimente le journal d'audit, est enregistrée le lendemain, sinon la garde « 1 tampon par jour » la refuse.
+    horloge = new Date(2026, 10, 12, 12, 0)
     await srv.api('POST', `/commerces/${AH}/clients/${lina.id}/visite`, undefined, PIN)
     await srv.api('PATCH', `/commerces/${AH}/equipe/${membreId}`, { code: '9753' }, PIN)
     const j: EntreeJournal[] = (await srv.api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.journal
@@ -374,6 +387,9 @@ describe('Messages, menu, apparence (serveur)', () => {
     assert.equal((await srv.api('PUT', `/commerces/${AH}/menu`, menu, PIN)).statut, 200)
     const pub = await srv.api('GET', `/commerces/${AH}/menu`)
     assert.equal(pub.contenu.menu.categories[0].produits[0].nom, 'Har gow')
+    // P1-M2 : les allergènes saisis côté commerçant sont relus tels quels en public
+    // (ordre normalisé selon ALLERGENES par validerMenu).
+    assert.deepEqual(pub.contenu.menu.categories[0].produits[0].allergenes, ['Gluten', 'Crustacés'])
     const c: Client = (await srv.api('POST', `/commerces/${AH}/clients`, { prenom: 'Léo', contact: '0677777777' })).contenu.client
     assert.equal((await srv.api('GET', `/cartes/${c.id}`)).contenu.menuDisponible, true)
   })
@@ -396,8 +412,9 @@ describe('Messages, menu, apparence (serveur)', () => {
     assert.equal(compterPlats(pub), 81)
     const lus = pub.categories.flatMap((c: CategorieMenu) => c.produits.map((p) => [p.nom, p.prix]))
     assert.deepEqual(lus, officiel.categories.flatMap((c) => c.produits.map((p) => [p.nom, p.prix])))
-    assert.equal(lus.filter(([, prix]: [string, number | null]) => prix === null).length, 3)
-    assert.deepEqual(lus.find(([nom]: [string]) => nom === '6 Maki Gold'), ['6 Maki Gold', 10000])
+    assert.equal(lus.filter(([, prix]: [string, number | null]) => prix === null).length, 5)
+    assert.deepEqual(lus.find(([nom]: [string]) => nom === '6 Maki Gold'), ['6 Maki Gold', null])
+    assert.deepEqual(lus.find(([nom]: [string]) => nom === 'Riz Thaï'), ['Riz Thaï', null])
     // Le même menu, réimporté depuis son export CSV, est accepté tel quel par le serveur.
     const csv = menuDepuisCsv(menuEnCsv(pub), AH, horloge)
     assert.equal((await srv.api('PUT', `/commerces/${AH}/menu`, { categories: csv.categories }, PIN)).statut, 200)
@@ -416,5 +433,42 @@ describe('Messages, menu, apparence (serveur)', () => {
     assert.equal((await srv.api('PATCH', `/commerces/${AH}`, { apparence: { couleur: '#1d4ed8', banniere: 'https://exemple.fr/b.jpg' } }, PIN)).statut, 200)
     const pub = await srv.api('GET', `/commerces/${AH}`)
     assert.equal(pub.contenu.commerce.apparence.couleur, '#1d4ed8')
+  })
+})
+
+describe('Garde « 1 tampon par jour » sur la route historique `visite` (P1-S12)', () => {
+  test('2e tampon le même jour via `visite` → 409 ; la caisse refuse aussi ; lendemain → de nouveau possible', async () => {
+    horloge = new Date(2026, 10, 9, 12, 0)
+    const srv = await demarrer('visite-garde.db')
+    try {
+      const lina: Client = (await srv.api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '06 12 34 56 78' }, PIN)).contenu.client
+      const tampons = async () => ((await srv.api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.clients as Client[]).find((c) => c.id === lina.id)!.tampons
+      const visite = () => srv.api('POST', `/commerces/${AH}/clients/${lina.id}/visite`, undefined, PIN)
+
+      const premiere = await visite()
+      assert.equal(premiere.statut, 200)
+      assert.equal(premiere.contenu.client.tampons, 1)
+
+      // 2e visite le même jour : refus, aucun tampon crédité — même règle que la caisse.
+      const deuxieme = await visite()
+      assert.equal(deuxieme.statut, 409)
+      assert.match(deuxieme.contenu.erreur, /1 tampon par jour/)
+      assert.equal(await tampons(), 1)
+
+      // Uniformité : un passage en caisse le même jour est refusé aussi (la visite a déjà compté).
+      const caisse = await srv.api('POST', `/commerces/${AH}/caisse/passage`, { clientId: lina.id, montantCentimes: 1000, actionId: 'act-visite-garde' }, PIN)
+      assert.equal(caisse.statut, 409)
+      assert.match(caisse.contenu.erreur, /1 tampon par jour/)
+      assert.equal(await tampons(), 1)
+
+      // Lendemain : la visite redevient possible.
+      horloge = new Date(2026, 10, 10, 12, 0)
+      const lendemain = await visite()
+      assert.equal(lendemain.statut, 200)
+      assert.equal(lendemain.contenu.client.tampons, 2)
+    } finally {
+      horloge = new Date(2026, 10, 9, 12, 0)
+      await srv.app.fermer()
+    }
   })
 })

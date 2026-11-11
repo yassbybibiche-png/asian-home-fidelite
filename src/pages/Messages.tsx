@@ -4,7 +4,8 @@ import type { MessageCommercant } from '../data/api'
 import { CIBLES, clientsCibles, texteCible, TYPES_MESSAGES, type Cible } from '../lib/messages'
 import { etatRelances, MENTION_ENVOI } from '../lib/integrations'
 import { libelleModele, libelleStatutEnvoi } from '../lib/relances'
-import { texteEtContacts } from '../lib/ecransCommercant'
+import { texteEtContacts, type Recapitulatif } from '../lib/ecransCommercant'
+import { Confirmation } from '../components/Confirmation'
 import { dateRelative } from '../lib/format'
 import type { EnvoiRelance } from '../types'
 import { BoutonCopier, EnTete, MessageErreur, Vide } from '../components/ui'
@@ -82,7 +83,7 @@ function RelancesSmsEmail() {
         ))}
       </ul>
       <p className="text-sm text-gray-600">
-        {MENTION_ENVOI}. Le client se désinscrit par le lien de l’e-mail, en répondant STOP au SMS quand il vient d’un numéro, ou auprès du commerçant ; vous pouvez aussi retirer son consentement sur sa fiche.
+        {MENTION_ENVOI}. Le client se désinscrit par le lien de désinscription de chaque SMS ou e-mail, ou auprès du commerçant ; vous pouvez aussi retirer son consentement sur sa fiche.
       </p>
       <fieldset className="space-y-2 border-t border-gray-100 pt-3">
         <legend className="etiquette">Relances automatiques (à l’ouverture du tableau de bord, une fois par jour)</legend>
@@ -117,6 +118,7 @@ export default function Messages() {
   const [texte, setTexte] = useState(() => texteCible('inactifs', commerce))
   const { executer, enCours, erreur } = useAction()
   const [annonce, setAnnonce] = useState('')
+  const [demande, setDemande] = useState(false)
   const [recents, setRecents] = useState<MessageCommercant[] | null>(null)
   const [erreurListe, setErreurListe] = useState<string | null>(null)
   const cibles = clientsCibles(clients, commerce, cible, new Date())
@@ -145,12 +147,22 @@ export default function Messages() {
   }
 
   async function deposer() {
-    if (!window.confirm(`Déposer ce message dans l’espace client de ${cibles.length} client(s) ?`)) return
+    setDemande(false)
     const r = await executer(() => avecPin((a, api) => api.envoyerMessage(commerce.id, a, cible, texte.trim())))
     if (r.ok) {
       setAnnonce(`✓ Message déposé dans l’espace client de ${r.valeur} client(s) : ils le verront à la prochaine ouverture de leur carte.`)
       chargerRecents()
     }
+  }
+
+  const recapDepot: Recapitulatif = {
+    titre: 'Déposer ce message ?',
+    lignes: [
+      ['Destinataires', `${cibles.length} client(s)`],
+      ['Cible', CIBLES.find((c) => c.cible === cible)!.libelle],
+    ],
+    confirmer: 'Déposer le message',
+    avertissement: 'Le message s’affichera dans l’espace client des clients visés.',
   }
 
   const contacts = cibles.map((c) => c.telephone ?? c.email ?? '')
@@ -212,9 +224,10 @@ export default function Messages() {
           Rien n’est envoyé par SMS ni par e-mail depuis cet écran : sans les clés des prestataires configurées sur le serveur, SMS et e-mail ne sont pas branchés. Collez
           le texte dans votre messagerie et envoyez-le vous-même.
         </p>
-        <button className="bouton w-full" disabled={enCours || !texte.trim() || !cibles.length} onClick={() => void deposer()}>
+        <button className="bouton w-full" disabled={enCours || !texte.trim() || !cibles.length} onClick={() => setDemande(true)}>
           {enCours ? 'Dépôt…' : 'Déposer dans l’espace client'}
         </button>
+        {demande && <Confirmation recap={recapDepot} enCours={enCours} onConfirmer={() => void deposer()} onAnnuler={() => setDemande(false)} />}
         <MessageErreur>{erreur}</MessageErreur>
         {annonce && (
           <p className="alerte-succes" role="status">
@@ -244,7 +257,7 @@ export default function Messages() {
                   <span className="shrink-0">{dateRelative(m.date)}</span>
                 </p>
                 <p className="text-gray-800">{m.texte}</p>
-                <BoutonCopier texte={m.texte} libelle="Copier" className="min-h-11 text-sm font-semibold text-marque-700 underline" />
+                <BoutonCopier texte={m.texte} libelle="Copier" className="min-h-11 text-sm font-semibold text-magenta-700 underline" />
               </li>
             ))}
           </ul>

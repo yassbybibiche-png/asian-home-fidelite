@@ -95,6 +95,37 @@ export function estPurgeable(c: Client, commerce: Pick<Commerce, 'conservationMo
   return datePurge(c, dureeConservationMois(commerce)).getTime() <= maintenant.getTime() && !protectionPurge(c, maintenant)
 }
 
+// ---------- Rappel périodique de purge (P1-G1) ----------
+
+/**
+ * Décision P1-G1 — refus explicite de la purge automatique : RIEN n'est jamais supprimé sans un geste du
+ * commerçant. Ni tâche planifiée (Render Free n'exécute rien sans requête), ni suppression à l'ouverture de
+ * l'état, ni minuteur côté front. La contrepartie est ce rappel : le tableau de bord — ouvert à chaque passage
+ * du commerçant — et l'écran Clients montrent les cartes dues ou proches de l'être, avec le lien vers l'écran
+ * Clients où la purge se lance après saisie de « PURGER ».
+ * Portée exacte de la garantie : le rappel du tableau de bord couvre les cartes purgeables (dues ou dues sous
+ * 30 jours, sans protection), en mode API, depuis les clients chargés dans le navigateur. Une carte protégée
+ * au-delà de la conservation n'y apparaît pas — elle reste listée dans l'écran Clients avec sa protection, et
+ * c'est l'écran Clients (`GET …/purge`, relu à chaque ouverture) qui est la liste de référence, pas le rappel.
+ */
+export interface ResumeRappelPurge {
+  /** Cartes dont la date de purge est passée et qu'aucune protection ne retient : à purger maintenant. */
+  aPurger: number
+  /** Cartes dont la date de purge tombe dans les 30 jours, sans protection. */
+  bientot: number
+  /** Cartes listées mais protégées (exclues, récompense en attente, réserve, litige) : jamais purgées. */
+  proteges: number
+}
+
+/** Résumé du rappel, depuis une liste de purge (`listePurge`) : les trois compteurs sont disjoints. */
+export function resumeRappelPurge(liste: ClientAPurger[]): ResumeRappelPurge {
+  return {
+    aPurger: liste.filter((c) => c.statut === 'due' && !c.protection).length,
+    bientot: liste.filter((c) => c.statut === 'bientot' && !c.protection).length,
+    proteges: liste.filter((c) => c.protection).length,
+  }
+}
+
 // ---------- Export individuel (droit d'accès / portabilité) ----------
 
 const ORIGINES: Record<NonNullable<Client['consentementRelanceOrigine']>, string> = {
@@ -218,7 +249,7 @@ export function politiqueConfidentialite(
       titre: 'Finalité',
       lignes: [
         'La carte de fidélité du commerce et la roue du jour.',
-        'Les relances par SMS ou e-mail, uniquement avec votre consentement (case non pré-cochée), retirable à tout moment : lien dans chaque e-mail, réponse STOP au SMS quand il vient d’un numéro, ou auprès du commerce.',
+        'Les relances par SMS ou e-mail, uniquement avec votre consentement (case non pré-cochée), retirable à tout moment : lien de désinscription dans chaque SMS et chaque e-mail, ou auprès du commerce.',
       ],
     },
     {

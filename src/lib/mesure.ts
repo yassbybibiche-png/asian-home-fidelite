@@ -104,6 +104,9 @@ export interface LigneCoutLot {
 
 const dansIntervalle = (jour: string, debut: string, fin: string) => jour >= debut && jour <= fin
 
+/** Jour dans [debut, fin] (jours à Paris, inclus) — aussi utilisé par le test 2 (`mesure-offre.ts`). */
+export { dansIntervalle }
+
 /** Gains de la période [debut, fin] (jours à Paris, inclus) regroupés par lot, du plus coûteux au moins coûteux. */
 export function coutsParLot(tirages: Tirage[], lots: Lot[], debut: string, fin: string): LigneCoutLot[] {
   const parLot = new Map<string, LigneCoutLot>()
@@ -243,7 +246,7 @@ export interface EtapeEntonnoir {
  */
 export function entonnoir(t: Totaux): EtapeEntonnoir[] {
   const etapes: [TypeEvenement, string][] = [
-    ['scan', 'Pages de jeu ouvertes (scan QR / lien)'],
+    ['scan', 'Scans du QR (page chargée ou non)'],
     ['tirage', 'Tirages'],
     ['gain', 'Gains'],
     ['clicGoogle', 'Clics vers l’avis Google'],
@@ -438,6 +441,9 @@ export function resultatsAccroche(compteurs: CompteurEvenement[], test: TestsAB[
   }
   return { depuis: test.depuis, jusqua: fin, A: r.A, B: r.B, assezDeDonnees, significatif }
 }
+
+// ---------- Test A/B « offre de la semaine » : voir `src/lib/mesure-offre.ts` (module du tableau de bord,
+// page différée — hors bundle initial, cf. seuil du test de bundle P2-Q2). ----------
 
 // ---------- Événements anonymes : types acceptés ----------
 

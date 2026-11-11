@@ -1,6 +1,10 @@
 // Mise en scène de la roue (P1-C2) : durée de rotation, mouvement réduit, vibration, confettis, textes des écrans
 // de résultat et parcours « garder ma carte ». Logique pure, testable sans navigateur ; aucune logique de tirage ici.
 import { jourEnClair } from './roulette.ts'
+import type { Langue } from './langue.ts'
+import { COULEURS_CONFETTIS } from '../theme.ts'
+
+export { COULEURS_CONFETTIS }
 
 /** Rotation de la roue : 3,6 s (fourchette demandée 3 à 4 s). Animation CSS de `transform` seul (composité, 60 fps). */
 export const DUREE_ROTATION_MS = 3600
@@ -61,7 +65,6 @@ export function vibrer(motif: number[], nav: { vibrate?: (m: number[]) => boolea
 
 // ---- Confettis (CSS maison, aucune dépendance) ----
 
-export const COULEURS_CONFETTIS = ['#b3262d', '#f2d48a', '#d4a73c', '#fff7e0', '#1f2937', '#ff4d6d']
 export const NOMBRE_CONFETTIS = 36
 
 export interface Confetti {
@@ -150,6 +153,32 @@ export function etapesEcranAccueil(p: Plateforme): string[] {
     'Ouvrez votre carte avec le bouton ci-dessous.',
     'Ajoutez la page à vos favoris, ou à l’écran d’accueil depuis le menu du navigateur de votre téléphone.',
   ]
+}
+
+/** Étapes en anglais (P2-Q1) : même ordre que `etapesEcranAccueil`, hors dictionnaire — elles ne sont pas
+ *  traduites par `t()` mais choisies par la langue, comme `texteProgressionLangue`. Cela évite 8 clés
+ *  (FR + EN) dans le dictionnaire initial du bundle (P2-Q2). */
+const ETAPES_ECRAN_ACCUEIL_EN: Record<Plateforme, string[]> = {
+  ios: [
+    'Open your card with the button below, in Safari.',
+    'Tap the Share button (the square with an upward arrow).',
+    'Choose “Add to Home Screen”, then “Add”.',
+  ],
+  android: [
+    'Open your card with the button below, in Chrome.',
+    'Tap the ⋮ menu at the top right.',
+    'Choose “Add to Home screen” (or “Install”), then confirm.',
+  ],
+  autre: [
+    'Open your card with the button below.',
+    'Bookmark the page, or add it to your home screen from your phone browser’s menu.',
+  ],
+}
+
+/** Instructions pas à pas pour ajouter la carte à l’écran d’accueil, dans la langue courante. */
+export function etapesEcranAccueilLangue(p: Plateforme, langue: Langue): string[] {
+  if (langue === 'fr') return etapesEcranAccueil(p)
+  return ETAPES_ECRAN_ACCUEIL_EN[p]
 }
 
 export const NOTE_WALLET = 'Apple Wallet et Google Wallet arrivent bientôt ; en attendant, l’icône sur votre écran d’accueil ouvre directement votre carte.'

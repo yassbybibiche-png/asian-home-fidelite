@@ -79,7 +79,7 @@ export function etatGoogleBusiness(s: { configure: boolean; connecte: boolean } 
 export const MENTIONS_RGPD = [
   'Données collectées : prénom + téléphone ou e-mail du client, ses visites, tampons, points, récompenses et gains de la roulette ; anniversaire et plat préféré seulement s’il les donne.',
   'Finalité : la carte de fidélité et la roulette du commerce. Aucune revente, aucune publicité tierce.',
-  'Relances SMS / e-mail : seulement avec le consentement explicite du client (case non pré-cochée, date et origine conservées) ; désinscription à tout moment (lien dans chaque e-mail, réponse STOP au SMS quand il vient d’un numéro, ou auprès du commerçant). Aucun envoi tant qu’aucun prestataire n’est configuré.',
+  'Relances SMS / e-mail : seulement avec le consentement explicite du client (case non pré-cochée, date et origine conservées) ; désinscription à tout moment (lien de désinscription dans chaque SMS et chaque e-mail, ou auprès du commerçant). Aucun envoi tant qu’aucun prestataire n’est configuré.',
   'Conservation : 3 ans après la dernière visite par défaut (réglable dans Réglages) ; l’écran Clients liste à l’avance les cartes à purger, le commerce confirme la purge (jamais automatique, journalisée).',
   'Droits du client : accès, rectification, export, suppression, retrait du consentement — depuis sa carte (« Recevoir mes données », « Demander la suppression »), en caisse ou par message au commerce.',
   'Export et suppression côté commerce : sur la fiche client, export CSV de ses données et bouton « Supprimer ce client » (tirages, journal, parrainages, demandes et relances supprimés avec lui ; suppression journalisée).',

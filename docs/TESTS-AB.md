@@ -27,8 +27,10 @@ d'une même journée voient la même phrase.
 - Une semaine a 7 jours (impair) : chaque jour de la semaine **alterne** de variante d'une semaine à l'autre (le samedi
   n'est pas toujours B). Sur 2 semaines complètes, chaque variante a eu chaque jour de la semaine une fois.
 
-**Mesure.** Compteurs anonymes par jour (table `evenements_jour`, migration 0008) : `scan` = page de jeu ouverte (une fois
-par onglet), `tirage` = tirage enregistré par le serveur. **Indicateur** : tirages ÷ pages ouvertes, par variante.
+**Mesure.** Compteurs anonymes par jour (table `evenements_jour`, migration 0008) : `scan` = QR scanné — compté par la
+redirection courte `/r/<commerceId>` du serveur, **même si la page de jeu ne se charge jamais** (réseau coupé, serveur
+endormi) — ou page de jeu ouverte directement (lien partagé, parrainage), signalée une fois par onglet ; `tirage` =
+tirage enregistré par le serveur. **Indicateur** : tirages ÷ scans, par variante.
 
 **Lancer / arrêter.** Réglages → *Lots de la roulette* → interrupteur « Test A/B : phrase d'accroche de la page de jeu ».
 Le serveur note le jour de début (et le jour d'arrêt) ; ces dates ne viennent jamais du navigateur. Réactiver = nouveau
@@ -58,16 +60,22 @@ taux de chaque variante.
 **mardi** ou le **jeudi** ?
 
 **Pourquoi manuel.** Une offre de jour ne peut pas être répartie entre clients le même jour (elle est affichée à tous,
-en vitrine comme sur la carte) : on compare des **semaines** entières, ce que l'app ne bascule pas toute seule. Aucun
-mécanisme n'est codé pour ce test ; c'est un protocole.
+en vitrine comme sur la carte) : on compare des **semaines** entières, ce que l'app ne bascule pas toute seule. Le
+jour de l'offre ne se change donc pas automatiquement ; en revanche **la comparaison est outillée** : le tableau de
+bord (Mesure → « Test A/B · offre de la semaine », `comparerOffreSemaine` dans `src/lib/mesure-offre.ts`) calcule, pour
+deux périodes de 4 semaines choisies par le gérant, les visites par jour de semaine et la variation nette — plus
+besoin d'exporter le CSV à la main pour comparer.
 
 **Protocole.**
 1. **Semaines 1 à 4 — offre le mardi.** Réglages → *Offre de la semaine* : jour = mardi, même libellé et même condition
    pendant toute la durée.
 2. **Semaines 5 à 8 — offre le jeudi.** Changer seulement le jour (mardi → jeudi). Libellé et condition identiques.
 3. Ne pas lancer d'autre opération (SMS, réseaux sociaux, test 1…) pendant ces 8 semaines, ou la noter.
-4. **Mesurer** : Tableau de bord → *Mesure* → **Jour** → **Export CSV** (colonne `visites`, une ligne par jour ;
-   exporter à la fin de chaque période de 4 semaines : la vue « jour » couvre les 30 derniers jours).
+4. **Mesurer** : Tableau de bord → *Mesure* → **Test A/B · offre de la semaine** : saisir le lundi de début de chaque
+   période de 4 semaines (par défaut, les deux derniers blocs de 4 semaines). Le tableau donne les visites de chaque
+   jour de semaine pour les deux périodes, et la variation nette. (Repli : **Export CSV** de la vue « Jour », colonne
+   `visites`, une ligne par jour ; exporter à la fin de chaque période de 4 semaines : la vue « jour » couvre les 30
+   derniers jours.)
 5. **Comparer** :
    - visites des 4 mardis avec offre ÷ visites moyennes des mardis des 4 semaines précédant le test (base) ;
    - même calcul pour les 4 jeudis avec offre ;
@@ -86,7 +94,7 @@ l'ordre inverse (jeudi puis mardi) sur les 8 semaines suivantes.
 
 | Mesure | Source | Identité ? |
 |---|---|---|
-| Pages de jeu ouvertes, tirages, gains, clics vers l'avis Google | compteurs du serveur (`evenements_jour`, un nombre par jour et par type) | **aucune** |
+| Pages de jeu ouvertes, tirages, gains, clics vers l'avis Google | compteurs du serveur (`evenements_jour`, un nombre par jour et par type) — `scan` est compté à la redirection `/r/` du QR, même si la page ne se charge pas | **aucune** |
 | Visites, tirages, gains, lots distribués, coût des lots | données déjà en base (tampons, tirages) | déjà existantes, rien de nouveau collecté |
 | Retour après gain | tirages + visites déjà en base, calculé dans le tableau de bord | idem |
 | Avis réellement publiés sur Google | **non mesuré** (Google ne le dit pas) ; seul le clic vers Google est compté | — |

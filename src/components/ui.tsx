@@ -1,8 +1,7 @@
-import { useId, useMemo, useState, type ReactNode } from 'react'
-import qrcode from 'qrcode-generator'
+import { useId, useState, type ReactNode } from 'react'
 import type { Commerce } from '../types'
 import { initiales } from '../lib/format'
-import { estLogoLocal, logoCommerce } from '../lib/visuels'
+import { estLogoLocal, LOGO_DEFAUT_PETIT, logoCommerce, VISUELS } from '../lib/visuels'
 import { estLogoTeleverse } from '../lib/logo'
 import { ETATS_WALLET, EXPLICATION_WALLET, LIBELLE_WALLET, MENTIONS_RGPD } from '../lib/integrations'
 import { useLangue } from './Langue'
@@ -16,11 +15,24 @@ export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Comme
     if (estLogoTeleverse(logo)) {
       return <img src={logo} alt={`Logo ${commerce.nom}`} className={`${dims} shrink-0 rounded-xl bg-nuit-950 object-contain ring-1 ring-gray-200`} />
     }
+    // Logo par défaut d'Asian Home : variante WebP 192×192 (4,9 Ko) servie en premier —
+    // le PNG 600×600 (74 Ko) reste le repli (boucle t5 : le logo est affiché 64×64 sur
+    // #/jouer et #/menu, et télécharge ~870 ms sur 4G lente en parallèle du héros).
+    // Seul le logo par défaut est concerné : un logo téléversé ou renseigné par le
+    // commerçant garde sa balise <img> simple (branche ci-dessus / ci-dessous).
+    if (logo === VISUELS.logo) {
+      return (
+        <picture className="block shrink-0">
+          <source srcSet={LOGO_DEFAUT_PETIT} type="image/webp" />
+          <img src={logo} alt={`Logo ${commerce.nom}`} className={`${dims} shrink-0 rounded-xl object-cover ring-1 ring-gray-200 bg-gray-950`} />
+        </picture>
+      )
+    }
     return <img src={logo} alt={`Logo ${commerce.nom}`} className={`${dims} shrink-0 rounded-xl object-cover ring-1 ring-gray-200 ${estLogoLocal(logo) ? 'bg-gray-950' : 'bg-white'}`} />
   }
   return (
     <span
-      className={`${dims} inline-flex shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-marque-500 to-marque-700 font-bold tracking-wide text-white shadow-sm ring-1 ring-black/5`}
+      className={`${dims} inline-flex shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-magenta-500 to-magenta-700 font-bold tracking-wide text-white shadow-sm ring-1 ring-black/5`}
       aria-hidden
     >
       {(logo || initiales(commerce.nom)).slice(0, 3).toUpperCase()}
@@ -82,7 +94,7 @@ export function Interrupteur({ actif, onChange, libelle, aide }: { actif: boolea
         className="relative inline-flex h-11 w-16 shrink-0 items-center justify-center rounded-full"
         data-interrupteur
       >
-        <span className={`relative h-8 w-14 rounded-full transition-colors ${actif ? 'bg-marque-500' : 'bg-gray-500'}`} aria-hidden>
+        <span className={`relative h-8 w-14 rounded-full transition-colors ${actif ? 'bg-magenta-500' : 'bg-gray-500'}`} aria-hidden>
           <span className={`absolute top-1 left-1 h-6 w-6 rounded-full bg-white shadow transition-transform ${actif ? 'translate-x-6' : ''}`} />
         </span>
       </button>
@@ -114,25 +126,6 @@ export function Icone({ nom, className = 'h-6 w-6' }: { nom: string; className?:
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={nom === 'plus' ? 3.5 : 1.9} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
       <path d={CHEMINS[nom]} />
-    </svg>
-  )
-}
-
-/** QR code dessiné en SVG, généré localement (aucun appel réseau). */
-export function QrCode({ texte, className = 'h-48 w-48', titre }: { texte: string; className?: string; titre?: string }) {
-  const { d, taille } = useMemo(() => {
-    const qr = qrcode(0, 'M')
-    qr.addData(texte)
-    qr.make()
-    const n = qr.getModuleCount()
-    let chemin = ''
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) chemin += `M${x + 4} ${y + 4}h1v1h-1z`
-    // Marge blanche de 4 modules autour (zone de silence exigée par la norme QR).
-    return { d: chemin, taille: n + 8 }
-  }, [texte])
-  return (
-    <svg viewBox={`0 0 ${taille} ${taille}`} className={`${className} bg-white`} role="img" aria-label={titre ?? 'QR code'} shapeRendering="crispEdges">
-      <path d={d} fill="#111827" />
     </svg>
   )
 }
@@ -234,7 +227,7 @@ export function EncartWallet({ demo = false, lienCarte, replie = false }: { demo
       </ul>
       <p className="mt-1.5">{EXPLICATION_WALLET}</p>
       {lienCarte && (
-        <a href={lienCarte} className="mt-1 flex min-h-11 items-center font-semibold text-marque-700 underline">
+        <a href={lienCarte} className="mt-1 flex min-h-11 items-center font-semibold text-magenta-700 underline">
           Ouvrir la carte publique (QR) ↗
         </a>
       )}
@@ -261,7 +254,7 @@ export function BlocRgpd({ commerceId }: { commerceId?: string }) {
 export function LienConfidentialite({ commerceId, className = '' }: { commerceId: string; className?: string }) {
   const { t } = useLangue()
   return (
-    <a href={`#/confidentialite/${encodeURIComponent(commerceId)}`} className={`font-semibold text-marque-700 underline ${className}`}>
+    <a href={`#/confidentialite/${encodeURIComponent(commerceId)}`} className={`font-semibold text-magenta-700 underline ${className}`}>
       {t('Politique de confidentialité')}
     </a>
   )

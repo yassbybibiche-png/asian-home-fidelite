@@ -4,9 +4,12 @@ import { urlAbsolue } from '../router'
 import type { CategorieMenu, Produit } from '../types'
 import { ALLERGENES, LIMITES_MENU, compterPlats, menuDepuisCsv, menuEnCsv, nomFichierMenuCsv, prixEnTexte } from '../lib/menu'
 import { analyserMontant } from '../lib/points'
-import { BoutonCopier, EnTete, MessageErreur, QrCode, Vide } from '../components/ui'
+import { BoutonCopier, EnTete, MessageErreur, Vide } from '../components/ui'
+import { QrCode } from '../components/QrCode'
 import { estAsianHome } from '../lib/visuels'
 import { COMPTE_PLATS_REELS, menuReelAsianHome } from '../data/menu-reel'
+import { Confirmation } from '../components/Confirmation'
+import type { Recapitulatif } from '../lib/ecransCommercant'
 
 type ProduitEdite = Omit<Produit, 'prix'> & { prix: string }
 type CategorieEditee = Omit<CategorieMenu, 'produits'> & { produits: ProduitEdite[] }
@@ -52,6 +55,7 @@ export default function MenuCarte() {
   const { executer, enCours, erreur } = useAction()
   const [enregistre, setEnregistre] = useState(false)
   const [erreurCsv, setErreurCsv] = useState<string | null>(null)
+  const [remplacement, setRemplacement] = useState<{ nouvelles: CategorieMenu[]; avertissement: string } | null>(null)
   const lien = urlAbsolue('menu', commerce.id)
 
   useEffect(() => {
@@ -79,16 +83,38 @@ export default function MenuCarte() {
   const prixInvalide = categories.some((c) => c.produits.some((p) => p.prix.trim() && analyserMontant(p.prix) === null))
   const editeurNonVide = categories.some((c) => c.produits.length > 0)
 
-  /** Remplace le contenu de l'éditeur, après sauvegarde CSV automatique du menu actuel (s'il n'est pas vide) et confirmation. */
+  /** Remplace le contenu de l'éditeur, après sauvegarde CSV automatique du menu actuel (s'il n'est pas vide) et confirmation. La sauvegarde part AVANT la modale : annuler ne perd rien, confirmer remplace. */
   function remplacer(nouvelles: CategorieMenu[], question: string) {
     if (editeurNonVide) {
       telechargerMenuCsv(categories!)
-      if (!window.confirm(`${question} Le menu actuel vient d’être sauvegardé en CSV (${nomFichierMenuCsv(new Date())}). Les modifications non enregistrées seront perdues.`)) return
+      setRemplacement({
+        nouvelles,
+        avertissement: `${question} Le menu actuel vient d’être sauvegardé en CSV (${nomFichierMenuCsv(new Date())}). Les modifications non enregistrées seront perdues.`,
+      })
+      return
     }
+    appliquerRemplacement(nouvelles)
+  }
+
+  /** Le remplacement lui-même, seulement après confirmation (ou éditeur vide). */
+  function appliquerRemplacement(nouvelles: CategorieMenu[]) {
+    setRemplacement(null)
     setEnregistre(false)
     setErreurCsv(null)
     setCategories(versEdition(nouvelles))
   }
+
+  const recapRemplacement: Recapitulatif | null = remplacement
+    ? {
+        titre: 'Remplacer le menu ?',
+        lignes: [
+          ['Menu actuel', 'Sauvegardé en CSV'],
+          ['Publication', 'Rien n’est publié avant « Enregistrer le menu »'],
+        ],
+        confirmer: 'Remplacer le menu',
+        avertissement: remplacement.avertissement,
+      }
+    : null
 
   async function importerCsv(fichier: File) {
     let menu
@@ -117,7 +143,7 @@ export default function MenuCarte() {
       <section className="carte space-y-3">
         <h2 className="titre-carte">QR code du menu</h2>
         <div className="flex justify-center">
-          <div className="rounded-2xl bg-white p-2 ring-2 ring-marque-500">
+          <div className="rounded-2xl bg-white p-2 ring-2 ring-magenta-500">
             <QrCode texte={lien} className="h-40 w-40" titre="QR code du menu" />
           </div>
         </div>
@@ -134,7 +160,10 @@ export default function MenuCarte() {
           <h2 className="titre-carte">Carte officielle du restaurant</h2>
           <p className="text-sm text-gray-700">
             Charge les {COMPTE_PLATS_REELS} plats de la carte officielle d’Asian Home dans l’éditeur ci-dessous, avec les prix relevés le 10/11/2026 sur
-            la carte du restaurant. 2 prix sont à confirmer : Riz Thaï 8,90 € et 6 Maki Gold 100,00 €. Les 3 plats absents de la carte (Thaï-sty
+            la carte du restaurant. 2 prix imprimés ne sont pas confirmés et restent masqués (« Prix sur place ») dans le menu public tant que vous
+            ne les confirmez pas : Riz Thaï (8,90 € imprimés) et 6 Maki Gold (100,00 € imprimés — probable coquille pour 10,00 €). Saisissez le prix
+            confirmé dans l’éditeur ci-dessous pour l’afficher ; si le prix confirmé est exactement la valeur imprimée, prévenez l’équipe : par
+            sécurité, cette valeur reste masquée tant qu’elle n’est pas validée côté application. Les 3 plats absents de la carte (Thaï-sty
             Krusty, Bœuf Basilic, Boisson 33cl) sont conservés sans prix dans « Hors carte (prix à confirmer) ».
           </p>
           <button
@@ -188,6 +217,10 @@ export default function MenuCarte() {
         + Ajouter une catégorie
       </button>
 
+      {recapRemplacement && remplacement && (
+        <Confirmation recap={recapRemplacement} onConfirmer={() => appliquerRemplacement(remplacement.nouvelles)} onAnnuler={() => setRemplacement(null)} />
+      )}
+
       <div className="sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-10 space-y-2 md:bottom-4">
         <MessageErreur>{erreur && `Menu non enregistré : ${erreur}`}</MessageErreur>
         {prixInvalide && <MessageErreur>Chaque prix renseigné doit être valide (ex : 6,50). Un prix vide s’affiche « Prix sur place ».</MessageErreur>}
@@ -200,6 +233,7 @@ export default function MenuCarte() {
 }
 
 function EditeurCategorie({ categorie, onChange }: { categorie: CategorieEditee; onChange(c: CategorieEditee | null): void }) {
+  const [demande, setDemande] = useState(false)
   const majProduit = (i: number, p: ProduitEdite | null) =>
     onChange({ ...categorie, produits: p ? categorie.produits.map((x, j) => (j === i ? p : x)) : categorie.produits.filter((_, j) => j !== i) })
   return (
@@ -215,10 +249,24 @@ function EditeurCategorie({ categorie, onChange }: { categorie: CategorieEditee;
         <button
           type="button"
           className="h-12 shrink-0 rounded-xl px-3 text-sm font-semibold text-red-800 ring-1 ring-red-200"
-          onClick={() => window.confirm(`Supprimer la catégorie « ${categorie.nom || 'sans nom'} » et ses produits ?`) && onChange(null)}
+          onClick={() => setDemande(true)}
         >
           Supprimer
         </button>
+        {demande && (
+          <Confirmation
+            recap={{
+              titre: 'Supprimer cette catégorie ?',
+              lignes: [
+                ['Catégorie', categorie.nom || 'sans nom'],
+                ['Produits', `${categorie.produits.length} produit(s) seront supprimés`],
+              ],
+              confirmer: 'Supprimer la catégorie',
+            }}
+            onConfirmer={() => (setDemande(false), onChange(null))}
+            onAnnuler={() => setDemande(false)}
+          />
+        )}
       </div>
       <ul className="space-y-3">
         {categorie.produits.map((p, i) => (

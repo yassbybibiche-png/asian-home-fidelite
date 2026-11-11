@@ -66,7 +66,13 @@ describe('Fichiers WebP livrés (public/visuels/menu-*.webp)', () => {
     }
   })
   test('aucun autre menu-*.webp que les 18 attendus', () => {
-    const presents = readdirSync(new URL('../public/visuels/', import.meta.url)).filter((f) => f.endsWith('.webp'))
+    // Boucle t2 : le dossier contient aussi logo-petit.webp (variante du logo, pas une photo de
+    // menu) — le filtre porte sur le préfixe menu-, l'exigence est inchangée : les 18 attendus
+    // doivent exister et tout menu-*.webp supplémentaire fait échouer le test.
+    // Boucle t10 : les variantes *-petit.webp (photos de catégories, pas des photos de plats
+    // du PDF) sont exclues du filtre — l'exigence porte sur les photos de plats, pas sur
+    // les variantes.
+    const presents = readdirSync(new URL('../public/visuels/', import.meta.url)).filter((f) => f.startsWith('menu-') && f.endsWith('.webp') && !f.endsWith('-petit.webp'))
     assert.deepEqual(presents.sort(), [...FICHIERS].sort())
   })
   test('le script d’extraction couvre exactement ces 9 plats', () => {
@@ -93,13 +99,15 @@ describe('Rattachements dans la carte officielle (menuReelAsianHome)', () => {
       Object.values(SLUGS).map((s) => `/visuels/menu-${s}.webp`).sort(),
     )
   })
-  test('Loc Lac, Mango Stick et les 2 makis gardent leur photo existante, sans vignette', () => {
+  test('Loc Lac et Mango Stick gardent leur photo existante, sans vignette ; les 2 makis n’ont plus de photo (P1-M3)', () => {
     const de = (nom: string) => plats().find((x) => x.nom === nom)!
     assert.equal(de('Loc Lac').photo, VISUELS.menuLocLac)
     assert.equal(de('Mango Stick').photo, VISUELS.menuMangoStickyRice)
-    assert.equal(de('8 Maki Tiger').photo, VISUELS.menuMakis)
-    assert.equal(de('8 Maki Chicken Dragon').photo, VISUELS.menuMakis)
-    for (const nom of ['Loc Lac', 'Mango Stick', '8 Maki Tiger', '8 Maki Chicken Dragon']) assert.equal(de(nom).photoVignette, undefined, nom)
+    assert.equal(de('8 Maki Tiger').photo, undefined)
+    assert.equal(de('8 Maki Chicken Dragon').photo, undefined)
+    assert.equal(de('8 Maki Tiger').photoVignette, undefined)
+    assert.equal(de('8 Maki Chicken Dragon').photoVignette, undefined)
+    for (const nom of ['Loc Lac', 'Mango Stick']) assert.equal(de(nom).photoVignette, undefined, nom)
   })
   test('sans photo : Love Bao, 6 Maki Gold, Tiramisu, boissons, variantes makis / california / sashimi / sushi', () => {
     for (const nom of ['Love Bao', '6 Maki Gold', 'Tiramisu']) {

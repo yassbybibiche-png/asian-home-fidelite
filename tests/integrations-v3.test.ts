@@ -205,7 +205,7 @@ describe('Apple Wallet : en suspens', () => {
     const client = { ...nouveauClient(commerce.id, 'Lina', { telephone: '0612345678' }), tampons: 2, points: 30 }
     const p = passJsonApple(commerce, client, 'https://x/#/carte/1', { passTypeIdentifier: 'pass.x', teamIdentifier: 'T' })
     assert.equal(p.storeCard.primaryFields[0].value, '2/4')
-    assert.equal(p.backgroundColor, 'rgb(179, 38, 45)')
+    assert.equal(p.backgroundColor, 'rgb(209, 0, 111)') // P0-D1 : fond du pass = couleur par défaut (magenta #d1006f)
     assert.doesNotMatch(JSON.stringify(p), /0612345678/)
     const fichiers = { 'pass.json': Buffer.from(JSON.stringify(p)), 'icon.png': Buffer.from([1, 2, 3]) }
     assert.equal(manifeste(fichiers)['icon.png'], createHash('sha1').update(Buffer.from([1, 2, 3])).digest('hex'))
@@ -294,7 +294,8 @@ describe('SMS / e-mail : branchements préparés, aucun envoi', () => {
       const corps = new URLSearchParams(String(t.init.body))
       assert.equal(corps.get('To'), '+33655555555')
       assert.equal(corps.get('From'), '+33700000000')
-      assert.match(corps.get('Body')!, /^Asian Home Paris : Lina, vous nous manquez.*STOP : répondez STOP$/)
+      assert.match(corps.get('Body')!, /^Asian Home Paris : Lina, vous nous manquez.*STOP : http:\/\/127\.0\.0\.1:\d+\/d\/[^/]+\/[A-Za-z0-9_-]{32}$/)
+      assert.doesNotMatch(corps.get('Body')!, /répondez STOP/i)
 
       const e = await api('POST', `/commerces/${AH}/clients/${mail.id}/relance`, { canal: 'email', message: 'Revenez nous voir !' }, PIN)
       assert.equal(e.statut, 200)

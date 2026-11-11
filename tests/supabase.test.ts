@@ -10,10 +10,12 @@ import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 
 import { creerServeur, hacherPinAncien, type OptionsServeur } from '../server/app.ts'
-import { ErreurConflit } from '../server/stockage.ts'
+import { ErreurConflit, ErreurMigrationManquante } from '../server/stockage.ts'
 import { configSupabaseDepuisEnv, ouvrirStockageSupabase } from '../server/stockage-supabase.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import { cleContact, nouveauClient, offrirRecompense, validerVisite } from '../src/lib/fidelite.ts'
+import { calculerChiffresCartes } from '../src/lib/stats.ts'
+import { soldePoints } from '../src/lib/points.ts'
 import type { Client, Commerce, Tirage } from '../src/types.ts'
 
 const URL_SB = 'https://projet-factice.supabase.co'
@@ -67,6 +69,8 @@ const SCHEMA: Record<string, { pk: string; uniques: Unicite[]; fk?: [string, str
   },
   // 0008_mesure.sql — écrite seulement par la fonction `incrementer_evenement` (POST /rpc/…), clé (commerce_id, jour, type).
   evenements_jour: { pk: 'jour', uniques: [], fk: [['commerce_id', 'commerces']] },
+  // 0010_compteurs_publics.sql — clé du compteur (`lecture:<ip>`, `carte:<id>`…), fenêtre d'une minute, nombre.
+  compteurs_publics: { pk: 'cle', uniques: [] },
 }
 
 interface Requete {
@@ -77,8 +81,8 @@ interface Requete {
   corps: unknown
 }
 
-/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` à `sans0008` : idem pour 0004 à 0008. */
-function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, sans0006 = false, sans0007 = false, sans0008 = false } = {}) {
+/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` à `sans0008` : idem pour 0004 à 0008. `sans0010` : idem pour 0010 (compteurs publics). */
+function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, sans0006 = false, sans0007 = false, sans0008 = false, sans0010 = false } = {}) {
   const absentes = new Set([
     ...(sans0003 ? ['equipe', 'journal', 'menus'] : []),
     ...(sans0004 ? ['parrainages', 'demandes_rattrapage'] : []),
@@ -86,6 +90,7 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
     ...(sans0006 ? ['tentatives_auth'] : []),
     ...(sans0007 ? ['envois'] : []),
     ...(sans0008 ? ['evenements_jour'] : []),
+    ...(sans0010 ? ['compteurs_publics'] : []),
   ])
   const tables: Record<string, Ligne[]> = Object.fromEntries(Object.keys(SCHEMA).map((t) => [t, []]))
   const requetes: Requete[] = []
@@ -144,7 +149,10 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
     }
     const debut = Number(params.get('offset') ?? 0)
     const limite = params.get('limit')
-    return limite ? lignes.slice(debut, debut + Number(limite)) : lignes.slice(debut)
+    // P0-S18 (revue Codex point 4) : PostgREST plafonne une réponse à 1 000 lignes même sans `limit` (max-rows par
+    // défaut) ; le faux le reproduit, sinon un test HTTP ne verrait jamais une lecture non paginée. Une lecture
+    // sans `limit` qui attend plus de 1 000 lignes est donc un bug du code testé, pas du faux.
+    return lignes.slice(debut, debut + (limite ? Number(limite) : 1000))
   }
 
   const projeter = (lignes: Ligne[], select: string | null) =>
@@ -373,7 +381,7 @@ describe('Supabase : adaptateur de stockage (faux PostgREST)', () => {
     assert.deepEqual(f.requetes.at(-1)!.corps, { id: 'ti-1', commerce_id: commerce.id, client_id: lina.id, date: t1.date, donnees: t1 })
     await st.ajouterTirage(t2)
     assert.deepEqual(await st.tirages(commerce.id), [t2, t1])
-    assert.equal(f.requetes.at(-1)!.params.get('order'), 'date.desc')
+    assert.equal(f.requetes.at(-1)!.params.get('order'), 'date.desc,id.asc')
     assert.deepEqual(await st.tiragesClient(commerce.id, lina.id), [t1, t2])
     assert.equal(f.requetes.at(-1)!.params.get('client_id'), `eq.${lina.id}`)
 
@@ -423,6 +431,47 @@ describe('Supabase : adaptateur de stockage (faux PostgREST)', () => {
     assert.deepEqual(f.tables.tirages.map((t) => t.id), ['t1', 't3', 't4'])
   })
 
+  test('P0-S11 : majCommerce conditionné à la version relue dans une transaction ; inconditionnel hors transaction', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    await st.majCommerce({ ...commerce, nom: 'Hors transaction' })
+    assert.equal(f.requetes.at(-1)!.params.get('version'), null, 'hors transaction : pas de garde (comportement inchangé)')
+    // Lecture dans la transaction, écriture concurrente entre-temps → ErreurConflit, la ligne garde l'autre écriture.
+    await assert.rejects(
+      st.transaction(async () => {
+        const lu = (await st.commerce(commerce.id))!
+        await ouvrir(f).majCommerce({ ...lu, nom: 'Autre requête' })
+        await st.majCommerce({ ...lu, nom: 'Perdant' })
+      }),
+      (e: Error) => e instanceof ErreurConflit && /réessayez/.test(e.message),
+    )
+    assert.equal((f.tables.commerces[0].donnees as Commerce).nom, 'Autre requête')
+    // Deux écritures successives dans la même transaction : la version suivie est celle renvoyée par la 1re.
+    await st.transaction(async () => {
+      const lu = (await st.commerce(commerce.id))!
+      await st.majCommerce({ ...lu, nom: 'Un' })
+      await st.majCommerce({ ...lu, nom: 'Deux' })
+    })
+    assert.equal((f.tables.commerces[0].donnees as Commerce).nom, 'Deux')
+  })
+
+  test('P0-S11 : journal et traces programme jamais ignorés — ErreurMigrationManquante sans la 0003 / 0004', async () => {
+    const sans3 = fauxPostgrest({ sans0003: true })
+    const st3 = ouvrir(sans3)
+    await st3.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    const entree = { id: 'jr-1', commerceId: commerce.id, date: '2026-11-11T10:00:00.000Z', action: 'passage' as const, auteur: { type: 'gerant' as const, nom: 'Gérant' }, details: '+1 tampon' }
+    await assert.rejects(Promise.resolve(st3.ajouterJournal(entree)), (e: Error) => e instanceof ErreurMigrationManquante && /0003_cartiz\.sql/.test(e.message))
+
+    const sans4 = fauxPostgrest({ sans0004: true })
+    const st4 = ouvrir(sans4)
+    await st4.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    const p = { id: 'pr-1', commerceId: commerce.id, parrainId: 'cl-a', filleulId: 'cl-b', date: '2026-11-11T10:00:00.000Z', pointsParrain: 50, pointsFilleul: 50 }
+    await assert.rejects(Promise.resolve(st4.ajouterParrainage(p)), (e: Error) => e instanceof ErreurMigrationManquante && /0004_programme\.sql/.test(e.message))
+    const d = { id: 'rt-1', commerceId: commerce.id, clientId: 'cl-b', date: '2026-11-11T10:00:00.000Z', montantCentimes: 0, statut: 'en_attente' as const, creeLe: '2026-11-11T10:00:00.000Z' }
+    await assert.rejects(Promise.resolve(st4.ajouterDemandeRattrapage(d)), ErreurMigrationManquante)
+  })
+
   test('erreur Supabase : message clair, sans la clé', async () => {
     const f = fauxPostgrest()
     const st = ouvrir(f)
@@ -440,7 +489,7 @@ describe('Supabase : adaptateur de stockage (faux PostgREST)', () => {
 describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () => {
   const dossier = mkdtempSync(join(tmpdir(), 'fidelite-supabase-'))
   after(() => rmSync(dossier, { recursive: true, force: true }))
-  const horloge = new Date(2026, 10, 9, 12, 0)
+  let horloge = new Date(2026, 10, 9, 12, 0) // `let` : le test « parcours » avance d'un jour par visite (P1-S12).
 
   async function demarrer(f: ReturnType<typeof fauxPostgrest> | undefined, options: Partial<OptionsServeur> = {}) {
     const app = await creerServeur({
@@ -528,28 +577,16 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
     }
   })
 
-  test('production AVANT la migration 0003 : l’existant marche (visite, récompense, état, roue), les nouveautés → 503 explicite', async () => {
+  test('production AVANT la migration 0003 : démarrage refusé (journal d’audit obligatoire) ; après la migration, /sante le dit', async () => {
+    // Mis à jour par P0-S11 : ce test affirmait qu'une visite passait sans la 0003 (journal ignoré en silence). P0-S11
+    // interdit de perdre le journal sans le dire : le serveur refuse désormais de démarrer en Supabase sans la 0003,
+    // avec un message qui nomme la migration et la sauvegarde à faire avant.
     const f = fauxPostgrest({ sans0003: true })
-    const { app, api } = await demarrer(f)
-    try {
-      assert.equal((await api('GET', '/sante')).contenu.migrations.cartiz, false)
-      const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
-      const v = await api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)
-      assert.equal(v.statut, 200, 'la visite reste enregistrée (seule la trace du journal manque)')
-      assert.equal(v.contenu.client.tampons, 1)
-      const etat = await api('GET', `/commerces/${AH}/etat`, undefined, PIN)
-      assert.deepEqual([etat.statut, etat.contenu.membres, etat.contenu.journal], [200, [], []])
-      assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).statut, 201)
-      assert.equal((await api('GET', `/cartes/${c.id}`)).statut, 200)
-      const m = await api('POST', `/commerces/${AH}/equipe`, { nom: 'Mai', code: '2468' }, PIN)
-      assert.equal(m.statut, 503)
-      assert.match(m.contenu.erreur, /0003_cartiz\.sql/)
-      assert.equal((await api('PUT', `/commerces/${AH}/menu`, { categories: [] }, PIN)).statut, 503)
-      assert.equal((await api('GET', `/commerces/${AH}/caisse`, undefined, { 'X-Equipe-Code': '2468' })).statut, 503, 'pas « code incorrect »')
-      assert.equal((await api('GET', `/commerces/${AH}/menu`)).statut, 200)
-    } finally {
-      await app.fermer()
-    }
+    await assert.rejects(demarrer(f), (e: Error) => {
+      assert.match(e.message, /0003_cartiz\.sql/)
+      assert.match(e.message, /sauvegarde-base\.mjs/)
+      return true
+    })
     // Après la migration : /sante le dit.
     const g = fauxPostgrest()
     const apres = await demarrer(g)
@@ -597,7 +634,12 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       const id = ins.contenu.client.id as string
       assert.equal(ins.contenu.client.telephone, undefined, 'réponse publique sans téléphone')
       const bis = await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '+33 6 12 34 56 78' })
-      assert.deepEqual([bis.statut, bis.contenu.existant, bis.contenu.client.id], [200, true, id])
+      // P2-S13 — oracle fermé (changement de contrat) : même statut 201 et même forme que la création,
+      // sans `existant` et sans jeton ; seule la carte (même id) est renvoyée.
+      assert.equal(bis.statut, 201)
+      assert.equal('existant' in bis.contenu, false)
+      assert.equal(bis.contenu.jeton, undefined)
+      assert.equal(bis.contenu.client.id, id)
 
       const sansVisite = await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })
       assert.equal(sansVisite.statut, 409)
@@ -621,9 +663,11 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).statut, 409)
       assert.equal(f.tables.tirages.length, 1)
 
-      // Seuil 2 : 3 visites → récompense → 1 tampon reporté.
+      // Seuil 2 : 3 visites → récompense → 1 tampon reporté. P1-S12 : 1 tampon par jour — une visite par jour.
       assert.equal((await api('PATCH', `/commerces/${AH}`, { seuilTampons: 2 }, PIN)).statut, 200)
+      horloge = new Date(2026, 10, 10, 12, 0)
       await api('POST', `/commerces/${AH}/clients/${id}/visite`, undefined, PIN)
+      horloge = new Date(2026, 10, 11, 12, 0)
       await api('POST', `/commerces/${AH}/clients/${id}/visite`, undefined, PIN)
       const { commerce, clients } = await etat()
       assert.equal(clients[0].tampons, 3)
@@ -634,6 +678,7 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.equal((await api('POST', `/commerces/${AH}/clients/${id}/recompense`, undefined, PIN)).statut, 409)
       assert.equal((await api('GET', `/commerces/${AH}/etat`, undefined, { 'X-Commerce-PIN': '9999' })).statut, 401)
     } finally {
+      horloge = new Date(2026, 10, 9, 12, 0)
       await app.fermer()
     }
   })
@@ -648,7 +693,8 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
         api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }),
         api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '+33612345678' }),
       ])
-      assert.deepEqual([a.statut, b.statut].sort(), [200, 201])
+      // P2-S13 — oracle fermé (changement de contrat) : les deux réponses sont 201, création ou reprise.
+      assert.deepEqual([a.statut, b.statut].sort(), [201, 201])
       assert.equal(a.contenu.client.id, b.contenu.client.id)
       assert.equal(f.tables.clients.length, 1)
       assert.deepEqual(f.rejets, ['clients:23505'], 'c’est la contrainte de la base qui a tranché')
@@ -672,6 +718,205 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
     } finally {
       await app.fermer()
     }
+  })
+
+  test('P0-S11 : deux enregistrements simultanés des réglages d’un commerce → 200 + 409, une seule valeur retenue', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const ligne = () => f.tables.commerces.find((c) => c.id === AH)!
+      const versionInitiale = Number(ligne().version)
+      // Les deux PATCH ne partent qu'une fois les deux arrivés : chacun a relu le commerce (même version) dans sa
+      // transaction avant que l'autre n'écrive. Sans verrou, les deux passeraient et le 2e écraserait le 1er en silence.
+      f.barriere('PATCH', 'commerces')
+      const reponses = await Promise.all([7, 8].map((seuilTampons) => api('PATCH', `/commerces/${AH}`, { seuilTampons }, PIN)))
+      assert.deepEqual(reponses.map((r) => r.statut).sort(), [200, 409])
+      assert.match(reponses.find((r) => r.statut === 409)!.contenu.erreur, /réessayez/)
+      const gagnant = reponses.find((r) => r.statut === 200)!.contenu.commerce as Commerce
+      assert.equal(Number(ligne().version), versionInitiale + 1, 'une seule écriture a eu lieu')
+      assert.equal((ligne().donnees as Commerce).seuilTampons, gagnant.seuilTampons)
+      const maj = f.requetes.filter((r) => r.table === 'commerces' && r.methode === 'PATCH')
+      for (const r of maj) assert.equal(r.params.get('version'), `eq.${versionInitiale}`, 'garde de version dans la requête elle-même')
+      // Un nouvel essai (après le 409) relit la version à jour et passe.
+      assert.equal((await api('PATCH', `/commerces/${AH}`, { seuilTampons: 9 }, PIN)).statut, 200)
+      assert.equal((ligne().donnees as Commerce).seuilTampons, 9)
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S11 : logo envoyé pendant un enregistrement des réglages — le verrou empêche d’écraser l’un par l’autre', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const png = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'logo.png')) // vrai PNG 600×600
+      const port = (app.serveur.address() as AddressInfo).port
+      assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/commerces/${AH}/logo`)).status, 404, 'aucun logo téléversé avant la course')
+      f.barriere('PATCH', 'commerces')
+      const [reglages, logo] = await Promise.all([
+        api('PATCH', `/commerces/${AH}`, { seuilTampons: 6 }, PIN),
+        fetch(`http://127.0.0.1:${port}/api/v1/commerces/${AH}/logo`, { method: 'PUT', headers: PIN, body: png }).then(async (r) => ({ statut: r.status })),
+      ])
+      assert.deepEqual([reglages.statut, logo.statut].sort(), [200, 409])
+      const d = f.tables.commerces.find((c) => c.id === AH)!.donnees as Commerce
+      // Jamais un mélange silencieux : soit les réglages, soit le logo — l'autre a reçu 409 et peut réessayer.
+      assert.equal(reglages.statut === 200, d.seuilTampons === 6)
+      assert.equal(logo.statut === 200, /\/logo\?v=/.test(d.logo ?? ''))
+      // L'image publique suit l'adresse retenue : un envoi refusé (409) ne remplace pas les octets servis (revue Codex).
+      const servi = await fetch(`http://127.0.0.1:${port}/api/v1/commerces/${AH}/logo`)
+      if (logo.statut === 200) {
+        assert.equal(servi.status, 200)
+        assert.ok(Buffer.from(await servi.arrayBuffer()).equals(png), 'octets identiques au PNG envoyé')
+      } else {
+        assert.equal(servi.status, 404, 'aucun logo téléversé avant la course : toujours aucun après le refus')
+        assert.equal(f.tables.meta.find((m) => m.cle === `logo:${AH}`)?.valeur ?? '', '')
+      }
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S11 : premières visites simultanées de deux filleuls du même parrain → parrain crédité deux fois (reprise sur conflit)', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const bob = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Bob', contact: '0611111111' }, PIN)).contenu.client as Client
+      const filleuls = [
+        (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Alice', contact: '0622222222', parrain: bob.codeParrainage }, PIN)).contenu.client as Client,
+        (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Chloé', contact: '0633333333', parrain: bob.codeParrainage }, PIN)).contenu.client as Client,
+      ]
+      const donnees = (id: string) => f.tables.clients.find((l) => l.id === id)!.donnees as Client
+      assert.equal(soldePoints(donnees(bob.id)), 50, 'bienvenue')
+      // Les deux filleuls sont écrits ensemble (barrière sur leurs PATCH) : chaque requête a relu le parrain à la même
+      // version, donc le 1er crédit passe et le 2e fait 409. Sans reprise, le 2e filleul resterait payé sans crédit parrain.
+      f.barriere('PATCH', 'clients')
+      const visites = await Promise.all(filleuls.map((c) => api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)))
+      assert.deepEqual(visites.map((v) => v.statut), [200, 200], JSON.stringify(visites.map((v) => v.contenu)))
+      assert.equal(soldePoints(donnees(bob.id)), 50 + 50 + 50, 'bienvenue + 2 parrainages')
+      assert.equal(donnees(bob.id).parrainagesGagnes?.length, 2)
+      for (const c of filleuls) assert.equal(donnees(c.id).parrainagePaye, true)
+      const traces = f.tables.parrainages.filter((l) => l.parrain_id === bob.id)
+      assert.deepEqual(traces.map((l) => l.filleul_id).sort(), filleuls.map((c) => c.id).sort())
+      assert.ok(traces.every((l) => (l.donnees as { pointsParrain: number }).pointsParrain === 50), JSON.stringify(traces))
+      assert.equal(f.tables.journal.filter((l) => (l.donnees as { action?: string; clientId?: string }).action === 'parrainage' && (l.donnees as { clientId?: string }).clientId === bob.id).length, 2, 'un seul journal par crédit')
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S11 (revue Codex) : deux logos envoyés simultanément — l’adresse gagnante sert l’image gagnante', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const png = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'logo.png')) // vrai PNG 600×600
+      const jpg = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'interieur.jpg')) // vrai JPEG
+      const port = (app.serveur.address() as AddressInfo).port
+      const base = `http://127.0.0.1:${port}/api/v1`
+      f.barriere('GET', 'meta') // instantanés simultanés : les deux PUT voient l'absence de logo
+      const [a, b] = await Promise.all([
+        fetch(`${base}/commerces/${AH}/logo`, { method: 'PUT', headers: PIN, body: png }).then(async (r) => ({ statut: r.status, contenu: await r.json() })),
+        fetch(`${base}/commerces/${AH}/logo`, { method: 'PUT', headers: PIN, body: jpg }).then(async (r) => ({ statut: r.status, contenu: await r.json() })),
+      ])
+      assert.deepEqual([a.statut, b.statut].sort(), [200, 409])
+      const gagnant = a.statut === 200 ? a : b
+      const octetsGagnant = a.statut === 200 ? png : jpg
+      const adresse = (gagnant.contenu as { commerce: Commerce }).commerce.logo!
+      assert.match(adresse, /\/logo\?v=/)
+      // L'adresse versionnée sert les octets de l'envoi gagnant, pas ceux du perdant ni les anciens.
+      const servi = await fetch(`http://127.0.0.1:${port}${adresse}`)
+      assert.equal(servi.status, 200)
+      assert.ok(Buffer.from(await servi.arrayBuffer()).equals(octetsGagnant), 'octets identiques à l’image gagnante')
+      // Sans version non plus : le pointeur suit l'adresse retenue.
+      const sansVersion = await fetch(`${base}/commerces/${AH}/logo`)
+      assert.equal(sansVersion.status, 200)
+      assert.ok(Buffer.from(await sansVersion.arrayBuffer()).equals(octetsGagnant))
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S11 (revue Codex) : logo envoyé pendant sa suppression — la suppression n’efface pas l’envoi gagnant', async () => {
+    const f = fauxPostgrest()
+    // Retient l'effacement du fichier par le DELETE : un envoi qui gagne entre-temps ne doit pas être effacé.
+    // (L'effacement est l'upsert `meta` qui vide `logo:<id>` ; sans lui, la course ne se produit jamais.)
+    let effacementRetenu = false
+    let libererEffacement: (() => void) | undefined
+    const fetchRetarde = async (entree: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const corps = init?.body ? (JSON.parse(String(init.body)) as { cle?: string; valeur?: string }) : undefined
+      if ((init?.method ?? 'GET') === 'POST' && corps?.cle === `logo:${AH}` && corps?.valeur === '') {
+        effacementRetenu = true
+        await new Promise<void>((ok) => {
+          libererEffacement = ok
+        })
+      }
+      return f.fetch(entree, init)
+    }
+    const { app, api } = await demarrer({ ...f, fetch: fetchRetarde as typeof fetch })
+    try {
+      const png = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'logo.png'))
+      const jpg = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'interieur.jpg'))
+      const port = (app.serveur.address() as AddressInfo).port
+      const base = `http://127.0.0.1:${port}/api/v1`
+      assert.equal((await fetch(`${base}/commerces/${AH}/logo`, { method: 'PUT', headers: PIN, body: png })).status, 200, 'un logo est déjà en place')
+      // Le DELETE vide le champ puis efface le fichier : on retient l'effacement.
+      const suppr = api('DELETE', `/commerces/${AH}/logo`, undefined, PIN)
+      for (let i = 0; i < 100 && !effacementRetenu; i++) await new Promise((r) => setTimeout(r, 50))
+      assert.ok(effacementRetenu, 'le DELETE a atteint son effacement de fichier')
+      // Entre-temps, un nouvel envoi gagne : son adresse est enregistrée.
+      assert.equal((await fetch(`${base}/commerces/${AH}/logo`, { method: 'PUT', headers: PIN, body: jpg })).status, 200)
+      libererEffacement?.()
+      assert.equal((await suppr).statut, 200)
+      // La suppression n'a pas effacé l'envoi gagnant : son adresse sert ses octets.
+      const commerce = (await api('GET', `/commerces/${AH}`, undefined, PIN)).contenu.commerce as Commerce
+      assert.match(commerce.logo ?? '', /\/logo\?v=/)
+      const servi = await fetch(`http://127.0.0.1:${port}${commerce.logo!}`)
+      assert.equal(servi.status, 200)
+      assert.ok(Buffer.from(await servi.arrayBuffer()).equals(jpg), 'octets identiques au JPEG envoyé')
+      const sansVersion = await fetch(`${base}/commerces/${AH}/logo`)
+      assert.equal(sansVersion.status, 200)
+      assert.ok(Buffer.from(await sansVersion.arrayBuffer()).equals(jpg))
+    } finally {
+      libererEffacement?.()
+      await app.fermer()
+    }
+  })
+
+  test('P0-S11 (revue Codex) : plafond atteint pendant la reprise du crédit parrain — le journal dit ce qui a vraiment été crédité', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      // Plafond annuel à 1 parrainage : le 2e crédit simultané est recalculé à 0 pendant la reprise.
+      assert.equal((await api('PATCH', `/commerces/${AH}`, { programme: { parrainage: { plafondAn: 1 } } }, PIN)).statut, 200)
+      const bob = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Bob', contact: '0611111111' }, PIN)).contenu.client as Client
+      const filleuls = [
+        (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Alice', contact: '0622222222', parrain: bob.codeParrainage }, PIN)).contenu.client as Client,
+        (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Chloé', contact: '0633333333', parrain: bob.codeParrainage }, PIN)).contenu.client as Client,
+      ]
+      const donnees = (id: string) => f.tables.clients.find((l) => l.id === id)!.donnees as Client
+      f.barriere('PATCH', 'clients')
+      const visites = await Promise.all(filleuls.map((c) => api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)))
+      assert.deepEqual(visites.map((v) => v.statut), [200, 200], JSON.stringify(visites.map((v) => v.contenu)))
+      assert.equal(soldePoints(donnees(bob.id)), 50 + 50, 'bienvenue + un seul parrainage (plafond 1)')
+      assert.equal(donnees(bob.id).parrainagesGagnes?.length, 1)
+      const traces = f.tables.parrainages.filter((l) => l.parrain_id === bob.id)
+      assert.deepEqual(traces.map((l) => (l.donnees as { pointsParrain: number }).pointsParrain).sort(), [0, 50])
+      // Le journal du passage de chaque filleul dit la vérité : l'un annonce +50 pour le parrain, l'autre le plafond.
+      const passages = f.tables.journal.filter((l) => (l.donnees as { action?: string }).action === 'passage')
+      assert.equal(passages.length, 2)
+      const textes = passages.map((l) => (l.donnees as { details?: string }).details ?? '')
+      assert.equal(textes.filter((t) => t.includes('+50 points pour Bob (parrain)')).length, 1, JSON.stringify(textes))
+      assert.equal(textes.filter((t) => t.includes('parrain au plafond annuel, rien pour Bob')).length, 1, JSON.stringify(textes))
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S11 : démarrage Supabase refusé sans la migration 0003 ou 0004 (journal et traces programme obligatoires)', async () => {
+    await assert.rejects(demarrer(fauxPostgrest({ sans0003: true })), /0003_cartiz/)
+    await assert.rejects(demarrer(fauxPostgrest({ sans0004: true })), /0004_programme/)
+    // Les autres migrations restent facultatives au démarrage (repli documenté) : 0005 à 0008.
+    const { app } = await demarrer(fauxPostgrest({ sans0005: true, sans0006: true, sans0007: true, sans0008: true }))
+    await app.fermer()
   })
 
   test('P0-U3 : code gagnant remis une seule fois (UPDATE conditionnel), même simultanément ; persistant ; sans 0005/0006', async () => {
@@ -1084,8 +1329,11 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
     }
   })
 
-  test('sans les migrations 0003 / 0004 / 0007 : suppression quand même (tables absentes = rien à supprimer), jamais de 500', async () => {
-    const f = fauxPostgrest({ sans0003: true, sans0004: true, sans0007: true })
+  test('sans la migration 0007 : suppression quand même (table absente = rien à supprimer), jamais de 500', async () => {
+    // Mis à jour par P0-S11 : ce test tournait aussi sans 0003 / 0004, mais le serveur refuse désormais de démarrer en
+    // Supabase sans elles (journal et traces du programme jamais perdus en silence). Seule l'absence de la 0007 (envois,
+    // que la suppression lit sans les écrire) reste un état de démarrage possible.
+    const f = fauxPostgrest({ sans0007: true })
     const { app, api } = await demarrer(f)
     try {
       const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
@@ -1096,6 +1344,315 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.equal((await api('GET', `/commerces/${AH}/purge`, undefined, PIN)).statut, 200)
     } finally {
       await app.fermer()
+    }
+  })
+})
+
+// ---------- P0-S18 : pagination serveur Supabase (plafond PostgREST de 1 000 lignes) ----------
+
+describe('P0-S18 : pagination serveur Supabase (plafond PostgREST de 1 000 lignes)', () => {
+  const commerce: Commerce = { ...nouveauCommerce('Chez Lin', 'restaurant', ''), id: 'c-chez-lin' }
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-s18-'))
+  after(() => rmSync(dossier, { recursive: true, force: true }))
+  const horloge = new Date(2026, 10, 9, 12, 0)
+
+  // Serveur HTTP sur le faux PostgREST (copie locale du `demarrer` du describe serveur, qui lui est local).
+  async function demarrer(f: ReturnType<typeof fauxPostgrest>) {
+    const app = await creerServeur({
+      fichierDb: join(dossier, 'ne-doit-pas-exister.db'),
+      supabase: { url: URL_SB, cleServiceRole: CLE, fetch: f.fetch },
+      adminPin: ADMIN,
+      pinInitial: '1234',
+      version: 'test',
+      maintenant: () => horloge,
+    })
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = {}) {
+      const r = await fetch(base + chemin, { method: methode, headers: { 'Content-Type': 'application/json', ...entetes }, body: corps === undefined ? undefined : JSON.stringify(corps) })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    return { app, api }
+  }
+
+  /** `n` clients / tirages / avis semés directement dans les tables du faux PostgREST (la lecture, elle, passe par
+   * le client officiel). Lignes complètes, comme un POST les écrirait (ordre, version) ; chaque client a 1 visite. */
+  function semer(f: ReturnType<typeof fauxPostgrest>, n: number, commerceId: string) {
+    for (let i = 0; i < n; i++) {
+      const id = `cl-s18-${String(i).padStart(4, '0')}`
+      const date = new Date(Date.UTC(2020, 0, 1) + i * 86_400_000).toISOString()
+      const c = { ...nouveauClient(commerceId, `Client ${String(i).padStart(4, '0')}`, { telephone: `06${String(10000000 + i)}` }), id, visites: [date], derniereVisite: date }
+      f.tables.clients.push({ id, commerce_id: commerceId, cle_contact: cleContact(c), donnees: c, ordre: i + 1, version: 1 })
+      const t: Tirage = { id: `ti-s18-${i}`, commerceId, clientId: id, lot: 'Nems', date }
+      f.tables.tirages.push({ id: t.id, commerce_id: commerceId, client_id: id, date, donnees: t })
+      const avis = { id: `av-s18-${i}`, commerceId, auteur: `Client ${i}`, note: 5, texte: 'Top', date }
+      f.tables.avis.push({ id: avis.id, commerce_id: commerceId, date, donnees: avis, version: 1 })
+    }
+  }
+
+  test('clients, tirages et avis lus en entier au-delà du plafond (1 200 lignes, pages de 1 000)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    semer(f, 1200, commerce.id)
+    const clients = await st.clients(commerce.id)
+    assert.equal(clients.length, 1200)
+    assert.equal(clients.at(-1)?.prenom, 'Client 1199')
+    assert.equal((await st.tirages(commerce.id)).length, 1200)
+    assert.equal((await st.avis(commerce.id)).length, 1200)
+    // Preuve que la lecture a bien paginé : sans `.range()`, le faux renverrait tout (pas de plafond simulé)
+    // et ce test passerait à tort — les offsets prouvent les deux pages.
+    for (const table of ['clients', 'tirages', 'avis']) {
+      const lectures = f.requetes.filter((r) => r.table === table && r.methode === 'GET')
+      assert.deepEqual(lectures.map((r) => r.params.get('offset')), ['0', '1000'], table)
+      assert.ok(lectures.every((r) => r.params.get('limit') === '1000'), table)
+    }
+  })
+
+  test('tirages d’un seul client : lus en entier au-delà du plafond (1 050 tirages, ordre stable)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    const c = { ...nouveauClient(commerce.id, 'Fidèle', { telephone: '0612345678' }), id: 'cl-s18-fidele' }
+    f.tables.clients.push({ id: c.id, commerce_id: commerce.id, cle_contact: cleContact(c), donnees: c, ordre: 1, version: 1 })
+    // Lignes semées dans l'ordre inverse de leur date : sans le tri par date, le faux renverrait l'ordre
+    // d'insertion et le test échouerait (revue Codex point 3).
+    for (let i = 1049; i >= 0; i--) {
+      const date = new Date(Date.UTC(2020, 0, 1) + i * 86_400_000).toISOString()
+      const t: Tirage = { id: `ti-f-${i}`, commerceId: commerce.id, clientId: c.id, lot: 'Nems', date }
+      f.tables.tirages.push({ id: t.id, commerce_id: commerce.id, client_id: c.id, date, donnees: t })
+    }
+    const lus = await st.tiragesClient(commerce.id, c.id)
+    assert.equal(lus.length, 1050)
+    assert.deepEqual(
+      lus.map((t) => t.id),
+      Array.from({ length: 1050 }, (_, i) => `ti-f-${i}`),
+      'séquence complète, triée par date croissante (pas seulement les extrémités)',
+    )
+    assert.deepEqual(
+      f.requetes.filter((r) => r.table === 'tirages' && r.methode === 'GET').map((r) => r.params.get('offset')),
+      ['0', '1000'],
+    )
+  })
+
+  test('dates identiques à la frontière des pages : aucune ligne perdue ni lue deux fois (1 001 tirages, même date)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    // 1 001 clients, un tirage chacun, tous à la même milliseconde, semés dans l'ordre inverse des ids : sans le
+    // départage par `id`, l'ordre des lignes de même date à cheval sur la frontière n'est pas garanti d'une
+    // requête à l'autre (le tri Postgres n'est pas stable) — le test échouerait. Ids à 4 chiffres pour que l'ordre
+    // lexicographique soit l'ordre numérique.
+    const date = '2026-11-08T12:00:00.000Z'
+    for (let i = 1000; i >= 0; i--) {
+      const id = String(i).padStart(4, '0')
+      const c = { ...nouveauClient(commerce.id, `Client ${i}`, { telephone: `06${10000000 + i}` }), id: `cl-eg-${id}` }
+      f.tables.clients.push({ id: c.id, commerce_id: commerce.id, cle_contact: cleContact(c), donnees: c, ordre: i + 1, version: 1 })
+      const t: Tirage = { id: `ti-eg-${id}`, commerceId: commerce.id, clientId: c.id, lot: 'Nems', date }
+      f.tables.tirages.push({ id: t.id, commerce_id: commerce.id, client_id: c.id, date, donnees: t })
+    }
+    const lus = await st.tirages(commerce.id)
+    assert.equal(lus.length, 1001)
+    assert.equal(new Set(lus.map((t) => t.id)).size, 1001, 'aucun doublon')
+    assert.deepEqual(
+      lus.map((t) => t.id),
+      Array.from({ length: 1001 }, (_, i) => `ti-eg-${String(i).padStart(4, '0')}`),
+      'départage par id croissant',
+    )
+    assert.deepEqual(
+      f.requetes.filter((r) => r.table === 'tirages' && r.methode === 'GET').map((r) => r.params.get('offset')),
+      ['0', '1000'],
+    )
+  })
+
+  test('/etat, statistiques et export CSV complets au-delà du plafond (1 050 clients)', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      semer(f, 1050, AH)
+      const etat = await api('GET', `/commerces/${AH}/etat`, undefined, PIN)
+      assert.equal(etat.statut, 200)
+      assert.equal(etat.contenu.clients.length, 1050)
+      assert.equal(etat.contenu.tirages.length, 1050)
+      // Statistiques (TableauDeBord, src/lib/stats.ts) calculées sur la liste complète, pas sur 1 000 lignes.
+      const cartes = calculerChiffresCartes(etat.contenu.clients)
+      assert.equal(cartes.cartesEmises, 1050)
+      assert.equal(cartes.passagesTotal, 1050)
+      // Export CSV : une ligne par client, y compris le 1 050e.
+      const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+      const csv = await fetch(`${base}/commerces/${AH}/export.csv`, { headers: PIN })
+      assert.equal(csv.status, 200)
+      const texte = await csv.text()
+      assert.equal(texte.split('\r\n').filter(Boolean).length, 1051, 'en-tête + 1 050 clients')
+      assert.ok(texte.includes('Client 1049'), 'le dernier client est dans l’export')
+    } finally {
+      await app.fermer()
+    }
+  })
+})
+
+// ---------- Persistance des compteurs publics (P0-S20) ----------
+
+describe('P0-S20 : compteurs publics persistants (Supabase)', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-p0s20-'))
+  after(() => rmSync(dossier, { recursive: true, force: true }))
+  const maintenant = new Date(2026, 10, 9, 12, 0)
+  const iso = (d: Date) => d.toISOString()
+  const DEBUT = iso(maintenant)
+
+  /** Serveur HTTP sur le faux PostgREST `f`, horloge pilotée, seuil de lecture par carte = 3 (seuil de persistance : 2). */
+  async function demarrerSb(f: ReturnType<typeof fauxPostgrest>, horloge: { t: Date }, transport?: typeof fetch) {
+    const app = await creerServeur({
+      fichierDb: join(dossier, 'ne-doit-pas-exister.db'),
+      supabase: { url: URL_SB, cleServiceRole: CLE, fetch: transport ?? f.fetch },
+      adminPin: ADMIN,
+      pinInitial: '1234',
+      version: 'test',
+      maintenant: () => horloge.t,
+      limitesPubliques: { lectureParCarte: 3 },
+    })
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = {}) {
+      const r = await fetch(base + chemin, {
+        method: methode,
+        headers: { 'Content-Type': 'application/json', ...entetes },
+        body: corps === undefined ? undefined : JSON.stringify(corps),
+      })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    return { app, api }
+  }
+
+  test('stockage : upsert + lecture + purge des fenêtres passées, clé seule (identifiant, sans contenu client)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    assert.equal(await st.schemaCompteursPublics(), true)
+    assert.deepEqual(await st.compteursPublics(), [])
+    await st.enregistrerCompteurPublic({ cle: 'lecture:203.0.113.7', debut: DEBUT, n: 60 }, iso(new Date(maintenant.getTime() - 60_000)))
+    await st.enregistrerCompteurPublic({ cle: 'carte:cl-abc', debut: DEBUT, n: 15 }, iso(new Date(maintenant.getTime() - 60_000)))
+    assert.deepEqual(await st.compteursPublics(), [
+      { cle: 'carte:cl-abc', debut: DEBUT, n: 15 },
+      { cle: 'lecture:203.0.113.7', debut: DEBUT, n: 60 },
+    ], 'lecture triée par clé (ordre déterministe de la pagination)')
+    // Upsert : même clé, nouvelle fenêtre, nouveau nombre — une seule ligne.
+    await st.enregistrerCompteurPublic({ cle: 'carte:cl-abc', debut: iso(new Date(maintenant.getTime() + 60_000)), n: 1 }, iso(new Date(maintenant.getTime() - 60_000)))
+    assert.equal((await st.compteursPublics()).length, 2)
+    assert.equal(f.tables.compteurs_publics.find((l) => l.cle === 'carte:cl-abc')!.n, 1)
+    for (const l of f.tables.compteurs_publics) assert.deepEqual(Object.keys(l).sort(), ['cle', 'debut', 'n'], 'ni nom, ni code gagnant, ni contenu client — la clé seule (identifiant déjà utilisé par l’anti-bruteforce)')
+    // Purge : une écriture supprime les lignes dont la fenêtre est passée (début < purgerAvant).
+    await st.enregistrerCompteurPublic({ cle: 'lecture:203.0.113.8', debut: iso(new Date(maintenant.getTime() + 120_000)), n: 1 }, iso(new Date(maintenant.getTime() + 60_000)))
+    assert.deepEqual(
+      (await st.compteursPublics()).map((l) => l.cle).sort(),
+      ['carte:cl-abc', 'lecture:203.0.113.8'],
+      'la fenêtre de 12:00 est purgée, celles de 12:01 et 12:02 gardées',
+    )
+  })
+
+  test('stockage : lecture paginée au-delà du plafond PostgREST (1 000 lignes)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    // 1 001 lignes, insérées dans l'ordre inverse du tri : la lecture doit toutes les rendre, triées par clé.
+    for (let i = 1000; i >= 0; i--) {
+      f.tables.compteurs_publics.push({ cle: `carte:cl-${String(i).padStart(4, '0')}`, debut: DEBUT, n: 1 })
+    }
+    const lignes = await st.compteursPublics()
+    assert.equal(lignes.length, 1001, 'sans pagination, la 1 001e ligne serait perdue (plafond PostgREST)')
+    assert.deepEqual(lignes.map((l) => l.cle), lignes.map((l) => l.cle).sort(), 'tri déterministe par clé (pages stables)')
+    assert.equal(lignes.at(-1)!.cle, 'carte:cl-1000')
+  })
+
+  test('stockage sans la migration 0010 : lecture vide, écriture refusée, repli mémoire', async () => {
+    const f = fauxPostgrest({ sans0010: true })
+    const st = ouvrir(f)
+    assert.equal(await st.schemaCompteursPublics(), false)
+    assert.deepEqual(await st.compteursPublics(), [])
+    await assert.rejects(st.enregistrerCompteurPublic({ cle: 'lecture:1.2.3.4', debut: DEBUT, n: 1 }, DEBUT), (e: Error) => e instanceof ErreurMigrationManquante && /0010_compteurs_publics/.test(e.message))
+  })
+
+  test('HTTP : compteur chaud survit au redémarrage, blocage aussi ; sans migration, mémoire seulement', async () => {
+    const f = fauxPostgrest()
+    const horloge = { t: new Date(2026, 10, 9, 12, 0) }
+    let srv = await demarrerSb(f, horloge)
+    let clientId: string
+    try {
+      const c = (await srv.api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
+      clientId = c.id
+      assert.equal((await srv.api('GET', `/cartes/${clientId}`)).statut, 200)
+      assert.equal((await srv.api('GET', `/cartes/${clientId}`)).statut, 200)
+      // 2 lectures = moitié du seuil (3) → persisté ; on laisse l'écriture arriver avant le redémarrage.
+      await new Promise((r) => setTimeout(r, 50))
+      assert.deepEqual(f.tables.compteurs_publics.map((l) => [l.cle, l.n]), [[`carte:${clientId}`, 2]])
+    } finally {
+      await srv.app.fermer()
+    }
+    srv = await demarrerSb(f, horloge)
+    try {
+      assert.equal((await srv.api('GET', `/cartes/${clientId}`)).statut, 200, '3e lecture de la fenêtre : rechargée depuis la base')
+      assert.equal((await srv.api('GET', `/cartes/${clientId}`)).statut, 429, '4e lecture : toujours bloquée après redémarrage')
+      assert.equal((await srv.api('GET', `/cartes/${clientId}`)).statut, 429, 'blocage rechargé : immédiat après redémarrage')
+    } finally {
+      await srv.app.fermer()
+    }
+
+    // Sans la migration : le serveur démarre quand même, compte en mémoire, et perd tout au redémarrage.
+    // L'absence de la table est avertie DÈS le démarrage (revue Codex point 6), pas au premier compteur chaud.
+    const g = fauxPostgrest({ sans0010: true })
+    const alertes: string[] = []
+    const warnOrigine = console.warn
+    console.warn = (...a: unknown[]) => {
+      alertes.push(a.map(String).join(' '))
+    }
+    let srvG: Awaited<ReturnType<typeof demarrerSb>>
+    try {
+      srvG = await demarrerSb(g, horloge)
+    } finally {
+      console.warn = warnOrigine
+    }
+    assert.ok(
+      alertes.some((m) => /compteurs publics comptés en mémoire seulement/.test(m)),
+      `avertissement de démarrage attendu, reçu : ${JSON.stringify(alertes)}`,
+    )
+    try {
+      const c = (await srvG.api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
+      clientId = c.id
+      assert.equal((await srvG.api('GET', `/cartes/${clientId}`)).statut, 200)
+      assert.equal((await srvG.api('GET', `/cartes/${clientId}`)).statut, 200)
+    } finally {
+      await srvG.app.fermer()
+    }
+    srvG = await demarrerSb(g, horloge)
+    try {
+      for (let i = 0; i < 3; i++) assert.equal((await srvG.api('GET', `/cartes/${clientId}`)).statut, 200, 'compteur perdu au redémarrage : 3 lectures passent à nouveau')
+      assert.equal((await srvG.api('GET', `/cartes/${clientId}`)).statut, 429)
+    } finally {
+      await srvG.app.fermer()
+    }
+  })
+
+  test('HTTP : une écriture ancienne retardée ne peut pas annuler un blocage récent (sérialisation par clé)', async () => {
+    const f = fauxPostgrest()
+    const horloge = { t: new Date(2026, 10, 9, 12, 0) }
+    // Le 1er upsert (n = 2) est retardé de 150 ms, le 2e (n = 3) passe immédiatement : sans sérialisation par clé,
+    // l'ancienne écriture arriverait après et la base finirait à n = 2 (revue Codex point 4).
+    let retarderPremierUpsert = true
+    const transport: typeof fetch = async (url, init) => {
+      if (retarderPremierUpsert && String(url).includes('/rest/v1/compteurs_publics') && init?.method === 'POST') {
+        retarderPremierUpsert = false
+        await new Promise((r) => setTimeout(r, 150))
+      }
+      return f.fetch(url, init)
+    }
+    const srv = await demarrerSb(f, horloge, transport)
+    try {
+      const c = (await srv.api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
+      assert.equal((await srv.api('GET', `/cartes/${c.id}`)).statut, 200)
+      assert.equal((await srv.api('GET', `/cartes/${c.id}`)).statut, 200)
+      assert.equal((await srv.api('GET', `/cartes/${c.id}`)).statut, 200)
+      await new Promise((r) => setTimeout(r, 300))
+      assert.deepEqual(f.tables.compteurs_publics.map((l) => [l.cle, l.n]), [[`carte:${c.id}`, 3]], 'l’écriture n = 3, partie après, est bien la dernière appliquée')
+    } finally {
+      await srv.app.fermer()
     }
   })
 })

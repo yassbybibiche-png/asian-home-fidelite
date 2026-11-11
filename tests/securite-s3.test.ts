@@ -256,7 +256,9 @@ describe('P0-S3 : parcours public avec le client du front (fiche publique unique
     assert.deepEqual((await api.carte(client.id)).jeu, {
       statut: 'dejaJoue',
       lotDuJour: gagne.resultat.lot,
-      codeDuJour: gagne.resultat.perdant ? null : gagne.resultat.code,
+      // P0-S19 : le code du jour n'est servi qu'au titulaire authentifié (jeton client) — ce client du front
+      // n'en porte pas ici (le titulaire authentifié le reçoit : tests/code-gagnant-p0-s19.test.ts).
+      codeDuJour: null,
       remisDuJour: false,
     })
 

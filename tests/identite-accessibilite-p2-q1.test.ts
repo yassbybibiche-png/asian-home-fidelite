@@ -114,30 +114,30 @@ describe('P2-Q1 : contrastes AA', () => {
     assert.ok(contraste('#6b7280', '#ffffff') >= 4.5, 'placeholder des champs (fond blanc)')
   })
 
-  test('or #c9a227 jamais en texte sur blanc (2,4:1) : seulement sur fond sombre', () => {
-    assert.ok(contraste('#c9a227', '#ffffff') < 3)
-    assert.ok(contraste('#c9a227', '#111111') >= 4.5)
+  test('magenta clair #ff2e9a jamais en texte sur blanc (3,44:1) : seulement sur fond sombre', () => {
+    assert.ok(contraste('#ff2e9a', '#ffffff') < 4.5)
+    assert.ok(contraste('#ff2e9a', '#111111') >= 4.5)
     const css = lire('src/index.css')
-    assert.match(css, /--color-or-400: #c9a227;/)
-    // Texte or direct : uniquement sur une pastille nuit (bg-nuit-950) dans la même classe.
-    const textesOr = TSX.flatMap((f) => lignes(f, /\btext-or-(400|500)\b/))
-    for (const l of textesOr) assert.match(l, /bg-nuit-950/, l)
+    assert.match(css, /--color-magenta-400: #ff2e9a;/)
+    // Texte magenta direct : uniquement sur une pastille nuit (bg-nuit-950) dans la même classe.
+    const textesMagenta = TSX.flatMap((f) => lignes(f, /\btext-magenta-(400|500)\b/))
+    for (const l of textesMagenta) assert.match(l, /bg-nuit-950/, l)
     assert.doesNotMatch(TSX.map(lire).join('\n'), /#c9a227|color: ['"]?#c9a227/i)
-    // Titre doré (.titre-or) : uniquement dans un en-tête .hero-sombre.
+    // Titre magenta (.titre-magenta) : uniquement dans un en-tête .hero-sombre.
     for (const f of TSX) {
       const s = lire(f)
-      for (const m of s.matchAll(/titre-or/g)) {
+      for (const m of s.matchAll(/titre-magenta/g)) {
         const avant = s.slice(Math.max(0, m.index! - 600), m.index)
-        assert.match(avant, /hero-sombre/, `${f} : .titre-or hors fond sombre`)
+        assert.match(avant, /hero-sombre/, `${f} : .titre-magenta hors fond sombre`)
       }
     }
-    // Feuille du chargement initial : doré sur noir.
-    assert.match(lire('src/chargement.css'), /background: #111111;\s*color: #c9a227;/)
+    // Feuille du chargement initial : magenta sur noir.
+    assert.match(lire('src/chargement.css'), /background: #111111;\s*color: #ff2e9a;/)
   })
 
   test('interrupteur éteint : rail gris-500 (≥ 3:1, contraste des composants) au lieu de gris-300', () => {
     const ui = lire('src/components/ui.tsx')
-    assert.match(ui, /actif \? 'bg-marque-500' : 'bg-gray-500'/)
+    assert.match(ui, /actif \? 'bg-magenta-500' : 'bg-gray-500'/)
     assert.ok(contraste('#6b7280', '#ffffff') >= 3)
     assert.ok(contraste('#d1d5db', '#ffffff') < 3)
   })

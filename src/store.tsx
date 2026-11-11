@@ -28,13 +28,17 @@ import { nouveauCommerce } from './data/defaults'
  * - « local » (VITE_API_URL absente) : démo dans ce navigateur (localStorage), comme avant ;
  * - « api » : données partagées sur le serveur (`server/`). Le serveur fait foi : chaque chargement
  *   remplace tout l'état local ; aucune action n'est appliquée en local avant la réponse du serveur
- *   (donc jamais de fausse réussite hors ligne). Rechargement toutes les 10 s, au retour au premier plan
- *   et après chaque action.
+ *   (donc jamais de fausse réussite hors ligne). Rechargement toutes les 30 s (P1-P1 : 10 s avant — un
+ *   rechargement complet `/commerces` + `/etat` toutes les 10 s projetait 9,11 Go/mois HTTP à 150 clients,
+ *   au-dessus des 5 Go gratuits Supabase ; 3,04 Go/mois à 30 s, 3,50 Go côté PostgREST), au retour au premier
+ *   plan et après chaque action. La roue, elle, garde sa propre vérification espacée de 10 s après chaque
+ *   réponse (`INTERVALLE_VERIFICATION_MS`, `src/lib/attenteVisite.ts`) : le déblocage n'est pas allongé par ce lot.
  */
 export type Mode = 'local' | 'api'
 export type Connexion = 'local' | 'chargement' | 'enLigne' | 'horsLigne'
 
-export const INTERVALLE_RECHARGEMENT_MS = 10_000
+/** Rechargement périodique de l'état complet (P1-P1 : 30 s, 10 s avant — voir le commentaire d'en-tête). */
+export const INTERVALLE_RECHARGEMENT_MS = 30_000
 
 export interface NouveauCommerce {
   nom: string
@@ -304,7 +308,7 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
   const actifRef = useRef('')
   const numero = useRef(0)
   const dernierApplique = useRef(0)
-  // Dernière cause d'échec de rechargement journalisée : hors ligne, on ne remplit pas le journal toutes les 10 s.
+  // Dernière cause d'échec de rechargement journalisée : hors ligne, on ne remplit pas le journal toutes les 30 s.
   const causeJournalisee = useRef<string | null>(null)
   const journal = useMemo(() => ({ stockage: stockage('localStorage') }), [])
 

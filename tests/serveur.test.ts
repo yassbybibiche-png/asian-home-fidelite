@@ -144,7 +144,12 @@ describe('Serveur /api/v1', () => {
   test('récompense : refusée avant le seuil, puis report des tampons excédentaires', async () => {
     const trop = await srv.api('POST', `/commerces/${commerceId}/clients/${client.id}/recompense`, undefined, pin)
     assert.equal(trop.statut, 409)
-    for (let i = 0; i < 3; i++) await srv.api('POST', `/commerces/${commerceId}/clients/${client.id}/visite`, undefined, pin) // 4 tampons, seuil 3
+    // P1-S12 : 1 tampon par jour — les 3 visites sont 3 jours différents (horloge remise au 9 ensuite).
+    for (let i = 0; i < 3; i++) {
+      horloge = new Date(2026, 10, 10 + i, 12, 0)
+      assert.equal((await srv.api('POST', `/commerces/${commerceId}/clients/${client.id}/visite`, undefined, pin)).statut, 200)
+    } // 4 tampons, seuil 3
+    horloge = new Date(2026, 10, 9, 12, 0)
     const r = await srv.api('POST', `/commerces/${commerceId}/clients/${client.id}/recompense`, undefined, pin)
     assert.equal(r.statut, 200)
     assert.equal(r.contenu.client.tampons, 1)
@@ -182,7 +187,8 @@ describe('Serveur /api/v1', () => {
   })
 
   test('le lendemain : sans nouvelle visite → 409 ; avec visite → nouveau tirage', async () => {
-    horloge = new Date(2026, 10, 10, 12, 0)
+    // P1-S12 : les visites du test « récompense » ont eu lieu jusqu'au 12 — le lendemain est donc le 13.
+    horloge = new Date(2026, 10, 13, 12, 0)
     assert.equal((await srv.api('POST', `/commerces/${commerceId}/tirages`, { contact: '0612345678' })).statut, 409)
     await srv.api('POST', `/commerces/${commerceId}/clients/${client.id}/visite`, undefined, pin)
     assert.equal((await srv.api('POST', `/commerces/${commerceId}/tirages`, { contact: '0612345678' })).statut, 201)
@@ -331,7 +337,9 @@ describe('V2 : front ↔ serveur (contrat) et carte publique', () => {
     assert.equal(gagne.secteur?.lot.libelle, gagne.resultat.lot, 'le lot du serveur existe sur la roue')
     const apres = await api.carte(client.id)
     // P0-U3 : le code gagnant du jour est re-servi au titulaire de la carte (jamais celui d'un tirage perdant).
-    const codeDuJour = gagne.resultat.perdant ? null : gagne.resultat.code
+    // P0-S19 : seulement avec son jeton client — ce client du front n'en porte pas ici, donc null (le titulaire
+    // authentifié le reçoit : tests/code-gagnant-p0-s19.test.ts).
+    const codeDuJour = null
     assert.deepEqual(apres.jeu, { statut: 'dejaJoue', lotDuJour: gagne.resultat.lot, codeDuJour, remisDuJour: false })
     assert.doesNotMatch(JSON.stringify(apres), /0612|telephone|email/, 'aucun contact en public')
     if (gagne.resultat.perdant) assert.ok(!JSON.stringify(apres).includes(gagne.resultat.code), 'code d’un tirage perdant jamais publié')

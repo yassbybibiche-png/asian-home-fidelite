@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  P2-Q4 — voir docs/SEO.md. Limite du routeur par fragment : Google ignore tout ce qui suit « # ». Les entrées #/menu et
-  #/jouer sont listées pour documenter les pages publiques, mais le moteur les ramène à « / » (une seule page indexable).
-  Pour que le menu soit indexé à part, il faudrait une vraie adresse (/menu) prérendue : non fait, voir docs/SEO.md.
+  P2-Q4 — voir docs/SEO.md. Le menu a désormais une vraie adresse prérendue (/menu/c-asian-home-paris, servie par
+  le serveur) : c'est elle qui est listée, pas l'adresse à fragment (Google ignore tout ce qui suit « # »).
+  La page de jeu n'est pas listée : elle n'est pas prérendable (elle exige une visite validée au comptoir),
+  et un fragment dans un sitemap est ramené à « / » de toute façon.
 -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
@@ -10,11 +11,7 @@
     <changefreq>weekly</changefreq>
   </url>
   <url>
-    <loc>https://asian-home-fidelite.onrender.com/#/menu</loc>
+    <loc>https://asian-home-fidelite.onrender.com/menu/c-asian-home-paris</loc>
     <changefreq>weekly</changefreq>
-  </url>
-  <url>
-    <loc>https://asian-home-fidelite.onrender.com/#/jouer</loc>
-    <changefreq>monthly</changefreq>
   </url>
 </urlset>

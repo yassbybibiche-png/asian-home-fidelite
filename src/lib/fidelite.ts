@@ -31,10 +31,32 @@ export function trouverClientParContact(clients: Client[], commerceId: string, c
   )
 }
 
+/**
+ * Identifiant de carte (P0-S7) : `cl-` + UUID v4 aléatoire (122 bits, `crypto`), impossible à deviner. Remplace
+ * l'ancien `cl-<horodatage base36>-<4 caractères>` (prévisible), encore porté par les cartes créées avant P0-S7.
+ */
+export function nouvelIdClient(): string {
+  const c = globalThis.crypto
+  // randomUUID manque hors contexte sécurisé (démo locale servie en http:// sur le réseau) : même UUID v4 à la main.
+  if (typeof c.randomUUID === 'function') return `cl-${c.randomUUID()}`
+  const o = c.getRandomValues(new Uint8Array(16))
+  o[6] = (o[6] & 0x0f) | 0x40
+  o[8] = (o[8] & 0x3f) | 0x80
+  const h = Array.from(o, (x) => x.toString(16).padStart(2, '0')).join('')
+  return `cl-${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+}
+
+const ID_CLIENT_ACTUEL = /^cl-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+/** Carte créée avec un identifiant imprévisible (P0-S7) ; sinon : ancien identifiant, soumis à la période de grâce. */
+export function estIdClientActuel(id: string): boolean {
+  return ID_CLIENT_ACTUEL.test(id)
+}
+
 export function nouveauClient(commerceId: string, prenom: string, contact: Contact, maintenant = new Date()): Client {
   const iso = maintenant.toISOString()
   return {
-    id: `cl-${maintenant.getTime().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    id: nouvelIdClient(),
     commerceId,
     prenom: prenom.trim(),
     ...contact,

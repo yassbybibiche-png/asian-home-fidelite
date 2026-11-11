@@ -4,14 +4,24 @@ import { useRoute } from '../router'
 import type { CommercePublic, Menu } from '../types'
 import { ErreurApi } from '../data/api'
 import { formaterPrix } from '../lib/points'
-import { bandeauPrixManquants, filtrerMenu } from '../lib/menu'
+import { bandeauPrixManquants, filtrerMenu, LIBELLE_ALLERGENES_ABSENTS } from '../lib/menu'
 import { badgesPlat, boutonsMenu, categorieEffective, categorieMidi, estHeureMenuMidi, LIBELLES_BADGES, MENTION_BADGE_DEDUIT } from '../lib/menuClient'
 import { LogoCommerce, PiedPublic } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
 import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
-import { estSignature, menuReelAsianHome } from '../data/menu-reel'
+import { estSignature, masquerPrixNonConfirmes, menuReelAsianHome, retirerPhotosDetachees } from '../data/menu-reel'
+import { enregistrerTraductions } from '../lib/langue'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
+
+/** Traductions des badges de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
+enregistrerTraductions({
+  '🌶 Épicé': '🌶 Spicy',
+  '🌶 Option épicée': '🌶 Spicy option',
+  '🌱 Végétarien': '🌱 Vegetarian',
+  '🌱 Option végétarienne': '🌱 Vegetarian option',
+  'Ce lien ne correspond à aucun commerce.': 'This link does not match any business.',
+})
 
 /** Page publique #/menu/<commerceId> (QR du menu, lien depuis la carte de fidélité). */
 export default function MenuPublic() {
@@ -72,12 +82,16 @@ export function MenuAffiche({
   setOuvert: (s: string | null) => void
 }) {
   // Menu enregistré vide chez Asian Home : on affiche la carte officielle du restaurant
-  // (relevée le 10/11/2026, avec ses prix ; les 3 plats hors carte restent « Prix sur place »).
+  // (relevée le 10/11/2026, avec ses prix ; 5 plats restent « Prix sur place » : les 3 hors carte
+  // + 2 prix imprimés non confirmés masqués, P1-M1).
   // Dès que le commerçant enregistre son propre menu, c'est le sien qui s'affiche.
   const menuEnregistre = menu.categories.some((c) => c.produits.length > 0)
   const asianHome = estAsianHome(commerce)
   const repliReel = !menuEnregistre && asianHome
-  const menuAffiche = useMemo(() => (repliReel ? menuReelAsianHome() : menu), [repliReel, menu])
+  // P1-M1 + P1-M3 : les prix imprimés non confirmés sont masqués et les photos détachées retirées,
+  // quel que soit le menu affiché (carte de repli ou menu enregistré avant le lot) — jamais 8,90 € /
+  // 100,00 € sans confirmation, jamais la photo makis partagée sur un plat nommé.
+  const menuAffiche = useMemo(() => retirerPhotosDetachees(masquerPrixNonConfirmes(repliReel ? menuReelAsianHome() : menu)), [repliReel, menu])
   const bandeauPrix = useMemo(() => bandeauPrixManquants(menuAffiche), [menuAffiche])
   const categories = useMemo(
     () => filtrerMenu(menuAffiche.categories.filter((c) => c.produits.length), recherche),
@@ -93,7 +107,7 @@ export function MenuAffiche({
   const bandeauMidi = !!midi && estHeureMenuMidi(maintenant)
   const avecBadges = visibles.some((c) => c.produits.some((p) => badgesPlat(p).length))
   // Interface traduite (P2-Q1) ; les noms de plats et de catégories restent ceux du restaurant.
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
 
   // Indicateur de l'onglet actif : en « Toutes », la catégorie dont la section est à l'écran (suivi au défilement).
   const [enVue, setEnVue] = useState<string | null>(null)
@@ -134,7 +148,7 @@ export function MenuAffiche({
           <LogoCommerce commerce={commerce} taille="lg" />
         </div>
         <p className="surtitre-sombre mt-3">{t('Menu')}</p>
-        <h1 className="titre-or mt-1 text-2xl">{commerce.nom}</h1>
+        <h1 className="titre-magenta mt-1 text-2xl">{commerce.nom}</h1>
         <p className="mt-1 text-sm text-white/80">{t('Cuisine asiatique halal · Thaï, Japon, Vietnam, Chine')}</p>
       </header>
 
@@ -150,7 +164,7 @@ export function MenuAffiche({
 
       {/* Bandeau « Menu Midi » : seulement du lundi au vendredi, 11h30–14h30, heure de Paris. */}
       {bandeauMidi && midi && (
-        <div className="apparition flex items-center gap-3 rounded-2xl bg-or-400/15 p-4 ring-1 ring-or-400/50" role="note">
+        <div className="apparition flex items-center gap-3 rounded-2xl bg-magenta-400/15 p-4 ring-1 ring-magenta-400/50" role="note">
           <span className="text-2xl" aria-hidden="true">
             🍱
           </span>
@@ -165,11 +179,14 @@ export function MenuAffiche({
       )}
 
       {asianHome && (
-        <img
-          src={VISUELS.tableSushis}
-          alt="Table dressée chez Asian Home Paris : bao buns, plateau de sushis et cocktails"
-          className="h-56 w-full rounded-3xl object-cover shadow-relief ring-1 ring-gray-900/5"
-        />
+        <picture className="block">
+          <source srcSet={VISUELS.tableSushisPetit} type="image/webp" />
+          <img
+            src={VISUELS.tableSushis}
+            alt="Table dressée chez Asian Home Paris : bao buns, plateau de sushis et cocktails"
+            className="h-56 w-full rounded-3xl object-cover shadow-relief ring-1 ring-gray-900/5"
+          />
+        </picture>
       )}
 
       {bandeauPrix && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">{bandeauPrix}</p>}
@@ -217,7 +234,12 @@ export function MenuAffiche({
                 return (
                   <section key={c.id} id={`m-${c.id}`} data-categorie={c.id} className="scroll-mt-36 space-y-2">
                     <h2 className="font-titre text-xl font-bold">{c.nom}</h2>
-                    {photo && <img src={photo.src} alt={photo.alt} loading="lazy" className="h-32 w-full rounded-2xl object-cover" />}
+                    {photo && (
+                      <picture className="block">
+                        <source srcSet={photo.srcPetit} type="image/webp" />
+                        <img src={photo.src} alt={photo.alt} loading="lazy" className="h-32 w-full rounded-2xl object-cover" />
+                      </picture>
+                    )}
                     <ul className="space-y-2">
                       {c.produits.map((p) => {
                         const detail = ouvert === p.id
@@ -239,11 +261,11 @@ export function MenuAffiche({
                                   <span className="font-semibold">{p.nom}</span>
                                   {/* Pastilles (étiquettes décoratives) : text-xs, 12,75 px, exception documentée (P2-Q1). */}
                                   {signature && (
-                                    <span className="rounded-full bg-marque-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">★ Signature</span>
+                                    <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('★ Signature')}</span>
                                   )}
                                   {badges.map((b) => (
-                                    <span key={b} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700" title={`Déduit de la description — ${MENTION_BADGE_DEDUIT}`}>
-                                      {LIBELLES_BADGES[b]}*<span className="sr-only"> ({MENTION_BADGE_DEDUIT})</span>
+                                    <span key={b} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700" title={t('Déduit de la description — {mention}', { mention: t(MENTION_BADGE_DEDUIT) })}>
+                                      {t(LIBELLES_BADGES[b])}*<span className="sr-only"> ({t(MENTION_BADGE_DEDUIT)})</span>
                                     </span>
                                   ))}
                                 </span>
@@ -252,7 +274,7 @@ export function MenuAffiche({
                               {p.prix == null ? (
                                 <span className="shrink-0 text-sm text-gray-600 italic">{t('Prix sur place')}</span>
                               ) : (
-                                <span className="shrink-0 font-semibold text-marque-700 tabular-nums">{formaterPrix(p.prix)}</span>
+                                <span className="shrink-0 font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix)}</span>
                               )}
                             </button>
                             {detail && (
@@ -265,15 +287,28 @@ export function MenuAffiche({
                                 )}
                                 <p className="text-sm">
                                   <span className="font-semibold">{t('Prix :')} </span>
-                                  {p.prix == null ? <span className="text-gray-600 italic">{t('sur place')}</span> : <span className="font-semibold text-marque-700 tabular-nums">{formaterPrix(p.prix)}</span>}
+                                  {p.prix == null ? <span className="text-gray-600 italic">{t('sur place')}</span> : <span className="font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix)}</span>}
                                 </p>
                                 {badges.length > 0 && (
                                   <p className="text-sm text-gray-600">
-                                    {badges.map((b) => LIBELLES_BADGES[b]).join(' · ')} — {MENTION_BADGE_DEDUIT} auprès de l’équipe.
+                                    {langue === 'en'
+                                      ? t('{labels} — {mention} — ask the team.', {
+                                          labels: badges.map((b) => t(LIBELLES_BADGES[b])).join(' · '),
+                                          mention: t(MENTION_BADGE_DEDUIT),
+                                        })
+                                      : // Branche FR conservée telle quelle : menu-client-p1-c5.test.ts:246 épingle
+                                        // littéralement `{MENTION_BADGE_DEDUIT} auprès de l’équipe`.
+                                        `${badges.map((b) => t(LIBELLES_BADGES[b])).join(' · ')} — ${MENTION_BADGE_DEDUIT} auprès de l’équipe.`}
                                   </p>
                                 )}
-                                {p.allergenes.length > 0 && <p className="text-sm text-gray-600">{t('Allergènes :')} {p.allergenes.join(', ')}</p>}
-                                {signature && <p className="text-sm font-semibold text-marque-700">{t('★ Plat signature — l’un des best-sellers du restaurant.')}</p>}
+                                {/* P1-M2 : la ligne allergènes est toujours affichée — la liste si elle est
+                                    renseignée (préfixe traduit), sinon la mention explicite « demander en caisse ». */}
+                                {p.allergenes.length > 0 ? (
+                                  <p className="text-sm text-gray-600">{t('Allergènes :')} {p.allergenes.join(', ')}</p>
+                                ) : (
+                                  <p className="text-sm text-gray-600">{t(LIBELLE_ALLERGENES_ABSENTS)}</p>
+                                )}
+                                {signature && <p className="text-sm font-semibold text-magenta-700">{t('★ Plat signature — l’un des best-sellers du restaurant.')}</p>}
                               </div>
                             )}
                           </li>
@@ -287,7 +322,7 @@ export function MenuAffiche({
           )}
         </>
       )}
-      {avecBadges && <p className="text-center text-sm text-gray-600">* 🌶 / 🌱 : déduit du nom ou de la description du plat, {MENTION_BADGE_DEDUIT} auprès de l’équipe.</p>}
+      {avecBadges && <p className="text-center text-sm text-gray-600">{t('* 🌶 / 🌱 : déduit du nom ou de la description du plat, {mention} auprès de l’équipe.', { mention: t(MENTION_BADGE_DEDUIT) })}</p>}
       {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}
       <p className="text-center text-sm text-gray-600">{t('Allergènes : demandez conseil à l’équipe en cas de doute.')}</p>
       <PiedPublic commerceId={commerce.id} />
@@ -300,7 +335,7 @@ function OngletCategorie({ libelle, choisi, indique, onClick }: { libelle: strin
   return (
     <button
       type="button"
-      className={`puce relative whitespace-nowrap ${indique ? 'after:absolute after:inset-x-4 after:-bottom-0.5 after:h-1 after:rounded-full after:bg-or-400' : ''}`}
+      className={`puce relative whitespace-nowrap ${indique ? 'after:absolute after:inset-x-4 after:-bottom-0.5 after:h-1 after:rounded-full after:bg-magenta-400' : ''}`}
       aria-pressed={choisi}
       aria-current={indique ? 'true' : undefined}
       onClick={onClick}

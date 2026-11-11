@@ -47,6 +47,21 @@ if (!secretSession) {
   }
 }
 
+// Accès client aux cartes (P0-S7, server/README.md « Accès client ») : `stricte` = jeton client exigé ; `transition` =
+// jetons émis et vérifiés, mais l'accès d'avant P0-S7 (lien ou contact seuls) reste admis. Défaut : `stricte` en
+// production quand SESSION_SECRET existe (les jetons en dépendent), `transition` sinon.
+const authClientDemande = env.AUTH_CLIENT?.trim()
+if (authClientDemande && authClientDemande !== 'stricte' && authClientDemande !== 'transition') arreter('AUTH_CLIENT doit valoir « stricte » ou « transition ».')
+if (authClientDemande === 'stricte' && !secretSession) arreter('AUTH_CLIENT=stricte exige SESSION_SECRET (signature des jetons client).')
+const authClient: 'stricte' | 'transition' = (authClientDemande as 'stricte' | 'transition' | undefined) ?? (production && secretSession ? 'stricte' : 'transition')
+if (authClient === 'transition') {
+  console.warn(
+    production
+      ? '[serveur] ACCÈS CLIENT EN MODE TRANSITION : le lien ou le contact seuls ouvrent encore une carte (comportement d’avant P0-S7). Passer en mode strict dès que /api/v1/sante → authClient.accesSansJeton reste à 0.'
+      : '[serveur] Accès client en mode transition (développement) : AUTH_CLIENT=stricte pour essayer le mode de production.',
+  )
+}
+
 // CORS strict (P0-S4) : seule l'origine CORS_ORIGIN peut appeler l'API depuis un autre site. Absente : '*' comme avant,
 // sans refuser de démarrer — en production le front est servi par CE serveur (même origine), le CORS ne le concerne pas.
 let origineCors = '*'
@@ -76,12 +91,19 @@ let app
 try {
   // Supabase (S1) seulement si SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY sont définies ; sinon SQLite (DB_FILE).
   supabase = configSupabaseDepuisEnv(env)
+  // P0-S9 : en production, démarrer sans Supabase = erreur, pas une bascule silencieuse vers un SQLite vide et
+  // éphémère (sur Render, le fichier est perdu à chaque redéploiement ou réveil — clients et tirages avec).
+  // Hors production, SQLite reste le défaut (développement local, tests).
+  if (production && !supabase) {
+    arreter('En production, Supabase est obligatoire : SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY doivent être définies (refus de démarrer sur SQLite vide).')
+  }
   app = await creerServeur({
     fichierDb,
     supabase,
     adminPin,
     pinInitial,
     secretSession,
+    authClient,
     demo: env.DEMO === '1',
     production,
     derriereProxy: env.TRUST_PROXY === '1' || !!env.RENDER,

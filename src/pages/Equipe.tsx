@@ -3,7 +3,10 @@ import { MESSAGE_MODE_SERVEUR, useAction, useDonneesCommerce, useStore } from '.
 import { urlAbsolue } from '../router'
 import type { MembreEquipe } from '../types'
 import { dateRelative } from '../lib/format'
-import { BoutonCopier, EnTete, MessageErreur, QrCode, Vide } from '../components/ui'
+import { BoutonCopier, EnTete, MessageErreur, Vide } from '../components/ui'
+import { QrCode } from '../components/QrCode'
+import { Confirmation } from '../components/Confirmation'
+import type { Recapitulatif } from '../lib/ecransCommercant'
 
 const CODE = /^\d{4}$/
 
@@ -127,6 +130,7 @@ function LigneMembre({ membre, codeRecent, onCode }: { membre: MembreEquipe; cod
   const [edition, setEdition] = useState(false)
   const [nom, setNom] = useState(membre.nom)
   const [code, setCode] = useState('')
+  const [demande, setDemande] = useState(false)
 
   async function enregistrer(e: FormEvent) {
     e.preventDefault()
@@ -143,8 +147,18 @@ function LigneMembre({ membre, codeRecent, onCode }: { membre: MembreEquipe; cod
   }
 
   async function supprimer() {
-    if (!window.confirm(`Retirer ${membre.nom} de l’équipe ? Son code n’ouvrira plus la caisse.`)) return
+    setDemande(false)
     await executer(() => avecPin((a, api) => api.supprimerMembre(membre.commerceId, a, membre.id)))
+  }
+
+  const recapRetrait: Recapitulatif = {
+    titre: 'Retirer ce membre ?',
+    lignes: [
+      ['Membre', membre.nom],
+      ['Code', 'Ne pourra plus ouvrir la caisse'],
+    ],
+    confirmer: 'Retirer le membre',
+    avertissement: 'Son code n’ouvrira plus la caisse.',
   }
 
   return (
@@ -158,7 +172,7 @@ function LigneMembre({ membre, codeRecent, onCode }: { membre: MembreEquipe; cod
           <button className="min-h-11 rounded-xl px-3 text-sm font-semibold text-gray-700 ring-1 ring-gray-300" onClick={() => setEdition((x) => !x)} aria-expanded={edition}>
             Modifier
           </button>
-          <button className="min-h-11 rounded-xl px-3 text-sm font-semibold text-red-800 ring-1 ring-red-200" onClick={() => void supprimer()} disabled={enCours}>
+          <button className="min-h-11 rounded-xl px-3 text-sm font-semibold text-red-800 ring-1 ring-red-200" onClick={() => setDemande(true)} disabled={enCours}>
             Retirer
           </button>
         </span>
@@ -178,6 +192,7 @@ function LigneMembre({ membre, codeRecent, onCode }: { membre: MembreEquipe; cod
         </form>
       )}
       <MessageErreur>{erreur}</MessageErreur>
+      {demande && <Confirmation recap={recapRetrait} enCours={enCours} onConfirmer={() => void supprimer()} onAnnuler={() => setDemande(false)} />}
       <ReaffichageCode membre={membre} codeRecent={codeRecent} onConsomme={() => onCode(null)} />
     </li>
   )
@@ -241,7 +256,7 @@ function ReaffichageCode({ membre, codeRecent, onConsomme }: { membre: MembreEqu
       </div>
     </form>
   ) : (
-    <button type="button" className="mt-2 min-h-11 text-sm font-semibold text-marque-700 underline" onClick={() => setOuvert(true)}>
+    <button type="button" className="mt-2 min-h-11 text-sm font-semibold text-magenta-700 underline" onClick={() => setOuvert(true)}>
       Réafficher le code une fois
     </button>
   )

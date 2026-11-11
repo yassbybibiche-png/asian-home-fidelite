@@ -3,24 +3,25 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createHash, createHmac, randomBytes, randomInt, randomUUID, scrypt, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, CommerceCaisse, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
-import { analyserContact, cleContact, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
-import { canalDuClient, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
+import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
+import { canalDuClient, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
 import { estPerdant, lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
 import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePrive.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
 import { actionDejaTraitee, avecAction, echangerPoints, formaterPrix, soldePoints } from '../src/lib/points.ts'
 import { analyserAnniversaire, clientsCibles, deposerMessage, genererMessages, marquerLus, TYPES_MESSAGES, type Cible, type Evenement } from '../src/lib/messages.ts'
+import { correspondRecherche } from '../src/lib/recherche.ts'
 import {
   appliquerInscription,
   appliquerRattrapageValide,
-  appliquerVisiteProgramme,
   consommerRecompenseEnAttente,
   genererCodeParrainage,
   niveauClient,
@@ -38,14 +39,17 @@ import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurLogo, LIMITES_LOGO, messageTropLourd, urlLogo, validerLogo, type FormatLogo } from '../src/lib/logo.ts'
 import { EVENEMENTS_PUBLICS, ajouterJours, basculerAccroche } from '../src/lib/mesure.ts'
 import { CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, dureeConservationMois, estPurgeable, exportClientCsv, libelleDuree, listePurge, nomFichierExportClient } from '../src/lib/rgpd.ts'
-import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSuppression, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
+import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSuppression, type CompteurPublic, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
+import { menuAffichePour, pageMenuIndisponible, pageMenuPrerendue, pageNonTrouvee } from './prerendu.ts'
+import { cheminMasquePourErreur, journaliserRequete } from './logs.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
 import {
   chiffrerJetons,
   dechiffrerJetons,
   echangerCode,
+  emplacementAImporter,
   emplacementValide,
   ErreurGoogle,
   googleBusinessConfigure,
@@ -145,8 +149,20 @@ export interface OptionsServeur {
   googleBusiness?: ConfigGoogleBusiness
   /** Secret de signature des jetons de session (SESSION_SECRET) ; absent = POST /sessions répond 503, le PIN en en-tête reste accepté. */
   secretSession?: string
+  /**
+   * Accès aux cartes (P0-S7) : 'stricte' = jeton client exigé (production) ; 'transition' (défaut) = jetons émis et
+   * vérifiés, mais l'accès d'avant P0-S7 (identifiant ou contact seuls) reste admis — voir server/README.md.
+   */
+  authClient?: ModeAuthClient
+  /** Fin de la période de grâce des anciens identifiants (ISO), si différente de GRACE_ANCIENS_ID_JUSQU_AU (tests). */
+  graceAnciensIdJusquAu?: string
   /** Seuils des routes publiques, si différents de LIMITES_PUBLIQUES (tests). */
   limitesPubliques?: Partial<LimitesPubliques>
+  /** Journal des lectures sensibles (P2-S15) : part des lectures `GET /cartes/:id` et `GET /commerces`
+   * journalisées (0–1, défaut 0,1) ; 0 = rien, 1 = tout (tests). Échantillonnage obligatoire (volume).
+   * `plafond` = lignes max par minute (défaut 600) : au-delà, les lignes sont comptées puis résumées en une
+   * seule ligne à la minute suivante (l'attaque reste visible par son volume, sans noyer les logs). */
+  journalLectures?: { taux?: number; plafond?: number }
   /** Horloge injectable (tests). */
   maintenant?: () => Date
 }
@@ -224,31 +240,136 @@ const DUREE_SESSION_S: Record<RoleSession, number> = { commerce: 8 * 3600, admin
 
 const signature = (secret: string, charge: string) => createHmac('sha256', secret).update(charge).digest()
 
-export function emettreJeton(secret: string, c: ChargeSession): string {
-  const charge = Buffer.from(JSON.stringify(c)).toString('base64url')
+function signer(secret: string, contenu: object): string {
+  const charge = Buffer.from(JSON.stringify(contenu)).toString('base64url')
   return `v1.${charge}.${signature(secret, charge).toString('base64url')}`
 }
 
-/** Jeton bien formé et signé par ce secret (l'expiration et la révocation sont vérifiées à part) ; sinon null. */
-export function lireJeton(secret: string, jeton: string): ChargeSession | null {
+/** Contenu d'un jeton bien formé et signé par ce secret ; sinon null. La forme du contenu est vérifiée par l'appelant. */
+function contenuSigne(secret: string, jeton: string): Record<string, unknown> | null {
   const parties = jeton.split('.')
   if (parties.length !== 3 || parties[0] !== 'v1' || jeton.length > 2048) return null
   if (!egaux(Buffer.from(parties[2], 'base64url'), signature(secret, parties[1]))) return null
   try {
-    const c = JSON.parse(Buffer.from(parties[1], 'base64url').toString('utf8')) as ChargeSession
-    const roleOk = c.role === 'admin' || ((c.role === 'commerce' || c.role === 'equipe') && typeof c.commerceId === 'string')
-    if (!roleOk || typeof c.jti !== 'string' || !Number.isInteger(c.exp) || (c.role === 'equipe' && typeof c.membreId !== 'string')) return null
-    return c
+    const c: unknown = JSON.parse(Buffer.from(parties[1], 'base64url').toString('utf8'))
+    return c && typeof c === 'object' && !Array.isArray(c) ? (c as Record<string, unknown>) : null
   } catch {
     return null
   }
 }
 
+export function emettreJeton(secret: string, c: ChargeSession): string {
+  return signer(secret, c)
+}
+
+/** Jeton bien formé et signé par ce secret (l'expiration et la révocation sont vérifiées à part) ; sinon null. */
+export function lireJeton(secret: string, jeton: string): ChargeSession | null {
+  const c = contenuSigne(secret, jeton) as ChargeSession | null
+  if (!c) return null
+  const roleOk = c.role === 'admin' || ((c.role === 'commerce' || c.role === 'equipe') && typeof c.commerceId === 'string')
+  if (!roleOk || typeof c.jti !== 'string' || !Number.isInteger(c.exp) || (c.role === 'equipe' && typeof c.membreId !== 'string')) return null
+  return c
+}
+
+// ---------- Jetons client (P0-S7) ----------
+// Même format et même secret que les sessions, contenu différent : `typ` au lieu de `role`. Un jeton client n'est donc
+// jamais accepté comme session (pas de `role`), ni une session comme jeton client (pas de `typ`).
+// • `client` : accès à UNE carte (`cid`) d'UN commerce (`com`), DUREE_JETON_CLIENT_S, renouvelable tant qu'il est valable ;
+// • `lien` : lien d'accès à usage unique (comptoir : DUREE_LIEN_COMPTOIR_S ; « Retrouver ma carte » :
+//   DUREE_LIEN_RECUPERATION_S), échangé contre un jeton `client` par POST /cartes/:id/jeton.
+// `ver` = version d'accès de la carte (table `meta`) : la révocation l'incrémente, tout jeton d'une version antérieure
+// est refusé.
+
+export type ModeAuthClient = 'stricte' | 'transition'
+
+export interface ChargeClient {
+  typ: 'client' | 'lien'
+  jti: string
+  /** Identifiant de la carte (client). */
+  cid: string
+  /** Commerce de la carte. */
+  com: string
+  ver: number
+  /** Expiration, en secondes unix. */
+  exp: number
+}
+
+export const DUREE_JETON_CLIENT_S = 30 * 24 * 3600
+export const DUREE_LIEN_COMPTOIR_S = 15 * 60
+export const DUREE_LIEN_RECUPERATION_S = 24 * 3600
+/**
+ * Fin de la période de grâce des cartes à ANCIEN identifiant (`cl-<horodatage>-<4 car.>`, prévisible) : 90 jours après
+ * le déploiement prévu de P0-S7 (12/11/2026). Jusque-là, l'ancien lien / QR seul ouvre la carte en vue limitée et
+ * donne un jeton (migration au 1er accès) ; ensuite il ne donne plus rien. Déploiement décalé : décaler cette date
+ * (et server/README.md, JOURNAL.md).
+ */
+export const GRACE_ANCIENS_ID_JUSQU_AU = '2027-02-10T00:00:00+01:00'
+/** Échecs d'accès client par IP (jeton falsifié, carte d'un autre, identifiant deviné…) avant blocage. */
+const MAX_ECHECS_CLIENT_IP = 30
+
+/**
+ * Exécute `fn` en réservant `cle` dans `reservees` : le test et la réservation sont synchrones (avant tout `await`),
+ * donc un 2e appel concurrent pour la même clé obtient `refus()`. Libérée à la fin, succès ou échec. En mémoire : ne
+ * vaut que pour UNE instance du serveur.
+ */
+export async function reserverPendant<T>(reservees: Set<string>, cle: string, refus: () => Promise<never>, fn: () => Promise<T>): Promise<T> {
+  if (reservees.has(cle)) return refus()
+  reservees.add(cle)
+  try {
+    return await fn()
+  } finally {
+    reservees.delete(cle)
+  }
+}
+
+export function emettreJetonClient(secret: string, c: ChargeClient): string {
+  return signer(secret, c)
+}
+
+/** Jeton client bien formé et signé par ce secret (expiration, version et usage unique vérifiés à part) ; sinon null. */
+export function lireJetonClient(secret: string, jeton: string): ChargeClient | null {
+  const c = contenuSigne(secret, jeton) as ChargeClient | null
+  if (!c || 'role' in c || (c.typ !== 'client' && c.typ !== 'lien')) return null
+  if (typeof c.jti !== 'string' || typeof c.cid !== 'string' || typeof c.com !== 'string' || !Number.isInteger(c.ver) || !Number.isInteger(c.exp)) return null
+  return c
+}
+
 // ---------- Anti-abus des routes publiques (en mémoire, fenêtres fixes d'une minute) ----------
 
-/** Compteurs par clé (`<catégorie>:<ip>`, `carte:<id>`, `inscription:<commerce>:<contact>`…) ; perdus au redémarrage, sans gravité à la minute. */
-function creerCompteursPublics(maintenant: () => Date) {
+/**
+ * Seuil de persistance (P0-S20) : un compteur n'est écrit en base qu'à partir de la moitié de son seuil — en trafic
+ * normal, zéro écriture (une page qui se recharge toutes les 10 s fait 6 lectures/min pour un seuil de 30) ; un
+ * compteur chaud ou bloqué, lui, survit à un redémarrage. Une ligne = 73 à 92 octets de JSON (mesuré) ; les écritures
+ * ne bloquent jamais la requête (en mémoire d'abord, persistance en arrière-plan). Écritures par clé et par fenêtre :
+ * bornées (le compteur sature à son seuil — une requête déjà bloquée ne ré-écrit pas : au plus
+ * `seuil − seuil/2 + 1` écritures) et sérialisées par clé (une écriture ancienne ne peut pas écraser un blocage plus
+ * récent). Une seule instance (Render aujourd'hui) : à plusieurs instances, chaque instance garderait ses propres
+ * compteurs en mémoire — la base ne sert qu'au redémarrage, pas à la limitation distribuée, et l'écriture d'une autre
+ * instance peut encore ramener un compteur en arrière (voir server/README.md).
+ */
+export const SEUIL_PERSISTANCE_COMPTEURS = 1 / 2
+
+/** Persistance des compteurs publics (P0-S20, migration 0010) ; absente = mémoire seulement (comme avant). */
+export interface PersistanceCompteurs {
+  charger: () => Promise<CompteurPublic[]>
+  enregistrer: (c: CompteurPublic, purgerAvant: string) => Promise<void>
+  /** Vrai si la table existe (avertir dès le démarrage quand elle manque) ; absent = on ne sait pas. */
+  schemaPresente?: () => Promise<boolean>
+  /** Supprime les lignes périmées (au démarrage : aucune donnée ne traîne au-delà de sa fenêtre). */
+  purger?: (avant: string) => Promise<void>
+}
+
+/** Compteurs par clé (`<catégorie>:<ip>`, `carte:<id>`, `inscription:<commerce>:<contact>`…) ; perdus au redémarrage sans persistance. */
+function creerCompteursPublics(maintenant: () => Date, persistance?: PersistanceCompteurs) {
   const fenetres = new Map<string, { debut: number; n: number }>()
+  /** Écritures en cours, par clé : les écritures d'une même clé partent dans l'ordre où elles ont été demandées. */
+  const files = new Map<string, Promise<void>>()
+  let averti = false
+  function avertir(e: unknown) {
+    if (averti) return
+    averti = true
+    console.warn(`[securite] compteurs publics comptés en mémoire seulement (perdus au redémarrage) : ${e instanceof Error ? e.message : e}`)
+  }
   return {
     /** Compte une requête ; au-delà de `max` dans la fenêtre en cours → 429 avec Retry-After (secondes restantes). */
     consommer(cle: string, max: number, motif: string) {
@@ -258,15 +379,63 @@ function creerCompteursPublics(maintenant: () => Date) {
         f = { debut: t, n: 0 }
         fenetres.set(cle, f)
       }
-      f.n++
-      if (f.n > max) {
+      // P0-S20 (revue Codex point 1) : le compteur sature à `max` — une requête déjà bloquée ne ré-incrémente pas
+      // et ne ré-écrit pas (le blocage est déjà persisté : l'écriture a eu lieu quand n a atteint `max`) ; sinon
+      // chaque requête bloquée écrirait, sans borne, tant que l'attaque continue.
+      if (f.n >= max) {
         const s = Math.max(1, Math.ceil((f.debut + FENETRE_PUBLIQUE_MS - t) / 1000))
         throw new ErreurHttp(429, `${motif} Réessayez dans ${s} s.`, { 'Retry-After': String(s) })
+      }
+      f.n++
+      // P0-S20 : un compteur chaud est persisté (en arrière-plan, sans bloquer la requête) ; un compteur froid
+      // ne coûte aucune écriture — et ne peut pas provoquer de 429 juste après un redémarrage de toute façon.
+      if (persistance && f.n >= Math.max(1, Math.ceil(max * SEUIL_PERSISTANCE_COMPTEURS))) {
+        const ligne: CompteurPublic = { cle, debut: new Date(f.debut).toISOString(), n: f.n }
+        const purgerAvant = new Date(t - FENETRE_PUBLIQUE_MS).toISOString()
+        // P0-S20 (revue Codex point 4) : écritures sérialisées par clé — les écritures partent en arrière-plan et
+        // leur ordre d'arrivée en base n'est pas garanti ; sans file, une écriture ancienne (n = 15) arrivant après
+        // une récente (n = 30) annulerait le blocage au redémarrage suivant.
+        const precedent = files.get(cle) ?? Promise.resolve()
+        const ecriture = precedent.then(() => persistance.enregistrer(ligne, purgerAvant))
+        const chaine = ecriture.catch(() => undefined)
+        files.set(cle, chaine)
+        void ecriture.catch(avertir)
+        void chaine.then(() => {
+          if (files.get(cle) === chaine) files.delete(cle)
+        })
       }
     },
     purger() {
       const t = maintenant().getTime()
       for (const [cle, f] of fenetres) if (t - f.debut >= FENETRE_PUBLIQUE_MS || t < f.debut) fenetres.delete(cle)
+    },
+    /**
+     * Recharge les compteurs persistés (redémarrage, réveil Render) : fenêtres encore valides seulement. Table
+     * absente ou base indisponible : mémoire seulement, avec un avertissement — jamais de 500 au démarrage.
+     * L'avertissement part dès le démarrage (pas seulement au premier compteur chaud), et les lignes périmées sont
+     * purgées au passage : la clé contient un identifiant (IP, contact, identifiant de carte — comme `tentatives_auth`),
+     * elle ne doit pas traîner au-delà de sa fenêtre d'une minute.
+     */
+    async restaurer() {
+      if (!persistance) return
+      const t = maintenant().getTime()
+      if (persistance.schemaPresente && !(await persistance.schemaPresente().catch(() => false))) {
+        avertir(new ErreurMigrationManquante('compteurs_publics', '0010_compteurs_publics.sql'))
+        return
+      }
+      let lignes: CompteurPublic[]
+      try {
+        lignes = await persistance.charger()
+      } catch (e) {
+        avertir(e)
+        return
+      }
+      for (const l of lignes) {
+        const debut = Date.parse(l.debut)
+        if (!Number.isFinite(debut) || debut > t || t - debut >= FENETRE_PUBLIQUE_MS || !Number.isInteger(l.n) || l.n <= 0) continue
+        fenetres.set(l.cle, { debut, n: l.n })
+      }
+      if (persistance.purger) await persistance.purger(new Date(t - FENETRE_PUBLIQUE_MS).toISOString()).catch(avertir)
     },
   }
 }
@@ -342,13 +511,13 @@ function creerLimiteurAuth(st: Stockage, maintenant: () => Date) {
 
   return {
     /** 429 si l'une des clés est bloquée (Retry-After = secondes restantes du plus long blocage). */
-    async verifier(cles: string[]) {
+    async verifier(cles: string[], motif = 'Trop de PIN incorrects.') {
       const t = maintenant().getTime()
       let fin = 0
       for (const cle of cles) fin = Math.max(fin, (await charger(cle)).bloqueJusqua)
       if (fin > t) {
         const s = Math.ceil((fin - t) / 1000)
-        throw new ErreurHttp(429, `Trop de PIN incorrects. Réessayez dans ${Math.ceil(s / 60)} min.`, { 'Retry-After': String(s) })
+        throw new ErreurHttp(429, `${motif} Réessayez dans ${Math.ceil(s / 60)} min.`, { 'Retry-After': String(s) })
       }
     },
     /**
@@ -402,6 +571,20 @@ function booleen(v: unknown, champ: string): boolean {
 function pinNeuf(v: unknown): string {
   if (typeof v !== 'string' || !PIN_VALIDE.test(v)) throw err(400, 'Le PIN commerçant doit contenir 4 à 6 chiffres.')
   return v
+}
+
+/**
+ * Pagination d'une recherche (`?q=&page=&limite=`) : bornes strictes, 400 sinon. `q` vide = aucune recherche
+ * (la route répond alors sans aucun client : on ne liste jamais les clients en vrac).
+ */
+function pageRecherche(params: URLSearchParams): { q: string; page: number; limite: number } {
+  const q = (params.get('q') ?? '').trim()
+  if (q.length > 80) throw err(400, '« q » : recherche de 80 caractères maximum.')
+  const page = Number(params.get('page') ?? 1)
+  const limite = Number(params.get('limite') ?? 20)
+  if (!Number.isInteger(page) || page < 1) throw err(400, '« page » : numéro de page à partir de 1.')
+  if (!Number.isInteger(limite) || limite < 1 || limite > 50) throw err(400, '« limite » : entre 1 et 50 résultats par page.')
+  return { q, page, limite }
 }
 
 function lien(v: unknown): string {
@@ -602,6 +785,33 @@ function clientCaisse(c: Client) {
   return reste
 }
 
+/**
+ * Client vu par un membre de l'équipe en caisse (revue Codex P0-S14, point 1) : comme `clientCaisse`, sans les
+ * messages privés au restaurant — réservés au gérant (page Avis, via GET …/etat qui garde `clientCaisse`).
+ */
+function clientCaisseEquipe(c: Client) {
+  const { messagesPrives: _p, ...reste } = clientCaisse(c)
+  return reste
+}
+
+/**
+ * Commerce vu en caisse (P0-S14) : seulement ce que le comptoir affiche et calcule — nom, logo, seuil, récompense,
+ * catalogue, taux de points, programme des niveaux. Jamais les lots (probabilités), ni les réglages internes
+ * (réponses auto, messages auto, relances, tests A/B, conservation, dates, liens de commande, lien Google).
+ */
+function commerceCaisse(c: Commerce): CommerceCaisse {
+  return {
+    id: c.id,
+    nom: c.nom,
+    ...(c.logo !== undefined ? { logo: c.logo } : {}),
+    seuilTampons: c.seuilTampons,
+    recompense: c.recompense,
+    ...(c.catalogue !== undefined ? { catalogue: c.catalogue } : {}),
+    ...(c.eurosParPoint !== undefined ? { eurosParPoint: c.eurosParPoint } : {}),
+    ...(c.programme !== undefined ? { programme: c.programme } : {}),
+  }
+}
+
 /** Gain vu en caisse (P0-U3) : de quoi reconnaître le client (prénom seul, jamais son contact) et l'état du code. */
 function gainCaisse(t: Tirage, client: Client | undefined, maintenant: Date) {
   return {
@@ -654,6 +864,22 @@ async function initialiser(st: Stockage, o: OptionsServeur) {
       for (const a of demo.avis) if (ids.has(a.commerceId)) await sansDoublon(st.ajouterAvis(a))
       await st.majMeta('demo', new Date().toISOString())
     })
+  }
+}
+
+/**
+ * P0-S11 : sous Supabase, le journal d'audit (0003) et les traces du programme (0004) ne sont jamais ignorés — le
+ * stockage lève ErreurMigrationManquante sans leurs tables. Plutôt que des 503 au milieu d'une visite (fait métier écrit,
+ * trace refusée), le serveur refuse de démarrer. SQLite crée tout son schéma au démarrage : rien à vérifier.
+ */
+async function exigerMigrationsAudit(st: Stockage) {
+  if (st.type !== 'supabase') return
+  const conseil = 'Faites d’abord une sauvegarde (node scripts/sauvegarde-base.mjs, voir server/README.md), puis appliquez-la dans le SQL Editor de Supabase.'
+  if (!(await st.schemaCartiz())) {
+    throw new Error(`Démarrage refusé : migration supabase/migrations/0003_cartiz.sql absente (journal d’audit). ${conseil}`)
+  }
+  if (!(await st.schemaProgramme())) {
+    throw new Error(`Démarrage refusé : migration supabase/migrations/0004_programme.sql absente (traces de parrainage et de rattrapage). ${conseil}`)
   }
 }
 
@@ -730,7 +956,7 @@ export function lireOrigineCors(valeur: string): string {
 function entetesCors(autorisee: string, origine: string | undefined): Record<string, string> {
   const autorisation = {
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Session, X-Commerce-PIN, X-Admin-PIN, X-Equipe-Code',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session, X-Commerce-PIN, X-Admin-PIN, X-Equipe-Code',
     'Access-Control-Max-Age': '600',
   }
   if (autorisee === '*') return { 'Access-Control-Allow-Origin': '*', ...autorisation }
@@ -773,6 +999,111 @@ function etagCorrespond(entete: string | undefined, valeur: string): boolean {
   return entete.split(',').some((e) => e.trim() === '*' || sansFaible(e) === sansFaible(valeur))
 }
 
+// ---------- Compression des réponses (P2-Q2) ----------
+
+/** Seuil : en dessous, la compression coûte plus qu'elle ne rapporte (en-têtes + CPU). */
+const SEUIL_COMPRESSION_OCTETS = 1024
+/** Types compressibles (texte) : les images et polices sont déjà compressées, les recompresser serait inutile. */
+const TYPES_COMPRESSIBLES = /^(text\/|application\/(json|manifest\+json|xml)|image\/svg\+xml)/
+/** Garde-fou : le cache des variantes compressées ne grandit pas sans limite (un déploiement = ~25 fichiers). */
+const CACHE_COMPRESSION_MAX = 128
+/** Variantes compressées des fichiers statiques, par chemin absolu + ETag (le fichier change → l'ETag
+ *  change ; deux fichiers différents ne partagent jamais une variante, revue Codex P2-Q2). */
+const cacheCompression = new Map<string, { br?: Buffer; gzip?: Buffer }>()
+
+/** Qualité d'un codage dans Accept-Encoding (RFC 9110 §12.5.3) : l'explicite prime sur le joker `*`
+ *  (un `br;q=0` explicite n'est pas ressuscité par `*`), la casse est ignorée, une qualité mal
+ *  formée (`q=oops`, `q=-1`) vaut 0 (codage non accepté), `q>1` est ramené à 1. */
+function qualiteCodage(parties: string[], nom: string): number {
+  const qualite = (p: string): number => {
+    const m = /;\s*q=([^;,\s]+)/.exec(p)
+    if (!m) return 1
+    const q = Number(m[1])
+    if (!Number.isFinite(q) || q < 0) return 0
+    return q > 1 ? 1 : q
+  }
+  for (const p of parties) {
+    if (p === nom || p.startsWith(`${nom};`)) return qualite(p)
+  }
+  for (const p of parties) {
+    if (p === '*' || p.startsWith('*;')) return qualite(p)
+  }
+  return 0
+}
+
+/** Codage accepté par le client : la plus forte qualité, brotli préféré à égalité. */
+function codageAccepte(req: IncomingMessage): 'br' | 'gzip' | null {
+  const ae = req.headers['accept-encoding']
+  if (!ae) return null
+  const parties = ae.toLowerCase().split(',').map((p) => p.trim()).filter(Boolean)
+  const qBr = qualiteCodage(parties, 'br')
+  const qGzip = qualiteCodage(parties, 'gzip')
+  if (qBr <= 0 && qGzip <= 0) return null
+  return qGzip > qBr ? 'gzip' : 'br'
+}
+
+/** Ajoute `Accept-Encoding` au `Vary` existant (fusionné avec `Vary: Origin` du CORS, jamais remplacé). */
+function avecVary(entetes: Record<string, string>): Record<string, string> {
+  const vary = entetes.Vary
+  if (!vary) return { ...entetes, Vary: 'Accept-Encoding' }
+  if (/(^|,)\s*Accept-Encoding(\s|,|$)/i.test(vary)) return entetes
+  return { ...entetes, Vary: `${vary}, Accept-Encoding` }
+}
+
+/** Calcule les en-têtes et le corps à envoyer (compressé ou non) — sans rien écrire.
+ *  `cleCache` : clé des variantes compressées (fichiers statiques, chemin absolu + ETag : deux
+ *  fichiers différents ne partagent jamais une variante, même à taille et mtime égales) ;
+ *  sans clé, la compression est refaite à chaque fois (réponses JSON/CSV, corps différents à
+ *  chaque requête). Sans `Accept-Encoding` (service worker hors ligne, `fetchFaux` des tests) :
+ *  réponse d'identité, comme avant. */
+function preparerCorps(
+  req: IncomingMessage,
+  entetes: Record<string, string>,
+  type: string,
+  corps: Buffer,
+  cleCache?: string,
+): { entetes: Record<string, string>; corps: Buffer } {
+  const base = { ...entetes, 'Content-Type': type }
+  if (!TYPES_COMPRESSIBLES.test(type) || corps.length < SEUIL_COMPRESSION_OCTETS) {
+    return { entetes: { ...base, 'Content-Length': String(corps.length) }, corps }
+  }
+  const entetesVary = avecVary(base)
+  const codage = codageAccepte(req)
+  if (!codage) {
+    return { entetes: { ...entetesVary, 'Content-Length': String(corps.length) }, corps }
+  }
+  let variantes = cleCache ? cacheCompression.get(cleCache) : undefined
+  if (cleCache && !variantes) {
+    variantes = {}
+    if (cacheCompression.size >= CACHE_COMPRESSION_MAX) cacheCompression.clear()
+    cacheCompression.set(cleCache, variantes)
+  }
+  let comprime = variantes?.[codage]
+  if (!comprime) {
+    comprime =
+      codage === 'br'
+        ? brotliCompressSync(corps, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } })
+        : gzipSync(corps, { level: 6 })
+    if (variantes) variantes[codage] = comprime
+  }
+  return { entetes: { ...entetesVary, 'Content-Encoding': codage, 'Content-Length': String(comprime.length) }, corps: comprime }
+}
+
+/** Envoie un corps en le compressant si le client l'accepte et que le type s'y prête ; sinon, identité. */
+function envoyerCorps(
+  req: IncomingMessage,
+  res: ServerResponse,
+  statut: number,
+  entetes: Record<string, string>,
+  type: string,
+  corps: Buffer,
+  cleCache?: string,
+): void {
+  const prep = preparerCorps(req, entetes, type, corps, cleCache)
+  res.writeHead(statut, prep.entetes)
+  res.end(prep.corps)
+}
+
 function servirStatique(dossier: string, chemin: string, req: IncomingMessage, res: ServerResponse, entetes: Record<string, string>): boolean {
   const racine = resolve(dossier)
   let decode: string
@@ -801,12 +1132,23 @@ function servirStatique(dossier: string, chemin: string, req: IncomingMessage, r
         ? CACHE_IMMUABLE
         : CACHE_VISUELS
   const communs = { ...entetes, 'Cache-Control': cache, ETag: balise }
+  const type = TYPES_MIME[extname(fichier)] ?? 'application/octet-stream'
+  // La 304 porte le même Vary que la 200 (le client qui négocie doit savoir que la réponse varie).
+  const communsVary = TYPES_COMPRESSIBLES.test(type) ? avecVary(communs) : communs
   if (etagCorrespond(req.headers['if-none-match'], balise)) {
-    res.writeHead(304, communs).end()
+    res.writeHead(304, communsVary).end()
     return true
   }
-  res.writeHead(200, { ...communs, 'Content-Type': TYPES_MIME[extname(fichier)] ?? 'application/octet-stream' })
-  res.end(readFileSync(fichier))
+  const corps = readFileSync(fichier)
+  if (req.method === 'HEAD') {
+    // HEAD : exactement les mêmes en-têtes que GET (dont Content-Encoding et Content-Length
+    // compressé, revue Codex P2-Q2), sans corps.
+    const prep = preparerCorps(req, communsVary, type, corps, `${fichier}:${balise}`)
+    res.writeHead(200, prep.entetes)
+    res.end()
+    return true
+  }
+  envoyerCorps(req, res, 200, communsVary, type, corps, `${fichier}:${balise}`)
   return true
 }
 
@@ -855,17 +1197,47 @@ function codeGagnant(): string {
 
 export async function creerServeur(o: OptionsServeur) {
   const origineCors = lireOrigineCors(o.origineCors ?? '*')
+  const modeAuthClient: ModeAuthClient = o.authClient ?? 'transition'
+  if (modeAuthClient === 'stricte' && !o.secretSession) {
+    throw new Error('Accès client strict (AUTH_CLIENT=stricte) impossible sans SESSION_SECRET : les jetons client sont signés avec ce secret.')
+  }
+  const finGrace = Date.parse(o.graceAnciensIdJusquAu ?? GRACE_ANCIENS_ID_JUSQU_AU)
+  if (Number.isNaN(finGrace)) throw new Error('Date de fin de grâce des anciens identifiants de carte illisible.')
   // Supabase seulement s'il est configuré ; sinon SQLite local (dev, tests, comportement d'avant S1).
   const st: Stockage = o.supabase ? ouvrirStockageSupabase(o.supabase) : ouvrirStockage(o.fichierDb)
   try {
     await initialiser(st, o)
+    await exigerMigrationsAudit(st)
   } catch (e) {
     await st.fermer()
     throw e
   }
+  // P2-Q6 (revue Codex 2e passe, point 1) : identifiants des commerces CONNUS, pour le masquage des logs —
+  // seul un commerce connu reste en clair dans une ligne (un préfixe `c-…` ne prouve rien). Chargé après
+  // `initialiser` (le commerce seed y est créé) ; complété à chaque création (POST /commerces). En cas
+  // d'échec de lecture, l'ensemble reste vide : tous les identifiants de commerce sont alors masqués
+  // (échec en sécurité, le serveur démarre quand même).
+  const idsCommercesConnus = new Set<string>()
+  try {
+    for (const commerce of await st.commerces()) idsCommercesConnus.add(commerce.id)
+  } catch {
+    // Ensemble vide : masquage maximal, pas d'échec de démarrage pour les logs.
+  }
   const maintenant = o.maintenant ?? (() => new Date())
   const limiteur = creerLimiteurAuth(st, maintenant)
-  const compteurs = creerCompteursPublics(maintenant)
+  // P0-S20 : persistance des compteurs publics (migration 0010). Table absente : `enregistrer` lève
+  // ErreurMigrationManquante (avertissement une fois, mémoire seulement) ; `charger` renvoie [].
+  const compteurs = creerCompteursPublics(maintenant, {
+    charger: async () => st.compteursPublics(),
+    enregistrer: async (c, purgerAvant) => {
+      if (!(await schemaCompteursPublics())) throw new ErreurMigrationManquante('compteurs_publics', '0010_compteurs_publics.sql')
+      await st.enregistrerCompteurPublic(c, purgerAvant)
+    },
+    schemaPresente: () => schemaCompteursPublics(),
+    purger: async (avant) => {
+      await st.purgerCompteursPublics(avant)
+    },
+  })
   const limites: LimitesPubliques = { ...LIMITES_PUBLIQUES, ...o.limitesPubliques }
   const nettoyage = setInterval(() => {
     compteurs.purger()
@@ -889,7 +1261,60 @@ export async function creerServeur(o: OptionsServeur) {
   })
 
   const ipDe = (req: IncomingMessage) =>
-    (o.derriereProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()) || req.socket.remoteAddress || '?'
+    (o.derriereProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()) || req.socket?.remoteAddress || '?'
+
+  /**
+   * Journal des lectures sensibles (P2-S15) : un échantillon des lectures `GET /cartes/:id` et
+   * `GET /commerces` (liste), pour détecter une énumération — beaucoup d'identifiants distincts, beaucoup
+   * de 404, depuis une même IP (voir server/README.md « Journal des lectures sensibles »).
+   * Échantillonnage obligatoire (volume) : `taux` = part journalisée (défaut 0,1, borné à [0, 1] — un taux
+   * non fini, `NaN` par ex., retombe sur le défaut au lieu de tout journaliser, revue Codex point 4) ;
+   * 1 en test. Plafond : 600 lignes/min (option `plafond`) — au-delà, les lignes sont comptées puis
+   * résumées en une seule ligne à la minute suivante (revue Codex point 3). L'identifiant de carte n'est
+   * jamais écrit en clair : empreinte SHA-256 tronquée (12 car. hex., 48 bits — assez pour compter les
+   * identifiants distincts ; pseudonymisation, pas anonymisation : le hash sans sel permet de vérifier des
+   * identifiants candidats, revue Codex point 6). Une ligne par lecture :
+   * `[lecture-sensible] carte id=<empreinte> ip=… statut=…` ou
+   * `[lecture-sensible] commerces ip=… statut=… nb=…` (console.info, comme les autres lignes `[securite]`).
+   * La journalisation ne doit jamais faire échouer une lecture : toute erreur d'écriture est avalée.
+   */
+  const tauxBrut = o.journalLectures?.taux ?? 0.1
+  const tauxJournalLectures = Number.isFinite(tauxBrut) ? Math.min(1, Math.max(0, tauxBrut)) : 0.1
+  const plafondJournalLectures = Math.max(1, Math.floor(o.journalLectures?.plafond ?? 600))
+  let fenetreJournalLectures = -1
+  let lignesJournalLectures = 0
+  let lignesSupprimeesJournalLectures = 0
+  function journaliserLectureSensible(req: IncomingMessage, chemin: string[], statut: number, details?: string) {
+    if (req.method !== 'GET') return
+    const carte = chemin[0] === 'cartes' && chemin.length === 2
+    const commerces = chemin[0] === 'commerces' && chemin.length === 1
+    if (!carte && !commerces) return
+    if (Math.random() >= tauxJournalLectures) return
+    const minute = Math.floor(maintenant().getTime() / 60_000)
+    if (minute !== fenetreJournalLectures) {
+      if (lignesSupprimeesJournalLectures > 0) {
+        try {
+          console.info(`[lecture-sensible] plafond ${plafondJournalLectures} lignes/min atteint : ${lignesSupprimeesJournalLectures} ligne(s) supprimée(s) la minute précédente`)
+        } catch {
+          // La journalisation ne doit jamais faire échouer une lecture.
+        }
+      }
+      fenetreJournalLectures = minute
+      lignesJournalLectures = 0
+      lignesSupprimeesJournalLectures = 0
+    }
+    if (lignesJournalLectures >= plafondJournalLectures) {
+      lignesSupprimeesJournalLectures++
+      return
+    }
+    lignesJournalLectures++
+    const cible = carte ? `carte id=${createHash('sha256').update(chemin[1]).digest('hex').slice(0, 12)}` : 'commerces'
+    try {
+      console.info(`[lecture-sensible] ${cible} ip=${ipDe(req)} statut=${statut}${details ? ` ${details}` : ''}`)
+    } catch {
+      // La journalisation ne doit jamais faire échouer une lecture.
+    }
+  }
 
   // ---- Anti-abus des routes publiques (seuils : LIMITES_PUBLIQUES) ----
   const TROP = 'Trop de requêtes.'
@@ -978,7 +1403,8 @@ export async function creerServeur(o: OptionsServeur) {
     for (const [jti, fin] of nonRevoquees) if (fin <= t) nonRevoquees.delete(jti)
   }
 
-  async function estRevoquee(c: ChargeSession): Promise<boolean> {
+  /** Session ou lien d'accès client (usage unique) déjà révoqué ? Même table, même cache (identifiant `jti`). */
+  async function estRevoquee(c: { jti: string; exp: number }): Promise<boolean> {
     if (revoquees.has(c.jti)) return true
     const t = maintenant().getTime()
     if ((nonRevoquees.get(c.jti) ?? 0) > t) return false
@@ -990,7 +1416,7 @@ export async function creerServeur(o: OptionsServeur) {
     return false
   }
 
-  async function revoquer(c: ChargeSession) {
+  async function revoquer(c: { jti: string; exp: number }) {
     revoquees.set(c.jti, c.exp * 1000)
     nonRevoquees.delete(c.jti)
     purgerCaches(maintenant().getTime())
@@ -1119,6 +1545,105 @@ export async function creerServeur(o: OptionsServeur) {
     return { json: { ok: true } }
   }
 
+  // ---- Accès client aux cartes (P0-S7) : jeton `Authorization: Bearer`, version d'accès, échecs comptés ----
+
+  const REFUS_CARTE = 'Accès à cette carte refusé : ouvrez-la sur le téléphone utilisé à l’inscription, demandez un lien d’accès au comptoir, ou retrouvez-la avec votre téléphone ou votre e-mail.'
+  const CONTACT_DEJA_INSCRIT = 'Ce téléphone ou cet e-mail a déjà une carte ici. Ouvrez-la sur le téléphone utilisé à l’inscription, demandez un lien d’accès au comptoir, ou utilisez « Retrouver ma carte ».'
+  /** Appels sans jeton acceptés en mode transition (GET /sante) : quand il n'en reste plus, passer en mode strict. */
+  let accesSansJeton = 0
+
+  // Version d'accès par carte, dans `meta` (clé `acces_client:<commerce>:<client>`, absente = 0) ; gardée en mémoire
+  // après la 1re lecture (Render = une instance, et toute révocation passe par `revoquerAccesCarte`).
+  const cleVersionAcces = (commerceId: string, clientId: string) => `acces_client:${commerceId}:${clientId}`
+  const versionsAcces = new Map<string, number>()
+  async function versionAcces(commerceId: string, clientId: string): Promise<number> {
+    const cle = cleVersionAcces(commerceId, clientId)
+    const connue = versionsAcces.get(cle)
+    if (connue !== undefined) return connue
+    const v = Number(await st.meta(cle)) || 0
+    versionsAcces.set(cle, v)
+    return v
+  }
+  /** Révoque TOUS les jetons et liens d'accès de la carte (version + 1, relue en base). */
+  async function revoquerAccesCarte(commerceId: string, clientId: string) {
+    const cle = cleVersionAcces(commerceId, clientId)
+    const v = (Number(await st.meta(cle)) || 0) + 1
+    await st.majMeta(cle, String(v))
+    versionsAcces.set(cle, v)
+  }
+
+  const cleClientIp = (req: IncomingMessage) => `client-ip:${ipDe(req)}`
+  const verifierBlocageClient = (req: IncomingMessage) => limiteur.verifier([cleClientIp(req)], 'Trop de tentatives d’accès à une carte.')
+  /** Échec d'accès client (compté par IP dans `tentatives_auth`, portée `client`) → 401 uniforme, ou 404 « introuvable ». */
+  async function refusCarte(req: IncomingMessage, statut: 401 | 404 = 401): Promise<never> {
+    await limiteur.echec([[cleClientIp(req), MAX_ECHECS_CLIENT_IP]], 'client')
+    throw err(statut, statut === 404 ? 'Carte de fidélité introuvable.' : REFUS_CARTE)
+  }
+
+  /**
+   * Jeton client de l'en-tête `Authorization: Bearer` (absent → undefined). Falsifié, de type `lien`, d'une autre carte
+   * ou d'un autre commerce → échec compté + 401 ; expiré ou révoqué → 401 (non compté : usure normale). Même réponse
+   * dans tous les cas, que la carte existe ou non.
+   */
+  async function jetonClient(req: IncomingMessage, cible: { clientId?: string; commerceId?: string }): Promise<ChargeClient | undefined> {
+    const brut = enTete(req, 'authorization')
+    if (brut === undefined) return undefined
+    await verifierBlocageClient(req)
+    const jeton = /^Bearer\s+(\S+)$/i.exec(brut)?.[1]
+    const c = jeton && o.secretSession ? lireJetonClient(o.secretSession, jeton) : null
+    if (!c || c.typ !== 'client' || (cible.clientId && c.cid !== cible.clientId) || (cible.commerceId && c.com !== cible.commerceId)) return refusCarte(req)
+    if (c.exp * 1000 <= maintenant().getTime() || c.ver !== (await versionAcces(c.com, c.cid))) throw err(401, REFUS_CARTE)
+    return c
+  }
+
+  /**
+   * Preuve exigée par les routes protégées d'une carte : jeton client. Mode transition : sans jeton, l'accès d'avant
+   * P0-S7 reste admis (undefined, l'appelant applique alors ses anciennes vérifications) et il est compté.
+   */
+  async function exigerAccesCarte(req: IncomingMessage, cible: { clientId?: string; commerceId?: string }): Promise<ChargeClient | undefined> {
+    const c = await jetonClient(req, cible)
+    if (c) return c
+    if (modeAuthClient === 'transition') {
+      accesSansJeton++
+      return undefined
+    }
+    await verifierBlocageClient(req)
+    return refusCarte(req)
+  }
+
+  /** Carte désignée par un jeton valide ; supprimée depuis (ou commerce disparu) → 401 uniforme. */
+  async function carteDuJeton(c: ChargeClient): Promise<{ commerce: Commerce; client: Client }> {
+    const commerce = await st.commerce(c.com)
+    const client = commerce && (await st.client(commerce.id, c.cid))
+    if (!commerce || !client) throw err(401, REFUS_CARTE)
+    return { commerce, client }
+  }
+
+  /** Jeton client neuf (version d'accès actuelle de la carte), à ranger par le navigateur. */
+  async function accesClient(commerceId: string, clientId: string) {
+    const exp = Math.floor(maintenant().getTime() / 1000) + DUREE_JETON_CLIENT_S
+    const charge: ChargeClient = { typ: 'client', jti: randomUUID(), cid: clientId, com: commerceId, ver: await versionAcces(commerceId, clientId), exp }
+    return { jeton: emettreJetonClient(o.secretSession!, charge), expireLe: new Date(exp * 1000).toISOString() }
+  }
+
+  /**
+   * `jti` des liens d'accès en cours d'échange (POST /cartes/:id/jeton) : réservation synchrone, en mémoire, contre deux
+   * échanges simultanés du même lien. Une seule instance (Render) ; à plusieurs instances, la fenêtre entre la lecture
+   * et l'écriture de la révocation en base reviendrait (server/README.md).
+   */
+  const echangesEnCours = new Set<string>()
+
+  /** Lien d'accès à usage unique (`lien`), à échanger contre un jeton client sur la page de la carte. */
+  async function lienAcces(commerceId: string, clientId: string, dureeS: number) {
+    const exp = Math.floor(maintenant().getTime() / 1000) + dureeS
+    const charge: ChargeClient = { typ: 'lien', jti: randomUUID(), cid: clientId, com: commerceId, ver: await versionAcces(commerceId, clientId), exp }
+    return { jeton: emettreJetonClient(o.secretSession!, charge), expireLe: new Date(exp * 1000).toISOString() }
+  }
+
+  /** Ancienne carte (identifiant prévisible) dont le lien seul n'ouvre plus rien : période de grâce terminée. */
+  const graceTerminee = (clientId: string) => !estIdClientActuel(clientId) && maintenant().getTime() >= finGrace
+  const infosGrace = (clientId: string) => (estIdClientActuel(clientId) ? {} : { ancienLien: true, graceJusquAu: new Date(finGrace).toISOString() })
+
   async function journaliser(commerceId: string, auteur: Auteur, action: EntreeJournal['action'], details: string, client?: Client, date = maintenant()) {
     const e: EntreeJournal = { id: `jr-${randomUUID()}`, commerceId, date: date.toISOString(), action, auteur, details }
     if (client) {
@@ -1185,6 +1710,44 @@ export async function creerServeur(o: OptionsServeur) {
     }
     return mesurePresent
   }
+
+  // Même principe pour la migration 0009 (portée `client` des échecs d'accès, P0-S7) ; lue par GET /sante seulement.
+  let authClientPresent = false
+  let authClientVerifieLe = 0
+  async function schemaAuthClient(): Promise<boolean> {
+    if (authClientPresent || Date.now() - authClientVerifieLe < 60_000) return authClientPresent
+    authClientVerifieLe = Date.now()
+    try {
+      authClientPresent = await st.schemaAuthClient()
+    } catch {
+      authClientPresent = false
+    }
+    return authClientPresent
+  }
+
+  // Même principe pour la migration 0010 (compteurs des limites publiques, P0-S20) ; la persistance s'en sert pour
+  // ne pas écrire dans une table absente, et le chargement au démarrage pour avertir une fois si elle manque.
+  let compteursPublicsPresent = false
+  let compteursPublicsVerifieLe = 0
+  async function schemaCompteursPublics(): Promise<boolean> {
+    if (compteursPublicsPresent || Date.now() - compteursPublicsVerifieLe < 60_000) return compteursPublicsPresent
+    compteursPublicsVerifieLe = Date.now()
+    try {
+      compteursPublicsPresent = await st.schemaCompteursPublics()
+    } catch {
+      compteursPublicsPresent = false
+    }
+    return compteursPublicsPresent
+  }
+
+  // P0-S20 : recharge les compteurs persistés AVANT de servir (redémarrage, réveil Render). Placé ici, après les
+  // helpers de schéma ci-dessus : les compteurs ont été créés plus haut, mais leur restauration attend que ces
+  // vérifications existent (aucune requête n'est servie avant la fin de `creerServeur` de toute façon).
+  await compteurs.restaurer()
+
+  /** Cache des pages de menu prérendues (P2-Q4) : par commerce, 5 min (TTL) ; 64 entrées au plus. Déclaré ici (par
+   *  serveur, pas au niveau du module) pour que les tests gardent des serveurs indépendants. */
+  const cachePrerendu = new Map<string, { html: string; etag: string; statut: number; expire: number }>()
 
   /**
    * Mesure anonyme (P2-Q3) : +1 sur le compteur du jour. Jamais bloquant : migration absente, base en panne → l'événement
@@ -1342,11 +1905,13 @@ export async function creerServeur(o: OptionsServeur) {
     }
 
     const d = { client, commerce }
+    // Le jeton de désinscription sert aux deux canaux : e-mail (lien long + List-Unsubscribe) et SMS (lien court
+    // /d/… — P1-B9 : « répondez STOP » est impossible avec l'expéditeur alphanumérique Brevo).
+    const jeton = await jetonDesinscription(commerce.id, client.id)
     let message: Message
     if (canal === 'sms') {
-      message = { destinataire, texte: smsRelance(demande.modele, d, lienCourtCarte(site, client.id), demande.libre) }
+      message = { destinataire, texte: smsRelance(demande.modele, d, lienCourtCarte(site, client.id), demande.libre, lienCourtDesinscription(site, client.id, jeton)) }
     } else {
-      const jeton = await jetonDesinscription(commerce.id, client.id)
       const e = emailRelance(demande.modele, d, { carte: lienCarte(site, client.id), desinscription: `${site}/#/desinscription/${client.id}/${jeton}` }, demande.libre)
       message = {
         destinataire,
@@ -1427,13 +1992,16 @@ export async function creerServeur(o: OptionsServeur) {
         const client = await st.clientParContact(c.id, contact)
         if (!client) continue
         const destinataire = canal === 'sms' ? (/^0\d{9}$/.test(cle) ? `+33${cle.slice(1)}` : `+${cle}`) : cle
+        // P0-S7 : avec SESSION_SECRET, le lien porte un lien d'accès à usage unique (24 h) — seul le titulaire du
+        // contact le reçoit ; ouvert, il donne le jeton client à ce téléphone. Sans secret : lien de la carte seul.
+        const acces = o.secretSession ? (await lienAcces(c.id, client.id, DUREE_LIEN_RECUPERATION_S)).jeton : ''
         const message: Message =
           canal === 'sms'
-            ? { destinataire, texte: `${c.nom} : votre carte de fidélité ${lienCourtCarte(site, client.id)}` }
+            ? { destinataire, texte: `${c.nom} : votre carte de fidélité ${lienCourtCarte(site, client.id)}${acces ? `?a=${acces}` : ''}` }
             : {
                 destinataire,
                 sujet: `Votre carte de fidélité ${c.nom}`,
-                texte: `Bonjour,\n\nVoici le lien de votre carte de fidélité ${c.nom} :\n${lienCarte(site, client.id)}\n\nVous n’avez rien demandé ? Ignorez ce message.\n\nL’équipe de ${c.nom}`,
+                texte: `Bonjour,\n\nVoici le lien de votre carte de fidélité ${c.nom} :\n${lienCarte(site, client.id)}${acces ? `?acces=${acces}\n\nCe lien ouvre votre carte complète sur votre téléphone (valable 24 h, une seule fois).` : ''}\n\nVous n’avez rien demandé ? Ignorez ce message.\n\nL’équipe de ${c.nom}`,
               }
         await notifications.envoyer(canal, message)
       }
@@ -1481,42 +2049,75 @@ export async function creerServeur(o: OptionsServeur) {
     return c
   }
 
+  /** Carte d'un jeton client valable, supprimée depuis : même refus qu'un jeton invalide (P0-S7). */
+  async function clientOu401(commerceId: string, id: string): Promise<Client> {
+    const c = await st.client(commerceId, id)
+    if (!c) throw err(401, REFUS_CARTE)
+    return c
+  }
+
   function exigerActif(c: Commerce) {
     if (!c.actif) throw err(409, 'Ce commerce n’est pas actif pour le moment.')
   }
 
   /**
    * Récompense de parrainage après la 1re visite du filleul (jamais à l'inscription).
-   * À appeler dans la transaction du passage, une fois le filleul mis à jour : met à jour le parrain,
-   * journalise des deux côtés et écrit la trace d'audit (0004, ignorée si la migration manque).
-   * Retourne le filleul avec ses points de parrainage, et le texte à ajouter au journal du passage.
+   * À appeler dans la transaction du passage : calcule le filleul avec ses points de parrainage et le texte à ajouter
+   * au journal du passage. Rien n'est écrit ici : `ecrire()` (parrain, journal, trace d'audit 0004) s'appelle APRÈS
+   * l'écriture du filleul (P0-S11) — si le filleul est en conflit (409), le parrain n'est pas crédité, et un nouvel
+   * essai ne peut pas le créditer deux fois.
    */
-  async function reglerParrainage(commerce: Commerce, filleulApres: Client, quand: Date): Promise<{ filleul: Client; texte: string }> {
-    if (!filleulApres.parrainId || filleulApres.parrainagePaye) return { filleul: filleulApres, texte: '' }
+  async function reglerParrainage(commerce: Commerce, filleulApres: Client, quand: Date): Promise<{ filleul: Client; texte: string; ecrire: () => Promise<string> }> {
+    const rien = { filleul: filleulApres, texte: '', ecrire: async () => '' }
+    if (!filleulApres.parrainId || filleulApres.parrainagePaye) return rien
     const parrain = await st.client(commerce.id, filleulApres.parrainId)
-    if (!parrain) return { filleul: filleulApres, texte: '' }
+    if (!parrain) return rien
     const r = parrainageDu(filleulApres, parrain, commerce, quand)
-    if (!r) return { filleul: filleulApres, texte: '' }
+    if (!r) return rien
     const pointsFilleul = soldePoints(r.filleul) - soldePoints(filleulApres)
     const pointsParrain = r.parrain ? soldePoints(r.parrain) - soldePoints(parrain) : 0
     const texte = r.parrain
       ? `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) et +${pointsParrain} points pour ${parrain.prenom} (parrain)`
       : `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) — parrain au plafond annuel, rien pour ${parrain.prenom}`
-    if (r.parrain) {
-      await st.majClient(r.parrain)
-      await journaliser(commerce.id, { type: 'gerant', nom: 'Gérant' }, 'parrainage', texte, r.parrain, quand)
+    const ecrire = async (): Promise<string> => {
+      let parrainCredite = r.parrain
+      let points = pointsParrain
+      let texteJournal = texte
+      if (parrainCredite) {
+        try {
+          await st.majClient(parrainCredite)
+        } catch (e) {
+          // Le filleul est déjà marqué payé : sans reprise, le crédit du parrain serait perdu pour de bon (un nouvel essai
+          // ne règle plus rien). Parrain modifié entre-temps (2 filleuls du même parrain en même temps, ou une caisse) :
+          // relu frais (st.client mémorise sa nouvelle version), recalculé, réécrit UNE fois. Un 2e conflit remonte.
+          if (!(e instanceof ErreurConflit)) throw e
+          const frais = await st.client(commerce.id, parrain.id)
+          const r2 = frais ? parrainageDu(filleulApres, frais, commerce, quand) : null
+          if (!frais || !r2) throw e
+          parrainCredite = r2.parrain
+          points = r2.parrain ? soldePoints(r2.parrain) - soldePoints(frais) : 0
+          texteJournal = r2.parrain
+            ? `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) et +${points} points pour ${frais.prenom} (parrain)`
+            : `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) — parrain au plafond annuel, rien pour ${frais.prenom}`
+          if (parrainCredite) await st.majClient(parrainCredite)
+        }
+        if (parrainCredite) await journaliser(commerce.id, { type: 'gerant', nom: 'Gérant' }, 'parrainage', texteJournal, parrainCredite, quand)
+      }
+      const trace: Parrainage = {
+        id: `pr-${randomUUID()}`,
+        commerceId: commerce.id,
+        parrainId: parrain.id,
+        filleulId: filleulApres.id,
+        date: quand.toISOString(),
+        pointsParrain: points,
+        pointsFilleul,
+      }
+      await st.ajouterParrainage(trace)
+      // Texte FINAL du journal du passage (revue Codex P0-S11, point 5) : la reprise peut recalculer le crédit
+      // (plafond atteint entre-temps) — le journal doit dire ce qui a vraiment été crédité, pas le calcul initial.
+      return texteJournal
     }
-    const trace: Parrainage = {
-      id: `pr-${randomUUID()}`,
-      commerceId: commerce.id,
-      parrainId: parrain.id,
-      filleulId: filleulApres.id,
-      date: quand.toISOString(),
-      pointsParrain,
-      pointsFilleul,
-    }
-    await st.ajouterParrainage(trace)
-    return { filleul: r.filleul, texte }
+    return { filleul: r.filleul, texte, ecrire }
   }
 
   /** Inscrit le client, ou retrouve celui qui a déjà ce téléphone / e-mail dans ce commerce. */
@@ -1525,7 +2126,7 @@ export async function creerServeur(o: OptionsServeur) {
    * garde son choix (sinon n'importe qui connaissant son numéro pourrait le réabonner après un STOP) — le gérant peut le
    * modifier sur la fiche.
    */
-  async function inscrireOuRetrouver(commerce: Commerce, prenom: string, contactSaisi: unknown, parrainCode?: string, consentement = false) {
+  async function inscrireOuRetrouver(commerce: Commerce, prenom: string, contactSaisi: unknown, parrainCode?: unknown, consentement = false) {
     const commerceId = commerce.id
     const contact = contactOuErreur(contactSaisi)
     const existant = await st.clientParContact(commerceId, contact)
@@ -1580,6 +2181,8 @@ export async function creerServeur(o: OptionsServeur) {
    * journal ici : l'appelant journalise l'opération SANS prénom ni contact (sinon la trace garderait la donnée effacée).
    */
   async function supprimerClientCascade(commerceId: string, clientId: string): Promise<BilanSuppression> {
+    // Version d'accès de la carte (P0-S7) : plus rien à protéger une fois la carte supprimée.
+    const cleAcces = cleVersionAcces(commerceId, clientId)
     for (const filleul of (await st.clients(commerceId)).filter((c) => c.parrainId === clientId)) {
       await st.transaction(async () => {
         const avant = await st.client(commerceId, filleul.id)
@@ -1588,7 +2191,12 @@ export async function creerServeur(o: OptionsServeur) {
         await st.majClient(apres)
       })
     }
-    return st.transaction(() => st.supprimerClient(commerceId, clientId))
+    const bilan = await st.transaction(() => st.supprimerClient(commerceId, clientId))
+    if (bilan.client) {
+      await st.supprimerMeta(cleAcces)
+      versionsAcces.delete(cleAcces)
+    }
+    return bilan
   }
 
   const resumeBilan = (b: BilanSuppression) =>
@@ -1600,23 +2208,56 @@ export async function creerServeur(o: OptionsServeur) {
   // (Render = une instance) : chaque affichage public ne relit pas l'image en base.
   type LogoStocke = { type: FormatLogo; version: string; octets: Buffer }
   const cleMetaLogo = (commerceId: string) => `logo:${commerceId}`
+  // Blob immuable d'un envoi précis (revue Codex P0-S11, point 2) : deux PUT simultanés d'images différentes
+  // n'écrasent plus l'image gagnante — l'adresse `?v=<version>` retrouve toujours ses propres octets.
+  const cleMetaLogoVersion = (commerceId: string, version: string) => `logo:${commerceId}:${version}`
   const logosEnMemoire = new Map<string, LogoStocke | null>()
+  const logosVersionnesEnMemoire = new Map<string, LogoStocke>()
+
+  function serialiserLogo(logo: LogoStocke): string {
+    return JSON.stringify({ type: logo.type, version: logo.version, donnees: logo.octets.toString('base64') })
+  }
+  function deserialiserLogo(brut: string | undefined): LogoStocke | null {
+    if (!brut) return null
+    const v = JSON.parse(brut) as { type: FormatLogo; version: string; donnees: string }
+    return { type: v.type, version: v.version, octets: Buffer.from(v.donnees, 'base64') }
+  }
+  /** Version désignée par une adresse de logo (`/logo?v=<version>`), null sinon (adresse vide ou statique). */
+  function versionLogoAdresse(logo: string | undefined): string | null {
+    if (!logo) return null
+    try {
+      return new URL(logo, 'http://localhost').searchParams.get('v')
+    } catch {
+      return null
+    }
+  }
 
   async function lireLogo(commerceId: string): Promise<LogoStocke | null> {
     if (logosEnMemoire.has(commerceId)) return logosEnMemoire.get(commerceId)!
-    const brut = await st.meta(cleMetaLogo(commerceId))
-    let logo: LogoStocke | null = null
-    if (brut) {
-      const v = JSON.parse(brut) as { type: FormatLogo; version: string; donnees: string }
-      logo = { type: v.type, version: v.version, octets: Buffer.from(v.donnees, 'base64') }
-    }
+    const logo = deserialiserLogo(await st.meta(cleMetaLogo(commerceId)))
     logosEnMemoire.set(commerceId, logo)
+    return logo
+  }
+  async function lireLogoVersion(commerceId: string, version: string): Promise<LogoStocke | null> {
+    const cle = `${commerceId}:${version}`
+    if (logosVersionnesEnMemoire.has(cle)) return logosVersionnesEnMemoire.get(cle)!
+    const logo = deserialiserLogo(await st.meta(cleMetaLogoVersion(commerceId, version)))
+    if (logo) logosVersionnesEnMemoire.set(cle, logo)
     return logo
   }
   async function ecrireLogo(commerceId: string, logo: LogoStocke | null) {
     logosEnMemoire.delete(commerceId)
-    await st.majMeta(cleMetaLogo(commerceId), logo ? JSON.stringify({ type: logo.type, version: logo.version, donnees: logo.octets.toString('base64') }) : '')
+    if (logo) {
+      await st.majMeta(cleMetaLogoVersion(commerceId, logo.version), serialiserLogo(logo))
+      logosVersionnesEnMemoire.set(`${commerceId}:${logo.version}`, logo)
+    }
+    await st.majMeta(cleMetaLogo(commerceId), logo ? serialiserLogo(logo) : '')
     logosEnMemoire.set(commerceId, logo)
+  }
+  /** Supprime le blob d'une version (au mieux) : la version n'est plus désignée par aucune adresse. */
+  async function supprimerLogoVersion(commerceId: string, version: string) {
+    logosVersionnesEnMemoire.delete(`${commerceId}:${version}`)
+    await st.majMeta(cleMetaLogoVersion(commerceId, version), '')
   }
 
   type Reponse = {
@@ -1641,11 +2282,30 @@ export async function creerServeur(o: OptionsServeur) {
           stockage: st.type,
           demo: !!o.demo,
           integrations: integrations(),
+          // P0-S9 : SQLite en production ne devrait plus arriver (server/index.ts refuse de démarrer sans
+          // Supabase) — si c'est le cas (démarrage par un autre chemin), l'alerte est visible ici.
+          ...(st.type === 'sqlite' && o.production
+            ? { alerteStockage: 'Base SQLite en production : les données sont dans un fichier local éphémère (perdu à chaque redéploiement ou réveil). Définir SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY — le serveur refuse désormais de démarrer sans elles en production.' }
+            : {}),
           // Migration 0003 (équipe, journal, menu) appliquée sur la base ?
           // Migration 0004 (parrainages, demandes de rattrapage) appliquée sur la base ?
           // Migration 0007 (journal des envois de relances) appliquée ? Sans elle, aucun envoi réel ne part.
           // Migration 0008 (compteurs anonymes de la mesure) appliquée ? Sans elle, l'entonnoir reste vide.
           migrations: { cartiz: await schemaCartiz(), programme: await schemaProgramme(), relances: await schemaRelances(), mesure: await schemaMesure() },
+        },
+      }
+    }
+    if (ressource === 'sante' && id === 'acces-client' && !sous && m === 'GET') {
+      // P0-S7 (à part : le contenu de /sante est figé) — mode d'accès aux cartes, jetons possibles (SESSION_SECRET),
+      // migration 0009 appliquée, fin de grâce des anciens liens, et appels encore faits SANS jeton depuis le démarrage
+      // (mode transition) : quand ce compteur reste à 0, passer AUTH_CLIENT à `stricte`. Aucune donnée client.
+      return {
+        json: {
+          mode: modeAuthClient,
+          jetons: !!o.secretSession,
+          migration: await schemaAuthClient(),
+          graceAnciensLiensJusquAu: new Date(finGrace).toISOString(),
+          accesSansJeton,
         },
       }
     }
@@ -1659,19 +2319,104 @@ export async function creerServeur(o: OptionsServeur) {
       if (envoi) envoyerLiensCarte(contact, canal, sitePublic(req))
       return { statut: 202, json: { ok: true, envoi } }
     }
+    if (ressource === 'cartes' && id && sous === 'jeton' && !sousId && m === 'POST') {
+      // PUBLIC (P0-S7) — obtenir / renouveler le jeton client de cette carte. Preuves acceptées, dans l'ordre :
+      // 1. jeton client encore valable (Authorization) → renouvellement ;
+      // 2. `{ lien }` : lien d'accès à usage unique (comptoir, « Retrouver ma carte ») → consommé ;
+      // 3. rien : seulement une carte à ANCIEN identifiant, pendant la période de grâce (migration au 1er accès), et
+      //    jamais révoquée (version d'accès 0) : une carte révoquée ne se rouvre que par un lien d'accès.
+      // Tout le reste : échec compté + 401 uniforme (que la carte existe ou non).
+      limiterIp(req, 'fiche', limites.ficheClientParIp)
+      compteurs.consommer(`carte:${id}`, limites.lectureParCarte, TROP)
+      if (!o.secretSession) throw err(503, 'Accès client non configuré sur ce serveur (SESSION_SECRET absente) : la carte reste ouverte par son lien.')
+      await verifierBlocageClient(req)
+      const corps = await lireCorps(req)
+      const charge = await jetonClient(req, { clientId: id })
+      let carte: { commerce: Commerce; client: Client } | undefined
+      if (charge) carte = await carteDuJeton(charge)
+      else if (typeof corps.lien === 'string' && corps.lien) {
+        const l = lireJetonClient(o.secretSession, corps.lien)
+        if (!l || l.typ !== 'lien' || l.cid !== id) return refusCarte(req)
+        // Usage unique, aussi en concurrence : le `jti` est réservé dès ici, avant le 1er `await` ; un 2e échange
+        // simultané du même lien est refusé. La révocation en base reste la garde durable.
+        carte = await reserverPendant(echangesEnCours, l.jti, () => refusCarte(req), async () => {
+          if (l.exp * 1000 <= maintenant().getTime() || (await estRevoquee(l))) return refusCarte(req)
+          const commerce = await st.commerce(l.com)
+          const client = commerce && (await st.client(commerce.id, id))
+          if (!commerce || !client || l.ver !== (await versionAcces(commerce.id, id))) return refusCarte(req)
+          await revoquer(l) // usage unique
+          return { commerce, client }
+        })
+      } else {
+        if (estIdClientActuel(id) || graceTerminee(id)) return refusCarte(req)
+        carte = await clientDeCarte(id).catch(() => undefined)
+        if (!carte || (await versionAcces(carte.commerce.id, carte.client.id)) > 0) return refusCarte(req)
+      }
+      exigerActif(carte.commerce)
+      return { statut: 201, json: { ...(await accesClient(carte.commerce.id, carte.client.id)), clientId: carte.client.id, commerceId: carte.commerce.id } }
+    }
+    if (ressource === 'cartes' && id && sous === 'revocation' && !sousId && m === 'POST') {
+      // PUBLIC (P0-S7) — « Déconnecter tous mes appareils » : le titulaire (jeton valable) révoque tous les jetons et
+      // liens d'accès de sa carte, celui-ci compris. Le lien seul ne suffit jamais.
+      limiterIp(req, 'fiche', limites.ficheClientParIp)
+      const charge = await jetonClient(req, { clientId: id })
+      if (!charge) {
+        await verifierBlocageClient(req)
+        return refusCarte(req)
+      }
+      const { commerce: c, client } = await carteDuJeton(charge)
+      await revoquerAccesCarte(c.id, client.id)
+      await journaliser(c.id, { type: 'client', nom: 'Client (depuis sa carte)' }, 'acces', 'Accès à la carte révoqué par le client (tous ses appareils)', client)
+      return { json: { ok: true } }
+    }
     if (ressource === 'cartes' && id && !sous && m === 'GET') {
       // PUBLIC (ajout V2) : la carte vue par le client (#/carte/<clientId>) et l'état de son jeu du jour.
-      // Mêmes informations que POST /clients en public : jamais de téléphone ni d'e-mail. Seule exception (P0-U3) : le
-      // code gagnant DU JOUR de ce client, re-servi à son titulaire (autre téléphone, cache vidé) — jamais dans une liste.
+      // Mêmes informations que POST /clients en public : jamais de téléphone ni d'e-mail. P0-S19 : le code gagnant
+      // DU JOUR n'est servi qu'au titulaire authentifié (jeton client valable de CETTE carte) — jamais dans la vue
+      // limitée, jamais non plus dans la vue complète obtenue sans jeton en mode transition : connaître un
+      // `clientId` ne suffit plus à retirer le gain avant son titulaire. Le titulaire sur un autre téléphone /
+      // au cache vidé récupère son code avec un jeton (lien d'accès du comptoir, « Retrouver ma carte », ou
+      // renouvellement du jeton rangé sur son téléphone) ; la réponse de son propre tirage le lui donne aussi.
+      // P0-S7 : vue COMPLÈTE avec un jeton client de cette carte (ou en mode transition) ; sinon vue LIMITÉE (tampons,
+      // jeu du jour sans code, sans prénom, messages, historique ni demandes). Ancien
+      // identifiant après la période de grâce, sans jeton : 404, comme une carte inconnue.
       limiterIp(req, 'lecture', limites.lectureParIp)
       compteurs.consommer(`carte:${id}`, limites.lectureParCarte, TROP)
-      for (const c of await st.commerces()) {
+      const charge = await jetonClient(req, { clientId: id })
+      if (!charge) await verifierBlocageClient(req)
+      const complete = !!charge || modeAuthClient === 'transition'
+      const commerces = charge ? [(await carteDuJeton(charge)).commerce] : await st.commerces()
+      for (const c of commerces) {
         let client = await st.client(c.id, id)
         if (!client) continue
+        if (!complete && graceTerminee(id)) break
         exigerActif(c)
         const tirages = await st.tiragesClient(c.id, client.id)
         const t = maintenant()
         const duJour = tirageDuJour(tirages, c.id, client.id, t)
+        const jeu = {
+          statut: statutJeu(client, tirages, c.id, t),
+          lotDuJour: duJour?.lot ?? null,
+          // P0-S19 : code gagnant du jour servi UNIQUEMENT au titulaire authentifié (`charge` = jeton client valable
+          // de cette carte). Sans jeton : null, même en vue complète (mode transition) — le lot reste affiché, le
+          // code, lui, ne quitte jamais le serveur sans preuve. Tirage perdant : null, même avec jeton.
+          codeDuJour: charge && duJour?.code && !estPerdant(duJour.lot) ? duJour.code : null,
+          remisDuJour: !!duJour?.remis,
+        }
+        const acces = { vue: complete ? 'complete' : 'limitee', jeton: !!charge, ...infosGrace(id) }
+        if (!complete) {
+          const menu = await st.menu(c.id)
+          return {
+            json: {
+              client: { id: client.id, commerceId: c.id, tampons: client.tampons },
+              commerce: commercePublic(c),
+              jeu,
+              menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
+              acces,
+            },
+          }
+        }
+        if (!charge) accesSansJeton++
         // Ouverture de la carte : relance des inactifs / anniversaire, si ces règles sont activées (une seule fois chacune).
         const avec = avecMessages(client, c, 'ouverture', t)
         if (avec !== client) {
@@ -1692,12 +2437,7 @@ export async function creerServeur(o: OptionsServeur) {
           json: {
             client: cartePublique(client),
             commerce: commercePublic(c),
-            jeu: {
-              statut: statutJeu(client, tirages, c.id, t),
-              lotDuJour: duJour?.lot ?? null,
-              codeDuJour: duJour?.code && !estPerdant(duJour.lot) ? duJour.code : null,
-              remisDuJour: !!duJour?.remis,
-            },
+            jeu,
             menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
             // P1-C3 : historique des lots de la roue (gagnants seulement), sans aucun code — seul celui du jour est servi ci-dessus.
             historiqueLots: tirages
@@ -1705,16 +2445,20 @@ export async function creerServeur(o: OptionsServeur) {
               .sort((a, b) => b.date.localeCompare(a.date))
               .slice(0, 20)
               .map((x) => ({ lot: x.lot, date: x.date, statut: statutGain(x, t) })),
+            acces,
           },
         }
       }
-      throw err(404, 'Carte de fidélité introuvable.')
+      // Carte supprimée depuis l'émission du jeton : même refus qu'un jeton invalide.
+      if (charge) throw err(401, REFUS_CARTE)
+      return refusCarte(req, 404)
     }
     if (ressource === 'cartes' && id && sous === 'lus' && m === 'POST') {
-      // PUBLIC : le client marque ses messages comme lus (même niveau d'accès que la lecture de sa carte).
+      // PUBLIC : le client marque ses messages comme lus (P0-S7 : jeton client de cette carte ; mode transition : lien seul).
       limiterIp(req, 'lecture', limites.lectureParIp)
       compteurs.consommer(`carte:${id}`, limites.lectureParCarte, TROP)
-      for (const c of await st.commerces()) {
+      const charge = await exigerAccesCarte(req, { clientId: id })
+      for (const c of charge ? [(await carteDuJeton(charge)).commerce] : await st.commerces()) {
         if (!(await st.client(c.id, id))) continue
         exigerActif(c)
         await st.transaction(async () => {
@@ -1731,10 +2475,12 @@ export async function creerServeur(o: OptionsServeur) {
       // la suppression » (demande enregistrée ; la suppression elle-même est faite par le commerce, fiche client).
       // Identité : lien de la carte + téléphone ou e-mail du client (403 sinon). Le commerce inactif n'empêche pas ces
       // droits. Limité par IP et par carte (même seuil que les autres formulaires de la carte).
+      // P0-S7 : jeton client de cette carte EN PLUS du contact (mode transition : lien + contact, comme avant).
       limiterIp(req, 'fiche', limites.ficheClientParIp)
       compteurs.consommer(`rgpd:${id}`, limites.ficheClientParIp, TROP)
+      const charge = await exigerAccesCarte(req, { clientId: id })
       const corps = await lireCorps(req)
-      const { commerce: c, client } = await clientDeCarte(id)
+      const { commerce: c, client } = charge ? await carteDuJeton(charge) : await clientDeCarte(id)
       if (!contactDuClient(client, corps.contact)) {
         throw err(403, 'Ce téléphone ou cet e-mail ne correspond pas à cette carte : indiquez celui donné à l’inscription.')
       }
@@ -1763,8 +2509,8 @@ export async function creerServeur(o: OptionsServeur) {
       throw err(405, 'Méthode non autorisée.')
     }
     if (ressource === 'desinscription' && id && sous && !sousId && m === 'POST') {
-      // PUBLIC — lien de désinscription des e-mails de relance (page #/desinscription/…, et bouton « Se désabonner » des
-      // messageries via List-Unsubscribe-Post). Le corps n'est pas lu (formulaire One-Click ou vide). Idempotent.
+      // PUBLIC — lien de désinscription des relances (page #/desinscription/…, lien des e-mails et lien court /d/…
+      // des SMS, bouton « Se désabonner » des messageries via List-Unsubscribe-Post). Le corps n'est pas lu
       limiterIp(req, 'fiche', limites.ficheClientParIp)
       for (const c of await st.commerces()) {
         if (!(await st.client(c.id, id))) continue
@@ -1776,7 +2522,7 @@ export async function creerServeur(o: OptionsServeur) {
           if (avant.consentementRelance === false) return
           const apres = avecConsentement(avant, false, 'lien-email', maintenant())
           await st.majClient(apres)
-          await journaliser(c.id, { type: 'client', nom: 'Client (lien de désinscription)' }, 'consentement', 'Consentement aux relances retiré : lien de désinscription (e-mail)', apres)
+          await journaliser(c.id, { type: 'client', nom: 'Client (lien de désinscription)' }, 'consentement', 'Consentement aux relances retiré : lien de désinscription', apres)
         })
         return { json: { ok: true, commerce: c.nom } }
       }
@@ -1798,6 +2544,7 @@ export async function creerServeur(o: OptionsServeur) {
         const base = nouveauCommerce(texte(nom, 'nom', 80, { requis: true }), typeCommerce(type ?? 'autre'), lien(lienGoogle ?? ''))
         const commerce = appliquerReglages(base, reglages, CHAMPS_REGLAGES.filter((k) => !['nom', 'type', 'lienGoogle'].includes(k)))
         await st.ajouterCommerce(commerce, await hacherPin(pinClair))
+        idsCommercesConnus.add(commerce.id) // P2-Q6 : le nouveau commerce reste lisible dans les logs.
         // Réponse à l'admin authentifié : fiche complète, comme PATCH et /etat (le PIN est stocké à part).
         return { statut: 201, json: { commerce } }
       }
@@ -1809,14 +2556,20 @@ export async function creerServeur(o: OptionsServeur) {
     if (!sous) {
       if (m === 'PATCH') {
         await exigerCommercant(req, id)
-        const maj = appliquerReglages(commerce, await lireCorps(req), CHAMPS_REGLAGES, jourParis(maintenant()))
+        const corps = await lireCorps(req)
+        const jour = jourParis(maintenant())
         // Comme le front : enregistrer les réglages réapplique les règles aux avis en attente.
-        await st.transaction(async () => {
+        // Commerce relu DANS la transaction (P0-S11) : sous Supabase, sa version y est mémorisée et `majCommerce` écrit
+        // « WHERE version = <lue> » — deux enregistrements simultanés : l'un passe, l'autre 409 « réessayez ».
+        const maj = await st.transaction(async () => {
+          const frais = await commerceOu404(id)
+          const maj = appliquerReglages(frais, corps, CHAMPS_REGLAGES, jour)
           await st.majCommerce(maj)
           for (const a of await st.avis(id)) {
             const r = appliquerRegles(a, maj)
             if (r !== a) await st.majAvis(r)
           }
+          return maj
         })
         return { json: { commerce: maj } }
       }
@@ -1829,12 +2582,24 @@ export async function creerServeur(o: OptionsServeur) {
     // (PNG / JPEG / WebP, 2 Mo maximum) : le format est lu dans ses octets, le Content-Type envoyé est ignoré.
     if (sous === 'logo' && !sousId) {
       if (m === 'GET') {
-        const logo = await lireLogo(id)
-        if (!logo) throw err(404, 'Aucun logo téléversé pour ce commerce : le logo par défaut s’affiche.')
         const versionDemandee = new URL(req.url ?? '/', 'http://localhost').searchParams.get('v')
-        // Adresse versionnée (celle du champ `logo`) : un nouvel envoi change l'adresse, on peut la garder un an.
-        const cache = versionDemandee === logo.version ? CACHE_IMMUABLE : 'public, max-age=300'
-        return { image: { type: logo.type, octets: logo.octets, etag: `"${logo.version}"`, cache } }
+        // Adresse versionnée : les octets de CETTE version, jamais ceux d'un autre envoi (revue Codex P0-S11,
+        // point 2). Une vieille adresse ne sert plus les octets d'un nouvel envoi : 404, pas une mauvaise image.
+        if (versionDemandee) {
+          const parVersion = await lireLogoVersion(id, versionDemandee)
+          if (parVersion) return { image: { type: parVersion.type, octets: parVersion.octets, etag: `"${parVersion.version}"`, cache: CACHE_IMMUABLE } }
+          // Compatibilité : logo téléversé avant les blobs versionnés (seul le pointeur existe).
+          const courant = await lireLogo(id)
+          if (courant?.version === versionDemandee) return { image: { type: courant.type, octets: courant.octets, etag: `"${courant.version}"`, cache: CACHE_IMMUABLE } }
+          throw err(404, 'Aucun logo téléversé pour ce commerce : le logo par défaut s’affiche.')
+        }
+        // Sans version : le pointeur, ou à défaut l'image désignée par la fiche du commerce — le pointeur a pu
+        // être effacé par une suppression arrivée entre-temps (revue Codex P0-S11, point 3) alors que l'adresse
+        // désigne toujours un envoi gagnant. La fiche fait foi, pas le pointeur.
+        const versionAdresse = versionLogoAdresse(commerce.logo)
+        const logo = (await lireLogo(id)) ?? (versionAdresse ? await lireLogoVersion(id, versionAdresse) : null)
+        if (!logo) throw err(404, 'Aucun logo téléversé pour ce commerce : le logo par défaut s’affiche.')
+        return { image: { type: logo.type, octets: logo.octets, etag: `"${logo.version}"`, cache: 'public, max-age=300' } }
       }
       if (m === 'PUT') {
         await exigerCommercant(req, id)
@@ -1848,17 +2613,73 @@ export async function creerServeur(o: OptionsServeur) {
         }
         const version = createHash('sha256').update(octets).digest('hex').slice(0, 16)
         // Fichier d'abord, adresse ensuite : un échec entre les deux laisse l'ancien logo affiché, jamais une image cassée.
+        const ancien = await lireLogo(id)
         await ecrireLogo(id, { type: infos.type, version, octets })
-        const maj: Commerce = { ...commerce, logo: urlLogo(id, version) }
-        await st.majCommerce(maj)
+        let maj: Commerce
+        try {
+          // Relecture dans la transaction (P0-S11) : verrou optimiste, ne réécrit pas des réglages enregistrés entre-temps.
+          maj = await st.transaction(async () => {
+            const maj: Commerce = { ...(await commerceOu404(id)), logo: urlLogo(id, version) }
+            await st.majCommerce(maj)
+            return maj
+          })
+        } catch (e) {
+          // Envoi refusé (409 du verrou ou autre) : remettre le pointeur sur l'image que l'adresse désigne
+          // (revue Codex P0-S11, point 2) — l'ancienne image si un PATCH a gagné, celle du PUT gagnant sinon
+          // (lue dans son blob versionné, que cet envoi n'a pas écrasé). L'erreur d'origine est toujours renvoyée.
+          try {
+            const logoAdresse = (await st.commerce(id))?.logo
+            if ((await lireLogo(id))?.version === version) {
+              const adresse = versionLogoAdresse(logoAdresse)
+              const cible =
+                logoAdresse === ''
+                  ? null
+                  : !adresse || adresse === ancien?.version
+                    ? ancien
+                    : adresse === version
+                      ? undefined
+                      : (await lireLogoVersion(id, adresse)) ?? ancien
+              if (cible !== undefined) await ecrireLogo(id, cible)
+            }
+            // Mon blob versionné n'est désigné par aucune adresse : le supprimer au mieux (sauf si un autre envoi
+            // des mêmes octets a gagné entre-temps — même version).
+            if (versionLogoAdresse(logoAdresse) !== version) await supprimerLogoVersion(id, version)
+          } catch {
+            // L'erreur d'origine reste celle renvoyée.
+          }
+          throw e
+        }
+        // Envoi accepté : le blob de l'image remplacée ne sert plus (au mieux, sauf si un envoi des mêmes octets
+        // l'a repris entre-temps — fenêtre résiduelle, voir server/README.md « Atomicité (P0-S11) »).
+        if (ancien && ancien.version !== version) {
+          try {
+            if (versionLogoAdresse((await st.commerce(id))?.logo) !== ancien.version) await supprimerLogoVersion(id, ancien.version)
+          } catch {
+            // Un blob orphelin ne gêne pas : aucune adresse ne le désigne.
+          }
+        }
         return { json: { commerce: maj, logo: { ...infos, octets: octets.length } } }
       }
       if (m === 'DELETE') {
         // « Revenir au logo par défaut » : champ vidé (repli sur public/visuels/logo.png pour Asian Home, initiales sinon).
         await exigerCommercant(req, id)
-        const maj: Commerce = { ...commerce, logo: '' }
-        await st.majCommerce(maj)
-        await ecrireLogo(id, null)
+        // L'adresse remplacée est lue DANS la transaction (revue Codex P0-S11, point 3) : un PUT arrivé entre-temps
+        // gagne et n'est pas effacé — l'effacement ne touche que l'image que ce DELETE a remplacée.
+        const { maj, adresseAvant } = await st.transaction(async () => {
+          const frais = await commerceOu404(id)
+          const adresseAvant = frais.logo
+          const maj: Commerce = { ...frais, logo: '' }
+          await st.majCommerce(maj)
+          return { maj, adresseAvant }
+        })
+        try {
+          const versionAvant = versionLogoAdresse(adresseAvant)
+          if (((await lireLogo(id))?.version ?? null) === (versionAvant ?? null)) await ecrireLogo(id, null)
+          // Le blob de l'adresse remplacée ne sert plus — sauf si un nouvel envoi des mêmes octets l'a reprise.
+          if (versionAvant && versionLogoAdresse((await st.commerce(id))?.logo) !== versionAvant) await supprimerLogoVersion(id, versionAvant)
+        } catch {
+          // Le champ est vidé ; un fichier orphelin ne gêne pas : aucune adresse ne le désigne.
+        }
         return { json: { commerce: maj } }
       }
       throw err(405, 'Méthode non autorisée.')
@@ -1901,6 +2722,7 @@ export async function creerServeur(o: OptionsServeur) {
       else {
         exigerActif(commerce)
         limiterIp(req, 'inscription', limites.inscriptionParIp)
+        await verifierBlocageClient(req)
       }
       const corps = await lireCorps(req)
       if (!commercant) limiterContact('inscription', id, corps.contact, limites.inscriptionParContact)
@@ -1908,7 +2730,28 @@ export async function creerServeur(o: OptionsServeur) {
       // Consentement aux relances : case séparée, jamais pré-cochée ; absent = pas de consentement.
       const consentement = corps.consentementRelance == null ? false : booleen(corps.consentementRelance, 'consentementRelance')
       const { client, existant } = await st.transaction(() => inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain, consentement))
-      return { statut: existant ? 200 : 201, json: { client: commercant ? client : cartePublique(client), existant } }
+      // Commerçant (PIN) : le personnel voit déjà tous les clients — `existant` et 200/201 restent (tests serveur).
+      if (commercant) return { statut: existant ? 200 : 201, json: { client, existant } }
+      // P2-S13 — signaux uniformisés côté public : la réponse a le MÊME statut 201 et la MÊME forme `{ client }`
+      // que le contact ait déjà une carte ou non, sans champ `existant`. Nouvelle carte : son jeton (1re preuve,
+      // sur le téléphone qui vient de s'inscrire). Carte existante : PAS de jeton — le titulaire la retrouve par
+      // « Retrouver ma carte » ou un lien du comptoir, comme en mode strict.
+      // Résiduels documentés (revue Codex P2-S13, points 1–2) : la présence du jeton distingue une création
+      // d'une reprise pour qui observe la réponse, et la carte renvoyée permet de lire `jeu.statut` sans jeton
+      // en mode transition (trou préexistant P0-S7, fermé en mode strict, production) — fermeture complète
+      // impossible tant que l'amorçage du jeton se fait en ligne ; bornés par les limites par IP / par contact
+      // et le journal P2-S15. Mode strict : inchangé (409 sans aucune donnée, P0-S7) — le 409 lui-même y reste
+      // un signal d'existence, pour la même raison.
+      if (existant) {
+        if (modeAuthClient === 'stricte') {
+          await limiteur.echec([[cleClientIp(req), MAX_ECHECS_CLIENT_IP]], 'client')
+          throw err(409, CONTACT_DEJA_INSCRIT)
+        }
+        accesSansJeton++
+        return { statut: 201, json: { client: cartePublique(client) } }
+      }
+      // Nouvelle carte : son jeton client (1re preuve = celui qui vient de s'inscrire sur ce téléphone).
+      return { statut: 201, json: { client: cartePublique(client), ...(o.secretSession ? await accesClient(id, client.id) : {}) } }
     }
 
     if (sous === 'clients' && sousId && m === 'POST' && (action === 'visite' || action === 'recompense')) {
@@ -1922,17 +2765,24 @@ export async function creerServeur(o: OptionsServeur) {
         let texteJournal: string
         if (action === 'visite') {
           // Passage sans montant : paliers, défi, niveau et parrainage s'appliquent comme en caisse.
-          // Sans la garde « 1 tampon par jour » de la caisse : cette route historique (« Valider une visite »
-          // depuis la fiche client) l'a toujours autorisé, et le front affiche déjà l'avertissement.
+          // P1-S12 — même garde « 1 tampon par jour » que la caisse (`passageAvecProgramme`) : la route historique
+          // l'autorisait, un 2e appel le même jour créditait un 2e tampon. La route est gardée (pas supprimée) :
+          // le bouton « Valider une visite » de la fiche client est le passage rapide sans achat, distinct de
+          // l'écran caisse (qui demande le code équipe et un montant).
           let evenements: EvenementPassage[] = []
-          ;({ client: apres, evenements } = appliquerVisiteProgramme(avant, commerce, 0, maintenant()))
+          try {
+            ;({ client: apres, evenements } = passageAvecProgramme(avant, commerce, 0, maintenant()))
+          } catch (e) {
+            throw err(409, (e as Error).message)
+          }
           apres = avecMessages(apres, commerce, 'passage')
           const regle = await reglerParrainage(commerce, apres, maintenant())
           apres = regle.filleul
           await st.majClient(apres)
-          texteJournal = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`
+          const texteParrainage = await regle.ecrire()
+          texteJournal =`+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${texteParrainage ? ` · ${texteParrainage}` : ''}`
           await journaliser(id, auteur, 'passage', texteJournal, apres)
-          if (regle.texte) await journaliser(id, auteur, 'parrainage', regle.texte, apres)
+          if (texteParrainage) await journaliser(id, auteur, 'parrainage', texteParrainage, apres)
           return apres
         }
         apres = offrirRecompense(avant, commerce, maintenant())
@@ -1954,7 +2804,23 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'caisse' && !sousId && m === 'GET') {
       const { auteur } = await exigerAuteur(req, id)
       exigerActif(commerce)
-      return { json: { auteur, commerce, clients: (await st.clients(id)).map(clientCaisse) } }
+      // P0-S14 — vue caisse minimale : plus jamais la liste des clients ni le journal. Sans `q`, aucun client ;
+      // avec `?q=`, seuls les clients correspondants, paginés côté serveur. La fiche complète d'un client s'obtient
+      // à la demande (GET …/caisse/clients/:id : scan QR ou sélection). La recherche filtre côté serveur sur tous
+      // les clients du commerce (lecture paginée complète, P0-S18) : ce qui est minimisé, c'est ce qui quitte le
+      // serveur vers la tablette de l'équipe, pas le travail du serveur.
+      const { q, page, limite } = pageRecherche(new URL(req.url ?? '/', 'http://localhost').searchParams)
+      const trouves = q ? (await st.clients(id)).filter((c) => correspondRecherche(c, q)) : []
+      const total = trouves.length
+      const clients = trouves.slice((page - 1) * limite, page * limite).map(clientCaisseEquipe)
+      return { json: { auteur, commerce: commerceCaisse(commerce), clients, total, page, limite } }
+    }
+
+    // Fiche client à la demande (P0-S14) : scan QR ou sélection dans les résultats de recherche. 404 si inconnu.
+    if (sous === 'caisse' && sousId === 'clients' && action && !extra && m === 'GET') {
+      await exigerAuteur(req, id)
+      exigerActif(commerce)
+      return { json: { client: clientCaisseEquipe(await clientOu404(id, action)) } }
     }
 
     if (sous === 'caisse' && (sousId === 'passage' || sousId === 'recompense' || sousId === 'echange' || sousId === 'attente' || sousId === 'reserve') && !action && m === 'POST') {
@@ -1977,6 +2843,8 @@ export async function creerServeur(o: OptionsServeur) {
         let apres: Client
         let details: string
         let journalAction: EntreeJournal['action'] = sousId === 'attente' ? 'recompense' : sousId === 'reserve' ? 'reserve' : sousId
+        // Parrainage éventuel : écrit après le client (P0-S11, métier puis journal).
+        let parrainage: { texte: string; ecrire: () => Promise<string> } | undefined
         if (sousId === 'passage') {
           // Paliers, défi, niveaux (multiplicateur), réserve et parrainage : décidés côté serveur.
           let evenements: EvenementPassage[] = []
@@ -1990,8 +2858,8 @@ export async function creerServeur(o: OptionsServeur) {
           apres = regle.filleul
           const gagnes = soldePoints(apres) - soldePoints(avant)
           const niveau = niveauClient(apres, commerce)
-          details = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${centimes ? ` · ${formaterPrix(centimes)} → +${gagnes} point${gagnes > 1 ? 's' : ''} (solde ${soldePoints(apres)}, ${niveau.nom} ×${niveau.multiplicateur})` : ''}${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`
-          if (regle.texte) await journaliser(id, auteur, 'parrainage', regle.texte, apres, quand)
+          details = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${centimes ? ` · ${formaterPrix(centimes)} → +${gagnes} point${gagnes > 1 ? 's' : ''} (solde ${soldePoints(apres)}, ${niveau.nom} ×${niveau.multiplicateur})` : ''}${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}`
+          parrainage = regle
         } else if (sousId === 'recompense') {
           if (!recompenseDebloquee(avant, commerce)) throw err(409, `Récompense pas encore débloquée : ${avant.tampons}/${commerce.seuilTampons} tampons.`)
           apres = avecAction(offrirRecompense(avant, commerce, quand), actionId)
@@ -2028,10 +2896,17 @@ export async function creerServeur(o: OptionsServeur) {
           journalAction = 'echange'
         }
         await st.majClient(apres)
+        // Texte final du parrainage (revue Codex P0-S11, point 5) : la reprise peut recalculer le crédit — le
+        // journal du passage reprend ce texte, pas le calcul initial.
+        const texteParrainage = (await parrainage?.ecrire()) ?? ''
+        if (texteParrainage) {
+          await journaliser(id, auteur, 'parrainage', texteParrainage, apres, quand)
+          details += ` · ${texteParrainage}`
+        }
         await journaliser(id, auteur, journalAction, details, apres, quand)
         return { client: apres, dejaTraite: false }
       })
-      return { json: { client: clientCaisse(resultat.client), dejaTraite: resultat.dejaTraite } }
+      return { json: { client: clientCaisseEquipe(resultat.client), dejaTraite: resultat.dejaTraite } }
     }
 
     // ---------- Code gagnant de la roue (P0-U3) : vérifié puis marqué « remis » en caisse ----------
@@ -2174,6 +3049,29 @@ export async function creerServeur(o: OptionsServeur) {
       return { json: { client: clientCaisse(client) } }
     }
 
+    // ---------- Accès du client à sa carte (P0-S7) : lien d'accès au comptoir, révocation ----------
+    // Lien d'accès : l'équipe (code équipe ou gérant) le montre en QR au client présent au comptoir — c'est la preuve
+    // de remplacement quand le téléphone d'inscription est perdu ou changé, sans SMS ni e-mail. 15 min, usage unique.
+    // Révocation : gérant seulement ; tous les jetons et liens de la carte tombent (téléphone perdu, carte reprise).
+
+    if (sous === 'clients' && sousId && action === 'lien-acces' && !extra && m === 'POST') {
+      const { auteur } = await exigerAuteur(req, id)
+      exigerActif(commerce)
+      if (!o.secretSession) throw err(503, 'Accès client non configuré sur ce serveur (SESSION_SECRET absente).')
+      const client = await clientOu404(id, sousId)
+      const { jeton, expireLe } = await lienAcces(id, client.id, DUREE_LIEN_COMPTOIR_S)
+      await journaliser(id, auteur, 'acces', 'Lien d’accès à la carte remis au comptoir (15 min, usage unique)', client)
+      return { statut: 201, json: { lien: `${sitePublic(req)}/#/carte/${encodeURIComponent(client.id)}?acces=${jeton}`, expireLe } }
+    }
+
+    if (sous === 'clients' && sousId && action === 'revocation-acces' && !extra && m === 'POST') {
+      const nom = await exigerCommercant(req, id)
+      const client = await clientOu404(id, sousId)
+      await revoquerAccesCarte(id, client.id)
+      await journaliser(id, { type: 'gerant', nom }, 'acces', 'Accès à la carte révoqué par le commerce (jetons et liens d’accès en cours invalidés)', client)
+      return { json: { ok: true } }
+    }
+
     // ---------- Prénom demandé APRÈS le tirage (P1-C1) ----------
     // PUBLIC — l'inscription depuis le QR ne demande que le téléphone ou l'e-mail ; le prénom est proposé sur l'écran de
     // gain. Identité : lien de la carte + contact donné à l'inscription (403 sinon, comme les routes RGPD). Seulement si
@@ -2182,12 +3080,14 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'clients' && sousId && action === 'prenom' && m === 'POST') {
       exigerActif(commerce)
       limiterIp(req, 'fiche', limites.ficheClientParIp)
+      // P0-S7 : jeton client de cette carte ; mode transition sans jeton : lien + contact, comme avant.
+      const charge = await exigerAccesCarte(req, { clientId: sousId, commerceId: id })
       const corps = await lireCorps(req)
       const prenom = texte(corps.prenom ?? '', 'prenom', 40)
       if (!prenom) throw err(400, 'Indiquez votre prénom.')
       const client = await st.transaction(async () => {
-        const avant = await clientOu404(id, sousId)
-        if (!contactDuClient(avant, corps.contact)) {
+        const avant = charge ? await clientOu401(id, sousId) : await clientOu404(id, sousId)
+        if (!charge && !contactDuClient(avant, corps.contact)) {
           throw err(403, 'Ce téléphone ou cet e-mail ne correspond pas à cette carte : indiquez celui donné à l’inscription.')
         }
         if ((avant.prenom ?? '').trim()) throw err(409, 'Cette carte a déjà un prénom.')
@@ -2208,12 +3108,14 @@ export async function creerServeur(o: OptionsServeur) {
       exigerActif(commerce)
       limiterIp(req, 'fiche', limites.ficheClientParIp)
       compteurs.consommer(`message-prive:${sousId}`, limites.ficheClientParIp, TROP)
+      // P0-S7 : jeton client de cette carte ; mode transition sans jeton : lien + contact, comme avant.
+      const charge = await exigerAccesCarte(req, { clientId: sousId, commerceId: id })
       const corps = await lireCorps(req)
       const valide = validerMessagePrive(corps)
       if (typeof valide === 'string') throw err(400, valide)
       const message = await st.transaction(async () => {
-        const avant = await clientOu404(id, sousId)
-        if (!contactDuClient(avant, corps.contact)) {
+        const avant = charge ? await clientOu401(id, sousId) : await clientOu404(id, sousId)
+        if (!charge && !contactDuClient(avant, corps.contact)) {
           throw err(403, 'Ce téléphone ou cet e-mail ne correspond pas à cette carte : indiquez celui donné à l’inscription.')
         }
         const t = maintenant()
@@ -2232,6 +3134,8 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'clients' && sousId && action === 'profil' && m === 'POST') {
       exigerActif(commerce)
       limiterIp(req, 'fiche', limites.ficheClientParIp)
+      // P0-S7 : jeton client de cette carte (mode transition : lien seul, comme avant).
+      const charge = await exigerAccesCarte(req, { clientId: sousId, commerceId: id })
       const corps = await lireCorps(req)
       const inconnus = Object.keys(corps).filter((k) => k !== 'anniversaire' && k !== 'platPrefere')
       if (inconnus.length) throw err(400, `Champ non modifiable : ${inconnus.join(', ')}.`)
@@ -2240,7 +3144,7 @@ export async function creerServeur(o: OptionsServeur) {
       const plat = corps.platPrefere == null ? '' : texte(corps.platPrefere, 'platPrefere', 80)
       if (!anniversaire && !plat) throw err(400, 'Indiquez au moins votre anniversaire ou votre plat préféré.')
       const client = await st.transaction(async () => {
-        const avant = await clientOu404(id, sousId)
+        const avant = charge ? await clientOu401(id, sousId) : await clientOu404(id, sousId)
         if (!peutCompleterProfil(avant)) throw err(409, 'Votre profil se complète après votre 2e visite : revenez nous voir !')
         const apres: Client = { ...avant }
         if (anniversaire) apres.anniversaire = anniversaire
@@ -2255,14 +3159,16 @@ export async function creerServeur(o: OptionsServeur) {
 
     if (sous === 'clients' && sousId && action === 'rattrapage' && !extra && m === 'POST') {
       // Public (depuis la carte du client) : le commerçant valide ou refuse ensuite.
+      // P0-S7 : jeton client de cette carte (mode transition : lien seul, comme avant).
       exigerActif(commerce)
       limiterIp(req, 'fiche', limites.ficheClientParIp)
+      const charge = await exigerAccesCarte(req, { clientId: sousId, commerceId: id })
       const corps = await lireCorps(req)
       const dateVisite = new Date(typeof corps.date === 'string' ? corps.date : '')
       const montant = typeof corps.montantCentimes === 'number' ? corps.montantCentimes : NaN
       const ticket = corps.ticket == null ? '' : texte(corps.ticket, 'ticket', 80)
       const client = await st.transaction(async () => {
-        const avant = await clientOu404(id, sousId)
+        const avant = charge ? await clientOu401(id, sousId) : await clientOu404(id, sousId)
         const raison = rattrapageRecevable(avant, commerce, dateVisite, montant, maintenant())
         if (raison) throw err(409, raison)
         if ((avant.demandesRattrapage ?? []).some((d) => d.statut === 'en_attente' && new Date(d.date).toDateString() === dateVisite.toDateString())) {
@@ -2299,6 +3205,7 @@ export async function creerServeur(o: OptionsServeur) {
           ...avant,
           demandesRattrapage: (avant.demandesRattrapage ?? []).map((d) => (d.id === extra ? { ...d, statut: corps.decision === 'valider' ? 'validee' : 'refusee', decideLe: t.toISOString() } : d)),
         }
+        // Client d'abord, parrain et journal ensuite (P0-S11) : un conflit sur le client n'écrit rien d'autre.
         if (corps.decision === 'valider') {
           const raison = rattrapageRecevable(avant, commerce, new Date(demande.date), demande.montantCentimes, t)
           if (raison) throw err(409, raison)
@@ -2306,18 +3213,20 @@ export async function creerServeur(o: OptionsServeur) {
           apres = avecMessages(avecVisite, commerce, 'passage', t)
           const regle = await reglerParrainage(commerce, apres, t)
           apres = regle.filleul
+          await st.majClient(apres)
+          const texteParrainage = await regle.ecrire()
           await journaliser(
             id,
             { type: 'gerant', nom: 'Gérant' },
             'rattrapage',
-            `Visite oubliée validée (${new Date(demande.date).toLocaleDateString('fr-FR')}${demande.montantCentimes ? `, ${formaterPrix(demande.montantCentimes)}` : ''}) : +1 tampon${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`,
+            `Visite oubliée validée (${new Date(demande.date).toLocaleDateString('fr-FR')}${demande.montantCentimes ? `, ${formaterPrix(demande.montantCentimes)}` : ''}) : +1 tampon${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${texteParrainage ? ` · ${texteParrainage}` : ''}`,
             apres,
             t,
           )
         } else {
+          await st.majClient(apres)
           await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'rattrapage', `Visite oubliée refusée (${new Date(demande.date).toLocaleDateString('fr-FR')})`, apres, t)
         }
-        await st.majClient(apres)
         return apres
       })
       return { json: { client: clientCaisse(client) } }
@@ -2481,12 +3390,12 @@ export async function creerServeur(o: OptionsServeur) {
       // Twilio non configuré → 501 ; signature X-Twilio-Signature fausse → 403 (personne d'autre ne peut désinscrire).
       // SMS via Brevo → 501 aussi : avec un expéditeur alphanumérique le client ne peut pas répondre au SMS, Brevo
       // gère le STOP dans sa propre base (liste noire) quand une réponse est possible, et l'app ne branche pas de
-      // webhook Brevo pour les réponses ; le consentement se retire depuis la fiche client, le lien de
-      // désinscription des e-mails, ou auprès du commerçant — jamais par cette route.
+      // webhook Brevo pour les réponses ; le consentement se retire par le lien de désinscription porté par chaque
+      // SMS (P1-B9, STOP : <lien court /d/…>), depuis la fiche client, ou auprès du commerçant — jamais par cette route.
       limiterIp(req, 'stop', limites.lectureParIp)
       if (!notifications.statut().sms) throw err(501, 'Réception des réponses STOP à brancher : Twilio n’est pas configuré sur ce serveur. Aucun consentement n’a été modifié.')
       if (notifications.prestataire('sms') === 'Brevo') {
-        throw err(501, 'Réception des réponses STOP non applicable : les SMS partent via Brevo (expéditeur alphanumérique, pas de réponse possible) ; Brevo gère sa propre liste noire et le consentement se retire depuis la fiche client. Aucun consentement n’a été modifié.')
+        throw err(501, 'Réception des réponses STOP non applicable : les SMS partent via Brevo (expéditeur alphanumérique, pas de réponse possible) ; chaque SMS porte un lien de désinscription (STOP : lien en fin de message). Aucun consentement n’a été modifié.')
       }
       const params = await lireFormulaire(req)
       if (!notifications.signatureSmsValide(`${sitePublic(req)}${req.url ?? ''}`, params, enTete(req, 'x-twilio-signature'))) {
@@ -2508,18 +3417,29 @@ export async function creerServeur(o: OptionsServeur) {
 
     if (sous === 'tirages' && !sousId && m === 'POST') {
       // PUBLIC : tout est décidé ici (visite du jour, 1 tirage par jour, lot tiré) — rien ne vient du navigateur.
+      // P0-S7 : le joueur est le titulaire du jeton client (Authorization) de CE commerce, jamais « celui qui connaît le
+      // contact ». Mode transition sans jeton : comme avant (contact → inscription ou carte retrouvée).
       exigerActif(commerce)
       limiterIp(req, 'tirage', limites.tirageParIp)
+      const charge = await exigerAccesCarte(req, { commerceId: id })
       const corps = await lireCorps(req)
-      limiterContact('tirage', id, corps.contact, limites.tirageParContact)
+      if (charge) compteurs.consommer(`tirage:${id}:${charge.cid}`, limites.tirageParContact, 'Trop de tentatives pour ce contact.')
+      else limiterContact('tirage', id, corps.contact, limites.tirageParContact)
       const prenom = corps.prenom == null ? '' : texte(corps.prenom, 'prenom', 40)
-      const dejaJoue = 'Vous avez déjà tourné la roue aujourd’hui. Revenez lors de votre prochaine visite !'
+      // P2-S13 — message de refus uniformisé : UN SEUL message (409), identique que le client ait déjà joué
+      // aujourd'hui ou n'ait pas encore validé sa visite — LE MESSAGE ne distingue plus les deux cas. Le
+      // titulaire, lui, connaît déjà la raison précise via `jeu.statut` de GET /cartes/:id (MessageSansVisite /
+      // MessageDejaJoue sur #/jouer) ; ce message ne fait que rappeler les deux issues possibles. Les deux
+      // formulations historiques sont conservées à l'intérieur (« valider votre visite », « déjà tourné la roue »)
+      // pour que le conseil reste utile au client légitime. Résiduel (revue Codex P2-S13, point 2) : en mode
+      // transition, `jeu.statut` se lit sans jeton sur la carte — la fermeture complète du statut vient du
+      // mode strict (production), pas de ce message.
+      const refusJeu = 'Vous ne pouvez pas jouer pour le moment : faites valider votre visite du jour au comptoir — si vous avez déjà tourné la roue aujourd’hui, revenez lors de votre prochaine visite.'
       const resultat = await st.transaction(async () => {
-        const { client } = await inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain)
+        const client = charge ? await clientOu401(id, charge.cid) : (await inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain)).client
         const t = maintenant()
         const statut = statutJeu(client, await st.tiragesClient(id, client.id), id, t)
-        if (statut === 'dejaJoue') return { refus: dejaJoue }
-        if (statut === 'sansVisite') return { refus: 'Pour jouer, faites d’abord valider votre visite du jour au comptoir.' }
+        if (statut === 'dejaJoue' || statut === 'sansVisite') return { refus: refusJeu }
         const jouables = lotsJouables(commerce.lots)
         if (!jouables.length) return { refus: 'Aucun lot n’est configuré pour le moment.' }
         const lot = jouables[tirerLot(commerce.lots)].libelle
@@ -2527,8 +3447,8 @@ export async function creerServeur(o: OptionsServeur) {
         try {
           await st.ajouterTirage(tirage)
         } catch (e) {
-          // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e.
-          if (e instanceof ErreurConflit) return { refus: dejaJoue }
+          // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e — même message unique.
+          if (e instanceof ErreurConflit) return { refus: refusJeu }
           throw e
         }
         return { tirage }
@@ -2629,8 +3549,10 @@ export async function creerServeur(o: OptionsServeur) {
       // seulement si la règle est active ; tout le reste attend une validation manuelle.
       const auteur = await exigerCommercant(req, id)
       const g = exigerGoogle()
+      // GOOGLE_BUSINESS_LOCATION mal renseignée → 409 explicite AVANT tout appel à Google (même le
+      // rafraîchissement du jeton) ; sinon fiche mémorisée, sinon recherche parmi les fiches du compte.
+      let emplacement = emplacementAImporter(g.emplacement, (await lireJetonsGoogle(g, id))?.emplacement)
       let jetons = await accesGoogle(g, id)
-      let emplacement = emplacementValide(g.emplacement) ? g.emplacement : jetons.emplacement
       if (!emplacementValide(emplacement)) {
         emplacement = await trouverEmplacement(fetchGoogle, jetons.accessToken, placeIdDuLien(commerce.lienGoogle))
         jetons = { ...jetons, emplacement }
@@ -2750,18 +3672,154 @@ export async function creerServeur(o: OptionsServeur) {
     throw err(404, 'Route inconnue.')
   }
 
+  /**
+   * Chemin avec identifiants porteurs masqués, pour les logs d'erreur (P2-S15, revue Codex point 2) : un
+   * identifiant de carte ou un jeton de désinscription ne doit pas apparaître en clair dans `console.error`
+   * quand une exception non HTTP survient sur ces routes. Même marche que les logs JSON
+   * (`cheminMasquePourErreur`, `server/logs.ts`), avec `…` au lieu de l'empreinte (format historique).
+   * Le message de l'exception elle-même n'est pas masqué (les erreurs de stockage n'y incluent pas
+   * d'identifiant aujourd'hui).
+   */
+  const masquerIdentifiantsChemin = (pathname: string) => cheminMasquePourErreur(pathname, idsCommercesConnus)
+
   const serveur = createServer(async (req, res) => {
+    const debutRequete = Date.now()
+    // P2-Q6 : l'IP est lue à la réception, quand le socket existe encore — au moment de `finish` il
+    // peut déjà être détruit (corps abandonné après une 413, par exemple), et `req.socket` vaut `null`.
+    const ipRequete = ipDe(req)
+    // Une ligne JSON par réponse terminée (niveau, horodatage, route masquée, statut, durée). `finish` se
+    // déclenche quand la réponse est envoyée, quel que soit le chemin de sortie (succès, erreur, 304,
+    // redirection, statique) ; la ligne n'est jamais émise deux fois pour une même requête. Une connexion
+    // interrompue avant la fin de la réponse ne produit aucune ligne (son statut serait inconnu). Le bloc
+    // entier est protégé : une défaillance de journalisation ne doit jamais faire échouer une requête.
+    res.on('finish', () => {
+      try {
+        let pathname = '/'
+        try {
+          pathname = new URL(req.url ?? '/', 'http://localhost').pathname
+        } catch {
+          pathname = '/'
+        }
+        journaliserRequete({ methode: req.method ?? '?', pathname, statut: res.statusCode, dureeMs: Date.now() - debutRequete, ip: ipRequete, commercesConnus: idsCommercesConnus })
+      } catch {
+        // La journalisation ne doit jamais faire échouer une requête.
+      }
+    })
     const entetes: Record<string, string> = { ...ENTETES_SECURITE, ...entetesCors(origineCors, req.headers.origin) }
     const url = new URL(req.url ?? '/', 'http://localhost')
+    // P2-S15 : le routeur a-t-il répondu (pour ne pas journaliser deux fois une lecture dont l'envoi échoue).
+    let routeurTermine = false
     try {
       if (req.method === 'OPTIONS') {
         res.writeHead(204, entetes).end()
         return
       }
-      // Lien court des SMS de relance (P1-B3) : /c/<clientId> → la carte du client (#/carte/<clientId>).
+      // Lien court des SMS de relance (P1-B3) : /c/<clientId> → la carte du client (#/carte/<clientId>). Sans jeton, la
+      // page n'en reçoit que la vue limitée (P0-S7). `?a=<lien d'accès>` (SMS « Retrouver ma carte ») : transmis à la
+      // page, qui l'échange contre un jeton ; dans le fragment, il n'est jamais renvoyé à un serveur.
       const court = /^\/c\/([\w-]{1,80})$/.exec(url.pathname)
       if (court && (req.method === 'GET' || req.method === 'HEAD')) {
-        res.writeHead(302, { ...entetes, Location: `/#/carte/${court[1]}`, 'Cache-Control': 'no-store' }).end()
+        const a = url.searchParams.get('a')
+        const acces = a && /^[\w.-]{1,2048}$/.test(a) ? `?acces=${a}` : ''
+        res.writeHead(302, { ...entetes, Location: `/#/carte/${court[1]}${acces}`, 'Cache-Control': 'no-store' }).end()
+        return
+      }
+      // Lien court de désinscription des SMS de relance (P1-B9) : /d/<clientId>/<jeton> → la page de désinscription
+      // (#/desinscription/<clientId>/<jeton>). Le jeton n'est pas vérifié ici : c'est la page qui appelle
+      // POST /api/v1/desinscription/… (HMAC, idempotent), après un clic de confirmation.
+      const courtDesinscription = /^\/d\/([\w-]{1,80})\/([A-Za-z0-9_-]{16,64})$/.exec(url.pathname)
+      if (courtDesinscription && (req.method === 'GET' || req.method === 'HEAD')) {
+        res.writeHead(302, { ...entetes, Location: `/#/desinscription/${courtDesinscription[1]}/${courtDesinscription[2]}`, 'Cache-Control': 'no-store' }).end()
+        return
+      }
+      // Lien court du QR vitrine (P2-Q3) : /r/<commerceId> → la page de jeu (#/jouer/<id>). Le scan est compté ici,
+      // AVANT la redirection : il l'est donc même si la page ne se charge jamais (réseau coupé, serveur endormi,
+      // navigateur qui abandonne). Anonyme comme POST /evenements : un compteur par jour, sans identité ni IP
+      // stockée ; même limite par IP (dépassée, on redirige quand même sans compter — jamais d'erreur affichée au
+      // client). HEAD : sonde, pas comptée. Commerce inconnu ou en pause : redirection sans compteur (la page
+      // affiche « fermé »). `?via=qr` dit à la page de ne pas re-signaler le scan (sinon double comptage).
+      const courtJeu = /^\/r\/([\w-]{1,80})$/.exec(url.pathname)
+      if (courtJeu && (req.method === 'GET' || req.method === 'HEAD')) {
+        if (req.method === 'GET') {
+          let compterCeScan = true
+          try {
+            limiterIp(req, 'evenement', limites.evenementParIp)
+          } catch {
+            compterCeScan = false
+          }
+          if (compterCeScan) {
+            let commerce: Commerce | null = null
+            try {
+              commerce = (await st.commerce(courtJeu[1])) ?? null
+            } catch {
+              commerce = null // base en panne : on redirige quand même, sans compter
+            }
+            if (commerce?.actif) await compter(courtJeu[1], 'scan')
+          }
+        }
+        res.writeHead(302, { ...entetes, Location: `/?via=qr#/jouer/${courtJeu[1]}`, 'Cache-Control': 'no-store' }).end()
+        return
+      }
+      // Page publique prérendue (P2-Q4) : /menu/<commerceId> — le menu en HTML statique, lisible par les moteurs
+      // de recherche (la SPA vit dans le fragment, invisible d'eux). Rendu à la demande, cache 5 min en mémoire
+      // (le menu change rarement ; un changement met 5 min à apparaître ici comme chez les robots) ; ETag faible
+      // sur le contenu (304 si repris). Limite par IP comme les autres lectures publiques. Commerce inconnu (ou
+      // /menu sans id) : 404, pas la SPA en 200 (soft 404) ; commerce en pause : page « indisponible » (noindex).
+      // Slash final accepté (/menu/<id>/) ; toute autre adresse sous /menu/ (/menu/a/b, /menu/%20) : 404 aussi
+      // (revue Codex : ces formes retombaient sur la SPA en 200).
+      const pageMenu = /^\/menu(?:\/([\w-]{1,80}))?\/?$/.exec(url.pathname)
+      const menuInvalide = url.pathname.startsWith('/menu/') && !pageMenu
+      if ((pageMenu || menuInvalide) && (req.method === 'GET' || req.method === 'HEAD')) {
+        limiterIp(req, 'lecture', limites.lectureParIp)
+        const site = sitePublic(req)
+        const id = pageMenu?.[1]
+        let page = id ? cachePrerendu.get(id) : undefined
+        if (page && page.expire <= Date.now()) {
+          if (id) cachePrerendu.delete(id) // page en cache ⇒ id défini
+          page = undefined
+        }
+        if (!page) {
+          let html: string
+          let statut = 200
+          if (!id) {
+            html = pageNonTrouvee(site)
+            statut = 404
+          } else {
+            let commerce: Commerce | null = null
+            try {
+              commerce = (await st.commerce(id)) ?? null
+            } catch {
+              commerce = null
+            }
+            if (!commerce) {
+              html = pageNonTrouvee(site)
+              statut = 404
+            } else if (!commerce.actif) {
+              html = pageMenuIndisponible(commerce, site)
+            } else {
+              const menuStocke = (await st.menu(id)) ?? { commerceId: id, categories: [], majLe: '' }
+              html = pageMenuPrerendue(commerce, menuAffichePour(commerce, menuStocke), site)
+            }
+          }
+          const etagPage = `W/"${createHash('sha256').update(html).digest('hex').slice(0, 16)}"`
+          page = { html, etag: etagPage, statut, expire: Date.now() + 300_000 }
+          if (statut === 200 && id) {
+            if (cachePrerendu.size >= 64) cachePrerendu.clear()
+            cachePrerendu.set(id, page)
+          }
+        }
+        const cache = page.statut === 200 ? 'public, max-age=300' : 'no-store'
+        const communs = { ...entetes, 'Cache-Control': cache, ETag: page.etag }
+        if (etagCorrespond(req.headers['if-none-match'], page.etag)) {
+          res.writeHead(304, communs).end()
+          return
+        }
+        if (req.method === 'HEAD') {
+          const prep = preparerCorps(req, communs, 'text/html; charset=utf-8', Buffer.from(page.html))
+          res.writeHead(page.statut, prep.entetes).end()
+          return
+        }
+        envoyerCorps(req, res, page.statut, communs, 'text/html; charset=utf-8', Buffer.from(page.html))
         return
       }
       if (!url.pathname.startsWith('/api/v1/') && url.pathname !== '/api/v1') {
@@ -2772,18 +3830,28 @@ export async function creerServeur(o: OptionsServeur) {
       }
       const chemin = url.pathname.slice('/api/v1/'.length).split('/').filter(Boolean).map(decodeURIComponent)
       const r = await router(req, chemin)
+      routeurTermine = true
+      // P2-S15 : échantillon des lectures sensibles (énumération détectable dans les logs).
+      const commercesLus = (r.json as { commerces?: unknown[] } | undefined)?.commerces
+      journaliserLectureSensible(req, chemin, r.statut ?? 200, Array.isArray(commercesLus) ? `nb=${commercesLus.length}` : undefined)
       if (r.redirection) {
         res.writeHead(302, { ...entetes, Location: r.redirection, 'Cache-Control': 'no-store' }).end()
         return
       }
       if (r.csv) {
-        res.writeHead(200, {
-          ...entetes,
-          'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="${r.csv.nom.replace(/[^\w.-]/g, '_')}"`,
-          'Cache-Control': 'no-store',
-        })
-        res.end(r.csv.contenu)
+        // Export téléchargeable, comme le JSON : compressé si le client l'accepte (revue Codex P2-Q2).
+        envoyerCorps(
+          req,
+          res,
+          200,
+          {
+            ...entetes,
+            'Content-Disposition': `attachment; filename="${r.csv.nom.replace(/[^\w.-]/g, '_')}"`,
+            'Cache-Control': 'no-store',
+          },
+          'text/csv; charset=utf-8',
+          Buffer.from(r.csv.contenu),
+        )
         return
       }
       if (r.image) {
@@ -2797,12 +3865,10 @@ export async function creerServeur(o: OptionsServeur) {
         return
       }
       if (r.xml != null) {
-        res.writeHead(r.statut ?? 200, { ...entetes, 'Content-Type': 'text/xml; charset=utf-8', 'Cache-Control': 'no-store' })
-        res.end(r.xml)
+        envoyerCorps(req, res, r.statut ?? 200, { ...entetes, 'Cache-Control': 'no-store' }, 'text/xml; charset=utf-8', Buffer.from(r.xml))
         return
       }
-      res.writeHead(r.statut ?? 200, { ...entetes, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-      res.end(JSON.stringify(r.json))
+      envoyerCorps(req, res, r.statut ?? 200, { ...entetes, 'Cache-Control': 'no-store' }, 'application/json; charset=utf-8', Buffer.from(JSON.stringify(r.json)))
     } catch (erreur) {
       // Conflit d'écriture (doublon refusé par la base, ligne modifiée entre-temps) : 409, l'utilisateur peut réessayer.
       const e =
@@ -2814,10 +3880,29 @@ export async function creerServeur(o: OptionsServeur) {
               ? err(erreur.statut, erreur.message)
               : erreur
       const http = e instanceof ErreurHttp
-      if (!http) console.error(`[serveur] ${req.method} ${url.pathname} :`, e)
+      if (!http) console.error(`[serveur] ${req.method} ${masquerIdentifiantsChemin(url.pathname)} :`, e)
       const statut = http ? e.statut : 500
-      res.writeHead(statut, { ...entetes, ...(http ? e.entetes : {}), 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-      res.end(JSON.stringify({ erreur: http ? e.message : 'Erreur interne du serveur.' }))
+      // P2-S15 : lectures sensibles en échec (404 / 429 : signaux d'énumération) — seulement si l'erreur vient
+      // du routeur (sinon la lecture a déjà été journalisée au retour du routeur, ci-dessus). Même décodage
+      // que le chemin du succès (empreinte identique en succès et en échec, revue Codex point 1) ; encodage
+      // invalide : pas de journalisation plutôt qu'une 500 de plus.
+      if (!routeurTermine) {
+        let cheminErreur: string[] = []
+        try {
+          cheminErreur = url.pathname.startsWith('/api/v1/') ? url.pathname.slice('/api/v1/'.length).split('/').filter(Boolean).map(decodeURIComponent) : []
+        } catch {
+          cheminErreur = []
+        }
+        journaliserLectureSensible(req, cheminErreur, statut)
+      }
+      envoyerCorps(
+        req,
+        res,
+        statut,
+        { ...entetes, ...(http ? e.entetes : {}), 'Cache-Control': 'no-store' },
+        'application/json; charset=utf-8',
+        Buffer.from(JSON.stringify({ erreur: http ? e.message : 'Erreur interne du serveur.' })),
+      )
     }
   })
 

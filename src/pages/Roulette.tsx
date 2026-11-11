@@ -1,14 +1,15 @@
 import { useDonneesCommerce } from '../store'
-import { urlAbsolue } from '../router'
+import { urlQrJeu } from '../router'
 import { dateRelative } from '../lib/format'
 import { lotsJouables, totalProbabilites } from '../lib/roulette'
-import { BoutonCopier, EnTete, QrCode, Vide } from '../components/ui'
+import { BoutonCopier, EnTete, Vide } from '../components/ui'
+import { QrCode } from '../components/QrCode'
 
 export default function Roulette() {
   const { commerce, tirages, clients } = useDonneesCommerce()
   const prenom = (id: string) => clients.find((c) => c.id === id)?.prenom ?? 'Client'
   const total = totalProbabilites(commerce.lots)
-  const url = urlAbsolue('jouer', commerce.id)
+  const url = urlQrJeu(commerce.id)
 
   return (
     <div className="space-y-5">
@@ -46,7 +47,7 @@ export default function Roulette() {
           {lotsJouables(commerce.lots).map((lot, i) => (
             <li key={i} className="flex items-center justify-between gap-3 py-2.5">
               <span>🎁 {lot.libelle}</span>
-              <span className="shrink-0 rounded-full bg-marque-50 px-2.5 py-0.5 text-sm font-semibold text-marque-700 tabular-nums">
+              <span className="shrink-0 rounded-full bg-magenta-500/10 px-2.5 py-0.5 text-sm font-semibold text-magenta-700 tabular-nums">
                 {Math.round((lot.probabilite / total) * 100)} %
               </span>
             </li>

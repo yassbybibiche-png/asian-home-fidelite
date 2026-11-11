@@ -22,15 +22,15 @@ export default function Offre() {
       <EnTete titre={`L’offre ${NOM_APP}`} sousTitre="Un seul produit, pour tous les commerces." action={estDemo ? <BadgeDemo /> : undefined} />
 
       <section className="carte overflow-hidden p-0">
-        <div className="bg-gradient-to-br from-marque-500 via-marque-600 to-marque-800 px-5 py-6 text-white">
-          <p className="text-sm font-semibold tracking-wide text-marque-100 uppercase">Abonnement</p>
+        <div className="bg-gradient-to-br from-magenta-500 via-magenta-600 to-magenta-700 px-5 py-6 text-white">
+          <p className="text-sm font-semibold tracking-wide text-white/80 uppercase">Abonnement</p>
           <p className="mt-1 font-titre text-5xl font-bold">Gratuit</p>
           <p className="mt-2 font-medium">Sans engagement, sans frais de mise en place</p>
         </div>
         <ul className="space-y-3 px-5 py-4">
           {INCLUS.map((l) => (
             <li key={l} className="flex gap-3">
-              <span className="font-bold text-marque-500" aria-hidden>
+              <span className="font-bold text-magenta-600" aria-hidden>
                 ✓
               </span>
               <span>{l}</span>
@@ -45,7 +45,7 @@ export default function Offre() {
         <ul className="mt-3 divide-y divide-gray-100">
           {KIT_LANCEMENT.map((m) => (
             <li key={m.libelle} className="flex items-center gap-4 py-3">
-              <span className="flex h-12 min-w-12 shrink-0 items-center justify-center rounded-xl bg-marque-50 px-2 font-extrabold text-marque-600">
+              <span className="flex h-12 min-w-12 shrink-0 items-center justify-center rounded-xl bg-magenta-500/10 px-2 font-extrabold text-magenta-700">
                 {m.quantite}
               </span>
               <span className="min-w-0">

@@ -1,5 +1,983 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — Boucle t10 « Photos paresseuses en WebP léger » (fusionné dans `autonome/integration`)
+- **Changement** : 6 variantes WebP recadrées approximativement au ratio d'affichage (Pillow, q75) servies en premier via `<picture>` (repli JPEG inchangé) — carte : `interieur` (675×443, 36 914 o), `interieur-salon` (320×157, 5 560 o) ; menu (`photoCategorie`, interface étendue avec `srcPetit`) : `sushis-ardoise` (614×201), `cocktails` (640×210), `menu-plat-riz` (424×139), `menu-mango-sticky-rice` (411×134) ; total ~350 Ko → ~83 Ko (−267 Ko) ; 6 entrées `VISUELS` ; documenté dans `public/visuels/SOURCES.md` ; garde `tests/visuels.test.ts` > 10 000 o → > 3 000 o (décodage intégral vérifié, 6/6 OK) ; nouveau script de mesure versionné `scripts/mesurer-photos-paresseuses.mjs`.
+- **Mesures** : durées de téléchargement — interieur 1 136 → 574 ms (−562 ms), salon 559 → 295 ms (−264 ms), sushis-ardoise 573 → 266 ms (−307 ms), cocktails 978 → 381 ms (−597 ms), menu-plat-riz 577 → 375 ms (−202 ms), menu-mango 897 → 369 ms (−528 ms) ; standard plat (premier affichage 1 874/1 888 ms, parcours 6 553/6 574 ms) ; Lighthouse 78/78 (plat vs 78/86 à t9) ; bundle JS initial +690 o (+0,15 %) ; 0 erreur console. Le JPEG `menu-mango-sticky-rice.jpg` se télécharge toujours (photo du plat « Mango Stick », vignette 64×64) — candidat t11. Détail dans `SCORES.md` et `BOUCLE.md` (ABAB avec le script corrigé).
+- **Tests : 1184 → 1200/1200** (+10 `tests/boucle-t10-photos-paresseuses.test.ts`, +6 tests auto dans `tests/visuels.test.ts`, 75 fichiers), E2E 3/3. Revue Codex t10 (5 points) : fusion favorable sous réserve des corrections de preuve (appliquées) ; Mango Stick = meilleur candidat t11. Compteur de tours sans gain : **0**.
+
+## 11/11/2026 — Boucle t9 « Héros du menu recadré à la bande visible de la carte » (fusionné dans `autonome/integration`)
+- **Changement** : même fichier `public/visuels/table-sushis-petit.webp`, recadré 720×1279 (95 494 o) → 720×590 (51 402 o, WebP q75, −46 %) — recadrage centré à la bande visible de la carte ; aucun changement de code ; test `boucle-t4-hero` mis à jour (dimensions 720×590, plafond < 60 Ko — validé par la revue Codex t9, preuve dans `BOUCLE.md`).
+- **Mesures** : LCP `#/menu` Asian Home 2 540/2 492 → 2 324/2 252 ms (moyenne −228 ms, 2 passes sur 2) ; `#/jouer` plat (1 648/1 672 ms) ; standard plat (premier affichage 1 894/1 882 ms, parcours 6 853/6 696 ms) ; Lighthouse 78/86 (plat vs 80/81 à t7 — le 86 est la meilleure passe depuis t0) ; bundle IDENTIQUE à t6 (453 667 o) ; 0 erreur console. Détail dans `SCORES.md` et `BOUCLE.md` (dont l'incident d'édition SCORES.md : `old_text` ambigu remplacé à la mauvaise occurrence, corrigé).
+- **Tests : 1184/1184** (inchangés), E2E 3/3. Revue Codex t9 (5 points) : fusion favorable après corrections documentaires ; ensuite : DA, TBT ciblé, ou photos paresseuses. Compteur de tours sans gain : **0**.
+
+## 11/11/2026 — Boucle t7 « Bannière de la carte recadrée au ratio d'affichage » (fusionné dans `autonome/integration`)
+- **Changement** : même fichier `public/visuels/hero-plats-petit.webp`, recadré 720×480 (75 588 o) → 720×180 (27 382 o, WebP q75, −64 %) — recadrage centré au ratio d'affichage 390×96 ; aucun changement de code ; test `boucle-t6-banniere` mis à jour (dimensions 720×180, plafond < 60 Ko — validé par la revue Codex t7, preuve dans `BOUCLE.md` ; validation après la modification, avant la fusion — ordre strict non respecté, consigné).
+- **Mesures** : transition — héros chargé 1 397 → 1 160 ms (−237 ms), bannière chargée 1 405 → 1 166 ms (−239 ms) ; LCP direct 3 162 → 3 002 ms (−160 ms) ; standard plat (premier affichage 1 820/1 825 ms, parcours 6 512/6 457 ms) ; Lighthouse 80/81 (plat vs 78/79 à t6) ; bundle IDENTIQUE à t6 (453 667 o) ; 0 erreur console. Détail dans `SCORES.md` et `BOUCLE.md` (dont la réserve cache : un habitué peut conserver l'ancienne variante temporairement).
+- **Tests : 1184/1184** (inchangés), E2E 3/3. Revue Codex t7 (5 points) : fusion justifiée après corrections documentaires ; prochain tour : profiler les longues tâches du TBT. Compteur de tours sans gain : **0**.
+
+## 11/11/2026 — Boucle t6 « Bannière de la carte en WebP léger » (fusionné dans `autonome/integration`)
+- **Changement** : nouveau `public/visuels/hero-plats-petit.webp` (720×480, WebP q75, 75 588 o, dérivé du vrai `hero-plats.jpg` par Pillow, −57 %) servi en premier via `<picture className="block">` dans `CarteFidelite.tsx` (bannière `h-24`), le JPEG restant le repli ; `<source>` WebP seulement pour la bannière par défaut ; constante `VISUELS.heroPlatsPetit` ; documenté dans `public/visuels/SOURCES.md`. Nouveau script de mesure versionné `scripts/mesurer-carte-asian-home.mjs` (parcours complet, transition réelle + chargement direct).
+- **Mesures** : transition réelle — héros affiché ~1 568 → ~1 379 ms (−~190 ms), bannière affichée ~1 920 → ~1 386 ms (−~530 ms) ; LCP direct 3 349 → ~3 176 ms (−~170 ms) ; standard plat (premier affichage 1 881/1 817 ms, parcours 6 396/6 577 ms) ; Lighthouse 78/79 (plat vs 78/80 à t5) ; bundle JS initial +182 o (+0,04 %) ; 0 erreur console. Détail dans `SCORES.md` et `BOUCLE.md` (ABAB stash/rebuild : le gain se transpose au parcours réel).
+- **Tests : 1180 → 1184/1184** (+3 `tests/boucle-t6-banniere.test.ts`, +1 test auto dans `tests/visuels.test.ts`, 74 fichiers), E2E 3/3. Revue Codex t6 (5 points) : fusion justifiée ; variante recadrée 720×180 notée comme candidat t7. Compteur de tours sans gain : **0**.
+
+## 11/11/2026 — Boucle t5 « Logo du commerce en WebP léger » (fusionné dans `autonome/integration`) — REGARD NEUF
+- **Changement** : `LogoCommerce` sert la variante `logo-petit.webp` (192×192, WebP q80, 4 900 o) en premier via `<picture className="block shrink-0">` (repli PNG 600×600 inchangé) — seulement pour le logo par défaut (`logo === VISUELS.logo`) ; logo téléversé ou renseigné par le commerçant inchangé ; constante `LOGO_DEFAUT_PETIT` (hors `VISUELS`) ; documenté dans `public/visuels/SOURCES.md`. Mesure ponctuelle étendue à `#/jouer` (`scripts/mesurer-menu-asian-home.mjs`) ; garde anti-écrasement ajoutée à `mesurer-scores.mjs` et `mesurer-lighthouse.mjs` (incident : archive brute P0-U0 écrasée une fois sans `--sortie`, chiffres conservés dans `SCORES.md`).
+- **Mesures** : LCP `#/menu` Asian Home 2 892/2 908 → 2 572/2 588 ms (moyenne −320 ms, 2 passes sur 2) ; LCP `#/jouer` 1 744/1 648 → 1 740/1 648 ms (plat, attendu) ; standard plat (premier affichage 1 894/1 883 ms, parcours 6 753/6 534 ms) ; Lighthouse 78/80 (plat vs 78/76 à t4) ; bundle JS initial +304 o (+0,07 %) ; 0 erreur console. Détail dans `SCORES.md` et `BOUCLE.md` (dont le regard neuf : protocole standard sous-mesure l'expérience Asian Home réelle ; Lighthouse trop bruité pour 2 passes — ABAB ou 3+ passes ; DA différé faute de métrique).
+- **Tests : 1176 → 1180/1180** (+4 `tests/boucle-t5-logo-commerce.test.ts`, 73 fichiers), E2E 3/3. Revue Codex t5 (5 points) : fusion justifiée ; garde anti-écrasement appliquée. Compteur de tours sans gain : **0**.
+
+## 11/11/2026 — Boucle t4 « Héros du menu optimisé » (fusionné dans `autonome/integration`)
+- **Changement** : nouveau `public/visuels/table-sushis-petit.webp` (720×1279, WebP q75, 95 494 o, dérivé du vrai `table-sushis.jpg` par Pillow, −51 %) servi en premier via `<picture className="block">` (repli JPEG inchangé) dans `MenuPublic.tsx` (héros) et `CartePublique.tsx` (bannière) ; constante `VISUELS.tableSushisPetit` ; documenté dans `public/visuels/SOURCES.md` (dimensions `table-sushis.jpg` corrigées : 788×1400 sur disque). Le héros n'est PAS préchargé par le SW (photo de contenu, comme les photos de plats) ; script de mesure ponctuelle versionné `scripts/mesurer-menu-asian-home.mjs`.
+- **Mesures** : LCP `#/menu` Asian Home 3 428/3 376 → 3 076/2 892 ms (moyenne −418 ms, 2 passes sur 2 ; + 2 passes de confirmation 2 912/2 960 ms) ; `#/jouer` plat (premier affichage 1 896/1 895 ms, LCP 1 872/1 844 ms, parcours 6 738/6 854 ms) ; Lighthouse 84/81 → 78/76 (TBT 590/720 → 850/1 030 ms) — réserve ABAB conservée dans `SCORES.md` (effet propre du tour ≈ −2 points, dans le bruit) ; bundle JS initial +153 o (+0,03 %) ; 0 erreur console. Détail dans `SCORES.md` et `BOUCLE.md`.
+- **Tests : 1171 → 1176/1176** (+4 `tests/boucle-t4-hero.test.ts`, +1 test auto dans `tests/visuels.test.ts` — une entrée `VISUELS` = un test), E2E 3/3. Revue Codex t4 (5 points) : fusion raisonnable après `className="block"` sur les deux `<picture>` ; aucun motif d'annulation. Compteur de tours sans gain : 1 (t3).
+
+## 11/11/2026 — Boucle t2 « Logo de chargement optimisé » (fusionné dans `autonome/integration`)
+- **Changement** : nouveau `public/visuels/logo-petit.webp` (192×192, WebP q80,
+  4 900 o, dérivé du vrai logo par Pillow) servi en premier via `<picture>`
+  dans `index.html` (repli `logo.png` inchangé) ; ajouté au préchargement du
+  service worker ; documenté dans `public/visuels/SOURCES.md`. `logo.png`
+  reste intact partout (logo du commerce, repli, fixtures).
+- **Mesures (2 passes Playwright + 2 Lighthouse)** : premier affichage
+  2 355/2 232/2 235 → 2 078/1 861 ms (moyenne −304 ms), LCP 2 340/2 220/2 224 →
+  2 028/1 812 ms (moyenne −341 ms), parcours 7 213/6 971/6 987 → 6 141/6 277 ms
+  (la validation en caisse gagne aussi) ; Lighthouse 80/85 → 84/81 (plat),
+  LCP Lighthouse 2,9/2,8 → 2,3/2,2 s, TBT 620/450 → 590/720 ms (mixte) ;
+  bundle inchangé ; 0 erreur console. Détail dans `SCORES.md`.
+- **Tests : 1166 → 1171/1171** (+4 `tests/boucle-t2-logo.test.ts`, +1 test SW
+  dans `performance-bundle-p2-q2.test.ts`), E2E 3/3. **Correctif SW (revue
+  Codex, fondé)** : `fichier()` ne consultait que `CACHE_FICHIERS` — les
+  fichiers préchargés n'étaient pas servis hors ligne ; repli `caches.match`
+  ajouté (test de régression vérifié : échoue sans le correctif).
+  **Tests épinglés corrigés après preuve et validation Codex** :
+  `photos-menu.test.ts:68` (filtre `menu-`, exigence inchangée) et
+  `mesure-p1-u1.test.ts:27` (extraction bornée à la sous-section — voir
+  `BOUCLE.md`). **Revue Codex 5 points** : repli SW, commentaire de repli,
+  dimensions WebP, mentions anticipées (corrigés), test menu (légitime).
+- **Non vérifié.** Téléphone réel, à froid Render, `npm audit` (403 VM) —
+  inchangé.
+
+## 11/11/2026 — Boucle t1 « QR code différé » (fusionné dans `autonome/integration`)
+- **Changement** : `QrCode` déménage de `components/ui.tsx` vers
+  `components/QrCode.tsx` ; `CarteFidelite` le charge en différé (`React.lazy`
+  + `Suspense`, repli « Chargement du QR code… » `role="status"`, frontière
+  locale `ErreurQr`) ; pages différées (Equipe, MenuCarte, FicheClient,
+  QrVitrine, Roulette) importent le nouveau module. Jouer/CartePublique/Caisse
+  restent statiques (P2-Q2 : caisse hors ligne).
+- **Mesures (3 passes Playwright + 2 Lighthouse)** : JS initial 481 332 →
+  453 028 o (−5,9 %), Lighthouse 77/81 → 80/85, TBT 910/630 → 620/450 ms ;
+  premier affichage, LCP, parcours plats (bruit) ; ouverture carte sans
+  régression (600/622/691 ms) ; 0 erreur console. Détail dans `SCORES.md`.
+- **Tests : 1163 → 1166/1166** (+3 `tests/boucle-t1-qrcode.test.ts`), E2E 3/3,
+  `tsc` + `typecheck:server` propres. **Test épinglé corrigé après preuve et
+  validation Codex** : `corps-sombres-p1-d2.test.ts:44` lisait `ui.tsx` pour le
+  `bg-white` du QR — une ligne mise à jour vers `QrCode.tsx` (exigence
+  inchangée, voir `BOUCLE.md`). **Revue Codex 5 points** : frontière locale,
+  repli annoncé, test épinglé (corrigés), QR hors ligne (règle des pages
+  différées, documenté), libellés anticipés (corrigés). **SCORES.md restructuré** :
+  chiffres courants en premier (§ Bundle « boucle t1 »), section P1-U1
+  conservée verbatim après (le test `mesure-p1-u1` y lit ses chiffres figés).
+- **Non vérifié.** Téléphone réel, à froid Render, `npm audit` (403 VM) —
+  inchangé.
+
+## 11/11/2026 — Boucle d'amélioration continue : mise en place (BOUCLE.md, CHANGELOG.md, baseline t0)
+- **Cadre créé** : `BOUCLE.md` (règles exactes, méthode de mesure, journal des
+  tours, leviers écartés), `CHANGELOG.md` (bilan lots P0/P1/P2 + tours de boucle),
+  baseline t0 mesurée et consignée dans `SCORES.md` (§ « Re-mesure boucle t0 »).
+- **Baseline t0 (HEAD `7395522`, 2 passes, même protocole que P2-Q2)** : premier
+  affichage `#/jouer` 2 261 / 2 197 ms, LCP 2 248 / 2 148 ms, parcours scan → lot
+  6 664 / 7 343 ms, Lighthouse 77 / 81 (TBT 910 / 630 ms), bundle initial
+  JS 481 332 o + CSS 70 766 o = 552 098 o, 0 erreur console, tests 1163/1163.
+- **Analyse t0** : le TBT domine ; `unused-javascript` : `index-*.js` gaspille
+  62 KiB sur 102 KiB transférés sur `#/jouer` ; `qrcode-generator` (52 Ko de
+  sources, minifié 21 233 o) est dans le bundle initial via `components/ui.tsx`,
+  consommé dans le graphe initial par la seule `CarteFidelite` — levier retenu
+  pour le tour 1 (différé, sans toucher aux pages épinglées par P2-Q2).
+- **Leviers écartés et documentés dans BOUCLE.md** : Caisse/CartePublique en
+  `React.lazy` (test P2-Q2 épingle les imports statiques + caisse hors ligne —
+  décision produit, pas un test faux) ; logo PNG → WebP (fixture de tests,
+  chemin épinglé dans l'écran de chargement).
+
+## 11/11/2026 — P2-Q6 « Logs structurés + alertes » (AUDIT.md §7) — livraison partielle : logs + procédure, alerte non branchée
+- **Nouveau `server/logs.ts`** : une ligne JSON par réponse terminée (`console.info`, comme `[securite]` et
+  `[lecture-sensible]`) — `{"type":"requete","niveau":"info"|"avertissement"|"erreur","horodatage":"ISO",
+  "methode","route","statut","dureeMs","ip"}`. Niveau par statut (< 400 info, 4xx avertissement, 5xx erreur) ;
+  horodatage = horloge réelle ; durée = réception → envoi. **Masquage** : requête jetée (`?acces=`, `?q=`) ;
+  chemin normalisé comme le routeur (segments vides supprimés, décodage par segment) ; seuls restent en clair
+  les mots littéraux des routes et l'identifiant d'un commerce CONNU (ensemble chargé au démarrage après
+  `initialiser`, complété à chaque création ; vide en cas d'échec de lecture = masquage maximal) à sa place
+  (après `commerces`, `r`, `menu`) ; tout autre segment (id de carte/client, jeton, code gagnant,
+  téléphone/e-mail/secret glissé dans un chemin 404) est remplacé par son empreinte SHA-256 tronquée
+  (12 car. hex., comme P2-S15). La liste blanche échoue en sécurité : oublier un littéral ne fait que
+  rendre une ligne moins lisible.
+- **Branchement `server/app.ts`** : `res.on('finish')` au centre du gestionnaire HTTP (succès, erreur, 304,
+  redirection, statique), IP lue à la réception, bloc protégé par `try/catch` ; `ipDe` durci (`req.socket?.`).
+  `masquerIdentifiantsChemin` remplacé par le marcheur partagé `cheminMasquePourErreur` (même règle, `…`).
+- **Bug trouvé par la suite pendant le lot, corrigé avant commit** : la 1re version appelait `ipDe(req)` dans
+  le handler `finish`, quand `req.socket` est déjà `null` (corps abandonné après une 413) → `TypeError` non
+  attrapée → processus tué, corps de la 413 vide (test `logo-p1-b5` en échec, 20/21 ; baseline 21/21).
+  Corrigé (IP à la réception + `?.` + `try/catch`), test de régression ajouté (PUT logo > 2 Mo → 413 complète
+  + ligne émise).
+- **Docs `server/README.md`** : section « Logs structurés et alertes » (format, lecture via logs Render /
+  `jq`, alertes à surveiller : 5xx, 429 en rafale, 401 répétés, 404 en rafale, lenteurs — procédure seulement) ;
+  rétention Render vérifiée dans la doc officielle le 11/11 (Hobby 7 jours, 6 000 lignes/min/instance
+  supprimées au-delà) ; exemples `jq` vérifiés sur un log mélangé (pré-filtre `grep '^{'`, tri, filtre
+  dernière heure) ; ligne `/d/:clientId/:jeton` ajoutée à la table des routes (elle y manquait).
+  **Statut honnête : le critère AUDIT.md (« alerte reçue sur staging lors d'un 500 provoqué ») n'est pas
+  atteint** — aucun staging n'existe encore et aucun canal d'alerte n'est choisi (pas d'envoi réel, pas de
+  service tiers payant, pas de webhook, par décision du lot) ; la moitié réalisable est couverte par un test
+  (une 500 réelle émet une ligne de niveau `erreur` — le signal qu'une alerte consommerait). La seconde moitié
+  (alerte réellement reçue sur staging) reste à faire : staging à créer (`docs/DEPLOIEMENT.md` §6) + canal à
+  choisir. **README racine + SCORES.md** : compteurs 1149/68 → 1159/69.
+- **Tests** (`tests/logs-structures-p2-q6.test.ts`, 14 tests) : niveau par statut, masquage (canonique,
+  encodé, segment vide, liste blanche, commerce connu/forgé, `cheminMasquePourErreur` avec séparateurs
+  encodés), ligne complète, une ligne par requête, aucune donnée sensible (téléphone + e-mail créés dans
+  la capture, `console.error` capturé aussi, PIN en assertion déterministe sur la ligne session),
+  régression 413, émission simulée (vrai 500 → ligne `erreur`), régressions commerce forgé / séparateurs
+  encodés (JSON + `console.error` exacts), registre des commerces (POST /commerces → id lisible),
+  route inconnue.
+- **Revue Codex 1re passe (9 points, `/tmp/codex-revue-p2-q6.txt`, verdict « non acceptable en l'état ») — tous corrigés :**
+  1. [Fondé, bloquant] masquage ≠ normalisation du routeur (`%63artes`, `//`, jeton après segment vide) →
+  normalisation dans `routeMasquee` + régressions. 2. [Fondé] segment inconnu gardé en clair (e-mail dans un
+  chemin 404) → liste blanche, tout segment inconnu est masqué. 3. [Fondé] `console.error` incomplet (gains,
+  `/c/`, `/d/`, encodage) → normalisation + motifs ajoutés, format `…` conservé (test P2-S15 inchangé).
+  4. [Fondé] exemples `jq` en échec sur le stdout mélangé + commentaires inexacts → pré-filtre `grep '^{'`,
+  tri réel, filtre dernière heure (vérifiés avec jq 1.7 sur un log mélangé). 5. [Fondé] test PIN
+  probabiliste + téléphone créé hors capture + pas d'e-mail ni de `console.error` → créations dans la capture,
+  e-mail ajouté, `console.error` capturé, PIN en assertion déterministe sur la ligne session. 6. [Suggestion]
+  `finish` ≠ « une ligne par requête » (connexion interrompue = aucune ligne) → « une ligne par réponse
+  terminée » (doc + code) ; pas de gestion `close` (le statut d'une réponse interrompue serait inconnu,
+  une ligne avec un statut deviné tromperait plus qu'elle n'aiderait). 7. [Fondé] volume et rétention
+  approximatifs → taille 150–220 octets (207 mesurés sur une ligne caisse), volume nuancé (store 30 s),
+  rétention Hobby 7 jours + 6 000 lignes/min vérifiées dans la doc Render. 8. [Fondé] `/d/` absent de la
+  table des routes → ligne ajoutée. 9. [Fondé] critère AUDIT non atteint (test d'émission simulée + alerte
+  staging) → test d'émission simulée ajouté (vrai 500 → ligne `erreur`) ; la moitié staging est déclarée
+  non faite (pas de staging, pas de canal), le lot est présenté comme partiel (logs + procédure).
+- **Revue Codex 2e passe (`/tmp/codex-revue-p2-q6-2.txt`) : 7 corrections confirmées, 2 nouveaux points
+  bloquants** — 1) exception `c-…` trop permissive (e-mail forgé `c-alice@example.com` restait en clair,
+  aussi après un `menu` dans un chemin inconnu) ; 2) `console.error` cassait encore les frontières de
+  segments (`%3F`, `%2F`, `%40`). Tous deux corrigés : marcheur partagé `parcourirChemin`
+  (`routeMasquee` + `cheminMasquePourErreur`, masquage segment par segment avant réunion), ensemble des
+  commerces CONNUS (chargé au démarrage après `initialiser`, complété à chaque POST /commerces, vide en
+  cas d'échec de lecture = masquage maximal), ligne du tableau « une ligne par réponse terminée ».
+  Non bloquants de la 2e passe traités : assertions `console.error` exactes (2 lignes, chemins masqués),
+  test du registre après POST /commerces ; « à sa place » approximatif ignoré (un id de commerce connu et
+  public gardé en clair hors position n'est pas une fuite ; valider la grammaire complète des routes est
+  hors périmètre du lot).
+- **Revue Codex 3e passe (`/tmp/codex-revue-p2-q6-3.txt`) : 0 point bloquant, verdict « lot acceptable ».**
+  Les 2 fuites bloquantes de la 2e passe sont corrigées ; le reliquat staging du critère AUDIT est exclu
+  du verdict (déclaré non fait).
+- **Tests : 1149 → 1163 (+14, `tests/logs-structures-p2-q6.test.ts`)**, suite verte, `npx tsc -p .` propre,
+  typecheck serveur inclus dans `npm test`. Aucun test existant modifié (le test P2-S15 sur `console.error`
+  passe inchangé), aucun secret, aucun envoi réel.
+- **Non vérifié.** `/sante` en production non re-vérifié dans ce lot (faits production/Brevo repris de la
+  vérification du 11/11 à 08h18, agent parent) ; alerte réelle sur staging non testée (voir statut honnête
+  ci-dessus) ; egress réel du dashboard Supabase toujours non lu ; achat de crédits SMS Brevo non confirmé.
+
+## 11/11/2026 — P2-Q5 « Mise à jour README / documentation » (AUDIT.md §7)
+- **README.md racine** : production en ligne depuis le 09/11/2026 (Supabase `asian-home-fidelite`, migrations
+  0001–0008 appliquées le 10/11, 0009/0010 à la mise en production finale) ; Brevo branché en mode test depuis le
+  11/11 (compte créé et activé, 5 variables Render, `/sante` vérifié à 08h18 : `sms: true, email: true`,
+  `smsPrestataire: 'Brevo', modeTest: true`, aucun envoi réel) ; polling store 30 s (P1-P1, boucle Jouer 10 s
+  en attente) ; egress mesuré 3,04 Go/mois (navigateur) / 3,50 Go/mois (PostgREST), seuil 5 Go vers ~257 clients ;
+  tests 1149/1149, 68 fichiers ; section « Limites » réécrite (hébergement en ligne, journal d'audit, jeton client
+  en mode strict, file hors ligne caisse, consentement recueilli, vrai logo, photos 11/81).
+- **server/README.md** : egress mesuré (remplace l'estimation ~8 Go/mois) ; compression P2-Q2 (brotli q5 / gzip n6,
+  seuil 1 Ko, cache 128 entrées, `Vary: Accept-Encoding`) ; routes `/r/` (P2-Q3) et `/menu/` prérendu (P2-Q4) ;
+  `/sante` : 4 clés `migrations` dont `mesure` (0008), 0009/0010 hors `/sante` ; procédure de création : 14 tables
+  après 0001–0008, 15 après 0010 ; 5 secrets Render + `CORS_ORIGIN` ; titre « aucun déploiement » corrigé ;
+  « Migration future » marquée obsolète (Supabase est la base de production) ; limites honnêtes (journal d'audit,
+  mode strict client).
+- **docs/BREVO.md** : état au 11/11 (compte créé et activé, 5 variables posées, `/sante` vérifié à 08h18) ; étape E
+  « 5 variables » ; pré-requis §5 B cochés (compte, clé, expéditeur) sauf crédits SMS (achat non confirmé) et
+  destinataires. **docs/SEO.md** : sitemap `/` + `/menu/c-asian-home-paris` (plus de fragments). **SCORES.md** :
+  couverture 1149/1149.
+- **Tests** (`tests/documentation-p2-q5.test.ts`, 14 tests) : gardes documentaires — absence des affirmations
+  périmées et des contradictions connues, présence des faits à jour, total recoupé README ↔ SCORES.md (jamais codé
+  en dur), nombre de fichiers compté, cache compression recoupé avec `server/app.ts`.
+- **Revue Codex 1re passe (10 points, `/tmp/codex-revue-p2-q5.txt`, verdict « non acceptable ») — tous corrigés :**
+  1. [Fondé] « 4 tables RLS » ambigu + 15 tables après 0001–0008 → 4 clés `/sante.migrations`, 14 tables (15 après
+  0010). 2. [Fondé] titre « aucun déploiement n'a été fait » → « en production depuis le 09/11/2026 ».
+  3. [Fondé] « en attente des clés » + « (cas actuel : rien n'est envoyé) » → Brevo configuré, mode test.
+  4. [Fondé] consentement « aucun écran ne le recueille » + « aucun bouton Envoyer » → recueilli (Jouer, caisse),
+  « Envoyer la relance » sur la fiche client. 5. [Fondé] carte publique « rechargée toutes les 30 s » →
+  montage/retour au premier plan, pas de minuterie (`CartePublique.tsx` sans `setInterval`) ; 30 s = store,
+  10 s = boucle Jouer. 6. [Fondé] adresse Gmail de l'utilisateur retirée des 3 ajouts du lot (elle préexistait
+  dans AUDIT.md, JOURNAL.md, `tests/brevo-production-p1-b7.test.ts`, `docs/BREVO.md` §5 B — conservés, la
+  recette réelle a besoin d'un destinataire réel). 7. [Fondé] compteurs 1135/67 périmés dès l'ajout des tests →
+  1149/68 ; `npm test` inclut `typecheck:server` mais pas `tsc -p .` (vérifié `package.json`). 8. [Fondé]
+  gardes trop faibles → recoupements dynamiques + gardes anti-contradiction + cache recoupé avec le code.
+  9. [Fondé] ligne `/sante` étalée → une seule ligne physique. 10. [Fondé] « 4 secrets » → 5 secrets +
+  `CORS_ORIGIN` (`render.yaml`).
+- **Revue Codex 2e passe (`/tmp/codex-revue-p2-q5-2.txt`) : 0 point, verdict « lot acceptable ».**
+  (La 2e passe n'a pas pu certifier les 1149 réussites — sa propre exécution interrompue — mais la suite complète
+  a tourné ici : 1149/1149, voir ci-dessous.)
+- **Tests : 1135 → 1149 (+14, `tests/documentation-p2-q5.test.ts`)**, suite verte, `npx tsc -p .` propre,
+  typecheck serveur inclus dans `npm test`. Aucun test existant modifié, aucun secret, aucun envoi réel.
+- **Non vérifié.** `/sante` en production non re-vérifié dans ce lot (lecture en délai dépassé, probablement le
+  réveil Render — faits Brevo/production repris de la vérification du 11/11 à 08h18, agent parent) ; egress réel
+  du dashboard Supabase toujours non lu ; achat de crédits SMS Brevo non confirmé ; `docs/DEPLOIEMENT.md`,
+  `docs/GOOGLE-BUSINESS.md`, `docs/DOMAINE.md`, `docs/TESTS-AB.md`, `docs/PHOTOS-MANQUANTES.md`,
+  `docs/SAUVEGARDE.md`, `docs/SECURITE.md` relus et jugés à jour (aucune modification).
+
+## 11/11/2026 — P2-S17 « Rotation des secrets » (AUDIT.md §7, revue Codex point 10)
+- **Procédure documentée** (`docs/SECURITE.md`, nouveau, ~250 lignes, aucun secret réel) : inventaire
+  (SESSION_SECRET, SUPABASE_SERVICE_ROLE_KEY, ADMIN_PIN, PIN commerce, PIN_ASIAN_HOME, codes équipe,
+  GOOGLE_CLIENT_SECRET, BREVO_API_KEY, `secret_desinscription` en `meta`) ; § 2 SESSION_SECRET
+  (déconnexion générale, retour arrière 24 h) ; § 3 SUPABASE_SERVICE_ROLE_KEY (deux parcours : clé
+  `sb_secret_…` à préférer, clé legacy JWT via JWT secret — invalide `anon` aussi) ; § 4 PIN commerce
+  (`PUT /pin`, ne révoque pas les sessions ; PIN dans l'historique Git, commit `eedc463`, P0-S6 —
+  risque accepté par l'utilisateur le 09/11 « laisse comme ça », rien sans son OK explicite ;
+  neutraliser d'abord, purger ensuite) ; § 5 codes équipe (supprimer + recréer invalide les sessions,
+  contrairement au simple changement de code) ; § 6 autres secrets (Brevo : `/sante` ne valide pas la
+  clé, e-mail sandbox authentifié requis ; Google : reconnexion obligatoire ; `secret_desinscription` :
+  suppression en base + redémarrage de toutes les instances, secret mémorisé par instance) ; § 7
+  incident ; § 8 testé / non testé ; § 9 check-list. Règle Render (§ 0) : « Save and deploy » (le
+  build existant suffit), attendre Live ; « Save only » ne déploie pas, un simple Restart reprend les
+  variables du déploiement courant.
+- **Test local** (`tests/rotation-secrets-p2-s17.test.ts`, 2 tests, serveur de test SQLite, aucune
+  variable Render touchée, aucun secret réel) : rotation SESSION_SECRET (même base rouverte avec un
+  nouveau secret — anciens jetons gérant/admin/équipe/client → 401, nouvelle session PIN inchangé →
+  201, état métier conservé : même commerce, même client, mêmes champs prénom/tampons/points, retour
+  arrière vérifié) ; rotation PIN commerce (ancien PIN → 401, nouveau → 201, session d'avant toujours
+  valable).
+- **Revue Codex (10 points, `/tmp/codex-revue-p2-s17.txt`, diff `/tmp/codex-p2-s17.diff`)** : 1. [Fondé,
+  élevée] « Save » / Restart Render ne déploient pas la nouvelle valeur → CORRIGÉ : « Save and
+  deploy » explicite partout (vérifié dans la doc Render). 2. [Fondé, élevée] Supabase : legacy
+  `service_role` vs `sb_secret_…` → CORRIGÉ : deux parcours + vérification que l'ancienne clé est
+  refusée (curl → 401). 3. [Fondé, moyenne] `secret_desinscription` mémorisé par instance → CORRIGÉ :
+  suppression + redémarrage de toutes les instances, ancien lien → 404. 4. [Fondé, moyenne] `/sante`
+  ne valide pas la clé Brevo → CORRIGÉ : e-mail sandbox authentifié avant révocation, SMS simulé non
+  présenté comme validation. 5. [Fondé, moyenne] `POST /sessions` → 201 (pas 200) ; jeton client à
+  vérifier sur `/cartes/<id>` (pas `/etat`, route gérant/admin) → CORRIGÉ partout (doc + tests).
+  6. [Fondé, moyenne] « données intactes » dépassait la preuve → CORRIGÉ : test renforcé (comparaison
+  des champs client, sessions admin/équipe, retour arrière) + wording doc. 7. [Fondé, faible]
+  validation staging restante → CONSERVÉ explicitement (§ 8 + ici) ; AUDIT.md:723 non modifié
+  (document d'audit figé) — à lire « le changement seul ne retire pas la valeur de l'historique ».
+  8. [Fondé, faible] renvois § 7 au lieu de § 6 + lecture des variables → CORRIGÉ (table d'inventaire,
+  § 0). 9. [Non fondé] aucune fuite de secret réel. 10. [Non fondé] mécanismes confirmés + précision
+  ajoutée (§ 5, suppression/recréation membre invalide les sessions).
+- **Tests : 1133 → 1135** (suite complète verte au 2e run ; 1er run : 1134/1135, flake préexistant
+  `cartiz.test.ts:316` — l'UUID aléatoire d'une entrée de journal contient « 9753 », qui est aussi un
+  code de test dans la regex de non-correspondance ; passe seul 34/34, non lié au lot, test non
+  modifié). `npx tsc -p .` OK.
+- **Statut du lot : validation staging restante** — critère AUDIT.md « 1 rotation testée sur staging »
+  non satisfait (tests SQLite locaux uniquement) ; staging inexistant (création navigateur côté agent
+  parent). Aucune rotation réelle faite, aucune variable Render modifiée.
+
+## 11/11/2026 — P2-S15 « Journal des lectures sensibles » (AUDIT.md §7, F-12)
+- **Journal échantillonné** (`server/app.ts`, `journaliserLectureSensible`, branché au centre du
+  gestionnaire HTTP) : `GET /cartes/:id` et `GET /commerces` (liste) journalisés en `console.info`
+  (`[lecture-sensible]`) — carte : empreinte SHA-256 tronquée 12 car. hex. + IP + statut ; commerces :
+  IP + statut + `nb=`. Succès journalisé au retour du routeur, échecs (404/401/429) dans le `catch` —
+  un drapeau `routeurTermine` évite la double ligne quand l'envoi échoue après le routeur. Option
+  `journalLectures: { taux (défaut 0,1), plafond (défaut 600 lignes/min) }` ; `nb=` = nombre réel de
+  commerces renvoyés. `server/README.md` : format, détection (beaucoup d'empreintes distinctes + 404
+  depuis une même IP), volume, vie privée (pseudonymisation, pas anonymisation), limites.
+- **Revue Codex (8 points, `/tmp/codex-revue-p2-s15.txt`, diff `/tmp/codex-p2-s15.diff`)** : 1. [Fondé,
+  moyenne] empreinte différente en succès (décodé) et en échec (encodé) → CORRIGÉ : même décodage dans
+  les deux branches, encodage invalide → pas de journalisation (test id encodé `%63l-inconnu`).
+  2. [Fondé, élevée] `console.error` des erreurs internes écrivait le chemin en clair (id de carte) →
+  CORRIGÉ : `masquerIdentifiantsChemin` (`/cartes/…`, `/desinscription/…`, `/clients/…`) + test avec
+  encodage invalide (500, id absent de `console.error`). 3. [Fondé, moyenne] volume non borné → CORRIGÉ :
+  plafond 600 lignes/min, lignes excédentaires comptées puis résumées en une ligne à la minute suivante
+  (test plafond 2 + bascule d'horloge) ; wording README corrigé (les 429 ne sont pas journalisés
+  systématiquement, seuls les `[securite] BLOCAGE` le sont). 4. [Fondé, faible] taux `NaN` → tout
+  journalisé → CORRIGÉ : non fini → défaut 0,1 (tests bornes 2 → 1, -1 → 0). 5. [Non fondé] couverture
+  des chemins OK ; tests 401 et 429 AJOUTÉS quand même. 6. [Réserve fondée, faible] « pas pour retrouver
+  la carte » trop absolu → CORRIGÉ : README + commentaire disent « pseudonymisation » (hash sans sel
+  vérifiable par dictionnaire) ; HMAC avec secret dédié noté comme étape suivante possible, hors lot.
+  7. [Preuve partielle, faible] détection au taux 0,1 non prouvée, `nb` approximatif → CORRIGÉ : `nb`
+  exact testé ; taux 0,5 testé déterministe (stub `Math.random`) ; la détection automatique et
+  l'efficacité à 0,1 restent hors lot (pas d'agrégation ni d'alerte). 8. [Fondé, faible] latence stdout /
+  pas de protection → CORRIGÉ (plafond) + `console.info` isolé en try/catch (une défaillance de
+  journalisation ne fait jamais échouer une lecture) ; logger à tampon borné et mesure sous charge hors
+  lot. Limite connue notée : le statut journalisé est celui du routeur — un échec de sérialisation
+  ultérieur (500) laisserait une ligne à 200.
+- **Tests : 1124 → 1133 (+9, `tests/journal-lectures-p2-s15.test.ts`)**, suite verte (2 passages),
+  `npx tsc -p .` propre. **Flake** : 1er passage complet, 1 échec `fetch failed: ECONNRESET` sur
+  `tests/caisse-p0-s14.test.ts` (« fiche à la demande », connexion coupée, pas une assertion) — le fichier
+  seul passe, 2e passage complet vert (1133/1133) : non reproduit, attribué à la charge parallèle, à
+  surveiller si ça revient.
+
+## 11/11/2026 — P2-S13 « Oracles d'énumération » (AUDIT.md §7, F-12)
+- **Changement de contrat (public, délibéré — 5 assertions existantes mises à jour, pas affaiblies)** :
+  `POST /commerces/:id/clients` public répond désormais 201 + `{ client }` (sans téléphone ni e-mail) que
+  le contact ait déjà une carte ou non — même statut, même forme, plus de champ `existant`. Nouvelle carte :
+  jeton client remis (amorçage sur le téléphone qui s'inscrit) ; carte existante : pas de jeton (le
+  titulaire la retrouve par « Retrouver ma carte » ou un lien du comptoir). Commerçant (PIN) inchangé
+  (201/200 + `existant`, il voit déjà les clients) ; mode strict inchangé (409 sans aucune donnée, P0-S7).
+  Assertions mises à jour : `tests/supabase.test.ts` (reprise publique [200, true] → 201 sans `existant`
+  ni jeton ; double inscription simultanée [200, 201] → [201, 201]), `tests/relances-p1-b3.test.ts`
+  (200 + `existant` → 201 sans `existant` ni jeton), `tests/securite-s2.test.ts` (reprises 201 ; + égalité
+  des ids, revue Codex point 6), `tests/auth-client-p0-s7.test.ts` (reprise transition 200 → 201).
+- **Tirage : message 409 UNIQUE** (`server/app.ts`, `refusJeu`) — identique sans visite ou déjà joué (y
+  compris le conflit de course, index unique) ; les deux formulations historiques sont conservées à
+  l'intérieur (« faites valider votre visite du jour au comptoir », « déjà tourné la roue aujourd'hui »)
+  pour que le conseil reste utile. Le front (`Jouer.tsx`) n'a pas eu besoin de changer : il affiche le
+  message tel quel et l'UI précise vient de `jeu.statut` (GET /cartes/:id → MessageSansVisite /
+  MessageDejaJoue). Type `inscrirePublic` nettoyé (`src/data/api.ts`, plus d'`existant` en public).
+- **404 vs 409 (revu, sans changement de code)** : carte inconnue → 404, carte existante + mauvais contact
+  → 403 sur les routes RGPD ; `prenom` 404/409/403 et `jeu.statut` sur GET /cartes/:id conservés — tous
+  épinglés par des tests existants et protégés par des identifiants UUID non énumérables ; documentés
+  comme résiduels (voir ci-dessous). `server/README.md` mis à jour (table des routes).
+- **Revue Codex (6 points, `/tmp/codex-revue-p2-s13.txt`, diff `/tmp/codex-p2-s13.diff`)** : 1. [Fondé,
+  élevée] le jeton distingue création et reprise → CORRIGÉ en requalification honnête : le lot est une
+  RÉDUCTION des signaux, pas une fermeture complète ; résiduel explicité dans le code, le README et les
+  tests (assertions `jeton` présent/absent libellées « résiduel documenté »). 2. [Fondé, élevée] la carte
+  renvoyée en reprise permet de lire `jeu.statut` sans jeton en mode transition → NON CORRIGÉ par du code
+  (la reprise doit renvoyer la carte pour que le front transition joue sans jeton ; la fermeture vient du
+  mode strict, production) — documenté comme résiduel préexistant P0-S7. 3. [Fondé, moyenne] les nouveaux
+  tests prétendaient une indistinguabilité complète → CORRIGÉ : intitulés et commentaires reformulés
+  (garantie = même statut + même forme, pas indistinguabilité), résiduel asserté explicitement.
+  4. [Fondé, faible] timing non uniformisé → NON CORRIGÉ : non mesuré, non prétendu (JOURNAL). 5. [Non
+  fondé] le front gère le 201 sans jeton (lecture conditionnelle, Jouer.tsx:630) → aucun changement ; la
+  suggestion d'un test front est couverte par le test serveur (forme de la réponse reprise).
+  6. [Faible réserve] `securite-s2` ne prouvait plus la déduplication par les seuls statuts → CORRIGÉ
+  (égalité des ids ajoutée) ; + test ajouté : double inscription simultanée → 1 client, UN SEUL jeton.
+- **Tests : 1119 → 1124 (+5, `tests/oracles-p2-s13.test.ts`)**, suite verte, `npx tsc -p .` propre
+  (typecheck serveur inclus dans `npm test`). **Non vérifié** : timing création vs reprise non mesuré ;
+  fermeture complète de l'oracle d'inscription impossible tant que l'amorçage du jeton se fait en ligne
+  (il faudrait une vérification du contact hors bande pour les créations aussi — changement de parcours,
+  hors lot) ; en mode strict, le 409 lui-même reste un signal d'existence.
+
+## 11/11/2026 — P2-Q4 « Domaine + SEO » (AUDIT.md §7 ; lot déjà en partie livré : prérendu à faire, domaine non acheté)
+- **État initial trouvé** : P2-Q4 déjà en grande partie livré dans `autonome/integration`
+  (commits `4f9e942`/`6ec5744`/`2f37e77` : JSON-LD Restaurant, robots/sitemap, `docs/DOMAINE.md`,
+  `docs/SEO.md`). Trous restants : prérendu des pages publiques non fait (`docs/SEO.md` : « proposé
+  sans être fait ») et domaine `.fr` non acheté (rien acheté — **non acheté ici**, action utilisateur
+  restante, voir « Non vérifié »).
+- **Prérendu du menu** (nouveau `server/prerendu.ts`, route dans `server/app.ts`) : `GET/HEAD
+  /menu/<commerceId>` rend le menu en HTML statique (titre, description, canonical, Open Graph,
+  JSON-LD `Menu` avec `MenuSection`/`MenuItem`, offres seulement si prix non nul, `suitableForDiet:
+  HalalDiet` seulement pour Asian Home) ; même règle d'affichage que `#/menu` (menu enregistré s'il
+  contient un plat, sinon carte réelle d'Asian Home en repli, sinon page honnête sans plat inventé ;
+  prix non confirmés — Riz Thaï 8,90 €, Maki Gold 100,00 € — masqués partout, y compris dans le
+  JSON-LD) ; tout texte commerçant échappé (corps et JSON-LD, `<` → `\u003c`) ; aucune photo
+  (base64 trop lourde) ; aucun style en ligne (CSP `style-src 'self'`). Rendu à la demande, cache
+  serveur 5 min par commerce (64 entrées max, déclaré dans `creerServeur` pour isoler les tests),
+  `Cache-Control: public, max-age=300`, ETag faible (sha256, 16 car., 304 si repris), limite par IP
+  `lecture` (120/min) comme les autres lectures publiques, HEAD = mêmes en-têtes sans corps.
+  Commerce inconnu ou `/menu` sans id → **404** (pas de soft 404) ; commerce en pause → page
+  « indisponible » (200, noindex). `#/jouer` volontairement non prérendu (visite validée requise).
+- **Sitemap / JSON-LD** : `public/sitemap.xml` = `/` et `/menu/c-asian-home-paris` (plus de `#/menu`
+  ni `#/jouer`, Google ignore tout ce qui suit « # ») ; `index.html` : `hasMenu` =
+  `https://asian-home-fidelite.onrender.com/menu/c-asian-home-paris`. `docs/SEO.md` réécrit
+  (section « Prérendu du menu — FAIT ») ; `docs/DOMAINE.md` étape 5 mise à jour (sitemap/`hasMenu` +
+  QR `/r/` à réimprimer après bascule) + note que la partie technique est livrée, restent achat +
+  DNS + variables Render.
+- **Tests : 1092 → 1105 sur la branche (+13, `tests/prerendu-p2-q4.test.ts`, 13 tests)** : logique
+  pure, échappement hostile `</script><script>alert(1)</script>`, prix masqués, halal, menu vide,
+  serveur 200/304/HEAD/404/pause/menu enregistré, sitemap + `hasMenu`. `tests/seo-p2-q4.test.ts`
+  mis à jour délibérément (locs sitemap, `hasMenu`, type seed étendu avec `id`). `dist/` non suivi
+  par git : rien à commiter dedans. Commit `d6ef303`, fusion `--no-ff` `097918f` (conflit dans
+  `server/app.ts` avec le lot Q3 — les deux handlers ajoutés après `/d/` — résolu en gardant `/r/`
+  puis `/menu`, marqueurs supprimés, `npx tsc -p tsconfig.server.json` OK).
+- **Revue Codex (obtenue après coup sur le diff combiné Q3+Q4, 4 points, `/tmp/codex-revue-p2-q3q4.txt`)** :
+  d'abord indisponible (2 tentatives le 11/11 ~12h12 et ~12h20 UTC : limite d'usage du compte
+  ChatGPT/Codex, « try again at 12:21 PM » sans effet — heure de la dernière action 12:23:50 UTC) ;
+  revue interne rigoureuse faite à la place, puis Codex a fonctionné au 3e essai. Points 1 et 4
+  (ce lot) corrigés dans `474bc61` : 1. [Important] le service worker mettait TOUTE navigation HTML
+  en cache sous « / » — après une visite de `/menu/<id>`, la caisse hors ligne affichait le menu
+  statique au lieu de l'app (reproduit en simulation par Codex) → `public/sw.js` : la SPA reste
+  sous « / », le menu est gardé sous sa propre adresse (repli hors ligne : adresse exacte, puis
+  « / ») + test de simulation SW. 4. [Remarque] `/menu/inconnu/`, `/menu/` et `/menu/a/b`
+  retombaient sur la SPA en 200 → slash final accepté, autres formes : 404 (+ test). Point 3
+  (Remarque, 2e onglet héritant du `sessionStorage`) : comportement préexistant, hors lots,
+  **non corrigé** — correctif proposé non spécifié et risqué. Contrôles Codex sans anomalie :
+  coexistence des deux handlers, échappement corps + JSON-LD, prix masqués absents des offres,
+  typechecks client/serveur validés, bundle initial 481 184 o < 481 376 o (192 o de marge).
+- **Non vérifié :** domaine `.fr` non acheté (recommandation `.fr` OVH ~5,99 € TTC 1re année puis
+  ~9,35 € TTC/an, à revérifier) : restent achat + DNS + certificat Render + variables
+  (`CORS_ORIGIN`, `PUBLIC_URL`, `GOOGLE_REDIRECT_URI` si renseignée) + **QR réimprimés** après
+  bascule + Search Console ; aucune vérification en production ni staging (déploiement interdit) ;
+  pas de rendu sur téléphone réel ; pas de re-mesure Lighthouse/SCORES.md pour ce lot.
+
+## 11/11/2026 — P2-Q3 « Mesure / A/B » (AUDIT.md §7 ; lot déjà en partie livré : scan QR + test A/B n°2 à outiller)
+- **État initial trouvé** : P2-Q3 déjà en grande partie livré dans `autonome/integration`
+  (commits `6276425`/`9d33be6`/`fb29dc9` : compteurs anonymes migration 0008, entonnoir, test A/B
+  n°1 accroche). Trous restants : scan QR compté seulement si la page se charge (`signalerScan` JS
+  dans Jouer.tsx, une fois par onglet) ; test A/B n°2 (offre de la semaine) = protocole manuel non
+  outillé dans `docs/TESTS-AB.md`.
+- **Scan QR compté même si la page ne se charge pas** (`server/app.ts`, `src/router.ts`,
+  `src/pages/Jouer.tsx`, `src/pages/QrVitrine.tsx`, `src/pages/Roulette.tsx`) : `GET /r/<commerceId>`
+  compte le scan (compteur anonyme migration 0008) puis 302 vers `/?via=qr#/jouer/<id>`,
+  `Cache-Control: no-store`. Limite par IP `evenementParIp` (30/min) : dépassée, on redirige quand
+  même sans compter ; HEAD non compté ; commerce inconnu ou en pause → redirection sans compteur ;
+  base en panne → redirection sans compter. Aucun chemin ne renvoie d'erreur au client. `urlQrJeu()`
+  = `${origin}/r/<id>` (QR vitrine et Roulette) ; lien de parrainage dans `CarteFidelite.tsx`
+  inchangé (direct `#/jouer?parrain=`). La page ne re-signale pas le scan après `?via=qr` (pas de
+  double comptage) et retire la requête de l'adresse. `public/robots.txt` : `Disallow: /r/` (un
+  robot ne doit pas compter comme un scan). Libellé entonnoir : « Scans du QR (page chargée ou
+  non) ».
+- **Test A/B n°2 outillé** (nouveau `src/lib/mesure-offre.ts`, section dans
+  `src/components/Mesure.tsx`) : `comparerOffreSemaine`, `visitesParJourSemaine`, `JOURS_OFFRE = 28`,
+  jours courts lundi en premier, `DUREE_OFFRE_SEMAINES = 4`. Deux fenêtres de 28 jours ; chevauchement
+  ou date invalide → `null` ; variation nette via `variation()`. Module **séparé** de `mesure.ts`
+  exprès (voir bundle ci-dessous). `docs/TESTS-AB.md` mis à jour (définition du scan, comparaison
+  outillée, repli CSV conservé).
+- **Bundle (incident réglé sans toucher aux tests)** : mes premiers ajouts ont fait passer le JS
+  initial de 480 934 o à 481 719 o, au-dessus du seuil P2-Q2 (481 376 o = 80 % de 601 720 o) — 1 test
+  en échec. Cause : les helpers test-2 vivaient dans `mesure.ts`, importé par la page de jeu (bundle
+  initial). Correctif : déplacement dans `mesure-offre.ts` (chargé seulement par le tableau de bord
+  différé) + effet Jouer raccourci (comparaison exacte `'?via=qr'`). **JS initial final : 481 184 o**
+  (base 480 934, +250), sous le seuil. Mesuré avec `/tmp/mesure-bundle.mjs` et un worktree
+  `/tmp/fideliz-base` à `e04eb61` (temporaires, supprimables).
+- **Tests : 1092 → 1103 (+11)** : nouveau `tests/scan-qr-p2-q3.test.ts` (302 + compteur,
+  inconnu/pause, HEAD, limite IP, `urlQrJeu`, robots) ; `tests/mesure-p2-q3.test.ts` étendu (test 2,
+  test doc, regex de l'effet Jouer mise à jour). Commit `b3d1bbe`, fusion `--no-ff` `5fc646f`.
+- **Revue Codex (obtenue après coup sur le diff combiné Q3+Q4, voir entrée P2-Q4 ci-dessus)** :
+  d'abord indisponible (limite d'usage, 2 tentatives), revue interne rigoureuse faite à la place
+  (double comptage / scan manqué dans tous les parcours — QR `/r/`, ouverture directe, parrainage,
+  2e onglet, retour arrière — limite IP jamais bloquante, validation de l'id `[\w-]{1,80}`,
+  comparaison des périodes, bundle, couverture EN ; aucun point fondé trouvé), puis Codex a
+  fonctionné au 3e essai. Point 2 [Important] corrigé dans `474bc61` : un rechargement après un
+  scan QR recomptait le scan (le serveur 1 + la page 1, l'effet retirait `?via=qr` sans poser le
+  marqueur de session) → nouveau `marquerScanSignale()` (jeuApi.ts, posé avant le `replaceState`)
+  + garde mémoire dans `signalerScan()` quand `sessionStorage` est indisponible (+ tests).
+  Contrôles Codex sans anomalie : redirection `/r/` maintenue après dépassement IP, fenêtres
+  inclusives de 28 jours, rejet des chevauchements, lundi à l'indice 0.
+- **Non vérifié :** aucune vérification en production ni staging ; pas de rendu sur téléphone réel ;
+  pas de re-mesure Lighthouse/SCORES.md pour ce lot ; `/r/` inexistant en dev Vite (documenté dans
+  `urlQrJeu` + QrVitrine — le QR s'imprime depuis l'adresse publique définitive).
+
+## 11/11/2026 — P2-Q2 « Performance » (AUDIT.md §7 ; compression + mesures)
+- **Compression gzip/brotli côté serveur** (`server/app.ts`, `envoyerCorps`/`preparerCorps`,
+  `tests/compression-p2-q2.test.ts`, 7 tests) : brotli préféré (qualité 5) puis gzip (niveau 6)
+  pour les réponses textuelles ≥ 1 024 o (JS/CSS/HTML/SVG/XML/JSON/manifest/CSV) ; images et polices
+  déjà compressées jamais recompressées ; cache en mémoire des variantes par chemin absolu + ETag
+  (borné à 128 entrées) ; `Vary: Accept-Encoding` fusionné avec `Vary: Origin` du CORS (jamais
+  remplacé, `securite-s4.test.ts:185` vérifié) ; 304 inchangée ; HEAD avec les mêmes en-têtes que GET
+  (`Content-Encoding` + `Content-Length` compressé), sans corps ; négociation RFC 9110 (explicite
+  prime sur `*`, casse ignorée, qualité mal formée = 0, plus forte qualité gagnante, brotli préféré à
+  égalité) ; sans `Accept-Encoding` (service worker hors ligne, `fetchFaux`) : identité, comme avant.
+  Statiques, JSON API (menu public), XML, erreurs et exports CSV passent par le même helper.
+- **Ratios mesurés (build frais)** : JS initial 480 934 o → brotli 143 901 o (29,9 %), gzip 152 485 o ;
+  CSS 70 722 o → brotli 10 857 o ; total initial 551 656 o → brotli 154 758 o (28,0 %) ; tous les
+  assets JS+CSS 867 897 o → brotli 253 375 o (29,2 %) ; chunk initial 352 857 o → brotli 102 097 o ;
+  `index.html` 6 097 o → brotli 2 032 o.
+- **Mesures honnêtes, 2 passes Playwright + 2 passes Lighthouse, serveur local**
+  (`node_modules/.cache/mesure-p2-q2/`, SCORES.md) : premier affichage `#/jouer` 2 428 / 2 285 ms
+  (était 4 043–4 241 ms à P1-U1 — **seuil < 4 s atteint pour la première fois**) ; LCP 2 368 / 2 272 ms
+  (était 4 016–4 224 ms — **seuil < 2,5 s atteint en Slow 4G Playwright**) ; parcours scan → lot
+  6 988 / 6 954 ms (était 8 727–9 155 ms ; validation caisse 5,0 s contre 6,7–6,9 s, taps identiques) ;
+  menu par hash 930 / 1 092 ms, direct 1 764 / 1 765 ms (LCP 1 684 / 1 780 ms — en hausse de ~0,4 s
+  vs P1-U1, cause non établie) ; ouverture de la carte 710 / 622 ms (était 559 / 515 ms, en hausse
+  de ~0,15 s, cause non établie) ; 0 erreur console, 0 requête échouée. **Lighthouse 73 / 81**
+  (était 79/79 — **seuil ≥ 95 non atteint**, critère d'arrêt de la boucle toujours non rempli) :
+  FCP 0,8 s, LCP 3,2 / 2,6 s (était 4,6 s), TBT 840 / 660 ms (était 240 / 270 ms — **en hausse**,
+  cause non établie : le JS arrive plus tôt, le travail de la file principale se concentre dans la
+  fenêtre mesurée — hypothèse, non vérifiée — et la calibration CPU de Lighthouse sur cette VM
+  partagée est mise en cause par son propre avertissement), CLS 0, TTI 3,3 / 3,0 s (était 4,7/4,8 s).
+  Le TBT est le prochain levier (découpage du JS initial, report du travail hors du chemin critique).
+  **Vérification Render non faite** : la compression du proxy Render (production interdite d'accès)
+  n'est pas vérifiée d'ici — le serveur Node compresse lui-même, donc le gain vaut aussi derrière
+  un proxy qui ne compresse pas ; si Render compresse déjà, le serveur ne recompresse pas (le
+  `Content-Encoding` déjà posé n'est pas re-traité ici — non vérifié en production).
+- **Bundle (build frais)** : JS initial 480 934 o, CSS 70 722 o, total 551 656 o, JS total 797 175 o,
+  22 chunks, plus gros 352 857 o (< 500 000 o). Le non-gzipé croît (+8 189 o vs P1-U1, dont +6 361 o
+  nets P2-Q1 — dictionnaire EN + code — et +1 828 o des lots P0-S11/P1-M2/P1-M3 ; CSS +58 o) mais
+  le servi compressé chute (total initial brotli 154 758 o) — écart accepté et documenté (SCORES.md).
+- **Revue Codex (0 bloquant, 3 majeurs / 2 mineurs / 1 remarque, `node_modules/.cache/p2-q2-revue-codex.txt`,
+  tous fondés et corrigés)** : 1. [Majeur] collision du cache entre fichiers (clé = ETag seul) →
+  clé = chemin absolu + ETag. 2. [Majeur] joker `*` mal négocié (`*, br;q=0` renvoyait br,
+  `*;q=0.5` renvoyait l'identité) → explicite prime sur `*`, joker paramétré reconnu. 3. [Majeur]
+  HEAD annonçant la longueur brute → `preparerCorps` partagé (HEAD = mêmes en-têtes que GET, sans
+  corps) + test corrigé. 4. [Mineur] casse/qualités mal formées (`BR`, `q=oops`, `q=-1`,
+  `br;q=0.1, gzip;q=1` choisissait br) → casse ignorée, qualité invalide = 0, plus forte qualité
+  gagnante. 5. [Mineur] exports CSV non compressés → routés par `envoyerCorps` + test (20 clients,
+  export brotli vérifié). 6. [Remarque] le hors-ligne n'est pas validé par le fichier de test →
+  libellé précisé (le hors-ligne est couvert par `performance-bundle-p2-q2` et `carte-pwa-p1-c3`,
+  ce fichier vérifie le contrat serveur — identité sans `Accept-Encoding`). Validé par ailleurs :
+  fusion `Vary`, 304, types couverts, arithmétique SCORES.md, TBT signalé honnêtement.
+- **Piège SCORES.md (2 tests en échec, corrigé sans toucher aux tests)** : `tests/mesure-p1-u1.test.ts`
+  épingle le record P1-U1 — titre de section `## Bundle … — après P1-U1` + chiffres 472745/70664/
+  543409, et parse la sous-section parcours P1-U1 (5 lignes de tableau, span jusqu'à `## Cohérence
+  DA`). Ma première mise à jour (titre renommé « après P2-Q2 », chiffres remplacés, tableau P2-Q2
+  de même forme ajouté dans la plage) cassait les 2 tests. Correction : titre P1-U1 et chiffres
+  P1-U1 restaurés en tête de section, chiffres P2-Q2 dans une sous-section « Après P2-Q2 », et
+  tableau du parcours P2-Q2 avec une colonne d'écart vs P1-U1 (3 colonnes — il ne correspond plus
+  au motif 2 colonnes du test, et l'écart est l'information utile d'une re-mesure). Le test
+  `scores-p0-u0` (fraîcheur à 5 %) passe aussi : les chiffres P1-U1 en tête sont à 1,0–1,9 %
+  du build frais. Leçon : dans SCORES.md, ne jamais renommer une section épinglée ni ajouter un
+  tableau de même forme dans sa plage — ajouter après, sous forme distincte.
+- **Tests : 1085 → 1092 (+7)**, suite verte, `npx tsc -p .` propre, typecheck serveur inclus dans
+  `npm test`. Aucun test existant modifié, aucune fonction supprimée. Commit `1ad77e8`, fusion
+  `--no-ff` `426efcc`, branches `autonome/p2-q2-performance` et `autonome/integration` poussées.
+- **Non vérifié :** rendu sur téléphone réel ; délai à froid Render (~60 s, estimation) ; compression
+  effective en production (Render) ; le TBT en hausse (cause non établie) ; le menu direct et
+  l'ouverture de la carte en légère hausse (causes non établies, échantillon de 2 passes).
+
+## 11/11/2026 — P2-Q1 « Accessibilité / textes » (AUDIT.md §7 ; lot déjà fusionné 1e40b68 : vérification + trous)
+- **Vérification de l'état livré** : P2-Q1 et P2-Q2 étaient déjà fusionnés dans `autonome/integration` — le
+  travail consiste en une vérification de l'état livré + le comblement des trous restants, pas une refonte.
+- **Vouvoiement** (`tests/vouvoiement-couverture-p2-q1.test.ts`, nouveau, 14 tests) : détecteur unit-testable
+  (normalisation `’`→`'`, frontière Unicode, impératifs en début de phrase sensibles à la casse — un fragment
+  minuscule comme `saisis dans l’app` est un participe, pas un impératif ; liste d'autorisation `['Partage']`)
+  appliqué aux littéraux, gabarits et textes JSX bruts, commentaires exclus ; aucune faute en base.
+- **Couverture EN** : analyseur syntaxique des appels `t(` (extraction du 1er argument à parenthèses équilibrées,
+  découpe des ternaires imbriqués, reconstruction des gabarits avec substitution des constantes, résolution des
+  identifiants via les `export const … = '…'` de `src/`, cas dynamiques couverts par des branches dédiées) ;
+  chaque clé du dictionnaire effectif doit être utilisée (remplace le plancher 191). Trous trouvés et corrigés :
+  `MESSAGE_MODE_SERVEUR` ; toute la page `#/desinscription` (titres, phrases, bouton, phrase « fait » avec
+  modèle `{commerce}` — préposition traduite séparément : ` de ` / ` from ` selon `langue`) ; bandeau parrainage
+  `#/jouer` ; instructions « Garder ma carte » (en-tête ternaire + étapes via `t(e)`) ; libellés du profil
+  `#/carte` (suffixe ` — enregistré : {valeur}`) ; `‹ Retour`, chargement et sous-titre de `#/confidentialite` ;
+  confirmations/erreurs des formulaires du programme ; compteur de demandes en attente ; annonce des nouveaux
+  tampons ; `aria-label` « Progression du défi » ; historique traduit par type à l'affichage (`libelleHistorique`,
+  `historiqueCarte()` reste en français, contrat testé) ; expiration datée traduite par adaptateur `expirationLot`
+  (appel `texteExpiration(r.expireLe, maintenant)` conservé, épinglé par `carte-pwa-p1-c3.test.ts:312`) ;
+  branche EN du détail des badges (branche FR conservée, épinglée par `menu-client-p1-c5.test.ts:246`).
+  Clés mortes retirées : `10/11/12/13 chiffres sur 10` (inatteignables) ; `0 chiffre sur 10` ajouté (tapé `+`).
+  Dictionnaire initial : 191 → 247 clés ; effectif (avec les 19 enregistrées) : 266 clés.
+  `PAGES_TRADUITES` étendu à `['jouer', 'carte', 'menu', 'desinscription', 'confidentialite']` (langue mémorisée,
+  sans commutateur sur les 2 nouvelles) ; la caisse reste en français par conception.
+- **Contrastes** : gris-600 `#4b5563` retenu = 6,94:1 sur fond clair, 7,56:1 sur blanc, 7,13:1 sur ivoire —
+  plus fort que la suggestion de l'audit (`#5f6b7a`, 4,99:1) ; le gris-500 ne reste qu'en placeholder /
+  désactivé / rail d'interrupteur (contrôle par occurrence, pas par comptage de lignes). Documenté dans
+  `src/theme.ts` (ratios hex exacts ; valeurs OKLCH Tailwind 4 : écart d'environ 0,01 au plus).
+- **Tailles** : aucune `font-size` < 12 px dans les feuilles CSS et `index.html` ; `text-xs` = 12,75 px
+  (base 17 px) ; interrupteur 44×64 px ; cases 24 px dans zone 44×44.
+- **Bundle (trou P2-Q2 bouché ici)** : le bundle initial dépassait le seuil de 80 % (483 174 o pour 481 376 o
+  autorisés, +8 601 o vs la base 474 573 o : dictionnaire ~7 300 o + code ~1 300 o). Correction : 19 clés des
+  pages différées enregistrées par `enregistrerTraductions()` au chargement de leur page (désinscription 10,
+  confidentialité 5 dont `Ce lien ne correspond à aucun commerce.` partagée avec le menu, badges du menu 4) ;
+  les 8 étapes « Garder ma carte » sorties du dictionnaire vers `etapesEcranAccueilLangue()` (FR identique,
+  EN traduite) ; l'en-tête « Garder ma carte » en modèle `{appareil}` (3 clés → 1). Les clés `t('…')`
+  littérales de MenuPublic restent dans le dictionnaire initial (test `identite-accessibilite-p2-q1` les
+  scanne par regex). Bundle initial : **483 174 → 480 933 o** (index 352 857, ui 127 477), sous le seuil
+  avec 443 o de marge.
+- **Revues Codex (3 passes, `node_modules/.cache/p2-q1/revue-codex*.txt`)** : 1re passe 9 points, 2e passe
+  9 points, 3e passe 0 bloquant / 0 majeur / 2 mineurs — tous fondés et corrigés : analyseur incomplet
+  (apostrophe JSX, interpolations imbriquées), `Every Mondays` → `Every {jour}, members:`, branche EN du
+  détail des badges, textes français sur `#/carte`, historique en français, `Langue.tsx` forçant le français
+  hors jouer/carte/menu, ` de Asian Home` injecté en EN, `0 digit out of 10` → `0 digits out of 10`,
+  `lang="fr"` sur le corps de la politique de confidentialité (texte légal français, même en mode EN).
+  Non fondés, ignorés avec raison : ratios OKLCH (ratios hex exacts, formulation corrigée), paramètres `{x}`
+  cohérents, `carte-pwa-p1-c3.test.ts:312` n'exige que la présence de l'appel `texteExpiration`.
+- **Tests : 1083 → 1085 (+2)**, suite verte, `npx tsc -p .` propre, typecheck serveur inclus dans `npm test`.
+  Aucun test existant modifié, aucune fonction supprimée. Commit `3e522a6`, fusion `--no-ff` `1408a85`,
+  branches `autonome/p2-q1-accessibilite` et `autonome/integration` poussées.
+- **Non vérifié :** rendu visuel EN sur téléphone réel (vérifié par logique pure + tests source seulement) ;
+  le premier rendu EN des pages différées dépend de l'évaluation du module lazy avant le rendu (vérifié par
+  lecture du code + test de couverture, pas par un rendu navigateur).
+- **Résidus documentés (pas des oublis) :** données du commerce jamais traduites (noms de plats, libellés de
+  lots, description, `★ Signature`, `Démo`) ; corps de la politique = texte légal (français) ; messages
+  d'erreur du serveur en français (API en français) ; le dictionnaire EN pourrait à terme être chargé à la
+  demande (import dynamique) pour alléger encore le bundle initial — piste P2-Q2, hors scope P2-Q1.
+
+## 11/11/2026 — P1-G1 « RGPD : rappel de purge » (AUDIT.md §7)
+- **Rappel périodique** : le tableau de bord affiche le résumé de purge (`resumeRappelPurge`, `src/lib/rgpd.ts` —
+  `{ aPurger, bientot, proteges }`, compteurs disjoints, calculé depuis `listePurge` sur les clients déjà chargés,
+  sans appel serveur), en mode API seulement : alerte « N carte(s) à purger » (conservation dépassée) ou mention
+  discrète « N carte(s) à purger dans moins de 30 jours », avec le lien vers l'écran Clients. La liste de purge,
+  l'écran Clients et la route `GET …/purge` existaient déjà (P1-B6).
+- **Purge automatique refusée explicitement** : rien n'est jamais supprimé sans un geste du commerçant — ni tâche
+  planifiée, ni suppression à l'ouverture de l'état, ni minuteur côté front (documenté dans `src/lib/rgpd.ts` et
+  `server/README.md` ; la politique de confidentialité disait déjà que le commerce lance lui-même la suppression).
+- **Tests** (`tests/rappel-purge-p1-g1.test.ts`, 5 tests) : compteurs (dont protégée « bientôt » comptée
+  uniquement dans `proteges`), composition avec `listePurge` (1 due, 1 bientôt, 4 protégées, durée 12 mois),
+  présence du rappel dans `TableauDeBord.tsx`, absence de purge/minuteur dans le dashboard, refus documenté.
+- **Revue Codex (8 points, `/tmp/p1-g1-revue-codex.md`) — 2 fondés, corrigés :** 1. [Majeur] garantie absolue
+  (« une carte au-delà de la conservation sans rappel serait un bug ») non fondée : une carte protégée ne
+  produit pas de bannière → portée qualifiée dans `rgpd.ts` et `README.md` (rappel = cartes purgeables, mode
+  API, données chargées ; Clients = liste de référence) + test. 2. [Mineur] rappel calculé depuis le store
+  (données absentes/périmées = pas de bannière) → même qualification documentée. Points 3–6 (remarques :
+  compteurs disjoints, durée personnalisée, aucune purge depuis le dashboard, rappel récurrent à chaque
+  ouverture/rechargement du store) : rien à corriger. 7. [Mineur] tests d'interface par regex insuffisants
+  pour prouver le rendu → **ignoré avec raison** : aucun harnais de rendu React n'existe dans la suite
+  (ni jsdom, ni testing-library, ni renderToString) ; la convention du repo est la vérification des écrans
+  par regex source + logique pure testée, appliquée ici. Point 8 (remarque : contraintes respectées) : rien.
+- **Tests : 1066 → 1071 (+5)**, suite verte, `npx tsc -p .` propre, typecheck serveur inclus dans
+  `npm test`. Aucun test existant modifié, aucune fonction supprimée.
+- **Non vérifié :** rendu visuel de la bannière sur téléphone réel (vérifié par regex source + logique pure
+  seulement) ; aucune carte réelle n'est due aujourd'hui, le rappel n'a donc pas été vu avec de vraies données.
+
+## 11/11/2026 — P1-B8 « Google Business (configuration + recette) » (AUDIT.md §7, revue Codex point 9)
+- **Ce lot ne crée ni projet Cloud, ni clé, ni publication réelle.** Les fonctions et routes existaient déjà
+  (P1-B4) ; le lot ajoute des garde-fous côté code, vérifie le code contre un Google simulé et documente la
+  configuration + la recette réelle, qui attendent le compte Google du restaurant.
+- **Garde-fous** (`server/google-business.ts`, `server/app.ts`, `src/pages/Avis.tsx`) : réponse vide → 400
+  (helper ; 409 « brouillon non validé » via la route) ; réponse > **4 096 octets** (limite Google, vérifiée
+  le 11/11/2026 dans la référence API — pas des caractères) → 400 ; identifiant d'avis / fiche mal formés
+  (`?`, `#`, `..` refusés) → 400 / 409 ; `GOOGLE_BUSINESS_LOCATION` mal renseignée → **409 explicite** à
+  l'import, **avant tout appel à Google** (même le rafraîchissement du jeton) ; champ de réponse plafonné
+  à 2 000 caractères côté front (comme la route PATCH avis).
+- **Tests** (`tests/google-business-p1-b8.test.ts`, 10 tests, Google simulé, jamais contre Google) : gardes
+  unitaires (dont multi-octets aux frontières : 1 400 × « 漢 » = 4 200 octets refusés, 2 048 × « é » =
+  4 096 octets acceptés), `emplacementAImporter`, import serveur avec `GOOGLE_BUSINESS_LOCATION` invalide
+  (409, zéro appel à Google même jeton expiré) puis valable (1 avis importé), écran + doc.
+- **docs/GOOGLE-BUSINESS.md** : état au 11/11/2026 ; recette réelle en 5 étapes (connexion, import, 1 réponse
+  de test, déconnexion optionnelle, diagnostic 403/quota) marquée **« attend le compte »** ; consigne ajoutée
+  : **désactiver la règle auto 5★ avant le premier import de recette** (sinon l'import publie d'office les
+  réponses auto des 5★ postés après la connexion) ; révocation présentée comme best-effort.
+- **Revue Codex (7 points, `/tmp/p1-b8-revue-codex.md`) — 6 fondés, corrigés :** 1. [Majeur] limite en
+  octets, pas en caractères (vérifié dans la référence Google) → `Buffer.byteLength`, messages/doc/tests
+  corrigés. 2. [Majeur] recette « une seule réponse » non garantie (auto 5★ à l'import) → désactivation de
+  la règle documentée dans la recette. 3. [Mineur] regex acceptant `?`, `#`, `..` → segments restreints
+  (`[A-Za-z0-9][A-Za-z0-9._-]*`, 1er caractère alphanumérique). 4. [Mineur] révocation présentée comme
+  certaine → best-effort explicité. 5. [Remarque] « réponse vide → 400 » = helper, pas la route (409) →
+  précisé dans la doc. 6. [Remarque] `accesGoogle` (rafraîchissement) précédait la validation → validation
+  déplacée avant tout appel Google + test jeton expiré. Point 7 (remarque : statuts cohérents, front,
+  aucun appel réel) : rien à corriger.
+- **Tests : 1056 → 1066 (+10)**, suite verte, `npx tsc -p .` propre, typecheck serveur inclus dans
+  `npm test`. Aucun test existant modifié, aucun secret, aucun appel réel à Google.
+- **Non vérifié (attend le compte Google du restaurant + son accord) :** projet Cloud, OAuth, approbation
+  Google, variables Render, import réel + 1 réponse de test sur la vraie fiche (procédure § « Recette
+  réelle » de docs/GOOGLE-BUSINESS.md).
+
+## 11/11/2026 — P1-B7 « Brevo en production » (AUDIT.md §7, revue Codex point 8)
+- **Ce lot ne crée ni compte Brevo, ni clé, ni envoi réel.** Le code Brevo existait déjà (commit `4862968`) ;
+  le lot vérifie la validation **simulée** de bout en bout et documente la recette réelle autorisée.
+- **Validation simulée vérifiée** (`tests/brevo-production-p1-b7.test.ts`, 5 tests, sans clé ni réseau) :
+  les 5 variables Render lues depuis l'environnement (`configDepuisEnv` : clé, expéditeurs, drapeaux
+  `bacASable` / `modeTest`) ; serveur branché avec cette même configuration ; `/sante` combiné
+  `{ sms: true, email: true, smsPrestataire: 'Brevo', modeTest: true }` ; relance bienvenue e-mail
+  (sandbox Brevo, `X-Sib-Sandbox: drop`, journal statut `test`) puis SMS (simulé, zéro appel réseau,
+  journal `test`) ; la simulation répétée repasse (le statut `test` n'occupe pas le créneau anti-doublon).
+- **docs/BREVO.md** : état au 11/11/2026 (compte en cours de création côté agent parent — création annoncée
+  par l'agent parent, non vérifiée ici ; **clés attendues**) ; pré-requis à cocher avant la recette réelle
+  (§5 B : clé, expéditeur e-mail validé, crédits SMS achetés, destinataires définis) ; tarif SMS : page
+  Brevo affichant à partir de 0,073 €/SMS le 11/11 (signalé par l'agent parent, **à confirmer** au moment
+  de l'achat, contre ~0,045 € estimé le 10/11).
+- **Revue Codex (6 points, `/tmp/p1-b7-revue-codex.md`) — 4 fondés, corrigés :** 1. [Mineur] valeurs de
+  `configDepuisEnv` non assertées, serveur de test configuré à la main → valeurs assertées + serveur
+  branché via `configDepuisEnv(ENV_COMPLET)`. 3. [Remarque] répétition de simulation absente du scénario
+  → répétition SMS ajoutée (200, journal `test`). 4. [Mineur] **procédure §5 B fausse** : après un e-mail
+  « bienvenue » réel, un SMS « bienvenue » au même client le même jour répond 409 — l'index unique
+  `envois_un_par_jour (commerce, client, modèle, jour)` ignore le canal (vérifié : migration 0007) →
+  recette SMS déplacée sur un **deuxième client test**, avec l'explication dans la doc. 5. [Remarque]
+  « compte en cours de création » → précisé « création annoncée par l'agent parent, non vérifiée ici ».
+  Points 2 et 6 (remarques : assertions fondées, aucun risque d'envoi réel) : rien à corriger.
+- **Tests : 1051 → 1056 (+5)**, suite verte, `npx tsc -p .` propre, typecheck serveur inclus dans
+  `npm test`. Aucun test existant modifié, aucun secret, aucun envoi réel.
+- **Non vérifié (attend les clés + l'accord explicite de l'utilisateur) :** `/sante` en production
+  (`sms: true, email: true, smsPrestataire: 'Brevo'`) ; recette réelle §5 B (1 e-mail vers
+  yassbybibiche@gmail.com, puis 1 SMS vers le numéro de l'utilisateur, sur deux clients test distincts).
+
+## 11/11/2026 — P1-P1 « Egress / polling » (AUDIT.md §7, F-16)
+- **Décision (intervalle allongé, pas de différentiel) :** le rechargement périodique du store passe de 10 s à 30 s
+  (`INTERVALLE_RECHARGEMENT_MS`, `src/store.tsx`) ; rechargement sur action, au retour au premier plan et au retour du
+  réseau conservés. Un rechargement différentiel n'est pas fait dans ce lot : il exige un point de reprise côté serveur
+  (version/horodatage par ligne) et le seuil mesuré laisse de la marge à l'échelle actuelle (voir ci-dessous).
+- **Mesure locale (vrais octets UTF-8, `tests/egress-p1-p1.test.ts`, 150 clients / 100 visites / journal 100 entrées,
+  1 onglet visible 12 h/j, 30 j) :** HTTP `/etat` 69 210 o + `/commerces` 1 088 o = 70 298 o par rechargement →
+  **9,11 Go/mois à 10 s, 3,04 Go/mois à 30 s** ; côté PostgREST (lignes lues avec les colonnes sélectionnées dans
+  `server/stockage-supabase.ts` — `id,version,donnees` pour clients, `donnees` pour tirages/journal — proxy de l'egress
+  Supabase, pas la mesure dashboard) : 81 037 o → **3,50 Go/mois à 30 s**, sous les 5 Go gratuits. À 300 clients :
+  4,68 Go HTTP / 5,60 Go PostgREST à 30 s — **seuil 5 Go côté PostgREST vers ~257 clients** (pente mesurée sur deux
+  volumes, 324 o/client) : le différentiel deviendra nécessaire à ce volume. La minuterie caisse 15 s (`GET /caisse`,
+  240 o) ne pèse que 0,02 Go/mois ; un 2e onglet double le rechargement périodique. **Reste : l'egress réel dans le
+  dashboard Supabase** (pas d'accès navigateur sur cette VM — à lire par l'agent parent, Database → Usage ou
+  Settings → Usage).
+- **Roue :** la boucle Jouer (`INTERVALLE_VERIFICATION_MS`, `attenteVisite.ts`) est indépendante du store et inchangée —
+  vérification espacée de 10 s après chaque réponse réussie (hors latence réseau ; recul jusqu'à 60 s après échecs), donc
+  déblocage inchangé par le lot. Le critère « déblocage toujours < 10 s » de l'AUDIT est approximatif en ce sens (il
+  l'était déjà avant le lot) : la garantie exacte est l'espacement de 10 s après réponse.
+- **Revue Codex (7 points, `/tmp/p1-p1-revue-codex.md`) — tous fondés, corrigés :**
+  1. [Majeur] La mesure comptait des caractères UTF-16, pas des octets (accents sous-estimés) → `arrayBuffer().byteLength`
+     partout ; chiffres publiés recalculés (74 169 o → 70 298 o HTTP, 9,61 → 9,11 Go à 10 s, 3,20 → 3,04 Go à 30 s).
+  2. [Majeur] La taille HTTP mesure le flux Node → navigateur, pas Supabase → Node → mesure PostgREST ajoutée
+     (enveloppes `id,version,donnees`, 3,50 Go/mois à 30 s) + libellé précisé dans le test et l'AUDIT.
+  3. [Majeur] Le « < 5 Go » ne valait que pour le scénario périodique 1 onglet → exclusions explicitées (2e onglet,
+     caisse 15 s mesurée à 0,02 Go/mois, actions/focus non comptés) ; le critère global reste à démontrer par le dashboard.
+  4. [Mineur] « Déblocage toujours < 10 s » faux à la lettre (10 s après la réponse + latence) → libellé corrigé
+     (store, AUDIT) : espacement de 10 s après réponse réussie.
+  5. [Mineur] Seuil « ~234 clients » extrapolé d'un seul échantillon → mesure à deux volumes (150 et 300 clients) dans
+     le test, seuil recalculé ~257 clients côté PostgREST.
+  6. [Mineur] Le test ne vérifiait pas les tailles citées dans l'AUDIT → garde-fous ajoutés (rechargement 10 Ko–100 Ko,
+     PostgREST ≥ HTTP, croissance avec le volume, 10 s > 5 Go) ; les chiffres exacts restent documentés ici et dans
+     l'AUDIT.
+  7. [Mineur] Commentaire `store.tsx` (~12 Go) incohérent avec l'AUDIT (9,61 Go) → harmonisé sur les chiffres corrigés
+     (9,11 Go à 10 s / 3,04 Go HTTP à 30 s, 3,50 Go PostgREST).
+  Aucun secret, aucun envoi réel introduit (confirmé par la revue).
+- **Tests : 1048 → 1051 (+3, `tests/egress-p1-p1.test.ts` : constante 30 s + événements + action, roue à 10 s,
+  mesure live)**, suite verte, typechecks inclus dans `npm test`. Aucun test existant modifié.
+- **Non vérifié.** Egress réel dashboard Supabase (voir ci-dessus) ; aucun test sur téléphone réel ; l'hypothèse
+  « onglet visible 12 h/j » est celle de l'AUDIT étape 0, non relevée.
+
+## 11/11/2026 — P1-S12 « Garde 1 tampon/jour sur `visite` » (AUDIT.md §7, F-11)
+- **Décision (gardée, pas supprimée) :** la route historique `POST /commerces/:id/clients/:id/visite` reste — c'est le
+  passage rapide sans achat des écrans FicheClient (« Valider une visite (+1 tampon) ») et Clients (« Valider une
+  visite (+1) »), distinct de l'écran caisse (code équipe + montant). La caisse avec montant 0 donnerait le même
+  résultat, mais supprimer la route retirerait un geste commerçant existant (`api.visite`, utilisé par les deux écrans).
+- **Garde :** la branche `visite` de `server/app.ts` appelle désormais `passageAvecProgramme()` (la même fonction que la
+  caisse), 409 « 1 tampon par jour maximum » sinon — refus avant toute écriture (client, parrainage, journal). Import
+  `appliquerVisiteProgramme` retiré de `app.ts` (plus utilisé). Front : bouton désactivé + avertissement « Déjà un
+  passage aujourd’hui : 1 tampon par jour maximum. » sur FicheClient ET Clients (même texte que la caisse).
+- **Découverte en testant :** le test « journal d'audit » de `cartiz.test.ts` s'appuyait sans le savoir sur le bug — la
+  `visite` du gérant y créditait un 2e tampon le même jour (Lina avait déjà un passage le 11, action hors ligne
+  rejouée `faitLe` 11h30). La visite d'audit est déplacée au lendemain (12). C'est la preuve que le bug était réel.
+- **Montages de tests adaptés (6 échecs initiaux, horloges figées, aucune assertion métier affaiblie) :** les visites
+  accumulées le même jour sont étalées d'un jour par visite — `serveur.test.ts` (« récompense » : 10/11/12, « le
+  lendemain » devient le 13 ; CSV inchangé `;2;5;`), `programme.test.ts` (« niveaux » : 10 visites du 9 au 18,
+  passage le 19 ; « profil progressif » : 2e visite le lendemain), `auth-client-p0-s7.test.ts` (2e visite +24 h,
+  jeton valable 30 jours), `supabase.test.ts` (« parcours » : visites 9/10/11, `horloge` du describe en `let`,
+  restaurée en `finally` ; le double-`visite` simultané reste [200, 409] « réessayez » via le verrou optimiste).
+- **Revue Codex (2 points, `/tmp/p1-s12-revue-codex.md`) — tous deux fondés, corrigés :**
+  1. [Majeur] `passageCeJour` (front) comparait les jours dans le fuseau du navigateur, la garde serveur à Paris
+     (`server/index.ts` force `TZ=Europe/Paris`) — bouton désactivé à la mauvaise heure hors fuseau parisien.
+     → nouveau comparateur partagé `memeJourParis()` (`src/lib/points.ts`, jours `Europe/Paris` explicites via
+     `Intl`), utilisé par `passageCeJour` (front + `enregistrerPassage`) et par la garde serveur (`passageAvecProgramme`
+     et `rattrapageRecevable` dans `programme.ts`, qui ne dépendent plus du TZ du processus) ; test ajouté.
+  2. [Mineur] Liste Clients : bouton désactivé sans explication → même avertissement que la caisse et la fiche.
+- **Tests : 1046 → 1048 (+2 : garde `visite` de bout en bout dans `cartiz.test.ts`, jours Paris dans le même
+  fichier)**, suite verte, typechecks inclus dans `npm test`.
+
+## 11/11/2026 — P1-B9 « Désinscription SMS utilisable » (AUDIT.md §7, revue Codex point 7 — BLOQUANT avant toute activation SMS)
+- **Contexte :** chaque SMS de relance se terminait par `STOP : répondez STOP`, alors que l'expéditeur alphanumérique
+  Brevo (`ASIANHOME`) ne reçoit aucune réponse — texte trompeur, aucun mécanisme de désinscription utilisable par SMS.
+  La route de désinscription HMAC existait déjà (POST `/api/v1/desinscription/<client>/<jeton>`, retrait au clic depuis
+  `#/desinscription/…`, idempotente, limitée par IP) : elle est réutilisée telle quelle, sans modification du jeton.
+- **Mécanisme (lien, pas de réponse) :** `smsRelance()` prend désormais le lien de désinscription en 5e paramètre et se
+  termine par `STOP : <lien>` (`mentionDesinscriptionSms()`, `src/lib/relances.ts`) — le mot STOP est conservé (mention
+  légale des SMS marketing) mais ne promet plus de réponse. Lien court `GET /d/<client>/<jeton>` → 302 vers
+  `/#/desinscription/<client>/<jeton>` (`server/app.ts`, à côté du `/c/` existant ; jeton non vérifié à la redirection,
+  c'est la page qui appelle l'API après clic — même forme que `/c/`). Le serveur (`relancer()`) calcule le jeton une fois
+  et le sert aux deux canaux : SMS (lien court `/d/…`) et e-mail (lien long + `List-Unsubscribe`, inchangés).
+  `MENTION_STOP_SMS` supprimée (remplacée par `mentionDesinscriptionSms()` + `lienCourtDesinscription()`).
+- **Textes corrigés au même endroit (même promesse trompeuse) :** page Désinscription (lien invalide : plus de
+  « ou répondre STOP à un SMS »), `Messages.tsx` (écran commerçant), `MENTIONS_RGPD` (`integrations.ts`) et politique de
+  confidentialité (`rgpd.ts`) — tous disent désormais « lien de désinscription dans chaque SMS et chaque e-mail ».
+  Message 501 de `stop-sms` (Brevo) et commentaires `brevo.ts` mis à jour ; doc `docs/BREVO.md` (§1, §6),
+  `server/README.md` (§ relances) et `README.md` (§ RGPD) alignés. Origine stockée `lien-email` conservée pour les
+  retraits par lien (la route ne distingue pas SMS/e-mail, le jeton est le même) — dit ici, pas de nouvelle origine.
+- **Coût (conséquence assumée, documentée) :** le lien allonge le SMS — la plupart des relances SMS font désormais
+  **2 segments (2 SMS facturés)** au lieu d'1 ; alphabet GSM 7 bits conservé (jeton base64url : seuls `-` et `_`, tous
+  deux GSM). Repli sans lien (appel direct de `smsRelance()` sans passer par le serveur) : « STOP : désinscription
+  auprès du commerce » — honnête, jamais « répondez STOP ».
+- **Tests : 1044 → 1046 (+2, `tests/relances-p1-b3.test.ts`)**, suite verte, typechecks inclus dans `npm test`.
+  Nouveaux : redirection `/d/` (302, formats invalides → 404) ; SMS sans lien → repli honnête. Bout en bout (Brevo,
+  prestataire simulé) : contenu SMS exact avec lien court, redirection `/d/` du jeton réel, POST désinscription → 200,
+  consentement `false`, relance suivante → 409. **5 assertions existantes adaptées (changement de spec — le lot
+  remplace le texte qu'elles épinglaient) :** `relances-p1-b3.test.ts` (SMS purs : 1 segment → ≤ 2 ; message libre ;
+  corps Twilio et Brevo), `integrations-v3.test.ts:297` (corps SMS), `relances-ui-p1-b3.test.ts` (mention RGPD).
+  Aucun autre test modifié ; aucune fonction existante supprimée.
+- **Revue Codex (1 point, mineur, `/tmp/p1-b9-revue-codex.md`) :** le test « de bout en bout » n'ouvrait pas le lien
+  réel ni ne comparait explicitement les jetons SMS/e-mail. **Traité en partie :** redirection `/d/` du jeton réel
+  vérifiée dans le test (302 + Location exacte) ; le retrait au clic (pas à l'ouverture) est déjà couvert côté page
+  (`relances-ui-p1-b3`, pas de `useEffect`, retrait sur `onClick`) ; l'égalité des jetons SMS/e-mail tient par
+  construction (une seule fonction `jetonDesinscription()`, les deux branches vérifiées indépendamment contre la même
+  route POST) — pas de parcours navigateur ajouté (le repo n'a pas de harnais de rendu pour cette page). Aucun défaut
+  bloquant ou majeur ; HMAC inchangé, redirection interne filtrée, GSM conservé, aucun secret ni envoi réel.
+
+## 11/11/2026 — P1-C7 « Écrans commerçant (finitions) » (AUDIT.md §7)
+- **Contexte :** l'AUDIT listait pour P1-C7 : 8 `window.confirm()`, aide « encore X tampons »,
+  bouton « Saisir le prénom » si caméra refusée, découpe Réglages, pagination Clients.
+  Vérification faite au début du lot : l'aide tampons, le repli « Saisir le prénom » et la
+  pagination Clients (« Charger plus » au-delà de 50) étaient **déjà livrés en P1-C6**
+  (tests `ecrans-commercant-p1-c6.test.ts`) — rien à refaire, vérifiés en non-régression.
+  Restait : **10 `window.confirm()` hors démo** (l'AUDIT en comptait 8 — 2 de plus trouvés :
+  suppression de catégorie dans MenuCarte, déconnexion des appareils dans CartePublique) +
+  la découpe Réglages (9 fieldsets, pas 8).
+- **Remplacements (10, tous par `<Confirmation>`, modale `dialog` déjà utilisée à la caisse) :**
+  FicheClient ×3 (échange de points — récapitulatif « echange » réutilisé ; consentement
+  relances — nouveau type « consentement » ; refus de visite oubliée — nouveau type
+  « rattrapage-refus »), Equipe (retrait d'un membre), Avis (déconnexion Google), Messages
+  (dépôt du message ciblé), MenuCarte ×2 (remplacement du menu — la sauvegarde CSV part
+  **avant** la modale, le remplacement n'a lieu que sur confirmation ou éditeur vide ;
+  suppression de catégorie), CartePublique ×2 (demande de suppression RGPD, déconnexion de
+  tous les appareils). Seul `window.confirm()` restant : la réinitialisation de la **démo**
+  (Admin.tsx, 1 occurrence). `Caisse.tsx` : branche `else` restreinte aux 4 variantes
+  caisse (les 2 nouveaux types sont réservés à la fiche client — exigé par `tsc`).
+- **Réglages découpés en 6 onglets** (Commerce, Fidélité, Roulette, Messages, Carte, Données),
+  **un seul formulaire, un seul bouton Enregistrer** : 9 fieldsets conservés, 26 champs
+  (input/select/textarea) inchangés — 2 fieldsets déplacés pour des onglets thématiques
+  contigus (« Points » après « Programme », « Réponses aux avis » après « Messages
+  automatiques »). Onglets accessibles : `tablist`/`tab`/`tabpanel` + `aria-controls`,
+  roving tabindex, flèches/Début/Fin ; validation native : un champ invalide dans un onglet
+  masqué bascule sur son onglet puis est focalisé (`onInvalid`, revue Codex point 1).
+- **Évolution rédactionnelle (revue Codex point 7, documentée) :** les récapitulatifs ne
+  reprennent pas mot pour mot les anciens confirms — le prénom figure dans la ligne
+  « Client » du récapitulatif (pas dans le titre), et le refus de rattrapage ajoute
+  l'avertissement « classée sans crédit de tampon ni de points » (conséquence réelle,
+  implicite avant). Aucun prix, probabilité ni texte légal touché.
+- **Tests : 1032 → 1044 (+12, `tests/ecrans-commercant-p1-c7.test.ts`)**, suite verte,
+  `npx tsc -p .` propre (typecheck serveur inclus dans `npm test`). Couverture :
+  97,90 % / 91,49 % / 93,06 % ; `ecransCommercant.ts` 100 %. **2 tests existants adaptés
+  (propriété conservée, mécanisme changé — le lot remplace l'implémentation qu'ils
+  épinglaient) :** `menu-officiel.test.ts` (ordre CSV → modale → remplacement ; `return`
+  critique et 3 occurrences d'`appliquerRemplacement` vérifiés) et
+  `relances-ui-p1-b3.test.ts` (confirmation branchée sur `changerConsentement` dans le
+  composant Relances, un seul `majClient`). Aucun autre test modifié.
+- **Revue Codex (9 points, `/tmp/codex-revue-p1-c7.txt`, diff `/tmp/codex-p1-c7.diff`) —
+  verdict initial « bloquant », tous traités :**
+  1. [Fondé, bloquant] Validation native bloquée dans un onglet masqué (`lienGoogle`
+     `type="url"`, `nom` required) → `onInvalid` : bascule sur l'onglet du champ puis
+     focus ; test ajouté.
+  2. [Fondé] Navigation clavier des onglets incomplète → roving tabindex + flèches /
+     Début / Fin avec déplacement du focus ; test ajouté.
+  3. [Fondé, partiellement] Tests par fragments ne prouvant pas « agit seulement après
+     confirmation » → resserrement au plus près du mécanisme (Relances scopée au
+     composant, `majClient` unique après lecture de la demande ; MenuCarte : `return` +
+     comptage des appels) ; un test comportemental avec API espionnée demanderait un
+     harnais de rendu que le repo n'a pas pour ces pages — non fait, dit ici.
+  4. [Fondé] Test Menu affaibli → `return` critique + 3 occurrences
+     d'`appliquerRemplacement` vérifiés (définition + éditeur vide + confirmation).
+  5. [Fondé] Test Relances trop large → scopé au composant Relances, `majClient`
+     unique et après lecture de la demande.
+  6. [Fondé] Ordre/inventaire Réglages insuffisamment testés → légendes exactes par
+     panneau + inventaire 26 champs vérifiés (26 avant comme après).
+  7. [Remarque] Récapitulatifs reformulés → évolution documentée ci-dessus.
+  8. [Fondé] Exception Admin trop large → exactement 1 occurrence, celle de la démo.
+  9. [Fondé, aucune correction] Aucun défaut d'exécution dans les 10 remplacements ;
+     correctif Caisse et imports validés.
+- **Non vérifié :** rendu visuel des modales et des onglets sur téléphone réel (vérification
+  par tests + `tsc` seulement) ; test comportemental avec API espionnée (voir point 3) ;
+  découpe des onglets à valider avec le commerçant (AUDIT §7) ; rien touché en production.
+
+## 11/11/2026 — P1-U1 « Mesure du parcours comptoir » (AUDIT.md §7)
+- **Contexte :** re-mesure après refonte (noir+magenta, corps sombres), même protocole que
+  P0-U0 : `scripts/mesurer-scores.mjs` (Pixel 7, Slow 4G + CPU ×4, serveur local),
+  2 passes + Lighthouse 2 passes (`node_modules/.cache/mesure-p1-u1/`,
+  `resultats-passe1.json`, `resultats-passe2.json`, `lighthouse-passe1.json`,
+  `lighthouse-passe2.json`, 9 captures passe 2). **Aucun changement de code de
+  production dans ce lot** — SCORES.md + 5 tests de cohérence seulement.
+- **Résultats (2 passes) :** premier affichage `#/jouer` 4 241 / 4 043 ms (LCP 4 224 /
+  4 016 ms, `p.titre-carte`) — seuil < 4 s toujours non atteint ; parcours scan → lot
+  8 727 / 9 155 ms d'étapes (inscription 1 054 / 994, validation caisse 6 720 / 6 926,
+  vérification 366 / 312, tirage 587 / 923 ms), taps identiques (client 4 clics +
+  1 saisie, caisse 3 clics + 2 saisies) ; Lighthouse 79 (score identique sur les
+  deux passes ; FCP 1,1 s, LCP 4,6 s, TBT 240 / 270 ms, CLS 0, SI 1,1 s, TTI 4,7 /
+  4,8 s) — était 81 à P0-U0, 16 points sous le seuil ≥ 95 ; 0 erreur console,
+  0 requête échouée (2 passes) ; bundle frais JS initial 472745 o + CSS 70664 o =
+  543409 o (22 chunks, plus gros 349378 o) ; couverture 97,89 % / 91,48 % / 93,06 % ;
+  DA moyenne **8,0/10 inchangée** (client 9/10 ×3, commerçant 7–8/10).
+- **Critère < 30 s à chaud : étapes scriptées sous 30 s, vérifié** (8,7–9,2 s) ; le
+  critère complet avec gestes et attente humains **n'est pas vérifié** (pas de
+  téléphone réel sur cette VM — protocole téléphone documenté dans SCORES.md,
+  § « Protocole téléphone réel », à exécuter sur staging). À froid Render (~60 s) :
+  non mesuré (estimation). `npm audit` re-tenté : même 403 `policy_denied`, non
+  mesurable sur cette VM.
+- **Tests : 1027 → 1032 (+5, `tests/mesure-p1-u1.test.ts` — totaux du parcours et
+  moyenne DA re-calculés depuis les tableaux du document, pas des constantes)**,
+  suite verte, `npx tsc -p .` propre (typecheck serveur inclus dans `npm test`).
+  Aucun test existant modifié.
+- **Revue Codex (10 points, `/tmp/codex-revue-p1-u1.txt`, diff
+  `/tmp/codex-p1-u1.diff`) — verdict « corrections mineures », toutes traitées :**
+  1. [Fondé, aucune correction] Arithmétique exacte vérifiée (parcours, bundle, DA).
+  2. [Fondé] « 2 passes identiques » → « score identique sur les deux passes »
+     (les métriques TBT/TTI diffèrent).
+  3. [Fondé] Seuil « vérifié » avec gestes humains inclus → reformulé : étapes
+     scriptées sous 30 s, vérifié ; critère complet non vérifié (test adapté).
+  4. [Fondé] Écart bundle (+641 o CSS) attribué aux hashes sans preuve → « cause
+     non établie » (lots P0-S11/P1-M2/P1-M3 entre les deux mesures, non isolés) +
+     build documenté distinct de celui servi aux passes Playwright.
+  5. [Fondé] « Aucun écart significatif » sans statistique → « échantillon
+     insuffisant pour conclure » ; « ±5 » → écart observé de 5 points entre les
+     deux passes P0-U0 ; tirage 587 → 923 ms noté comme variabilité.
+  6. [Fondé] Test additionnant des constantes → totaux et moyenne DA désormais
+     extraits des tableaux de SCORES.md et re-calculés.
+  7. [Fondé, aucune correction] Test P0-U0 reste cohérent (premières occurrences).
+  8. [Fondé] Colonne « Mesure initiale » mélangeant P0-U0/P0-D1/P1-D2 → renommée
+     « Référence antérieure (lot précisé par métrique) », lot annoté par cellule.
+  9. [Fondé] Protocole téléphone contradictoire (à chaud sur « autre téléphone »
+     au cache non réchauffé) → même téléphone, même navigateur, 2e compte de test ;
+     « pas de navigateur pilotable » → navigateur simulé Playwright.
+  10. [Fondé] Règle de fusion (amélioration exigée) incompatible avec un lot de
+      mesure → note ajoutée : ce lot documente une re-mesure.
+- **Non vérifié :** téléphone réel (375 px, 4G, à chaud et à froid) ; délai à froid
+  Render ; `npm audit` ; rien touché en production.
+
+## 11/11/2026 — P1-M3 « Photos des plats » — PRÉPARATION SEULEMENT (AUDIT.md §7)
+- **Contexte :** le lot complet est impossible sans les photos du restaurant — aucune photo
+  fournie (`assets/source/photos/` ne contient que son `README.md`), jamais de photos clients
+  Google. Ce lot vérifie et consolide l'existant et produit l'inventaire exact à fournir au
+  commerçant : `docs/PHOTOS-MANQUANTES.md`.
+- **Inventaire vérifié (script + tests) :** 81 plats — **11 avec photo vérifiée, 70 sans photo**.
+  Avec photo : 9 WebP du PDF officiel (légendées par le restaurant) + Loc Lac + Mango Stick.
+  Fiches des plats : 372 739 o au total, chacune ≤ 250 Ko ; vignettes : 47 070 o.
+  Sans photo : liste exacte des 70 noms par catégorie dans `docs/PHOTOS-MANQUANTES.md`, avec les
+  raisons connues (Love Bao : légende PDF douteuse ; Tiramisu : deux bocaux ; 6 Maki Gold : aucune
+  photo ; boissons : non attribuables ; variantes makis/california/sashimi/sushi : 36 plats,
+  icônes minuscules) et le mode de dépôt (`assets/source/photos/`, `plat-<nom>.jpg`).
+- **Correction — photo détachée :** `menu-makis.jpg` (partagée entre 8 Maki Tiger et 8 Maki
+  Chicken Dragon, contribution client sur lacarte.menu, impossible de dire quel plat elle montre)
+  a été **détachée des deux plats** (`src/data/menu-reel.ts`) : 13 → 11 plats photographiés,
+  68 → 70 sans photo. Le fichier est gardé, non rattaché, en attendant 2 photos distinctes du
+  commerçant (ou sa confirmation du plat montré). Les 2 autres fichiers non rattachés
+  (`menu-nouilles-crevettes.jpg`, `menu-plat-riz.jpg`) restent tels quels, documentés.
+  `public/visuels/SOURCES.md` et `docs/MENU-OFFICIEL-2026-11-10.md` mis à jour.
+- **Tests : 1018 → 1027 (+9, `tests/photos-manquantes-p1-m3.test.ts` + correctifs revue)**,
+  suite verte, `npx tsc -p .` propre (typecheck serveur inclus dans `npm test`). Couverture :
+  comptes 11/70/81 + listes exactes, chaque photo existe et pèse ≤ 250 Ko, total fiches ≤ 400 Ko,
+  aucune photo partagée entre plats, les 3 fichiers non rattachés le restent, aucune image en
+  attente dans `assets/source/photos/`, doc cohérente avec le code (noms, comptes, poids).
+- **Revue Codex (3 points, `/tmp/codex-revue-p1-m3.txt`) — tous traités :**
+  1. [Fondé] Le détachement ne couvrait que la carte de repli ; un menu enregistré avant le lot
+     avec `menu-makis.jpg` l'affichait encore → `retirerPhotosDetachees()` appliqué dans `#/menu`
+     à tout menu affiché (même pattern que le masque des prix P1-M1) ; testé.
+  2. [Fondé] « Variantes makis / california / sashimi / sushi (28 plats) » faux : 36 plats
+     (7+6+6+4+5+4+4) → corrigé dans le doc (le total 70 restait exact).
+  3. [Fondé] « Les 2 spécialités sans photo » : en réalité 3 (avec 6 Maki Gold) → priorité
+     reformulée dans le doc.
+- **Attent le commerçant :** les photos des 70 plats (liste exacte dans `docs/PHOTOS-MANQUANTES.md`),
+  en priorité les 3 spécialités sans photo, Love Bao, puis entrées et variantes ; confirmations
+  du plat montré par `menu-nouilles-crevettes.jpg` et `menu-makis.jpg`.
+- **Non vérifié :** rendu visuel réel des photos sur téléphone (vérification par en-têtes/tailles
+  seulement) ; rien touché en production.
+
+## 11/11/2026 — P1-M2 « Allergènes » (AUDIT.md §7)
+- **Contexte :** le commerçant n'a fourni AUCUN allergène (0/81 renseigné) : rien n'est inventé.
+  Chaque fiche de plat dépliée affiche désormais la mention explicite « Allergènes : demander en
+  caisse » tant que la liste est vide ; dès qu'une liste est renseignée, c'est elle qui s'affiche.
+  Le pied de page général (« demandez conseil à l'équipe en cas de doute ») reste affiché.
+- **Code :** `src/lib/menu.ts` — `LIBELLE_ALLERGENES_ABSENTS` + `libelleAllergenes()` (liste ou
+  mention) ; `src/pages/MenuPublic.tsx` — ligne allergènes toujours affichée dans la fiche dépliée
+  (préfixe traduit séparément, mention traduite) ; `src/lib/langue.ts` — traduction EN de la mention.
+  Saisie commerçant inchangée (elle existait) : cases à cocher des 14 allergènes UE par plat dans
+  `#/menuCarte`, colonne `allergenes` (séparés par `|`) à l'import/export CSV.
+- **Comptes vérifiés :** **81/81 plats avec allergènes renseignés ou mention explicite**
+  (0 liste renseignée, 81 mentions explicites). Aucun allergène inventé.
+- **Tests : 1008 → 1018 (+10, `tests/allergenes-p1-m2.test.ts`)**, suite verte, `npx tsc -p .`
+  propre (typecheck serveur inclus dans `npm test`). Couverture : 81/81, libellé, traduction EN,
+  validation (allergène inconnu refusé), aller-retour CSV avec liste et sans, source `#/menu` et
+  `#/menuCarte`, et aller-retour serveur PUT → GET public des allergènes (`tests/cartiz.test.ts`,
+  ordre normalisé selon `ALLERGENES`).
+- **Revue Codex (2 points, `/tmp/codex-revue-p1-m2.txt`) — tous traités :**
+  1. [Fondé] `t(libelleAllergenes(p))` faisait retomber le préfixe en français en anglais quand la
+     liste était renseignée (chaîne complète absente du dictionnaire) → forme conditionnelle :
+     `t('Allergènes :')` + liste, sinon `t(LIBELLE_ALLERGENES_ABSENTS)` ; testé (préfixe EN).
+  2. [Remarque fondée] Le test des cases à cocher n'était que du source → ajout d'une assertion
+     serveur (PUT menu avec allergènes → GET public les relit) ; le clic de case lui-même reste
+     vérifié par source (pas de moteur de rendu React dans le repo — même pattern que les tests
+     photos). L'échec de `menu-client-p1-c5` signalé par Codex « sans diagnostic » ne se reproduit
+     pas (110/110 ciblés, 1018/1018 complets).
+- **Attent le commerçant :** les allergènes des 81 plats (à saisir dans `#/menuCarte` ou par CSV).
+- **Non vérifié :** rendu visuel réel sur téléphone ; rien touché en production.
+
+## 11/11/2026 — P1-M1 « Prix à vérifier + hors carte » (AUDIT.md §7)
+- **Contexte :** le commerçant n'a confirmé ni Riz Thaï 8,90 € ni 6 Maki Gold 100,00 € (valeurs
+  imprimées sur la carte, §8 n° 5). Les deux prix sont donc **masqués** (`prix: null`, « Prix sur
+  place ») au lieu d'être affichés ; les 3 plats hors carte restent sans prix, sans fusion décidée
+  seule (Thaï-sty Krusty / Crousti Poulet, Bœuf Basilic, Boisson 33cl = décisions commerçant).
+- **Code :** `src/data/menu-reel.ts` — Riz Thaï et 6 Maki Gold à `null` ; nouvelle constante
+  `PRIX_A_CONFIRMER` (valeurs imprimées + motif, référence uniquement, jamais affichée dans le menu
+  public) ; nouveaux helpers `estPrixNonConfirme()` et `masquerPrixNonConfirmes(menu)`.
+  `src/pages/MenuPublic.tsx` applique le masque au menu affiché, repli comme menu enregistré.
+  `src/pages/MenuCarte.tsx` : texte commerçant précisé (valeurs imprimées visibles côté commerçant
+  uniquement, pour confirmation/correction ; si le prix confirmé est exactement la valeur imprimée,
+  prévenir l'équipe — elle reste masquée tant que `PRIX_A_CONFIRMER` n'est pas mise à jour).
+  `docs/MENU-OFFICIEL-2026-11-10.md` mis à jour (76 prix affichés, 5 sans prix).
+- **Comptes vérifiés :** 81 plats, **76 prix affichés, 5 sans prix** (Riz Thaï, 6 Maki Gold,
+  Thaï-sty Krusty, Bœuf Basilic, Boisson 33cl), somme des prix affichés **597,40 €**
+  (706,30 € imprimés − 8,90 € − 100,00 €). Aucun autre plat/prix touché.
+- **Tests : 1006 → 1008 (+2, `tests/menu-reel.test.ts` : masque sur menu enregistré ancien,
+  application du masque dans `#/menu`)**, suite verte, `npx tsc -p .` propre (typecheck serveur
+  inclus dans `npm test`). Tests existants mis à jour vers le nouvel état attendu (CARTE, total,
+  5 sans prix, `tests/cartiz.test.ts` : aller-retour serveur du menu officiel) — aucun test affaibli.
+- **Revue Codex (3 points, `/tmp/codex-revue-p1-m1.txt`) — tous traités :**
+  1. [Artefact, ignoré] « Diff vide » : la revue a tourné avant le commit, sur des modifications
+     non commitées — résolu par le commit lui-même.
+  2. [Fondé] Menu enregistré avant le lot avec les anciens montants restait affiché → correctif :
+     `masquerPrixNonConfirmes()` appliqué dans `#/menu` à tout menu affiché (repli ou enregistré) ;
+     un prix corrigé (ex. 10,00 €) n'est pas masqué ; testé.
+  3. [Fondé] « Jamais affichées dans l'app » factuellement faux (valeurs visibles dans
+     `#/menuCarte`, protégée par PIN) → libellés corrigés en « jamais affichées dans le menu public ».
+- **Attent le commerçant :** confirmer Riz Thaï (8,90 € imprimés ?) et 6 Maki Gold (100,00 € imprimés,
+  probable coquille pour 10,00 € ?) ; trancher les 3 plats hors carte (fusion Thaï-sty Krusty /
+  Crousti Poulet ? Bœuf Basilic toujours servi ? Boisson 33cl à remplacer par Soda / Evian ?).
+- **Non vérifié :** menu enregistré en production (non lisible depuis ici ; l'audit du 10/11 le
+  disait vide — le masque d'affichage couvre le cas où il ne le serait plus) ; rien touché en production.
+
 ## 09/11/2026 — Programme de fidélité (benchmark concurrents, 11 nouveautés)
 - Benchmark lu avant de coder : `~/workspace/benchmark-fidelite-restaurant-2026-11-09.md`,
   `~/workspace/benchmark-fidelite-restaurant/benchmark-fidelite-chaines-2026-11-09.md`,
@@ -817,3 +1795,956 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   5 variables Render (dont `BREVO_MODE_TEST=1` tant que la consigne « mode test uniquement » s'applique),
   vérification en mode test (voir `docs/BREVO.md` §5 A). Le test d'envoi réel se fera plus tard, hors
   développement, avec l'accord explicite de l'utilisateur (`docs/BREVO.md` §5 B).
+
+## 11/11/2026 — P0-S21 : contrôle TypeScript du serveur (AUDIT.md § P0-S21, revue Codex point 13)
+- **Constat** : `tsconfig.json` n'inclut que `src/` ; `server/` (~4 600 lignes) n'était jamais vérifié par `tsc`
+  (Node et `npm test` suppriment les types sans les contrôler).
+- **Config** : nouveau `tsconfig.server.json`, qui étend `tsconfig.json` et ne change que `types: ["node"]` (au lieu
+  de `vite/client`), `lib: ["ES2022"]` (sans DOM : le serveur n'en a pas besoin, `fetch` / `URL` / `Response` /
+  `Buffer` viennent de `@types/node`, aucun conflit) et `include: ["server"]`. Les fichiers partagés importés
+  (`src/types.ts`, `src/lib/*.ts`, `src/data/*`, `seed.json`) sont vérifiés au passage, sans DOM : ils passent.
+  **Aucune règle assouplie** : `strict`, `noUnusedLocals`, `noUnusedParameters` gardés. `tsconfig.json` et le
+  script `build` inchangés.
+- **Dépendance** : `@types/node` `^24.19.2` en `devDependencies` (`npm install --save-dev @types/node@^24`, réseau OK).
+- **Script** : `npm run typecheck:server` (= `tsc -p tsconfig.server.json`).
+- **Erreurs trouvées : 2**, toutes deux `TS2345` dans `server/app.ts` (routes `POST …/clients` et `POST …/tirages`) :
+  `corps.parrain` (`unknown`, corps JSON non validé) passé au paramètre `parrainCode?: string` de
+  `inscrireOuRetrouver`. **Pas un vrai bug** : la fonction teste déjà `typeof parrainCode === 'string'` avant
+  usage (une valeur non-chaîne est ignorée). Correction de type seule : paramètre élargi à `parrainCode?: unknown`,
+  comportement identique. Aucune erreur dans `server/notifications/` (fichiers Brevo non touchés).
+- **Qualité** : `npm test` 806/806 (806 avant, aucun test ajouté ni modifié), `npm run build` OK,
+  `npm run typecheck:server` propre (et il échoue bien sur les 2 erreurs avant correction).
+- **Limites** : la vérification n'est pas branchée dans `npm run build` / `build:api` (build Render) — décision
+  volontaire, à trancher à la fusion ; `tests/`, `scripts/` et `tests-e2e/` ne sont toujours pas vérifiés par `tsc`.
+- **Revue Codex du code (11/11/2026, `/tmp/codex-revue-p0-s21.txt`)** : aucun bug fonctionnel introduit ;
+  2 remarques, toutes deux traitées : [P2] contrôle facultatif → `typecheck:server` branché dans `npm test`
+  (il tourne avant les tests, ~1 s, et fait échouer `npm test` en cas d'erreur de type serveur) ; [P3] ligne
+  obsolète de `server/README.md` (§ Limites honnêtes) affirmant que le serveur n'était pas vérifié par `tsc` →
+  corrigée. Le `build` Render n'est pas touché (choix explicite, voir ci-dessus).
+
+## 11/11/2026 — P0-S5 : sauvegarde complète de la base (Supabase Free n'en fait aucune)
+- **Constat** : Supabase Free = aucune sauvegarde ; une perte de base = perte de tous les clients / tampons / tirages.
+  Accès disponibles : `SUPABASE_URL` + clé service_role (PostgREST) ; pas de mot de passe Postgres, pas de `pg_dump`,
+  pas d'accès réseau à la production depuis la VM.
+- **Fait** : `server/sauvegarde.ts` (logique pure : 14 tables dans l'ordre des clés étrangères avec clé de conflit,
+  export qui ÉCHOUE si une table manque, validation, restauration qui refuse un fichier incomplet, adaptateurs SQL
+  lecture / upsert via `jsonb_populate_recordset`, AES-256-GCM avec clé de fichier HKDF + sel + IV aléatoires,
+  rétention pure) ; `scripts/sauvegarde-base.mjs` (PostgREST paginé par 1 000, compteur exact vérifié à chaque page, gzip, chiffrement si clé, écriture
+  `.tmp` unique puis lien atomique, rétention, `SAUVEGARDE OK` / `ERREUR SAUVEGARDE` + sortie 1, aucun secret affiché) ;
+  `scripts/restaurer-base.mjs` (PGlite seulement, migrations 0001–0008 sans `.down.sql`, une transaction, base cible
+  vide exigée, `--verifier` ; toute cible Supabase / Postgres refusée sans afficher le DSN). Le `.mjs` importe
+  directement le `.ts` (type-stripping Node 24) : vérifié, pas de duplication. `npm run sauvegarde` / `npm run restaurer`.- **Choix RLS** : rôles Supabase recréés avant les migrations (comme `tests/migration-pglite.test.ts`), restauration en
+  propriétaire des tables (non filtré par la RLS, aucune table en FORCE) → rien à désactiver. Colonnes `ordre` (identity)
+  réinsérées telles quelles (OVERRIDING SYSTEM VALUE) puis séquence recalée.
+- **Tests** : `tests/sauvegarde-p0-s5.test.ts`, **21 tests** — export depuis une PGlite remplie (≥ 1 ligne dans les
+  14 tables) → restauration dans une 2e PGlite → compteurs égaux, client / tirage / avis identiques, relecture
+  complète identique ligne à ligne ; base restaurée fonctionnelle (ordre, 1 tirage/jour) ; table absente → erreur nommée
+  (export et restauration) ; chiffrement (aller-retour, mauvaise clé, altération, clé invalide) ; rétention (limites) ;
+  CLI de bout en bout contre un faux PostgREST local (1 501 lignes de journal → pagination, chiffré, puis
+  `restaurer-base.mjs --verifier`), `--aide`, variables absentes, table absente → aucun fichier, rétention sur disque.
+  `npm test` **827/827** (806 avant, +21), typecheck serveur inclus, `npm run build` OK.
+- **Revue Codex (6 points, tous corrigés, +3 tests → 830/830)** : [P1] export tronqué si le plafond PostgREST est
+  < 1 000 → chaque page demande désormais le compteur exact (`count: 'exact'`) et l'export est refusé si le total lu
+  diffère du compteur ; [P1] ligne perdue par pagination par décalage si suppression concurrente → même compteur
+  vérifié à chaque page (il doit rester identique, sinon refus) + doc corrigée (l'affirmation « la restauration
+  échoue bruyamment, jamais en silence » surestimait les contraintes : une ligne supprimée entre deux pages ne
+  viole aucune clé étrangère) ; [P1] procédure de restauration Supabase (§ 8) cassée par les apostrophes
+  (`'<JSON>'`) → JSON collé entre délimiteurs dollar `$sauvegarde$…$sauvegarde$` ; [P2] `--verifier` après commit →
+  recompte désormais DANS la transaction (un écart annule la restauration) ; [P2] migrations rejouées avant le
+  contrôle de cible vide → la cible déjà initialisée est refusée AVANT toute migration ; [P2] deux sauvegardes
+  dans la même seconde → écriture `.tmp` unique par processus + lien atomique (`linkSync`, EEXIST = refus explicite).
+- **RPO / RTO** : RPO 24 h si sauvegarde quotidienne (lancée par l'opérateur : rien n'est planifié par ce lot) ;
+  RTO estimé 1–2 h (restauration manuelle vers Supabase, `docs/SAUVEGARDE.md` § 8). Rétention 30 jours / 30 fichiers.
+- **Limites** : jamais exécuté contre la vraie base (consigne + pas d'accès réseau) ; PostgREST ne donne pas
+  d'instantané cohérent entre tables (sauvegarder restaurant fermé ; une écriture concurrente est détectée par le
+  compteur exact et fait refuser l'export, jamais de fichier tronqué) ; schéma / RLS / config Supabase non sauvegardés (source = migrations) ; restauration validée sur PGlite
+  seulement, pas sur un projet Supabase ; pas d'alerte automatique d'échec ; copie hors VM à faire par l'opérateur.
+- **Décisions en attente (utilisateur)** : Supabase Pro 25 $/mois (sauvegardes quotidiennes 7 j) non acheté ;
+  mot de passe Postgres pour un `pg_dump` en complément ; planification + copie hors VM ; exercice de restauration
+  réelle sur un projet Supabase de test. Docs : `docs/SAUVEGARDE.md`, `server/README.md` § Sauvegarde / export,
+  `.env.example` (variables `SAUVEGARDE_*` commentées : `tests/supabase.test.ts` n'y autorise que 2 variables actives).
+
+## 11/11/2026 — P0-S7 : authentification client élargie (AUDIT.md § P0-S7, revue Codex points 4 et 5, audit F-03)
+- **Constat** : l'identifiant d'une carte (`cl-<horodatage base36>-<4 car.>`, `src/lib/fidelite.ts`) suffisait à la
+  lire en entier (messages, historique), à la modifier (prénom, profil, rattrapage, lus, message privé, demande de
+  suppression avec le contact) ; le téléphone seul suffisait à reprendre la carte (inscription publique → carte
+  existante renvoyée) et à jouer à la place du client (`POST /tirages` avec le contact → code gagnant).
+- **Mécanisme retenu** : jeton client signé HMAC, même format et même `SESSION_SECRET` que les sessions P0-S1, contenu
+  `{ typ, jti, cid, com, ver, exp }` (`typ` ≠ `role` : jamais confondu avec une session). En-tête
+  `Authorization: Bearer`. 30 jours, renouvelé par la page sous 15 jours. 1re preuve = le téléphone qui s'inscrit (le
+  serveur tire l'identifiant et renvoie le jeton de la NOUVELLE carte) ; preuves de remplacement sans SMS : **lien
+  d'accès à usage unique** montré en QR au comptoir (fiche client, 15 min, journalisé) ou envoyé par « Retrouver ma
+  carte » quand un prestataire est branché (24 h). Révocation : version d'accès par carte dans `meta`
+  (`acces_client:<commerce>:<client>`), incrémentée par le client (« Déconnecter tous mes appareils ») ou le gérant ;
+  usage unique des liens par `sessions_revoquees` (0005). Choix `meta` plutôt qu'une table : rien de neuf à
+  sauvegarder (14 tables), lisible par service_role seul, supprimée avec la carte (RGPD).
+- **Périmètre couvert** (mode strict) : vue complète de `GET /cartes/:id` (sans jeton : vue limitée = tampons + jeu du
+  jour ; `codeDuJour` inchangé, P0-S19 pourra s'appuyer sur `acces.jeton`), lus, profil, rattrapage (client), prénom,
+  message privé, données / suppression RGPD (jeton ET contact), tirage (le joueur = la carte du jeton, contact du
+  corps ignoré ; « 1 tirage / jour après visite validée » inchangé, testé), inscription d'un contact existant (409
+  sans carte ni identifiant, rien de modifié, aucun doublon), récupération (202 identique, lien d'accès seulement dans
+  le message au titulaire), liens courts `/c/<id>` (vue limitée ; `?a=` transmis). 401 uniforme que la carte existe
+  ou non ; échecs comptés dans `tentatives_auth` (portée `client`, clé `client-ip:<ip>`, 30 → blocage, séparé des PIN).
+- **Identifiants** : `cl-` + UUID v4 (`nouvelIdClient`, repli `getRandomValues` hors contexte sécurisé). Anciennes
+  cartes NON réécrites (aucune donnée modifiée) : **grâce jusqu'au 10/02/2027 00:00 Paris**
+  (`GRACE_ANCIENS_ID_JUSQU_AU`, 90 j après un déploiement supposé le 12/11/2026 — à décaler s'il glisse) : l'ancien
+  lien seul ouvre la vue limitée et donne un jeton (la page le demande seule, une fois par affichage), bandeau sur la
+  carte ; après, ancien lien seul → 404 comme une carte inconnue (un jeton déjà obtenu reste valable).
+- **Migration 0009** (`0009_auth_client.sql` + `.down.sql`) : contrainte `tentatives_auth.portee` élargie à `client`,
+  marqueur `auth_client_active()` (service_role seul) lu par `GET /sante/acces-client` ; RLS / revoke / grant comme
+  0005–0008. Testée aller / retour / rejeu sur PGlite. Sans elle : échecs client comptés en mémoire (comme sans 0006).
+  À appliquer APRÈS une sauvegarde (`scripts/sauvegarde-base.mjs`, documenté, **non exécuté**).
+- **Modes** (`AUTH_CLIENT`, `server/index.ts`) : `stricte` par défaut en production **si `SESSION_SECRET` existe**,
+  sinon `transition` avec avertissement ; `creerServeur` sans option = `transition` (jetons émis et vérifiés, accès
+  d'avant P0-S7 admis et compté dans `GET /sante/acces-client`). **Pourquoi ce défaut** : les suites existantes
+  (≈ 15 fichiers : tirage par contact seul, réinscription publique qui renvoie la carte, lecture par identifiant)
+  encodent exactement le comportement que le lot supprime, et la consigne interdit de modifier un test existant ;
+  elles tournent donc en mode transition (inchangées et vertes), le mode strict est couvert par les nouveaux tests et
+  par l'E2E. À trancher par l'orchestrateur : basculer ces suites en strict (modifier leurs appels) puis rendre
+  `stricte` le défaut de `creerServeur`.
+- **Front** : `src/lib/jetonCarte.ts` (jeton rangé par carte, expiration, repli mémoire), `avecJetonClient` /
+  `assurerJetonClient` (`src/data/jeuApi.ts`) : la page de jeu et la carte appellent l'API au travers d'une API qui
+  ajoute le jeton (les lignes `lancerTirage(api, …)` / `api.prenomCarte(…)` figées par `entree-qr-p1-c1` restent
+  identiques). Carte : vue limitée, échange du `?acces=` puis retrait de l'adresse, bandeau de grâce, « Sécurité de
+  ma carte ». Fiche client (gérant) : « Afficher le QR d'accès à sa carte », « Révoquer tous ses accès… ». Journal :
+  action `acces`. Chaînes client traduites (EN).
+- **Tests** : avant **830/830**. Après : **863/863** — `+33` dans `tests/auth-client-p0-s7.test.ts`
+  (refus sans preuve uniforme, preuve OK, expirée, falsifiée / autre carte / autre commerce / lien en Bearer, révoquée
+  par le client puis le commerce, lien comptoir 15 min / usage unique, renouvellement, ancien lien pendant puis après
+  la grâce, contact existant sans reprise, tirage sans / avec jeton et 1 / jour, récupération sans oracle avec lien
+  d'accès, 30 échecs → 429 persistant au redémarrage, énumération, mode transition, strict sans secret refusé,
+  migration 0009 PGlite aller / retour / rejeu / droits, stockage Supabase sans / avec 0009, logique front).
+  **Le KO** : `tests/sauvegarde-p0-s5.test.ts:95` fige la liste des migrations à `0001…0008` ; toute migration 0009
+  (exigée par le brief) le fait échouer, et aucun changement de code applicatif ne peut le satisfaire sans exclure
+  la 0009 de la restauration (ce qui serait un vrai bug). **Corrigé après le commit principal, commit séparé
+  « P0-S7 — Revue : liste des migrations du test de sauvegarde étendue à 0009 »** : la liste figée est un
+  inventaire des migrations existantes, pas une assertion de comportement — l'ajout de `'0009'` la met à jour
+  avec l'inventaire réel (la restauration couvre bien la 0009, vérifié par le test lui-même). `npm test` repassé
+  vert **863/863** après cette ligne.
+  `/sante` a ses clés figées (`securite-s1`) → état de l'accès client sur `GET /sante/acces-client` ; la ligne
+  « hors ligne » de `CartePublique` est figée (`chargement-p0-u1`) → gardée telle quelle.
+- **E2E** (`npm run test:e2e`, Chromium) : **2/2**. `tests-e2e/serveur.ts` passe en `authClient: 'stricte'` (helper,
+  rendu plus exigeant, pas plus permissif) : le parcours existant scan → inscription → visite → tirage → gain → carte
+  passe avec le jeton obtenu par la page. Nouveau `tests-e2e/acces-carte-p0-s7.spec.ts` (vue limitée sur un autre
+  appareil, QR d'accès → carte complète, lien retiré de l'adresse, 2e usage refusé) — il a trouvé un vrai défaut,
+  corrigé : un `?acces=` arrivé sur une carte déjà ouverte (même onglet) n'était pas lu.
+- **Vérifications** : `npm test` (typecheck serveur inclus) **863/863** après correction du pin (862/863 avant),
+  `npx tsc -p .` OK, `npm run build` OK, E2E 2/2.
+- **Non vérifié / limites** : rien contre Supabase réel (0009 non appliquée, PGlite seulement) ni en production ;
+  aucun SMS / e-mail réel ; `SESSION_SECRET` présent sur Render **non vérifié** — absent, la production resterait en
+  `transition` (avertissement au démarrage) : à vérifier avant de compter sur P0-S7 ; la caisse (code équipe) peut
+  appeler la route du QR d'accès mais seul l'écran fiche client (gérant) a le bouton ; l'inscription révèle toujours
+  qu'un contact a une carte dans CE commerce (409), sans code à usage unique (prestataire SMS / e-mail non branché) ;
+  un jeton volé sur le téléphone reste valable jusqu'à révocation / expiration ; deux échanges simultanés du même lien
+  d'accès peuvent tous deux réussir (fenêtre de quelques ms) — **corrigé ci-dessous (revue Codex, point 2)** ; rendu
+  de la vue limitée vérifié dans Chromium seulement (pas sur un vrai téléphone).
+- **Revue Codex (5 points, tous fondés, tous corrigés)** :
+  1. *[P1] Révocation contournée pendant la grâce* — `POST /cartes/:id/jeton` sans preuve délivrait un jeton à la
+     nouvelle version d'une ancienne carte révoquée. Correction (`server/app.ts`) : la branche « grâce » refuse (401
+     uniforme) dès que la version d'accès de la carte est > 0 ; une carte révoquée ne se rouvre que par un lien d'accès
+     (comptoir, « Retrouver ma carte »). `server/README.md` mis à jour.
+  2. *[P1] Lien à usage unique échangeable deux fois en concurrence* — `estRevoquee` et `revoquer` séparés par des
+     `await`. Correction : `reserverPendant` (exportée, `server/app.ts`) — `Set` des `jti` en cours d'échange, testé
+     et marqué de façon synchrone avant le 1er `await`, libéré en `finally` ; 2e échange concurrent → 401. La révocation
+     en base reste la garde durable. Limite documentée (`server/README.md`) : une seule instance (Render) ; à plusieurs
+     instances, il faudrait une consommation atomique en base. NB : avec SQLite, la course ne se produit pas (tout se
+     résout en microtâches) — elle demande la latence réseau de Supabase ; elle est donc reproduite par un test
+     unitaire à stockage lent (échoue sans réservation : les deux échanges passent), plus un test HTTP 4 × concurrent.
+  3. *[P1] Carte récupérée : impossible de rejouer* — la page de jeu ne connaissait pas la carte récupérée → ressaisie
+     du contact → 409. Correction : `memoriserJoueurCarte` (`src/data/jeuApi.ts`), appelée par `CartePublique` quand
+     la carte s'affiche EN ENTIER avec le jeton de ce téléphone : elle devient le joueur mémorisé de son commerce
+     (contact vide — le serveur ne le lit plus quand le jeton est là ; la dernière carte ouverte ainsi l'emporte,
+     « Ce n'est pas moi » reste possible). Le tirage passe par l'API enveloppée existante (`avecJetonClient`) : lignes
+     figées de `Jouer.tsx` (`lancerTirage(api, commerce, joueur.contact, joueur.prenom)`) inchangées.
+  4. *[P2] Jeton expiré : roue puis 401 sans issue* — `lancerTirage` signale `accesRefuse` sur 401 (champ ajouté
+     seulement dans ce cas : le `deepEqual` de `front-v2` reste vrai) ; `Jouer` oublie le jeton et affiche
+     `AccesCartePerdu` (message clair + lien « Retrouver ma carte » vers `#/carte/<id>`, dont la vue limitée porte le
+     formulaire). Chaînes traduites (EN). Serveur inchangé (401 reste 401).
+  5. *[P2] QR d'accès non régénérable* — `FicheClient.tsx` : bouton « Générer un nouveau lien d'accès » sous le QR
+     affiché. Choix documenté dans le code : l'ancien lien n'est pas révoqué (le serveur ne sait révoquer que la carte
+     entière), il reste à usage unique et expire à 15 min.
+- **Tests revue Codex** : avant **863/863** (+ E2E 2/2). Après : **870/870** (`npm test`, typecheck serveur inclus) —
+  `+7` dans `tests/auth-client-p0-s7.test.ts` (« P0-S7 — revue Codex ») : grâce perdue après révocation client puis
+  commerce (vérifié en échec sans la correction : 201 au lieu de 401) ; réservation synchrone à stockage lent ; 4
+  échanges HTTP simultanés → 1 seul 201 ; parcours QR comptoir → mémorisation → tirage 201 sans réinscription ;
+  règles de `memoriserJoueurCarte` ; jeton expiré → 401 + `accesRefuse` ; lecture du code (Jouer / FicheClient).
+  E2E **3/3** : nouveau test dans `tests-e2e/acces-carte-p0-s7.spec.ts` (QR du comptoir sur un nouveau téléphone →
+  « Tourner la roue du jour » → « Continuer avec ma carte » → gain ; puis accès retiré par le commerce → message
+  « Votre carte n'est plus ouverte sur ce téléphone » + « Retrouver ma carte ») — vérifié en échec sans la correction
+  du point 3 (timeout sur « Continuer »). Aucun test existant modifié. `npx tsc -p .` OK, `npm run build` OK.
+  Un `npm test` intermédiaire a eu 1 échec sur `avis-google-p1-b4` (« règle auto 4★ », 7,4 s, sans lien avec ce lot) :
+  28/28 seul, puis 870/870 sur deux exécutions complètes → instabilité de charge, pas une régression.
+- **Non vérifié (revue Codex)** : la course du point 2 contre un vrai Supabase (simulée par stockage lent) ; le cas
+  multi-instance ; le bouton de la fiche client n'est vérifié que par lecture de code (pas d'E2E du back-office).
+
+## 11/11/2026 — P0-S11 : atomicité des écritures Supabase (AUDIT.md § P0-S11, audit F-10, revue Codex points 1 et 12)
+- **Mécanisme retenu : compensation, pas transaction.** PostgREST n'a pas de transaction multi-requêtes ; une fonction
+  RPC transactionnelle générique a été écartée (toute la logique métier réécrite en PL/pgSQL = double implémentation,
+  risque de divergence avec `src/lib/`, aucun gain sur les conflits observés, qui sont des simultanéités déjà
+  tranchables par la base). Détail : `server/README.md` « Atomicité (P0-S11) » et en-tête de `server/stockage-supabase.ts`.
+- **A. Verrou optimiste sur `majCommerce`** : `commerces()` / `commerce()` lisent `id,version,donnees` (la version est
+  mémorisée dans la transaction en cours), `majVersionnee` généralisée à `commerces`. Route PATCH /commerces/:id : le
+  commerce est relu DANS la transaction avant `appliquerReglages` (même comportement : réglages + règles réappliquées
+  aux avis en attente, dans la même transaction). Logo PUT / DELETE : `majCommerce` dans une transaction avec relecture
+  fraîche ; ordre inchangé (PUT : fichier puis adresse ; DELETE : adresse puis fichier). Hors transaction : écriture
+  inconditionnelle (inchangé). SQLite : rien de changé (BEGIN IMMEDIATE + file d'attente) — documenté dans `stockage.ts`.
+- **B. Journal jamais perdu en silence** : `ajouterJournal`, `ajouterParrainage`, `ajouterDemandeRattrapage` ne font
+  plus `console.warn` + continuer ; `ErreurMigrationManquante` remonte. `creerServeur` (après `initialiser`, qui ne
+  journalise rien) refuse de démarrer sous Supabase sans `0003_cartiz.sql` ou `0004_programme.sql` : message nommant
+  la migration et `scripts/sauvegarde-base.mjs`. Pas de garde sous SQLite. Aucune autre suite n'utilise
+  `sans0003` / `sans0004` (grep `tests/`) ; les tests P0-U3 (sans0005 / sans0006) restent verts.
+- **Écart au brief (ajout)** : l'ordre « métier puis journal » à documenter n'était PAS respecté partout. Corrigé :
+  `reglerParrainage` écrivait le parrain, son journal et la trace 0004 AVANT le filleul — un conflit (409) sur le
+  filleul laissait le parrain crédité, et un nouvel essai pouvait le créditer une 2e fois. Il renvoie maintenant
+  `ecrire()`, appelé après l'écriture du filleul (visite, caisse, rattrapage). La caisse écrivait le journal
+  « parrainage » avant le client, et la décision de rattrapage son journal avant le client : remis après.
+  Pas de test dédié à cet ordre (l'entrelacement fautif n'est pas reproductible de façon déterministe avec la barrière
+  du faux PostgREST) ; les tests de parrainage existants restent verts.
+- **C. Aucune migration** : `version` + trigger `incrementer_version` (0001, recréés par la 0003), `journal` (0003),
+  index unique des tirages (0001). Liste figée 0001…0009 du test de sauvegarde inchangée.
+- **Tests** : avant **870/870**. Après : **875/875** (`npm test`, typecheck serveur inclus), `npm run build` et
+  `npx tsc -p .` OK. `+5` dans `tests/supabase.test.ts` : 2 PATCH simultanés → [200, 409] « réessayez », version
+  initiale + 1, une seule valeur retenue, garde `version=eq.<lue>` dans les deux requêtes ; PATCH + PUT logo
+  simultanés → jamais de mélange ; démarrage refusé sans 0003 (`/0003_cartiz/`) et sans 0004 (`/0004_programme/`),
+  accepté sans 0005…0008 ; stockage seul : `majCommerce` conditionné dans une transaction / inconditionnel hors ;
+  `ajouterJournal` sans 0003 et `ajouterParrainage` / `ajouterDemandeRattrapage` sans 0004 → ErreurMigrationManquante.
+  Les 3 tests de verrou échouent sans le correctif (vérifié : verrou retiré → 3 échecs ; relecture dans la transaction
+  retirée → le test PATCH échoue). Écart : la barrière est posée sur les **PATCH** `commerces`, pas sur les GET comme
+  suggéré — avant la lecture dans la transaction, la route lit déjà le commerce et le PIN, puis hache (scrypt) : une
+  barrière GET ne rend pas le test déterministe ; la barrière PATCH garantit que les deux requêtes ont relu la même
+  version avant d'écrire.
+- **Deux tests existants mis à jour (justifiés en commentaire P0-S11)** : « production AVANT la migration 0003 » →
+  le démarrage est désormais refusé (message `0003_cartiz.sql` + sauvegarde), la 2e partie (après migration : /sante
+  `cartiz: true`) est gardée ; « suppression sans migrations » → ne garde que `sans0007` (le bilan reste identique).
+  Non-régression citée (inchangés, verts) : double tirage simultané, double visite, double inscription, idempotence
+  caisse (`actionId`, rejeu `dejaTraite`, journal length 2 dans le test Cartiz), remise de gain unique (P0-U3).
+- **Ce qui reste non atomique** : suite d'écritures interrompue entre deux requêtes (panne réseau / crash) — réglages
+  écrits puis échec sur un avis réévalué, filleul écrit mais parrain pas crédité ; une entrée de journal peut se perdre
+  ainsi (jamais un journal mensonger). Hors périmètre : la route visite historique n'a pas de garde « 1 tampon / jour »
+  (F-11, lot P1-S12) — deux visites séquentielles le même jour restent possibles.
+- **Conséquence production** : si la base live n'a pas la 0003 ou la 0004, le prochain déploiement refusera de
+  démarrer (en principe, Render garde alors l'ancienne version en ligne — non vérifié). À vérifier AVANT de déployer : `GET /api/v1/sante` →
+  `migrations.cartiz` et `migrations.programme` à `true` ; sinon sauvegarde puis migrations. **Vérifié le 11/11/2026**
+  (GET public `https://asian-home-fidelite.onrender.com/api/v1/sante`) : `cartiz: true`, `programme: true` → la garde
+  ne bloquera pas le déploiement.
+- **Non vérifié** : contre un vrai Postgres / Supabase (faux PostgREST seulement) ; le comportement de Render si un
+  démarrage est refusé.
+
+## 11/11/2026 — P0-S11 : correctif revue Codex (crédit parrain repris sur conflit, logo refusé restauré)
+- **Point 1 [P1] — parrainage définitivement incomplet.** Depuis P0-S11 le filleul (`parrainagePaye: true`) est écrit
+  avant le parrain. Deux premières visites simultanées de deux filleuls du même parrain : les deux filleuls passaient,
+  un seul crédit parrain aussi — l'autre `majClient(parrain)` faisait 409, et aucun nouvel essai ne pouvait le réparer
+  (`parrainageDu` renvoie null pour un filleul payé ; caisse `dejaTraite` ; rattrapage déjà traité). Correctif dans
+  `reglerParrainage().ecrire()` : sur `ErreurConflit` du seul crédit parrain, une reprise — parrain relu frais
+  (`st.client`, nouvelle version mémorisée dans la transaction), `parrainageDu` recalculé, texte + trace reconstruits,
+  crédit + journal + trace réécrits. Toute autre erreur remonte sans reprise ; un crédit réussi n'est jamais rejoué.
+  Parrain disparu → erreur d'origine ; plafond atteint entre-temps → pas de crédit, trace `pointsParrain: 0`. Ordre
+  filleul-puis-parrain inchangé. Le texte du journal du passage (côté filleul, déjà calculé) n'est pas recalculé.
+- **Point 2 [P2] — logo refusé mais image remplacée.** `ecrireLogo` remplaçait les octets avant l'UPDATE conditionnel :
+  un PUT en 409 laissait la nouvelle image derrière l'ancienne adresse. Correctif (PUT seulement) : instantané
+  `lireLogo` avant l'écriture ; en cas d'échec de la transaction, restauration au mieux si le logo stocké a encore la
+  `version` de cet envoi (try/catch interne qui ne masque jamais l'erreur d'origine), puis l'erreur remonte.
+- **Tests** : avant **875/875**, après **876/876** (`npm test`), `npm run build` et `npx tsc -p .` OK. `+1` test
+  (`tests/supabase.test.ts`) : deux filleuls du même parrain, premières visites simultanées (barrière PATCH `clients`)
+  → [200, 200], parrain à 50 + 50 + 50, 2 `parrainagesGagnes`, 2 traces `parrainages` à 50, 2 journaux « parrainage »
+  du parrain, filleuls `parrainagePaye`. Test de course PATCH + PUT logo renforcé : 404 avant la course ; après, GET
+  brut du logo → 200 + octets identiques si le PUT a gagné, 404 et `meta` vide s'il a reçu 409. Vérifié : reprise
+  retirée → le nouveau test échoue ([200, 409]) ; restauration retirée → le test logo échoue (6/6 exécutions, le PUT
+  perd la course de façon stable avec la barrière).
+- **Résiduels** (documentés dans `server/README.md` § Atomicité) : deux conflits successifs sur le parrain dans la même
+  requête → 409, filleul payé, crédit parrain perdu (à corriger à la main) ; deux envois de logo simultanés d'images
+  différentes → un seul gagne l'adresse, octets cohérents sauf entrelacement extrême entre vérification et restauration.
+  Non couverts par un test : le cas « plafond atteint pendant la reprise », « parrain supprimé pendant la reprise » et
+  le double conflit.
+
+## 11/11/2026 — P0-S11 : 2e passe revue Codex (blobs logo versionnés, DELETE conditionnel, texte parrainage final)
+- **Contexte.** Le correctif de la 1re passe a été commité entre-temps par le coordinateur (`d48be12`, déjà poussé).
+  2e revue Codex du diff complet (`/tmp/codex-revue-p0-s11.txt`, 7 points). Incident d'outillage : `codex exec` restait
+  bloqué sans sortie quand le prompt est passé en argument et stdin laissé ouvert (« Reading additional input from
+  stdin... ») — relancé avec `< /dev/null`, réponse en 46 s. Leçon notée dans `AGENTS.md`.
+- **Point 2 [P1] — deux PUT logo restauraient une image qui ne correspond pas au gagnant (CORRIGÉ).** Le correctif de
+  la 1re passe ne demandait qu'un entrelacement extrême ; en fait deux PUT qui prennent le même instantané suffisent :
+  le perdant restaure l'ancien logo derrière l'adresse du gagnant. Correctif : chaque envoi écrit un blob immuable
+  `logo:<id>:<version>` en plus du pointeur ; le GET `?v=` sert le blob de CETTE version ; en cas de 409 le pointeur
+  est remis sur l'image que l'adresse désigne (ancienne si un PATCH a gagné, celle du PUT gagnant sinon, lue dans son
+  blob) ; le blob de l'envoi refusé est supprimé au mieux s'il n'est désigné par aucune adresse ; le blob remplacé est
+  nettoyé au mieux après un PUT accepté. Le GET sans version sert le pointeur, ou à défaut l'image désignée par la
+  fiche du commerce.
+- **Point 3 [P1] — DELETE logo pouvait effacer un PUT pourtant réussi (CORRIGÉ).** Le DELETE vidait le fichier après
+  l'UPDATE : un PUT arrivé entre-temps gagnait l'adresse puis voyait ses octets effacés. Correctif : l'adresse
+  remplacée est lue DANS la transaction ; le pointeur n'est vidé que s'il contient encore cette image, et le blob
+  correspondant n'est supprimé que si l'adresse courante ne le désigne plus.
+- **Point 5 [P2] — journal de parrainage potentiellement mensonger après reprise (CORRIGÉ).** Si le parrain atteignait
+  son plafond entre le calcul initial et la reprise, la trace était corrigée (0 point) mais le journal du passage
+  gardait « +50 points pour le parrain ». Correctif : `ecrire()` renvoie le texte FINAL ; les 3 appelants (visite,
+  caisse, rattrapage) l'utilisent pour le journal du passage et l'entrée « parrainage ».
+- **Points 1, 4, 6 (DOCUMENTÉS, non corrigés).** 1 — double conflit parrain dans la même requête : déjà résiduel
+  documenté, demande une reprise durable (hors périmètre). 4 — journal en panne après écriture métier (caisse
+  `dejaTraite` sans trace, visite historique rejouée = 2e tampon) : demande un journal rejouable / boîte d'envoi,
+  nouveau lot. 6 — PATCH réglages + avis partiels sous Supabase : même remède. Détail dans `server/README.md`
+  § Atomicité (« Ce qui reste NON atomique »).
+- **Tests** : avant **876/876**, après **879/879** (`npm test`, typecheck serveur inclus), `npx tsc -p .` OK. `+3` tests
+  (`tests/supabase.test.ts`) : deux PUT logo simultanés d'images différentes (barrière GET `meta` pour forcer les deux
+  instantanés) → [200, 409], adresse gagnante = octets gagnants (avec et sans `?v=`) ; PUT pendant un DELETE (effacement
+  retardé par un `fetch` enveloppé) → l'envoi gagnant survit, 200 + octets identiques ; plafond 1 parrainage, deux
+  filleuls simultanés → traces [0, 50], un journal de passage « +50 pour le parrain », l'autre « parrain au plafond
+  annuel, rien pour ». Contrôles négatifs : sans les blobs versionnés, les 2 tests logo échouent (10/10 et 3/3) ;
+  sans le texte final, le test plafond échoue (2 passages annoncent +50). Le test PUT/PUT avec la seule barrière PATCH
+  ne discriminait pas l'ancien code (l'ancien `ancien` du perdant était déjà l'image gagnante) — d'où la barrière GET
+  `meta`. Incident en cours de route : une édition a brièvement remplacé 3 lignes du test par du code serveur, réparée
+  aussitôt (test relu, suite verte) ; un revert de contrôle négatif oublié a été détecté par `grep` et restauré depuis
+  `/tmp/app.ts.fixed` avant la suite finale.
+- **Résiduels** (documentés dans `server/README.md` § Atomicité) : suppression d'un blob orphelin = vérification puis
+  écriture (un envoi des mêmes octets qui gagnerait exactement entre les deux laisserait une adresse sans blob,
+  réparable par un nouvel envoi) ; blobs remplacés conservés en `meta` (une ligne par ancien logo). Le pointeur seul
+  ne fait plus foi pour les lectures : le GET sans version se replie sur l'image désignée par la fiche.
+
+## 11/11/2026 — P0-S14 : Vue caisse minimale (AUDIT.md §7, F-13)
+- **Contexte.** `GET /caisse` renvoyait le commerce brut + tous les clients (tél/e-mail) + journal à n'importe quel
+  membre de l'équipe. Désormais : sans `?q=`, aucun client ; avec `?q=`, seuls les clients correspondants, paginés
+  côté serveur ; fiche client à la demande (scan QR / sélection) ; commerce réduit à ce que le comptoir affiche et
+  calcule ; plus de journal servi en caisse.
+- **Serveur (`server/app.ts`).** `GET /commerces/:id/caisse?q=&page=&limite=` (limite 1–50, défaut 20 ; `q` ≤ 80 car.,
+  400 sinon) → `{ auteur, commerce, clients, total, page, limite }` ; recherche par prénom (sans accents), téléphone
+  (+33/0033/06, tous formats) ou e-mail via `correspondRecherche` (même règle que le front). `GET
+  /commerces/:id/caisse/clients/:clientId` → `{ client }`, 404 si inconnu. `commerceCaisse` (type `CommerceCaisse`,
+  `src/types.ts`) : id, nom, logo, seuilTampons, recompense, catalogue, eurosParPoint, programme — jamais les lots
+  (probabilités) ni les réglages internes (réponses auto, messages auto, relances, tests A/B, conservation, dates,
+  liens). La recherche filtre côté serveur sur tous les clients du commerce (lecture paginée complète, P0-S18) : ce
+  qui est minimisé, c'est ce qui quitte le serveur vers la tablette, pas le travail du serveur. `GET …/etat`
+  (gérant) est inchangé : liste complète + journal.
+- **Front (`src/pages/Caisse.tsx`, `src/data/api.ts`).** `api.caisse(commerceId, acces, { q, page, limite })`,
+  `api.clientCaisse(commerceId, acces, clientId)`. Recherche différée 300 ms, ≥ 2 caractères, 8 par page, « Voir
+  plus » ; scan QR = fiche à la demande ; fiche du client sélectionné rafraîchie à chaque synchro (15 s). Cache
+  local : seulement les clients déjà vus sur cet appareil (recherche, scan, actions) — jamais la liste ; hors ligne,
+  la recherche se replie sur ces clients connus (message explicite) et le scan d'un client jamais vu reste impossible.
+- **Tests** : avant **879/879**, après **887/887** (`npm test`, typecheck serveur inclus), `npx tsc -p .` et
+  `npm run build` OK. `+8` tests (`tests/caisse-p0-s14.test.ts`) : ouverture sans recherche (aucun client, commerce
+  minimal, pas de journal), recherche par prénom (seul le client cherché), accents / +33 / e-mail, pagination
+  (12 correspondants, pages de 5 sans recouvrement ni perte), fiche à la demande (401/404), paramètres invalides
+  (400), parcours recherche → fiche → passage ; messages privés (voir revue Codex point 1). Adaptations au nouveau
+  contrat (pas d'affaiblissement) dans `tests/cartiz.test.ts` : lecture du solde via la fiche, recherche `?q=Lina`,
+  assertion « sans recherche, aucun client ».
+- **Revue Codex** du diff (`/tmp/codex-revue-p0-s14.txt`, 7 points, tous corrigés, aucun ignoré) :
+  1. [P1] `clientCaisse` exposait `messagesPrives` — `clientCaisseEquipe` (recherche, fiche, réponses d'actions) ;
+     `clientCaisse` inchangé pour le gérant (GET …/etat, page Avis) — test : message privé absent en caisse, présent
+     dans …/etat. La suggestion « liste blanche des champs » n'est pas reprise telle quelle : le comptoir a besoin de
+     presque toute la carte (visites, récompenses en attente, rattrapages, réserve) et les champs restants
+     (anniversaire, plat préféré, historique d'échanges) appartiennent à la carte servie ; seule la fuite nommée
+     (messages privés) est retirée.
+  2. [P1] ancien cache v1 (liste complète) survivait — clé cache v2 + suppression de la v1 au démarrage.
+  3. [P1] retrait d'une fiche sur 404 inopérant (fusion) — `persisterCache` (écriture sans fusion) pour les retraits.
+  4. [P1] scan réutilisant une fiche périmée — `ficheClient` interroge le serveur d'abord en ligne, cache seulement
+     hors ligne, 404 → retrait des clients connus.
+  5. [P2] effacer la recherche n'invalidait pas la requête en cours — compteur incrémenté en tête d'effet.
+  6. [P2] « Voir plus » mélangeait deux recherches — garde de génération + verrou pendant le chargement.
+  7. [P2] erreurs du scan / « Voir plus » non traitées, recherche masquant les erreurs — `.catch` + annonce,
+     try/catch, `erreurRecherche` affichée distinctement de « Aucun client trouvé ».
+  Incident : `codex exec` refusait de démarrer hors du repo (« Not inside a trusted directory ») — lancé avec
+  `workdir` = repo. Codex n'a pas pu écrire son rapport (sandbox lecture seule) : texte complet dans
+  `/tmp/codex-revue-p0-s14.txt` (retranscrit depuis sa sortie).
+- **Incident de suite (flaky, hors lot).** La 2e suite complète après correctifs : 886/887, 1 échec
+  `securite-s4` « définie et valide → démarre sans avertissement CORS » (timeout 23 s au démarrage du serveur en
+  sous-processus, « ni démarré ni arrêté »). `server/index.ts` et CORS ne sont pas touchés par ce lot ; le test
+  passe seul en 2,3 s (24/24) et passait dans la 1re suite complète (886/886) — surcharge de la VM pendant la suite.
+  Suite relancée pour un vert propre avant commit.
+- **Résiduels.** La route historique `POST /clients/:id/visite` (gérant OU équipe, `clientCaisse`) sert encore
+  `messagesPrives` à un membre — hors périmètre S14 (route partagée, la fiche gérant en dépend via …/etat) ; à
+  traiter si la vue équipe/gérant est un jour séparée sur cette route. Le cache local garde les fiches vues
+  indéfiniment (par appareil, équipe seulement) ; aucune purge automatique. La recherche filtre en mémoire côté
+  serveur (pas de filtre PostgREST sur le JSONB) : acceptable pour un commerce, à revoir si la base grossit
+  beaucoup. Les correctifs front (points 2–7) ne sont pas couverts par un test automatisé (pas de navigateur sur la
+  VM) : relus + typecheckés, à vérifier sur tablette réelle au premier usage.
+
+## 11/11/2026 — P0-S18 : Pagination serveur Supabase (AUDIT.md §7, revue Codex point 2)
+- **Contexte.** Les lectures `clients()` et `tirages()` ne paginaient pas : au-delà du plafond PostgREST (1 000 lignes
+  par réponse), listes, exports et statistiques étaient silencieusement incomplets.
+- **Stockage (`server/stockage-supabase.ts`).** Nouveau `lirePages` / `lireLignesPages` : boucle `.range()` par pages
+  de 1 000 lignes, dernière page (< 1 000) arrêtant la boucle, versions mémorisées pour le verrou optimiste comme
+  dans `lire`. Convertis : `commerces()`, `clients()`, `tirages()`, `tiragesClient()`, `tiragesParCode()`, `avis()`,
+  `membres()` (et déjà `compteursEvenements()`). `tiragesClient()` gagne un tri explicite (date croissante, même ordre
+  que l'ancienne lecture sans tri) : sans tri déterministe, les pages ne seraient pas stables. Inchangés : lectures
+  d'une seule ligne (`eq('id', …)`, `clientParContact`), `journal` / `envois` (limite explicite du caller). Aucun
+  changement dans `server/app.ts`, `src/pages/Clients.tsx` ni `src/lib/stats.ts` : ils reçoivent désormais des listes
+  complètes — l'écran Clients paginait déjà l'affichage (50 par 50, « Charger plus »), l'export CSV et les stats
+  n'avaient pas de plafond propre.
+- **Tests** : avant **887/887**, après **891/891** (`npm test`, typecheck serveur inclus), `npx tsc -p .` et
+  `npm run build` OK. `+4` tests (`tests/supabase.test.ts`, describe P0-S18) : 1 200 clients / tirages / avis lus en
+  entier (offsets `['0', '1000']`, `limit=1000` prouvés par requête) ; 1 050 tirages d'un seul client (ordre stable,
+  séquence complète vérifiée) ; 1 001 tirages à la même date, à cheval sur la frontière (aucun doublon, départage
+  par `id`) ; /etat + statistiques (`cartesEmises`, `passagesTotal`) + export CSV complets à 1 050 clients
+  (1 051 lignes CSV).
+- **Contrôle négatif (2 passages).** Avec l'ancien stockage (sans pagination) restauré temporairement : d'abord
+  seuls les 2 premiers tests échouaient (le 3e passait : le faux PostgREST ne simulait pas le plafond) ; après le
+  correctif du point 4 ci-dessous, les 4 tests échouent — ils discriminent tous la régression. Restauration vérifiée
+  : 45/45 ensuite.
+- **Revue Codex** (2 P1, 2 P2, 0 P0 ; texte complet `/tmp/codex-revue-p0-s18.txt`, diff
+  `/tmp/codex-p0-s18.diff`) : 1. [P1, corrigé] tri non déterministe à dates égales → départage par `id` ajouté aux
+  4 lectures triées par date (`tirages`, `tiragesClient`, `tiragesParCode`, `avis`) ; assertion d'ordre existante
+  mise à jour (`date.desc,id.asc`) et nouveau test « dates identiques à la frontière » (1 001 tirages, même date,
+  semés en ordre inverse, séquence complète vérifiée). 2. [P1, non corrigé — documenté] les offsets dérivent si une
+  écriture concurrente s'insère avant la page en cours (doublon ou omission possible) : la pagination par curseur
+  demanderait de restructurer toutes les lectures de listes, pour un risque négligeable ici (fenêtre de < 1 s, stats
+  et exports tolèrent une ligne de plus ou de moins ; le critère du lot — listes complètes au-delà du plafond en
+  conditions normales — est rempli) ; consigné comme résiduel dans `server/README.md`. 3. [P2, corrigé] le test
+  « ordre stable » ne vérifiait pas le tri (semis dans l'ordre chronologique) → semis en ordre inverse + séquence
+  complète des ids vérifiée. 4. [P2, corrigé] le test HTTP ne discriminait pas → le faux PostgREST plafonne
+  désormais à 1 000 lignes même sans `limit`, comme le vrai (max-rows par défaut) ; le contrôle négatif le prouve.
+- **Résiduels** (documentés dans `server/README.md`, § Supabase) : le bilan de `supprimerClient` compte les lignes
+  supprimées renvoyées par PostgREST (plafonné à 1 000 par table) — la suppression elle-même n'est pas plafonnée,
+  seul le chiffre du journal peut être un minimum si un client avait plus de 1 000 tirages. La recherche caisse
+  (P0-S14) filtre en mémoire côté serveur après lecture paginée complète : acceptable pour un commerce.
+
+## 11/11/2026 — P0-S19 : Code gagnant hors vue publique (AUDIT.md §7, revue Codex point 3)
+- **Contexte.** `GET /cartes/:id` re-servait le code gagnant du jour à quiconque connaissait un `clientId` (sans
+  authentification). **Option retenue : la 2e** — le code n'est servi qu'au titulaire authentifié (jeton client valable
+  de CETTE carte, `Authorization: Bearer`), jamais retiré de la réponse : le cas d'usage P0-U3 survit (voir ci-dessous).
+- **Serveur (`server/app.ts`, handler `GET /cartes/:id`).** `jeu.codeDuJour = charge && code && !perdant ? code : null`
+  — `charge` = jeton client accepté par `jetonClient`. Sans jeton : null, **même en vue complète (mode transition)** ;
+  le lot du jour reste affiché, seul le code est conditionné. Tirage perdant : null, même avec jeton. Vérification en
+  caisse (`GET /caisse/gains/:code`, `POST …/remise`) inchangée ; la réponse du tirage lui-même (`POST …/tirages`)
+  rend toujours son code au joueur qui vient de jouer (c'est son propre résultat, après visite validée).
+- **Front : aucun changement de comportement.** `Jouer.tsx` et `CartePublique.tsx` assuraient déjà le jeton avant
+  `api.carte` (P0-S7 : `assurerJetonClient`, repli mémoire du gain venant d'être tiré) ; seuls les commentaires ont été
+  mis à jour (`Jouer.tsx`, `src/data/api.ts`, `src/lib/carte.ts`). Titulaire légitime sur un autre téléphone / au
+  cache vidé : lien d'accès du comptoir (15 min) ou « Retrouver ma carte » (24 h) → `POST /cartes/:id/jeton` → jeton
+  → `GET` avec jeton → code ; testé de bout en bout (lien fabriqué avec le secret, comme la fiche client).
+- **Tests** : avant **891/891**, après **901/901** (`npm test`, typecheck serveur inclus), `npx tsc -p .` et
+  `npm run build` OK. `+10` tests (`tests/code-gagnant-p0-s19.test.ts`) : sans jeton en strict (vue limitée, code
+  null, texte brut sans code), avec jeton (code servi), jeton d'une autre carte / falsifié (401, aucun code), lien
+  d'accès → jeton → code (usage unique vérifié), perdant (null même avec jeton), remise en caisse (code + `remisDuJour`
+  avec jeton, null sans), 2e tirage (409 sans code), mode transition (vue complète sans jeton mais code null ; avec
+  jeton : code), sans `SESSION_SECRET` (GET null, `/jeton` 503), strict : tirage et export RGPD sans jeton → 401
+  (export du titulaire avec jeton + contact : 200, CSV avec son code). Adaptations au nouveau contrat (pas
+  d'affaiblissement) dans 4 tests existants : `code-gagnant-p0-u3` (le test « autre téléphone / cache vidé » exige
+  désormais null sans jeton), `serveur.test.ts`, `securite-s3.test.ts`, `carte-pwa-p1-c3.test.ts` (client du front sans
+  jeton → null).
+- **Incident de suite (flaky, hors lot).** 1re suite complète : 900/901, 1 échec `securite-s4` « définie et valide →
+  démarre sans avertissement CORS » (timeout 20 s au démarrage du serveur en sous-processus, même incident que P0-S14)
+  ; `server/index.ts` et CORS ne sont pas touchés par ce lot ; le test passe seul en 2,3 s (24/24). Suite relancée
+  pour un vert propre avant commit.
+- **Revue Codex** (texte complet `/tmp/codex-revue-p0-s19.txt`, diff `/tmp/codex-p0-s19.diff`) : 4 points.
+  1. [P0, fondé — verrouillé en strict, documenté] Export RGPD (`POST /cartes/:id/donnees`, `src/lib/rgpd.ts:146`
+     liste `(code …)` de tous les tirages) sans jeton en transition : CSV avec les codes. 2. [P0, fondé — idem]
+     `POST …/tirages` par contact seul en transition renvoie le code du tirage. Les deux sont le mode transition
+     lui-même (accès d'avant P0-S7 admis par conception) : les corriger ici aurait été changer la sémantique de la
+     transition lot par lot ; le correctif cohérent est le mode `stricte`, déjà le défaut en production dès que
+     `SESSION_SECRET` existe. Ajouté : test strict (tirage + export sans jeton → 401, aucun code) et mention du résiduel
+     dans `server/README.md` (§ Accès client, « Modes » + table des routes).
+  3. [P1, fondé — documenté, non corrigé] Anciennes cartes : un jeton s'obtient sans autre preuve pendant la période
+     de grâce P0-S7 (jusqu'au 10/02/2027), donc connaître un ancien identifiant suffit encore. Exception de migration
+     explicite de P0-S7, à échéance ; la retirer ici casserait la migration des cartes existantes.
+  4. [P1, fondé — documenté + test] Sans `SESSION_SECRET` (transition, dev seulement), aucun jeton ne peut être émis :
+     le titulaire ne relit plus son code côté serveur (repli : réponse de son tirage + mémoire du téléphone dans
+     `Jouer.tsx`). En production la variable est posée (Render, depuis le 10/11) ; test ajouté (GET null, `/jeton` 503).
+- **Résiduels.** En mode transition, un contact seul suffit encore à obtenir des codes (points 1–2 ci-dessus) — la
+  production est en `stricte` par défaut ; surveiller `GET /sante/acces-client → accesSansJeton` avant tout passage en
+  strict forcé. Le front ne prouve pas à lui seul le parcours titulaire authentifié (pas de navigateur sur la VM) :
+  relu + typechecké, à vérifier sur téléphone réel (lien comptoir → code affiché).
+
+## 11/11/2026 — P0-S20 : Persistance des compteurs publics (AUDIT.md §7, revue Codex point 6)
+
+- **Choix : persistance en base (pas documentation seule).** Justifié par la mesure : une ligne de compteur = 73
+  octets de JSON (clé courte `lecture:198.51.100.23`) à 92 octets (clé longue
+  `inscription:c-asian-home-paris:0612345678`) ; clé max 45 car. (`carte:cl-<UUID>`). En trafic normal : zéro écriture
+  (une page rechargée toutes les 10 s fait 6 lectures/min pour un seuil de 30). Seuil de persistance = moitié du seuil
+  (`SEUIL_PERSISTANCE_COMPTEURS = 1/2`, exporté depuis `server/app.ts`) : seuls les compteurs « chauds » (≥
+  ceil(max/2)) ou bloqués sont persistés ; un compteur froid ne peut pas provoquer de 429 juste après un redémarrage.
+  La limitation reste appliquée **en mémoire** (aucune latence ajoutée) ; les écritures sont en arrière-plan, sans
+  bloquer la requête.
+- **Migration 0010 (et non 0009).** Le brief disait 0009, mais 0009 est déjà la migration P0-S7 (auth client) : la
+  nouvelle migration est `supabase/migrations/0010_compteurs_publics.sql` (+ `.down.sql`, rejouable). Table
+  `compteurs_publics` (`cle` PK, `debut` timestamptz, `n` ≥ 0 ; index sur `debut` ; RLS activée, aucune policy, seul
+  `service_role` y a droit). **La migration n'est PAS appliquée en production par ce lot** — procédure dans
+  `server/README.md` (§ Migration 0010) : sauvegarde AVANT (par l'opérateur, jamais par un lot automatique), puis SQL
+  Editor ; vérification `select count(*) from public.compteurs_publics;` → 0 ligne.
+- **Implémentation.** `server/stockage.ts` : type `CompteurPublic`, méthodes `compteursPublics()`,
+  `enregistrerCompteurPublic(c, purgerAvant)` (purge puis upsert), `purgerCompteursPublics(avant)`, `schemaCompteursPublics()`
+  (SQLite : table + index + prepared statements). `server/stockage-supabase.ts` : lecture **paginée**
+  (`lireLignesPages`, tri `cle` — PostgREST plafonne à 1 000 lignes), upsert `onConflict: 'cle'`, purge `lt('debut', …)`,
+  mapping `ErreurMigrationManquante` (0009→0010 via `TABLES_0010`). `server/app.ts` : `creerCompteursPublics` réécrit
+  (saturation à `max`, écritures sérialisées par clé, voir revue Codex) ; `restaurer()` au démarrage de `creerServeur`
+  (après les helpers de schéma — pas de TDZ, les `async function schema*` sont hissées ; aucune requête servie avant la
+  fin de `creerServeur` de toute façon) : fenêtres valides seulement, table absente → avertissement `[securite]` dès le
+  démarrage + purge des lignes périmées, jamais de 500. `server/sauvegarde.ts` : 15 tables (ajout `compteurs_publics`,
+  **optionnelle** — voir revue Codex point 5) ; `scripts/restaurer-base.mjs` normalise la table optionnelle absente
+  (ancien export) avant les contrôles de compteurs et `--verifier`.
+- **Tests : 901 → 917 (+16), `npm test` vert, `npx tsc -p.` vert, `npm run build` vert.** Nouveaux :
+  `tests/compteurs-publics-p0-s20.test.ts` (5, HTTP SQLite : seuil de persistance = 1/2 ; compteur chaud survit ;
+  blocage survit + compteur saturé n'écrit plus ; compteur froid perdu sans conséquence ; fenêtre expirée ignorée),
+  `tests/supabase.test.ts` (5, describe P0-S20 : stockage upsert/lecture/purge ; lecture paginée au-delà de 1 000
+  lignes ; sans migration 0010 ; HTTP redémarrage Supabase + avertissement dès le démarrage ; écriture ancienne
+  retardée n'annule pas un blocage récent), `tests/migration-pglite.test.ts` (1, 0010 : rejouable, RLS fermée, upsert,
+  purge, DOWN), `tests/sauvegarde-p0-s5.test.ts` (5 : 15 tables + migrations 0001–0010 ; export avec `compteurs_publics`
+  absente → vide ; ancien export 14 tables restauré ; `compteurs_publics` mal formé refusé ; CLI ancien export avec et
+  sans `--verifier`). Contrôles négatifs vérifiés (chaque test discriminant échoue sans sa correction) : sans
+  `restaurer()` (2 tests de redémarrage), sans saturation (ligne en base > max), sans sérialisation par clé (upsert
+  retardé → n = 2 final), sans table optionnelle (export refusé ; restauration TypeError), sans validation stricte
+  (table mal formée acceptée).
+- **Revue Codex n° 1** (texte `/tmp/codex-revue-p0-s20.txt`, diff `/tmp/codex-p0-s20.diff`) : 0 P0, 6 points, tous
+  fondés et **tous corrigés** (diff des corrections `/tmp/codex-p0-s20-corrections.diff`) :
+  1. [P1] Écritures non bornées après blocage (100 appels, seuil 30 → 86 persistances : `f.n++` sans plafond, persistance
+     avant le 429). Corrigé : compteur saturé à `max`, refus avant toute écriture — au plus `seuil − seuil/2 + 1`
+     écritures par clé et par minute ; test (ligne en base reste à n = 3 après 429 répétés).
+  2. [P1] Données personnelles dans `cle` (IP, contact en clair via `cleContact`, identifiant de carte) — l'affirmation
+     « aucune donnée client » était fausse. Corrigé : documentation et commentaires rectifiés partout (migration,
+     README, tests) — la clé reprend l'identifiant déjà utilisé par l'anti-bruteforce (`tentatives_auth`, 0006), sans
+     nom ni code gagnant ni contenu client ; purge des lignes périmées au démarrage en plus de chaque écriture.
+     Pseudonymisation HMAC non retenue : elle casserait la restauration par clé (la clé lue en base doit correspondre
+     à la clé en mémoire), pour la même classe de données que `tentatives_auth` déjà acceptée.
+  3. [P1] Restauration tronquée à 1 000 compteurs (lecture non paginée, plafond PostgREST). Corrigé : lecture paginée
+     via `lireLignesPages` (P0-S18) + tri déterministe par `cle` ; test à 1 001 lignes.
+  4. [P1] Une écriture ancienne peut annuler un blocage récent (écritures concurrentes en arrière-plan, ordre
+     d'arrivée non garanti — l'écart n'était pas « d'une unité » comme annoncé). Corrigé : file d'écritures par clé
+     (`Map files`, chaîne de promesses, nettoyage après résolution, rejet absorbé sans bloquer la suite) ; test avec
+     upsert retardé de 150 ms (final n = 3).
+  5. [P1] Sauvegarde préalable impossible (15e table obligatoire → l'export avant migration échouait justement parce
+     que la table n'existait pas encore ; anciens exports à 14 tables non restaurables). Corrigé : `compteurs_publics`
+     devient `optionnelle` dans `TABLES_SAUVEGARDE` (exportée vide si absente, ancien export restauré vide) — la règle
+     « jamais de sauvegarde incomplète » reste entière pour les 14 tables métier ; tests unitaires + CLI.
+  6. [P2] Absence de migration silencieuse au démarrage (`ouVide` masquait l'absence, avertissement seulement au
+     premier compteur chaud). Corrigé : `restaurer()` vérifie `schemaPresente()` d'abord et avertit dès le démarrage ;
+     test (capture de `console.warn` au démarrage sans migration).
+- **Revue Codex n° 2** (corrections seules, `/tmp/codex-revue-p0-s20-corrections.txt`) : 2 points, tous fondés et
+  **tous corrigés** :
+  1. [P1] Ancien export sans `compteurs_publics` : `scripts/restaurer-base.mjs` lisait `sauvegarde.tables[nom].length`
+     → TypeError dans la transaction (idem `--verifier`, compteur absent). Corrigé : normalisation de la table
+     optionnelle absente à `[]` / `0` après validation, avant les contrôles ; test CLI d'ancien export avec et sans
+     `--verifier`. Au passage : le message `VÉRIFICATION OK … pour les 14 tables` du script disait encore 14 → 15.
+  2. [P2] Tables optionnelles entièrement exclues de la validation, même présentes mais mal formées
+     (`compteurs_publics: {corrompu: true}` accepté puis traité comme zéro ligne). Corrigé : `validerSauvegarde`
+     n'excuse que l'absence — présente mais non-tableau, la table est refusée comme les autres ; test.
+  La 2e revue confirme par ailleurs : saturation correcte, file par clé nettoyée, pagination triée, tables métier
+  toujours obligatoires, restauration après initialisation des variables de schéma (pas de TDZ).
+- **Incident de suite (flaky, hors lot, 3e occurrence après P0-S14 et P0-S19).** Une suite complète intermédiaire a
+  échoué sur `securite-s4` « définie et valide → démarre sans avertissement CORS » (timeout 20 s au démarrage du
+  serveur en sous-processus) ; le test passe seul, `server/index.ts` et CORS ne sont pas touchés par ce lot. La suite
+  finale est verte en une passe (917/917) — aucun contournement appliqué.
+- **Note de travail (à ne pas reproduire).** Deux `muse.edit` avec `old_text` trop court (`})` seul) ont remplacé la
+  première occurrence du fichier au lieu de la cible (ligne 34 de `supabase.test.ts` corrompue, puis test CLI
+  modifié au mauvais endroit) : réparé à chaque fois par script ciblé + vérification `git diff` ; désormais, tout
+  `old_text` doit contenir assez de contexte unique pour ne correspondre qu'à un seul endroit.
+- **Résiduels.** Une seule instance (Render) : à plusieurs instances, chaque instance garderait ses compteurs en
+  mémoire et l'écriture d'une autre instance peut encore ramener un compteur en arrière (documenté, README §
+  Anti-abus) — la base ne sert qu'au redémarrage, pas à la limitation distribuée. La migration 0010 reste **à
+  appliquer en production** (sauvegarde d'abord, SQL Editor) ; sans elle, tout marche en mémoire seulement, avec
+  l'avertissement dès le démarrage. Le repli mémoire sans migration et le parcours de redémarrage ne sont prouvés que
+  par tests automatisés (pas de navigateur sur la VM) : vérifier les logs Render après application de la 0010
+  (disparition de l'avertissement).
+
+## 11/11/2026 — P0-S9 : Refuser SQLite en production (AUDIT.md §7)
+
+- **Garde dans `server/index.ts` seulement** (le seul lanceur de production, `npm run serveur`) : après
+  `configSupabaseDepuisEnv(env)`, si production (`NODE_ENV=production` ou `RENDER`) et pas de Supabase →
+  `arreter('En production, Supabase est obligatoire : SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY doivent être définies
+  (refus de démarrer sur SQLite vide).')` (sortie 1, message explicite). Une seule des deux variables reste refusée
+  comme avant (demi-configuration). Hors production, SQLite reste le défaut (développement local, tests). La garde est
+  placée avant `creerServeur` : aucune ouverture SQLite n'a lieu en production.
+- **`/sante` (`server/app.ts`)** : clé conditionnelle `alerteStockage` (message explicite en français) uniquement quand
+  `stockage === 'sqlite'` ET `o.production` — elle n'apparaît jamais en dev, donc le test figé des clés de `/sante`
+  (`tests/securite-s1.test.ts:291`) reste vert. La garde rend ce cas quasi impossible (démarrage refusé avant) ; l'alerte
+  est une défense en profondeur pour un démarrage par un autre chemin.
+- **4 tests spawn existants adaptés (vrai changement de contrat, pas un affaiblissement — cf. précédent P0-S19).**
+  Ils lançaient `server/index.ts` en production (RENDER=1) sans Supabase et attendaient un démarrage : la garde les
+  aurait fait échouer sur le refus Supabase avant leur assertion. Ils fournissent désormais un faux Supabase HTTP
+  (`tests/faux-supabase-http.ts`, nouveau helper partagé — lectures → `[]`, écritures → ligne écrite, juste de quoi
+  laisser `initialiser` et `exigerMigrationsAudit` passer ; il ne simule pas une base, limite explicite) et gardent
+  leurs assertions d'origine : S1 « SESSION_SECRET absente en production → démarrage QUAND MÊME, avec avertissement »
+  (renommé « … (Supabase configuré, P0-S9) »), S4 « CORS_ORIGIN absente / valide / invalide » (`lancer` devenu asynchrone,
+  faux fermé dans chaque `finally`).
+- **Tests : 917 → 924 (+7), `npm test` vert, `npx tsc -p.` vert, `npm run build` vert.** Nouveaux
+  (`tests/refus-sqlite-p0-s9.test.ts`) : spawn production sans Supabase → refus code 1 + message (NODE_ENV et RENDER) ;
+  production AVEC Supabase (faux HTTP) → démarre ; développement sans Supabase → démarre ; une seule variable Supabase
+  → refus demi-configuration ; `/sante` unitaire : SQLite + production → `alerteStockage` ; SQLite + développement →
+  pas de clé, clés de `/sante` inchangées. Contrôle négatif vérifié : sans la garde, les 2 tests de refus échouent
+  (5 passent). Point d'attention : la ligne `mode …` du `listen` arrive après la ligne `/api/v1/sante` qui déclenche
+  la fin d'attente — les tests de démarrage positif attendent le motif par polling (`attendre`, 5 s) au lieu d'une
+  lecture immédiate (course corrigée pendant le lot, pas un flaky de suite).
+- **Docs.** `server/README.md` : § « Choix du stockage » (refus P0-S9 + `alerteStockage`) et § « Limites honnêtes »
+  (la mention « limitation des routes publiques : en mémoire, remise à zéro au redémarrage » était périmée depuis P0-S20
+  — compteurs chauds persistés et rechargés, fenêtres d'une minute).
+- **Revue Codex** (`/tmp/codex-revue-p0-s9.txt`, diff `/tmp/codex-p0-s9.diff`) : **0 point** — garde bien placée et
+  couvrant les deux cas de production, message actionnable, `alerteStockage` conditionnelle correcte, tests S1/S4 non
+  affaiblis, faux HTTP suffisant pour le démarrage, aucun secret ni changement hors production. Revue statique
+  uniquement (tests non exécutés dans sa sandbox).
+- **Résiduels.** La garde ne protège que le lanceur `server/index.ts` : un démarrage direct de `creerServeur` avec
+  SQLite en production reste possible par code (c'est le cas couvert par `alerteStockage`). Le déploiement Render
+  actuel n'est pas touché par ce lot (aucun redéploiement) : si les variables Supabase venaient à manquer sur Render,
+  le prochain déploiement refuserait de démarrer au lieu de servir une base vide — c'est le comportement voulu, à
+  vérifier côté opérateur (variables présentes depuis le 10/11).
+
+## 11/11/2026 — P0-S10 : Staging + rollback (AUDIT.md §7, revue Codex point 12)
+
+- **`render.yaml` : 2e service `asian-home-fidelite-staging`** (branche `autonome/integration`, mêmes
+  build/start/santé/variables que la production, valeurs différentes au dashboard). La production ne suit
+  que `master`. Base Supabase de TEST séparée obligatoire (jamais la production) ; PINs de test et
+  `SESSION_SECRET` différents de la production.
+- **`docs/DEPLOIEMENT.md` (nouveau)** : création du staging (§ 2), retour arrière en une commande (§ 3),
+  compatibilité des migrations 0001–0010 vérifiée une par une (§ 5), procédure après écritures partielles
+  (§ 4). Endpoint vérifié dans la doc officielle Render (`api-docs.render.com/reference/create-deploy`,
+  lu le 11/11/2026) : `POST /v1/services/{serviceId}/deploys` avec `{ "commitId": "<sha-40>" }`.
+- **`scripts/rollback-render.mjs` (nouveau)** : simulation par défaut (affiche la commande curl exacte),
+  `--executer` pour envoyer ; valide `--service` (staging/production), `--service-id` (`srv-…`) et SHA-40 ;
+  vérifie que le commit existe localement ; **ne touche jamais à la base**. La clé API (`RENDER_API_KEY`)
+  n'est jamais affichée.
+- **Compatibilité des migrations** : chaque migration « up » est additive seulement (aucun `DROP TABLE` /
+  `DROP COLUMN` / renommage / `DELETE` — testé) ; ancien code sur nouveau schéma (nouvelles tables
+  ignorées, CHECK 0009 élargi) et nouveau code sur ancien schéma (dégradation `ErreurMigrationManquante`,
+  sauf 0003/0004 exigées au démarrage par `exigerMigrationsAudit`). `.down.sql` pour 0005–0010 seulement
+  (0001–0004 : retour = restauration de sauvegarde). Corrigé en cours de lot : la base à 10 migrations a
+  **15 tables**, pas 14 (la sauvegarde en couvre 15 dont `compteurs_publics` en optionnelle).
+- **Tests : 924 → 941 (+17), `npm test` vert, `npx tsc -p .` vert, `npm run build` vert.** Nouveaux
+  (`tests/deploiement-p0-s10.test.ts`, 19 tests) : 2 services, commande de retour arrière (URL, corps,
+  curl, refus des valeurs ambigües, simulation, garde-fou cible contre un faux serveur Render),
+  migrations additives + `.down.sql` + tolérance aux migrations absentes, contenu de la doc.
+  `tests/render-yaml.test.ts` adapté — **changement de contrat, pas un affaiblissement** (comme P0-S9) :
+  1 → 2 services, toutes les assertions de la production gardées, nouvelles assertions pour le staging.
+  Contrôle négatif : le test de la doc échouait `ENOENT` avant sa création ; le test du garde-fou cible
+  refuse bien un identifiant de production avec le libellé staging.
+- **Revue Codex** (`/tmp/codex-revue-p0-s10.txt`, diff `/tmp/codex-p0-s10.diff`) : **verdict initial
+  « bloquant », 8 points, tous corrigés** (commit de correction sur la branche du lot) :
+  1. [P1, fondé] Le libellé `--service` ne protégeait pas la cible → le script relit désormais le
+     service chez Render (`GET /v1/services/{id}`) avant tout POST et refuse si son nom ne correspond
+     pas au libellé ; testé contre un faux serveur Render (concordant → POST envoyé, discordant → refusé
+     sans POST). Incident de test trouvé et corrigé : `spawnSync` + serveur dans le même processus =
+     interblocage (la boucle d'événements bloquée ne peut pas répondre) → `spawn` asynchrone ; et
+     `fetch` (undici) garde des sockets en keep-alive → `process.exit()` explicite en fin de script.
+  2. [P1, fondé] La sauvegarde ne « fige » pas les écritures → le § 4 commence désormais par suspendre
+     le service (Suspend Service) et note que l'export PostgREST n'est pas un instantané transactionnel.
+  3. [P1, fondé] La restauration proposée reprenait les données corrompues + `restaurer-base.mjs` ne
+     restaure que vers PGlite → distinction sauvegarde de conservation (après incident, preuve) /
+     sauvegarde saine (avant déploiement, à restaurer), procédure manuelle Supabase (docs/SAUVEGARDE.md
+     § 8).
+  4. [P1, fondé] Débloquer une relance `en_cours` pouvait doubler un envoi (message accepté par le
+     prestataire, statut final non écrit — cas prévu par `server/app.ts`) → vérification des traces du
+     prestataire d'abord, blocage gardé si livraison incertaine, déblocage seulement si non-livraison
+     confirmée, avec `statut` + `donnees` (statut + raison) mis à jour ensemble.
+  5. [P1, fondé] Quota Free : Render suspend **tous** les services Free si les 750 h sont épuisées
+     (`render.com/docs/free`, vérifié le 11/11/2026) → garantie « le quota tient » retirée ; suspension
+     préventive du staging, surveillance Billing, ou Starter.
+  6. [P2, fondé] La variante dashboard n'a pas le « même effet » → voies API (reconstruction, config
+     actuelle, auto-déploiements maintenus) et dashboard (artefact réutilisé, réglages du déploiement
+     cible pour le rollback seulement, auto-déploiements désactivés, Free : 2 déploiements les plus
+     récents seulement) documentées séparément (`render.com/docs/rollbacks`, vérifié le 11/11/2026).
+  7. [P2, fondé] « Ancien code » non défini → portée écrite au § 5 (retours entre commits récents
+     seulement ; contrôles statiques, pas une preuve d'exécution — la preuve, c'est staging + `/sante`).
+  8. [P2, fondé] `/sante.migrations` n'expose que `{ cartiz, programme, relances, mesure }` → 0009 via
+     `GET /api/v1/sante/acces-client` (`migration`), 0010 via SQL direct ; corrigé aussi au § 2 et à
+     l'ordre de déploiement. Au passage : `/sante.version` est la version du paquet, pas le SHA — le
+     commit déployé se vérifie dans le dashboard (Deploys), pas via `/sante`.
+  La sandbox Codex n'a pas pu exécuter la suite P0-S10 (`spawnSync git` → EPERM) : ce n'est pas un défaut
+  imputé au diff — la suite est verte ici (941/941).
+- **Résiduels / non vérifié.** Le service de staging n'est **pas créé** (pas de navigateur sur cette VM) :
+  création + première vérification « Live » + parcours de base à faire par l'opérateur (docs/DEPLOIEMENT.md
+  § 2). Rien ne prouve que le service existe tant que le `GET /api/v1/sante` du § 2, étape 4, n'a pas été
+  fait. La commande de retour arrière n'a jamais été exécutée pour de vrai (simulation + faux serveur
+  local seulement) : le premier vrai retour arrière devra être fait sur le staging d'abord.
+
+## 11/11/2026 — P0-U0 : Mesure initiale avant refonte (AUDIT.md §7, revue Codex point 15)
+
+- **Branche** `autonome/p0-u0-mesure-initiale` (depuis `autonome/integration` `de63457`) ;
+  commit `2bf30ca` ; fusion `--no-ff` `8a78ecc` dans `autonome/integration` ; les deux
+  branches poussées sur origin ; `git status` propre.
+- **Tests : 944/944 → 950/950** (219 suites), `npx tsc -p .` vert, `npm run build` vert
+  (0 avertissement). Nouveau : `tests/scores-p0-u0.test.ts` (6 tests) — SCORES.md contient
+  les sections attendues (titres Markdown) et ses chiffres de bundle correspondent à un
+  build frais à 5 % près (JS initial, CSS, total, JS total, chunks, plus gros chunk),
+  avec vérification de l'arithmétique exacte JS + CSS = total.
+- **Fichiers** : `SCORES.md` (nouveau, référence avant/après) ; `scripts/mesurer-scores.mjs`
+  (nouveau, Playwright Pixel 7, Slow 4G + CPU ×4, serveur E2E local) ;
+  `scripts/mesurer-lighthouse.mjs` (nouveau, Lighthouse 13.6.0 épinglé en devDependency) ;
+  `package.json` + `package-lock.json` (ajout `lighthouse` 13.6.0 exact ; aucune
+  dépendance existante modifiée — le lock ne fait qu'ajouter l'arbre Lighthouse).
+- **Mesures (11/11/2026, 5 passes Playwright + 2 passes Lighthouse, serveur local)** :
+  bundle initial 535857 o (JS 471651 + CSS 64206) ; couverture 97,84 % lignes / 91,43 %
+  branches / 92,92 % fonctions ; Lighthouse mobile `#/jouer` 81 (76 à la 1re passe,
+  variance ±5) ; premier affichage `#/jouer` 4,02–4,24 s (seuil < 4 s **non atteint**) ;
+  LCP jouer 4,06–4,18 s (élément `p.titre-carte`) ; scan → lot ~9,0–10,3 s d'étapes
+  (caisse ralentie 6,8–7,9 s) ; taps client 4 clics + 1 saisie, caisse 3 clics + 2 saisies ;
+  DA moyenne 6,1/10 (Jouer 7, Carte 7, Caisse 6, Menu 6, Tableau de bord 6, Clients 6,
+  Roulette 6, Réglages 5). Menu → commande et réservation n'existent pas (dit
+  explicitement). Délai à froid Render (~60 s) non mesuré ; `npm audit` non mesurable
+  sur cette VM (403 `policy_denied`).
+- **1 erreur console, reproductible 5/5** : `GET /api/v1/commerces/<id-client>` → 404 à
+  chaque transition jouer → carte. Cause élucidée (pile d'appel + hash au moment de
+  l'appel + chargement direct sans 404) : `JouerApi` (`src/pages/Jouer.tsx:422`,
+  `api.commerce(param)`) se re-rend une fois avec le nouveau `param` (identifiant
+  client) avant d'être démonté — les deux abonnements `useRoute()` (App et JouerApi)
+  ne se mettent pas à jour dans le même rendu. Aucun impact visible. **À corriger dans
+  un lot ultérieur — pas dans ce lot de mesure.**
+- **Revue Codex** (`/tmp/codex-revue-p0-u0.txt`, diff `/tmp/codex-p0-u0.diff`) : **10 points,
+  tous corrigés** (scripts réécrits, re-mesure complète passes 4–5, Lighthouse relancé
+  avec le script versionné) :
+  1. [Bloquant, fondé] LCP lu trop tôt / périmé sur navigation hash → stabilisation 2 s
+     avant lecture, élément LCP enregistré, menu mesuré aussi par chargement direct
+     (LCP menu par hash : aucune nouvelle entrée ; direct : 1632 ms). Les valeurs
+     4032/4040 ms des passes 2–3 étaient la valeur périmée de `#/jouer`.
+  2. [Bloquant, fondé] Caisse non ralentie (CDP seulement sur le client) → même
+     ralentissement sur chaque page ; validation caisse corrigée de ~1,1–1,6 s à 6,8–7,9 s.
+  3. [Fondé] `VITE_API_URL` hérité → forcé à `/` pour le serveur enfant + garde-fou
+     (toute requête hors origine locale fait échouer la passe).
+  4. [Fondé] Captures back-office « réussies » après échec du déverrouillage → fail-fast
+     + attente du titre de chaque écran ; déverrouillage OK aux passes 4–5.
+  5. [Fondé] Port non vérifié → refus de se brancher sur un serveur déjà présent
+     (port libre exigé) + surveillance `error`/`exit` du serveur enfant.
+  6. [Fondé] Faux positifs dans la cohérence des chiffres → arithmétique exacte
+     JS + CSS = total + vérification JS total / chunks / plus gros chunk.
+  7. [Fondé] Requêtes échouées non collectées sur caisse/back-office → mêmes collecteurs
+     partagés sur toutes les pages.
+  8. [Fondé] Lighthouse non reproductible (script en cache, chemins absolus) →
+     `scripts/mesurer-lighthouse.mjs` versionné + `lighthouse` 13.6.0 épinglé ;
+     méthodes Playwright (CDP direct) et Lighthouse (throttling simulé) documentées
+     comme distinctes.
+  9. [Fondé] Options CLI cassées (`--port` ignoré, `--sortie` buggué) → `parseArgs`
+     + validation du port.
+  10. [Fondé] Sections acceptées par simple mention → ancrage sur les titres Markdown
+      et seuils vérifiés dans le tableau. Plus la remarque de clôture : « à la limite »
+      remplacé par « seuil non atteint » (les 5 premiers affichages dépassent 4 s).
+  Vérifications de Codex confirmées : 471651 + 64206 = 535857 o, totaux d'étapes
+  corrects, moyenne DA 6,125 → 6,1.
+- **Résiduels / non vérifié.** Pas de mesure sur téléphone réel (Lighthouse et parcours
+  à refaire sur le staging, protocole dans SCORES.md) ; le vrai menu 81 plats et le vrai
+  logo n'ont pas été mesurés (commerce de test sans logo ni menu) ; délai à froid Render
+  non mesuré ; `npm audit` à mesurer hors de cette VM. Le 404 jouer → carte est un
+  défaut réel à corriger dans un lot ultérieur (piste : garder `page === 'jouer'` dans
+  `JouerApi` ou unifier l'abonnement `useRoute`).
+
+## 11/11/2026 — P0-D1 : Thème noir+magenta isolé + correctif 404 (AUDIT.md §6–§7, revue Codex point 14)
+
+Branche `autonome/p0-d1-theme-magenta` → fusion `--no-ff` dans `autonome/integration`
+(`0e1a10f`, poussée). Commits : `63596c9` (thème), `473a122` (correctif 404 +
+re-mesure), `15b72ad` (correctifs revue Codex). Production non touchée, rien déployé,
+rien sur master. Tests 950 → **974/974**, typechecks serveur + front verts,
+E2E scan→gain→carte 1/1, erreurs console 0, bundle 537804 o (+0,36 % vs référence
+P0-U0), DA 6,1 → **7,6/10** (cible ≥ 9 non atteinte — voir « Point ouvert »).
+
+- **Palette retenue (AUDIT §6.2, ratios recalculés par script Python, confirmés par
+  Codex par recalcul indépendant)** : fond `#111111`, surface `#1B1B22`, surface 2
+  `#26262E`, fond clair `#F7F5F2` ; texte magenta sur noir `#FF2E9A` 5,49:1,
+  `#FF4D6D` 5,88:1 ; fond de bouton (texte blanc) `#D1006F` 5,33:1, `#C4007A` 5,79:1,
+  `#A1005E` 7,84:1 ; laque `#B3262D` blanc dessus 6,5:1. Règles négatives assertées :
+  `#D1006F`/`#C4007A` sur `#111111` 3,54:1/3,26:1, `#FF2E9A` sur `#F7F5F2` 3,16:1,
+  blanc sur `#FF2E9A` 3,44:1 ; texte d'accent sur fond clair = `#A1005E` 7,21:1 ou
+  `#C4007A` 5,32:1. Cas limite : `#FF4D6D` sur gris-800 `#1F2937` (bandeau « commerce
+  désactivé », App.tsx) = 4,57:1, juste au-dessus d'AA. Ancien commentaire CSS
+  « or #c9a227 sur #111111 ≈ 8,9:1 » faux : vrai calcul 7,81:1.
+- **Décisions** : laque conservée **uniquement** comme réserve danger/erreur (échelle
+  `marque-*` définie, zéro usage dans les composants ; les erreurs actuelles utilisent
+  déjà `red-*`) ; `FOND_DEFAUT` reste ivoire `#fbf8f3` — l'AUDIT §6.4.3 proposait
+  `#111111`, rejeté : le fond est le corps de la carte rendu avec du texte foncé,
+  `#111111` échouerait au propre contrôle `problemesApparence` et rendrait la carte
+  illisible ; le noir par défaut est porté par le bandeau/héros, pas par
+  `apparence.fond`. `amber-*` conservé comme sémantique d'alerte/étoiles (pas comme DA)
+  — désormais verrouillé par une garde explicite (classes autorisées listées, étoiles
+  limitées à InvitationAvis/ui/Avis). Étoile SVG `stroke="currentColor"`. Tampons
+  pleins `bg-magenta-500` (blanc 5,33:1) — **écart à l'AUDIT §6.3** : le cercle
+  `#FF2E9A` + coche blanche qu'il propose vaut 3,44:1, donc contraire à WCAG.
+  Roue : secteurs `['#a1005e', '#111111', '#ff2e9a', '#fbf3e4', '#26262e',
+  '#fdf3f2']`, `couleurTexte('#ff2e9a') = '#111111'` (5,49:1) ; confettis magenta.
+  `.bouton` primaire magenta, `.lien` magenta-700, focus `magenta-400`,
+  `.titre-or` → `.titre-magenta`, `.puce-sombre` pressed magenta.
+- **Isolation** : `src/theme.ts` source unique ; `@theme` miroir exact (vérifié par
+  test, ensemble des tokens comparé) ; `chargement.css` / `hors-ligne.css` reprennent
+  des valeurs du thème ; halos et ombre du bouton en `color-mix()` sur les tokens
+  (jamais de rgb() d'une couleur du thème hors theme.ts — garde ajoutée).
+  Garde par test : aucun hex dans `src/**/*.ts(x)` sauf `theme.ts`, zéro
+  `or-300|or-400|or-500|#c9a227|#d4a73c|#f2d48a|titre-or|neon-500`, zéro usage
+  `marque-*` dans les `.tsx`, `text-magenta-300/400` seulement sur fond sombre prouvé.
+- **Tests existants modifiés** (changement de spec, assertions de même force
+  re-pointées sur magenta, rien affaibli) : `identite-accessibilite-p2-q1`,
+  `menu-reel`, `roue-p0-u2`, `attente-visite-p0-u4`, `menu-client-p1-c5`,
+  `chargement-p0-u1`, `integrations-v3` (fond du pass Wallet `rgb(179, 38, 45)` →
+  `rgb(209, 0, 111)`).
+- **Incidents** : imports `from '../theme'` sans extension `.ts` → `ERR_MODULE_NOT_FOUND`
+  (3 fichiers) ; ré-export `COULEURS_CONFETTIS` seul sans liaison locale dans
+  `animationRoue.ts` → `ReferenceError` ; `tsc` `roue.ts(34,28)` (Set inféré trop
+  étroit) → `Set<string>` ; `#fff` 3 chiffres dans `.hero-sombre` → `#ffffff`.
+  Coquille dans le message du commit 1 : « FOND_DEFAUT reste ivoire #fff8f3 » au lieu
+  de `#fbf8f3` (code correct, message seul — non amendé).
+- **Correctif 404** (`473a122`) : `GET /api/v1/commerces/<id-client>` → 404 à chaque
+  transition `#/jouer` → `#/carte` (mesuré 5/5 par P0-U0). Cause : `JouerApi` se
+  re-rendait une fois avec le nouveau `param` (identifiant client) avant d'être
+  démonté. Correctif : garde `page === 'jouer'` avant tout appel réseau (retour
+  silencieux) + `demandeEnCours` (revue Codex) : réponse obsolète ignorée après
+  jouer/A → jouer/B, ancien commerce effacé pendant le chargement du nouveau.
+  Preuves : `tests/jouer-404-p0-d1.test.ts` (5 tests), E2E avec assertion zéro
+  requête ≥ 400 (1/1) ; **contrôle négatif** : sans le correctif (stash de
+  `Jouer.tsx` seul), l'E2E échoue. Re-mesure (`node_modules/.cache/mesure-p0-d1/`,
+  1 passe) : 0 erreur console, 0 requête échouée. Les temps de cette passe ne sont
+  pas retenus (`npm test` tournait en parallèle sur la même VM).
+- **Captures 375 px** (`node_modules/.cache/mesure-p0-d1/`) : 9 écrans de la passe
+  standard + 5 complémentaires (script `captures-richesse.mjs`) : roue à 8 lots
+  (6 couleurs alternées, libellés lisibles), vrai menu 81 plats (prix magenta),
+  carte à bandeau personnalisé `#d1006f` (sous-titre blanc lisible). DA : Jouer 8,
+  Carte 8, Caisse 7, Menu 8, Tableau de bord 8, Clients 8, Roulette 7, Réglages 7.
+- **Revue Codex** (`/tmp/codex-revue-p0-d1.txt`, diff `/tmp/codex-p0-d1.diff`) :
+  **7 points** — ratios confirmés exacts à deux décimales par recalcul indépendant ;
+  adaptations des anciens tests confirmées légitimes ; aucun secret, envoi réel,
+  changement de prix/probabilités/textes légaux :
+  1. [Bloquant, fondé, CORRIGÉ] Magenta clair sur bandeau personnalisé (1,66:1 sur
+     `#d1006f`) → sous-titre blanc, test de propriété (blanc ≥ 4,5:1 sur tout
+     `assombrir(couleur)` validée), validé visuellement par `carte-couleur-perso.png`.
+  2. [Bloquant, fondé, CORRIGÉ partiellement] `theme.ts` pas la seule source
+     effective (copie manuelle + rgb() dans les halos) → halos/ombre en `color-mix()`
+     sur les tokens + garde anti-rgb(). **Génération du CSS depuis theme.ts
+     ÉCARTÉE** : les feuilles avant-JS (chargement/hors-ligne) ne peuvent pas
+     consommer de tokens TS au chargement, et le test du miroir exact bloque déjà
+     toute dérive — le coût d'un générateur n'apporte rien à l'utilisateur.
+  3. [Bloquant, fondé, NON CORRIGÉ — décision parent, voir « Point ouvert »]
+     Corps sombres côté client (AUDIT §6.2/§6.3) reportés comme « hors périmètre ».
+  4. [Fondé, CORRIGÉ] Doré subsistant (étoiles amber) → gardé par convention
+     (note/5) et sémantique d'alerte, mais verrouillé par une garde explicite.
+  5. [Fondé, CORRIGÉ] Cycle des requêtes incomplet (réponses obsolètes jouer/A →
+     jouer/B) → `demandeEnCours` + effacement de l'ancien commerce. Annulation
+     réelle (AbortSignal) hors périmètre : l'API ne le supporte pas ; `setState`
+     après démontage est un no-op (React 18+).
+  6. [Fondé, CORRIGÉ] Captures 1 secteur / menu vide → captures complémentaires
+     (8 lots, vrai menu, couleur perso).
+  7. [Remarque] Adaptations des anciens tests légitimes ; l'EROFS vu par Codex sur
+     `menu-client-p1-c5` venait de son bac à sable en lecture seule — suite
+     complète re-vérifiée ici : 974/974.
+- **Point ouvert — décision parent requise.** L'AUDIT §6.2 (« Fond principal
+  (client) `#111111` ») et §6.3 (« Cartes : fond `#1B1B22` sur écrans client »)
+  demandent des corps sombres côté client ; P0-D1 les a laissés clairs/ivoire
+  (DA 7,6/10, cible ≥ 9 non atteinte). C'est une refonte visuelle à part entière
+  (Jouer, Carte, Menu : fonds, cartes, champs, contrastes à re-vérifier), hors
+  mandat de P0-D1 (isolation du thème + substitution magenta). Trancher : lot P1
+  « surfaces sombres client » dédié, ou accepter les corps clairs comme périmètre
+  définitif (et abaisser la cible DA). Le back-office reste clair dans les deux cas
+  (AUDIT §6.2, lisibilité de travail).
+- **Résiduels / non vérifié.** Pas de mesure sur téléphone réel (Lighthouse et
+  parcours à refaire sur le staging) ; le vrai logo Asian Home n'a pas été mesuré
+  (commerce de test sans logo) ; délai à froid Render non mesuré ; `npm audit` à
+  mesurer hors de cette VM.
+
+## 11/11/2026 — P0-U6 « Réveil Render » (écran d'attente honnête, décision documentée)
+- **Décision (coordinateur, mode autonome : option la moins chère, isolée derrière une configuration).**
+  Ni plan payant acheté, ni keep-alive : écran d'attente honnête + option payante documentée et
+  isolée en commentaire dans `render.yaml` (plan `free` inchangé sur les deux services). Le
+  keep-alive est écarté (docs/DEPLOIEMENT.md § 7.4) : il consommerait les 750 h gratuites partagées
+  (production + staging éveillés = ~1 488 h/mois pour un mois de 31 jours, 1 440 h pour 30 jours —
+  près du double du quota, suspension de tous les services Free à épuisement) et n'est pas garanti
+  (Render peut redémarrer un service Free à tout moment).
+- **Livré (`9647a1f`, puis correctifs revue Codex `8ba0ea9`).** `index.html` : après 6 s sans JS,
+  message conditionnel « Le chargement prend plus de temps que prévu. Après une période sans visite,
+  le serveur peut mettre environ 1 minute à se réveiller — merci de patienter. » ; après 2 minutes,
+  proposition de recharger. `src/chargement.css` : indicateur indéterminé (segment magenta qui va et
+  vient — il signale l'attente, il ne mesure rien) ; mouvement réduit : barre masquée, texte conservé.
+  `docs/DEPLOIEMENT.md` § 7 : décision complète, option payante, rejet du keep-alive, mesure à froid.
+- **Dit explicitement : le parcours < 30 s à froid reste impossible.** L'écran ne le rend pas
+  possible, il l'explique. Le seul correctif certain est le plan payant.
+- **Prix Render : environ 7 $/mois (Starter, 512 Mo, 0,5 CPU, toujours allumé) — INDICATIF, pas
+  « vérifié ».** La page render.com/pricing (consultée le 11/11/2026) est à rendu JS : son tableau
+  des tarifs n'était pas lisible en lecture texte ; le montant est corroboré par 5 sources tierces
+  concordantes nommées avec liens dans docs/DEPLOIEMENT.md § 7.3 (kuberns, budgetforge, cloudpicked,
+  agentdeals, bex.co) + la vérification déjà consignée au § 1 — à confirmer dans le dashboard Render
+  avant tout achat. Le comportement de veille (15 min, réveil ~1 min, 750 h) vient lui de la doc
+  officielle render.com/docs/free, lue en texte intégral le 11/11/2026. Le message de commit
+  `9647a1f` dit encore « prix vérifié » : formulation corrigée dans § 7.3 et dans ce JOURNAL, pas
+  dans l'historique (branche non poussée au moment du correctif, mais deux commits conservés pour
+  tracer la revue).
+- **Revue Codex** (`/tmp/codex-revue-p0-u6.txt`, diff `/tmp/codex-p0-u6.diff`) : **7 points** —
+  1. [Bloquant, fondé, CORRIGÉ] Limite architecturale : pendant le réveil, Render affiche SA
+     propre page de chargement — notre écran n'est servi qu'une fois le serveur réveillé ; il
+     n'accompagne donc pas le réveil lui-même. Documenté dans § 7.1 (ne pas sur-vendre l'écran) ;
+     une page servie indépendamment du service endormi reste hors périmètre, non décidée.
+  2. [Fondé, CORRIGÉ] Message affirmatif (« le serveur se réveille », « la première fois ») →
+     conditionnel (la cause n'est pas connue après 6 s ; le réveil se reproduit après chaque inactivité).
+  3. [Fondé, CORRIGÉ] Barre déterminée 60 s → indicateur indéterminé (une barre à 100 % sur un
+     chargement bloqué affirmait une mesure inexistante).
+  4. [Fondé, CORRIGÉ] Prix « vérifié » → indicatif, sources nommées, « à confirmer dans le
+     dashboard avant tout achat », répercuté dans render.yaml.
+  5. [Remarque, CORRIGÉ] Arithmétique précisée (744 h = 31 jours, 720 h = 30 jours) ; équivalence
+     redémarrage = réveil retirée (durée documentée pour la sortie de veille seulement).
+  6. [Fondé, CORRIGÉ partiellement] Tests renforcés (propriétés CSS vérifiées dans leur règle,
+     plan free rattaché à chaque service par découpage — sans importer le mini-lecteur, qui
+     exécuterait ses tests deux fois). Pas de contrôle comportemental des délais : pas de navigateur
+     sur cette VM — reste à observer sur le staging (§ 7.5).
+  7. [Remarque] CSP, mouvement réduit, YAML : rien à corriger.
+- **Tests : 974 → 988 (+14, `tests/reveil-render-p0-u6.test.ts`), suite verte, `npx tsc -p .`
+  propre, typecheck serveur inclus dans `npm test`.** Aucun test existant modifié. Incident en
+  cours de route : une ligne de commentaire `render.yaml` avait perdu son `#` (mini-lecteur YAML
+  refusant le fichier) — corrigée avant le commit ; puis mon premier balisage (div imbriquée dans
+  le loader) cassait la regex du test P0-U1 existant — résolu sans toucher au test, en passant la
+  barre en un seul élément (fond animé).
+- **Non vérifié.** Aucune mesure à froid réelle (pas de navigateur sur cette VM, production non
+  touchée — ni réveil forcé, ni mesure) ; la durée « environ 1 minute » est la durée documentée
+  par Render, pas une mesure locale. Mesure simulée locale non retenue (un démarrage local ne
+  simule pas le réveil Render). Protocole de mesure à froid sur le staging : docs/DEPLOIEMENT.md
+  § 7.5 (observer séparément la page Render puis l'écran applicatif).
+
+## 11/11/2026 — P1-D2 « Corps sombres côté client » (AUDIT.md §6.2/§6.3, suite de P0-D1)
+- **Périmètre (coordinateur, ne pas rouvrir).** Corps sombres (fond `#111111`, cartes `#1B1B22`)
+  sur les pages client **#/jouer, #/carte, #/menu** uniquement — #/roulette est une page
+  commerçant (configuration de la roue, onglets back-office), pas une page client ; #/caisse reste
+  claire (comptoir), #/desinscription et #/confidentialite restent claires (lecture longue).
+  Bascule centralisée dans `src/App.tsx` (branche publique, squelettes et erreurs inclus) ;
+  règles `.page-client` en fin de `src/index.css`, correspondances centralisées dans
+  `src/theme.ts` (`PAGE_CLIENT_SOMBRE`) — 0 hex hors thème.
+- **Livré.** `src/theme.ts` : table des correspondances + ratios documentés ; `src/index.css` :
+  bloc `.page-client` (fond nuit-950, cartes nuit-900, champs surface2, textes gris-200/300/400,
+  magenta-400 en accent, alertes sémantiques non converties) ; `src/components/CarteFidelite.tsx` :
+  `data-surface-claire` sur la section — la carte reste un objet clair (fond configurable par
+  commerce, défaut ivoire ; le noir n'est pas un fond de carte valide, cf. `src/lib/apparence.ts`).
+  Note d'étoiles en **blanc** (pas de token ambre dans `index.css` : la garde P0-D1 réserve
+  l'ambre aux alertes et aux étoiles, et les étoiles gardent leur couleur ambre).
+- **Écart à la spec tampon de l'AUDIT §6.3, conservé depuis P0-D1.** Cercle `#ff2e9a` + coche
+  blanche = 3,44:1, sous le seuil AA du texte courant (4,5:1) ; la coche est un indicateur
+  graphique (seuil non-texte 3:1), mais le tampon est traité comme texte par prudence : le
+  tampon posé garde blanc sur magenta bouton `#d1006f` (5,33:1). Limite connue : magenta clair
+  `#ff2e9a` en texte = 4,37:1 sur surface2 `#26262e` — jamais utilisé sur les champs. Contrastes
+  recalculés avec `contraste()` du repo (blanc/noir 18,88 ; gris-200/noir 15,25 ; gris-400/surface
+  6,74 ; magenta-400/surface 4,98 ; erreur red-300 9,95 ; ok green-300 13,45 ; placeholder blanc
+  65 % sur surface2 7,18).
+- **Deux régressions trouvées par les captures de la 1re passe, corrigées avant la 2e.**
+  1. Le corps de la carte de fidélité devenait sombre avec des textes restaurés en gris foncé
+     (illisible) : `[data-surface-claire] .bg-white` ne cible que les descendants — la section
+     porte `bg-white` ET l'attribut, il faut la règle accolée
+     `[data-surface-claire].bg-white` (test ajouté).
+  2. La carte de gain gardait son dégradé clair (magenta pâle → blanc) avec des textes passés
+     en blanc : le seul dégradé clair côté client devient sombre en CSS
+     (`[data-resultat='gain']`, teinte magenta en haut, nuit en bas — test ajouté).
+  Vérifié visuellement sur la 2e passe : carte blanche lisible sur page sombre, gain sombre
+  lisible, menu réel 81 plats en fiches sombres, carte couleur perso ivoire + bandeau `#d1006f`
+  inchangée, écrans commerçant inchangés (caisse, tableau de bord, clients, roulette, réglages).
+- **Revue Codex** (`/tmp/codex-revue-p1-d2.txt`, diff `/tmp/codex-p1-d2.diff`) : **7 points,
+  tous CORRIGÉS** —
+  1. [Fondé] Bouton secondaire de parrainage dans l'îlot clair (texte blanc sur carte blanche,
+     invisible) → restauration `.bouton-secondaire` (+ survol) dans `[data-surface-claire]`.
+  2. [Fondé] Lien « Réessayer maintenant » magenta clair dans l'alerte ambre (3,31:1 sur
+     ambre-50) → magenta foncé dans les alertes claires (7,56/7,49/7,17:1).
+  3. [Fondé] Vue d'erreur de chargement hors `.page-client` (elle remplaçait le conteneur) →
+     bascule déplacée sur `<main>`, autour de la frontière d'erreur (markup `<Suspense>` exigé
+     par le test performance-bundle inchangé).
+  4. [Fondé] Bordure rouge `aria-invalid` du champ écrasée par la bordure sombre → règles
+     explicites `[aria-invalid='true']` + focus (rouge clair, 5,43:1 sur surface2, anneau rouge).
+  5. [Fondé] SCORES.md concluait « pas de régression » pour un bundle à +1,28 % vs le seuil
+     535857 o → libellé corrigé : seuil strict dépassé, écart = le CSS des règles P1-D2
+     elles-mêmes, accepté et documenté.
+  6. [Remarque] « Aucune régression de temps » sur une seule passe → « temps proches,
+     comparaison non concluante ».
+  7. [Remarque] Bas du dégradé de gain = nuit-900, donc blanc 17,12:1 et non 18,88:1
+     (nuit-950) → commentaire et test corrigés ; précision WCAG sur la coche du tampon
+     (indicateur graphique, seuil 3:1 — le choix conservateur est maintenu).
+  Les 3 correctifs CSS de la revue (points 1, 2, 4) sont vérifiés par règles + contrastes
+  testés, pas par capture (parrainage non actif sur les commerces de mesure, alerte
+  hors-ligne et champ invalide non déclenchés par le script de mesure).
+- **SCORES.md.** DA : écrans client 9/10 (jouer, carte, menu public), moyenne **8,0/10**
+  (était 7,6/10) — la cible ≥ 9/10 n'est pas atteinte : les écrans commerçant (7–8/10)
+  restent clairs par choix du lot ; un lot commerçant serait nécessaire. Bundle (build frais) :
+  JS initial 472715 o (+184 o), CSS 70023 o (+4 750 o, +7,3 % — règles `.page-client`),
+  total initial 542738 o, JS total 780925 o, 22 chunks, plus gros 349423 o. Temps (2e passe,
+  1 passe, Slow 4G) : premier affichage `#/jouer` 4251 ms, LCP 4224 ms ; parcours scan → lot
+  8572 ms d'étapes (taps identiques) ; temps proches de P0-D1 (1 passe, comparaison non
+  concluante) ; 0 erreur console, 0 requête échouée. Le bundle initial dépasse le seuil strict
+  « pas de régression vs 535857 o » de 1,28 % (CSS des règles P1-D2, JS initial +0,04 %) —
+  écart accepté et documenté dans SCORES.md.
+- **Tests : 988 → 1006 (+18, `tests/corps-sombres-p1-d2.test.ts` — 16 initiaux + 2 correctifs
+  revue Codex), suite verte,
+  `npx tsc -p .` propre, typecheck serveur inclus dans `npm test`.** Aucun test existant
+  modifié. Incident en cours de route : mes commentaires contenaient des hex (`App.tsx`) et
+  des `amber-NNN` nus (`theme.ts`, `index.css`) — la garde `theme.test.ts` scanne aussi les
+  commentaires ; réécrits en toutes lettres (« ambre »), sans contourner la règle.
+- **Non vérifié.** Pas de mesure sur téléphone réel (captures Pixel 7 simulé seulement) ;
+  pas de mesure à froid Render (lot P0-U6) ; `npm audit` non mesurable sur cette VM
+  (403 `policy_denied` sur le registry).

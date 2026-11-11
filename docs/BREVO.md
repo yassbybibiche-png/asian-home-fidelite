@@ -4,10 +4,31 @@ Brevo est le **fournisseur choisi** pour les relances (SMS + e-mail) de l'app As
 Un seul compte, une seule clé API, deux canaux. Twilio reste en repli pour les SMS **seulement si**
 Brevo SMS n'est pas configuré (il n'est plus le prestataire par défaut).
 
-**État réel (10/11/2026)** : le code est écrit et testé contre un Brevo **simulé** (`fetch` injecté,
-`tests/brevo-sms.test.ts`, `tests/relances-p1-b3.test.ts`). **Aucun compte Brevo n'existe, aucune clé
-n'a été créée, aucun envoi réel n'a jamais eu lieu** — en production, tant que les variables ci-dessous
-ne sont pas posées, la route relance répond 501 et rien ne part.
+**État réel (11/11/2026)** : le code est écrit et testé contre un Brevo **simulé** (`fetch` injecté,
+`tests/brevo-sms.test.ts`, `tests/relances-p1-b3.test.ts`). **Le compte Brevo a été créé et activé le 11/11
+au matin** (e-mail + mot de passe, lien de confirmation cliqué, téléphone vérifié par SMS, identité vérifiée
+par e-mail) ; **clé API v3 « Asian Home Fidelite » créée** (accès Complet, expire 11/11/2027, 2FA non
+activée) ; **expéditeur « Asian Home Paris » validé** (Brevo déconseille le
+freemail Gmail pour la délivrabilité, pas de DKIM/DMARC) ; **expéditeur SMS `ASIANHOME`** ; les **5
+variables Render sont posées** (dont `BREVO_MODE_TEST=1`), déploiement « Live » le 11/11 à 08h18 ;
+`/sante` vérifié à 08h18 : `sms: true, email: true, smsPrestataire: 'Brevo', modeTest: true`.
+**Aucun envoi réel n'a jamais eu lieu** (mode test : e-mail en sandbox Brevo, SMS simulé).
+**Non re-vérifié dans ce lot** (lecture de `/sante` en production en délai dépassé, probablement le réveil
+Render — à re-vérifier au prochain passage).
+
+**État au 11/11/2026 (après activation, lot P2-Q5) :**
+- **Validation simulée vérifiée de bout en bout (lot P1-B7**, `tests/brevo-production-p1-b7.test.ts`, sans clé ni
+  réseau) : les 5 variables lues depuis l'environnement ; `/sante` combiné `sms: true, email: true,
+  smsPrestataire: 'Brevo', modeTest: true` ; relance bienvenue e-mail (sandbox Brevo, en-tête
+  `X-Sib-Sandbox: drop`, journal statut `test`) puis SMS (simulé, zéro appel réseau, journal `test`).
+- **Compte Brevo créé et activé** (voir « État réel » ci-dessus) ; **les 5 variables Render sont posées** ;
+  `/sante` en production vérifié à 08h18 : `sms: true, email: true, smsPrestataire: 'Brevo', modeTest: true`
+  (non re-vérifié dans ce lot — voir ci-dessus).
+- **Recette réelle (§5 B) : « attend l'accord explicite de l'utilisateur »** — aucun envoi réel fait ;
+  pré-requis restants : crédits SMS achetés (§2 : tarif à confirmer dans le compte) et destinataires définis.
+- **Tarif SMS :** la page Brevo affichait le 11/11 un tarif **à partir de 0,073 €/SMS** (signalé par
+  l'agent parent, **à confirmer** au moment de l'achat, contre ~0,045 €/SMS estimé le 10/11) — vérifier
+  le montant exact dans le compte avant d'acheter des crédits (§2).
 
 **Consigne du 10/11/2026 ~22h14 (mode autonome) : AUCUN envoi réel de SMS, d'e-mail ou de réponse
 Google, et aucun paiement réel, pendant le développement — mode test uniquement.** La vérification du
@@ -36,11 +57,13 @@ plus tard, hors développement, avec l'accord explicite de l'utilisateur (§5, p
 - **Route SMS utilisée** : `/v3/transactionalSMS/send` (route actuelle de la doc Brevo, lue le
   10/11/2026 — [référence API](https://developers.brevo.com/reference/send-async-transactional-sms)) ;
   l'ancienne route `/v3/transactionalSMS/sms` est dépréciée.
-- **Mention STOP** : chaque SMS de relance se termine par « STOP : répondez STOP » (mention
-  obligatoire en France pour un SMS marketing). Brevo **bascule automatiquement** un SMS
+- **Mention STOP** : chaque SMS de relance se termine par « STOP : <lien court de désinscription `/d/<id>/<jeton>`> »
+  (P1-B9 — le mot STOP est conservé, mention obligatoire en France pour un SMS marketing, mais il ne promet plus de
+  réponse : le lien, qui ouvre la page `#/desinscription` (retrait au clic), est le seul mécanisme utilisable avec
+  l'expéditeur alphanumérique Brevo). Brevo **bascule automatiquement** un SMS
   transactionnel en `marketing` quand son contenu porte un code STOP (doc Brevo) : les relances
-  sont donc traitées comme du marketing côté Brevo, ce qui est leur vraie nature. SMS ≤ 160
-  caractères, alphabet GSM : 1 SMS facturé par relance (vérifié par les tests).
+  sont donc traitées comme du marketing côté Brevo, ce qui est leur vraie nature. SMS en alphabet GSM, la plupart
+  font 2 segments : 2 SMS facturés par relance (vérifié par les tests).
 - **Priorité** : si `BREVO_SMS_SENDER` est posé → SMS via Brevo ; sinon, si Twilio est configuré →
   SMS via Twilio ; sinon → 501. L'e-mail passe toujours par Brevo.
 - **Mode test (`BREVO_MODE_TEST=1`, voir §5)** : tant que cette variable vaut `1`, **aucun SMS /
@@ -110,10 +133,11 @@ Estimation d'usage : quelques dizaines de relances par mois au lancement → que
    (~4,50 € HT) suffit pour démarrer. Sans crédits, Brevo refuse l'envoi (la route répond 502 et
    le journal des envois marque l'essai « erreur »).
 
-### Étape E — Variables Render (4 variables, voir §4)
+### Étape E — Variables Render (5 variables, voir §4)
 
 1. [dashboard Render](https://dashboard.render.com) → service `asian-home-fidelite` →
-   **Environment** → ajouter les 4 variables (voir §4) → **Save Changes** (le service redéploie).
+   **Environment** → ajouter les 5 variables (voir §4) → **Save Changes** (le service redéploie).
+   **Fait le 11/11/2026** (déploiement « Live » à 08h18).
 2. Aucune variable dans `render.yaml` : les secrets sont posés à la main dans le dashboard
    (ils y sont déjà, `sync: false`).
 
@@ -179,6 +203,17 @@ Prérequis : variables de l'étape E posées, **dont `BREVO_MODE_TEST=1`**.
 
 **Ne pas faire pendant le développement.** Quand l'utilisateur donne son accord explicite :
 
+**Pré-requis (à cocher avant de retirer le mode test) :**
+- [x] Compte Brevo créé, clé API `BREVO_API_KEY` posée dans Render (fait le 11/11/2026, étape B).
+- [x] Expéditeur e-mail validé chez Brevo, `BREVO_SENDER_EMAIL` posée (fait le 11/11/2026, étape C).
+- [ ] Expéditeur SMS `ASIANHOME` posé (`BREVO_SMS_SENDER`) et **crédits SMS achetés** (sans crédits,
+  Brevo refuse l'envoi — 502, journal « erreur »). Tarif à confirmer dans le compte (§2 : ~0,045 €/SMS
+  estimé le 10/11, à partir de 0,073 €/SMS affiché le 11/11). **Achat de crédits non confirmé** (à vérifier
+  dans le tableau de bord Brevo avant la recette SMS).
+- [ ] Destinataires définis et consentants : e-mail `yassbybibiche@gmail.com` (l'utilisateur), puis
+  1 SMS vers **son propre numéro** (celui vérifié chez Brevo) — **aucun vrai client** ne reçoit quoi
+  que ce soit pendant cette recette.
+
 1. Retirer `BREVO_MODE_TEST` des variables Render (redéploiement), vérifier `/sante` :
    `integrations.modeTest` absent, `sms: true, email: true`.
 2. Créer un client test « Yassine Test » avec l'e-mail `yassbybibiche@gmail.com`, **cocher** la case
@@ -189,12 +224,15 @@ Prérequis : variables de l'étape E posées, **dont `BREVO_MODE_TEST=1`**.
    de désinscription en pied) ; journal des envois (**Messages** → « Journal des envois ») :
    ligne « bienvenue / e-mail / Envoyé ».
 5. Rejouer la même relance le même jour → **409** (« déjà été envoyée à ce client aujourd’hui »).
-6. SMS : même client test avec son propre numéro, canal **sms** → SMS reçu signé `ASIANHOME`,
-   avec le lien court `/c/<id>` et la mention STOP ; journal : ligne « bienvenue / sms / Envoyé ».
+6. SMS : **un deuxième client test** (« Yassine Test SMS ») avec son propre numéro, canal **sms**,
+   modèle **bienvenue** → SMS reçu signé `ASIANHOME`, avec le lien court `/c/<id>` et la mention STOP ;
+   journal : ligne « bienvenue / sms / Envoyé ». **Ne pas réutiliser le client de l'étape 2 le même jour :**
+   l'anti-doublon (1 relance par modèle, par client et par jour) ne distingue pas le canal — un SMS
+   « bienvenue » au même client le même jour que l'e-mail répondrait 409, comme à l'étape 5.
 7. Cliquer le lien de désinscription de l'e-mail → page de désinscription → bouton
    « Me désinscrire » → le consentement du client test passe à `false` (fiche client) et toute
    relance suivante répond 409.
-8. **Supprimer le client test** ensuite (fiche client → « Supprimer ce client ») pour ne laisser
+8. **Supprimer les deux clients test** ensuite (fiche client → « Supprimer ce client ») pour ne laisser
    aucune donnée de test en production.
 
 ## 6. STOP et désinscription — limites connues (lire avant d'activer)
@@ -203,10 +241,11 @@ Prérequis : variables de l'étape E posées, **dont `BREVO_MODE_TEST=1`**.
   le client ne peut pas répondre au SMS (il n'y a pas de numéro destinataire). Brevo met en
   liste noire les contacts qui répondent STOP **quand une réponse est possible** (expéditeur
   numérique), mais ce n'est pas le cas ici. Conséquence : **le consentement de l'app est la
-  seule source de vérité** — un client qui veut arrêter les SMS le dit au commerçant (qui retire
-  le consentement sur la fiche), clique le lien de désinscription d'un e-mail, ou demande la
-  suppression de sa carte. La route `POST /commerces/:id/stop-sms` répond **501** quand les SMS
-  partent via Brevo (elle reste réservée au webhook Twilio, avec signature).
+  seule source de vérité** — un client qui veut arrêter les SMS clique le lien de désinscription
+  porté par chaque SMS (`STOP : <lien court /d/…>`, P1-B9, même jeton HMAC que les e-mails), le dit
+  au commerçant (qui retire le consentement sur la fiche), clique le lien de désinscription d'un
+  e-mail, ou demande la suppression de sa carte. La route `POST /commerces/:id/stop-sms` répond
+  **501** quand les SMS partent via Brevo (elle reste réservée au webhook Twilio, avec signature).
 - **La mention STOP reste dans le texte** (obligation française pour un SMS marketing) et fait
   basculer le message en `marketing` côté Brevo (voir §1).
 - **E-mail** : désinscription par le lien de l'app (retrait au clic, pas à l'ouverture — un

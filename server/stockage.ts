@@ -23,8 +23,11 @@ export interface DemandeRattrapageTrace extends DemandeRattrapage {
   clientId: string
 }
 
-/** Secret visé par le dernier échec enregistré sur un compteur (P0-S2) : PIN admin, PIN commerce ou code équipe. */
-export type PorteeAuth = 'admin' | 'commerce' | 'equipe'
+/**
+ * Secret visé par le dernier échec enregistré sur un compteur (P0-S2) : PIN admin, PIN commerce ou code équipe ;
+ * `client` (P0-S7, migration 0009) : preuve d'accès à une carte de fidélité (jeton client, lien d'accès).
+ */
+export type PorteeAuth = 'admin' | 'commerce' | 'equipe' | 'client'
 
 /**
  * Compteur d'échecs d'authentification (migration 0006 : `tentatives_auth`). `cle` = `ip:<ip>` (tous secrets
@@ -37,6 +40,17 @@ export interface TentativesAuth {
   echecs: number
   bloqueJusqua: string | null
   derniereTentative: string
+}
+
+/**
+ * Compteur d'une limite publique (migration 0010 : `compteurs_publics`). `cle` = clé du compteur en mémoire
+ * (`lecture:<ip>`, `carte:<id>`, `inscription:<commerce>:<contact>`…) ; `debut` = début ISO de sa fenêtre d'une
+ * minute ; `n` = requêtes dans cette fenêtre. Aucune donnée client : la clé, un horodatage, un nombre.
+ */
+export interface CompteurPublic {
+  cle: string
+  debut: string
+  n: number
 }
 
 type P<T> = T | Promise<T>
@@ -62,10 +76,17 @@ export interface Stockage {
   readonly type: 'sqlite' | 'supabase'
   meta(cle: string): P<string | undefined>
   majMeta(cle: string, valeur: string): P<void>
+  /** Supprime une clé de `meta` (P0-S7 : version d'accès d'une carte supprimée) ; absente : rien. */
+  supprimerMeta(cle: string): P<void>
   commerces(): P<Commerce[]>
   commerce(id: string): P<Commerce | undefined>
   pin(id: string): P<Pin | undefined>
   ajouterCommerce(c: Commerce, pin: Pin): P<void>
+  /**
+   * Supabase (P0-S11) : dans une `transaction` qui a relu ce commerce, écriture conditionnée à la version lue
+   * (ErreurConflit si une autre requête l'a modifié entre-temps) ; sinon inconditionnelle. SQLite : transactions réelles
+   * et sérialisées (voir `transaction` plus bas), aucune autre écriture ne s'intercale — rien à vérifier.
+   */
   majCommerce(c: Commerce): P<void>
   majPin(id: string, pin: Pin): P<void>
   clients(commerceId: string): P<Client[]>
@@ -95,12 +116,19 @@ export interface Stockage {
   supprimerMembre(commerceId: string, id: string): P<void>
   /** Journal d'audit, du plus récent au plus ancien. */
   journal(commerceId: string, limite: number): P<EntreeJournal[]>
+  /**
+   * Jamais ignoré en silence (P0-S11) : Supabase sans la table (0003) lève ErreurMigrationManquante — le serveur refuse
+   * d'ailleurs de démarrer en Supabase sans la 0003. Les routes l'appellent APRÈS l'écriture métier.
+   */
   ajouterJournal(e: EntreeJournal): P<void>
   menu(commerceId: string): P<Menu | undefined>
   majMenu(m: Menu): P<void>
   /** Tables de la migration 0003 présentes (toujours vrai sous SQLite, le schéma est créé au démarrage). */
   schemaCartiz(): P<boolean>
-  /** Traces d'audit du programme (migration 0004 : parrainages, demandes de rattrapage). */
+  /**
+   * Traces d'audit du programme (migration 0004 : parrainages, demandes de rattrapage). Jamais ignorées (P0-S11) :
+   * Supabase sans les tables lève ErreurMigrationManquante ; le serveur refuse de démarrer en Supabase sans la 0004.
+   */
   ajouterParrainage(p: Parrainage): P<void>
   ajouterDemandeRattrapage(d: DemandeRattrapageTrace): P<void>
   /** Tables de la migration 0004 présentes (toujours vrai sous SQLite). */
@@ -122,6 +150,23 @@ export interface Stockage {
   tentativesAuth(cle: string): P<TentativesAuth | undefined>
   enregistrerTentativesAuth(t: TentativesAuth, purgerAvant: string): P<void>
   effacerTentativesAuth(cle: string): P<void>
+  /**
+   * Migration 0009 (P0-S7) appliquée : `tentatives_auth` accepte la portée `client`. Toujours vrai sous SQLite.
+   * Supabase sans elle : les échecs d'accès client sont comptés en mémoire seulement (comme sans la 0006).
+   */
+  schemaAuthClient(): P<boolean>
+  /**
+   * Compteurs des limites publiques (migration 0010 : `compteurs_publics`) : toutes les lignes, fenêtres passées
+   * comprises (le serveur ne garde que celles de la minute en cours). `enregistrerCompteurPublic` écrit la ligne
+   * entière (upsert sur `cle`) et supprime au passage les lignes dont la fenêtre est antérieure à `purgerAvant`.
+   * Supabase sans la table : lève ErreurMigrationManquante (le serveur se replie alors sur sa mémoire).
+   */
+  compteursPublics(): P<CompteurPublic[]>
+  enregistrerCompteurPublic(c: CompteurPublic, purgerAvant: string): P<void>
+  /** Supprime les lignes dont la fenêtre est antérieure à `avant` (purge au démarrage et à chaque écriture). */
+  purgerCompteursPublics(avant: string): P<void>
+  /** Table de la migration 0010 présente (toujours vrai sous SQLite). */
+  schemaCompteursPublics(): P<boolean>
   /**
    * Journal des envois de relances (migration 0007 : `envois`). Index unique (commerce, client, modèle, jour) sur les
    * lignes `en_cours` / `envoye` : une 2e réservation de la même relance le même jour lève ErreurConflit.
@@ -162,9 +207,10 @@ export interface Stockage {
 export class ErreurConflit extends Error {}
 
 /**
- * Table de la migration 0003 (equipe / journal / menus) absente de la base Supabase : migration pas encore appliquée.
- * Les lectures renvoient du vide et le journal est ignoré (l'existant continue de marcher) ; les nouvelles écritures
- * (équipe, menu) lèvent cette erreur → 503 explicite.
+ * Table d'une migration (0003 equipe / journal / menus par défaut, ou la migration nommée) absente de la base Supabase :
+ * migration pas encore appliquée. Les lectures renvoient du vide ; les écritures lèvent cette erreur → 503 explicite.
+ * Depuis P0-S11, le journal (0003) et les traces du programme (0004) ne sont plus ignorés : le serveur refuse de
+ * démarrer en Supabase sans ces deux migrations.
  */
 export class ErreurMigrationManquante extends Error {
   constructor(table: string, migration = '0003_cartiz.sql') {
@@ -231,6 +277,10 @@ const SCHEMA = `
     commerce_id TEXT NOT NULL, jour TEXT NOT NULL, type TEXT NOT NULL, n INTEGER NOT NULL,
     PRIMARY KEY (commerce_id, jour, type)
   );
+  CREATE TABLE IF NOT EXISTS compteurs_publics (
+    cle TEXT PRIMARY KEY, debut TEXT NOT NULL, n INTEGER NOT NULL CHECK (n >= 0)
+  );
+  CREATE INDEX IF NOT EXISTS compteurs_publics_debut ON compteurs_publics (debut);
 `
 
 type Ligne = { donnees: string }
@@ -245,6 +295,7 @@ export function ouvrirStockage(fichier: string) {
   const q = {
     meta: db.prepare('SELECT valeur FROM meta WHERE cle = ?'),
     majMeta: db.prepare('INSERT INTO meta (cle, valeur) VALUES (?, ?) ON CONFLICT (cle) DO UPDATE SET valeur = excluded.valeur'),
+    supprimerMeta: db.prepare('DELETE FROM meta WHERE cle = ?'),
     commerces: db.prepare('SELECT donnees FROM commerces ORDER BY rowid'),
     commerce: db.prepare('SELECT donnees FROM commerces WHERE id = ?'),
     pin: db.prepare('SELECT pin_hash AS hash, pin_sel AS sel FROM commerces WHERE id = ?'),
@@ -288,6 +339,12 @@ export function ouvrirStockage(fichier: string) {
     ),
     purgerTentativesAuth: db.prepare('DELETE FROM tentatives_auth WHERE derniere_tentative < ? AND (bloque_jusqu_a IS NULL OR bloque_jusqu_a < ?)'),
     effacerTentativesAuth: db.prepare('DELETE FROM tentatives_auth WHERE cle = ?'),
+    compteursPublics: db.prepare('SELECT cle, debut, n FROM compteurs_publics'),
+    majCompteurPublic: db.prepare(
+      `INSERT INTO compteurs_publics (cle, debut, n) VALUES (?, ?, ?)
+       ON CONFLICT (cle) DO UPDATE SET debut = excluded.debut, n = excluded.n`,
+    ),
+    purgerCompteursPublics: db.prepare('DELETE FROM compteurs_publics WHERE debut < ?'),
     ajoutEnvoi: db.prepare('INSERT INTO envois (id, commerce_id, client_id, modele, canal, statut, jour, date, donnees) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     majEnvoi: db.prepare('UPDATE envois SET statut = ?, donnees = ? WHERE id = ? AND commerce_id = ?'),
     envois: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
@@ -307,12 +364,15 @@ export function ouvrirStockage(fichier: string) {
 
   // Les transactions peuvent contenir des `await` (contrat commun avec Supabase) : elles passent une par une
   // (file d'attente). SQLite répondant sans attente réelle, aucune autre requête HTTP ne s'intercale pendant l'une d'elles.
+  // P0-S11 : c'est pourquoi SQLite n'a ni colonne `version` ni verrou optimiste (commerces, clients, avis) — BEGIN
+  // IMMEDIATE … COMMIT est déjà « tout ou rien » et sérialisé ; le verrou n'existe que sous Supabase.
   let file: Promise<unknown> = Promise.resolve()
 
   return {
     type: 'sqlite' as const,
     meta: (cle: string) => (q.meta.get(cle) as { valeur: string } | undefined)?.valeur,
     majMeta: (cle: string, valeur: string) => void q.majMeta.run(cle, valeur),
+    supprimerMeta: (cle: string) => void q.supprimerMeta.run(cle),
 
     commerces: () => lire<Commerce>(q.commerces.all()),
     commerce: (id: string) => lire<Commerce>(q.commerce.all(id))[0],
@@ -374,6 +434,14 @@ export function ouvrirStockage(fichier: string) {
       q.majTentativesAuth.run(t.cle, t.portee, t.echecs, t.bloqueJusqua, t.derniereTentative)
     },
     effacerTentativesAuth: (cle: string) => void q.effacerTentativesAuth.run(cle),
+    schemaAuthClient: () => true,
+    compteursPublics: () => (q.compteursPublics.all() as unknown as CompteurPublic[]).map((l) => ({ cle: l.cle, debut: l.debut, n: Number(l.n) })),
+    enregistrerCompteurPublic: (c: CompteurPublic, purgerAvant: string) => {
+      q.purgerCompteursPublics.run(purgerAvant)
+      q.majCompteurPublic.run(c.cle, c.debut, c.n)
+    },
+    purgerCompteursPublics: (avant: string) => void q.purgerCompteursPublics.run(avant),
+    schemaCompteursPublics: () => true,
     ajouterEnvoi: (e: EnvoiRelance) => inserer(q.ajoutEnvoi, e.id, e.commerceId, e.clientId, e.modele, e.canal, e.statut, e.jour, e.date, JSON.stringify(e)),
     majEnvoi: (e: EnvoiRelance) => inserer(q.majEnvoi, e.statut, JSON.stringify(e), e.id, e.commerceId),
     envois: (commerceId: string, limite: number, clientId?: string) =>

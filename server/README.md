@@ -13,14 +13,15 @@ voient enfin **les mêmes données**. Une seule instance Node pour tous les comm
 |---|---|
 | `server/index.ts` | Point d'entrée (`npm run serveur`) : variables d'environnement, fuseau, démarrage. |
 | `server/app.ts` | Routes `/api/v1`, PIN, anti-bruteforce, validation, service du front compilé (CSV : `src/lib/csv.ts`, partagé avec le front depuis la V2). |
+| `server/logs.ts` | **P2-Q6** : logs structurés JSON — une ligne par réponse terminée (niveau, horodatage, route masquée, statut, durée) ; jamais de secret, PIN, jeton, téléphone/e-mail brut ni identifiant de carte ou de client brut (empreinte SHA-256). Voir « Logs structurés et alertes ». |
 | `server/stockage.ts` | Base SQLite (schéma + requêtes) et contrat `Stockage` commun aux deux bases. |
 | `server/stockage-supabase.ts` | **S1** : même contrat sur Supabase (API REST PostgREST, clé service_role). |
 | `supabase/migrations/` | **S1** : schéma Postgres (`0001_schema_initial.sql`) et RLS (`0002_rls.sql`). |
 | `server/wallet.ts` | **V3** : Google Wallet préparé, inactif (voir « Intégrations préparées »). |
-| `server/notifications/` | **P1-B3** : relances SMS / e-mail branchées de bout en bout ; **lot « Brancher Brevo »** : SMS via Brevo (Twilio en repli), e-mail via Brevo ; aucun envoi sans clés (501). Voir « SMS / e-mail » et `docs/BREVO.md`. |
+| `server/notifications/` | **P1-B3** : relances SMS / e-mail branchées de bout en bout ; **lot « Brancher Brevo »** : SMS via Brevo (Twilio en repli), e-mail via Brevo ; **compte Brevo créé le 11/11/2026, 5 variables Render posées, mode test actif (`BREVO_MODE_TEST=1`) — aucun envoi réel**. Voir « SMS / e-mail » et `docs/BREVO.md`. |
 | `tests/serveur.test.ts` | Tests HTTP réels (port éphémère, base temporaire, `fetch`), lancés par `npm test`. |
 | `tests/migration-pglite.test.ts` | **S2** : la migration Supabase exécutée par un vrai Postgres local (PGlite, WebAssembly). |
-| `render.yaml` (racine) | **S3** : Blueprint Render du serveur (Free, Frankfurt, build / start, `NODE_VERSION`, 4 secrets `sync: false`). Validé par `tests/render-yaml.test.ts`. |
+| `render.yaml` (racine) | **S3** : Blueprint Render du serveur (Free, Frankfurt, build / start, `NODE_VERSION`, 5 secrets + `CORS_ORIGIN` `sync: false`). Validé par `tests/render-yaml.test.ts`. |
 
 ## Choix de la base : `node:sqlite` (retenu)
 
@@ -44,6 +45,22 @@ npm run build:api    # optionnel : le serveur sert alors aussi le front en mode 
 npm run serveur      # → http://localhost:3001/api/v1/sante
 ```
 
+### Vérification des types (P0-S21)
+
+Node exécute le serveur en supprimant les types **sans les vérifier** (même chose pour `npm test`), et `npm run build`
+(`tsc -p .`) ne couvre que `src/`. Le serveur se vérifie donc à part :
+
+```bash
+npm run typecheck:server   # = tsc -p tsconfig.server.json
+```
+
+`tsconfig.server.json` étend `tsconfig.json` (mêmes règles : `strict`, `noUnusedLocals`, `noUnusedParameters`) avec les
+types Node (`@types/node` 24, dépendance de dev) au lieu de `vite/client`, et `lib: ["ES2022"]` sans le DOM (les `fetch`,
+`URL`, `Response`… viennent des types Node). Il inclut `server/` et, par les imports, les fichiers de `src/` partagés
+(`src/lib/*.ts`, `src/types.ts`, `src/data/*`, `seed.json`). La vérification est branchée dans `npm test` (elle tourne
+avant les tests) : une erreur de type serveur fait échouer `npm test`. Elle n'est pas branchée dans `npm run build` /
+`build:api` (build Render) — décision volontaire, à trancher à la fusion.
+
 En développement, sans aucune variable : PIN admin `000000`, PIN commerçant d'Asian Home Paris `1234`
 (un avertissement s'affiche au démarrage). **Ces PIN de développement ne sont jamais acceptables en production** :
 en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
@@ -56,6 +73,7 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `ADMIN_PIN` | dev : `000000` ; **production : obligatoire** | PIN admin (création de commerces, accès à tous les commerces, réinitialisation d'un PIN). En production : 8 à 12 chiffres, pas tous identiques, sinon refus de démarrer. |
 | `PIN_ASIAN_HOME` | dev : `1234` ; **production : obligatoire au 1er démarrage** | PIN commerçant (4 à 6 chiffres) donné à Asian Home Paris lors de la création de la base. Ignoré ensuite (le changer via `PUT /pin`). |
 | `SESSION_SECRET` | dev : secret éphémère (avertissement) ; **production : à créer** | **P0-S1.** Secret de signature (HMAC-SHA256) des jetons de session, 32 caractères minimum (ex. `openssl rand -base64 48`). Absente en production : le serveur **démarre quand même** (avertissement dans les journaux), `POST /sessions` répond 503 et le front reste sur le PIN en en-tête. Trop courte en production : refus de démarrer. La changer ferme toutes les sessions ouvertes. |
+| `AUTH_CLIENT` | production : `stricte` si `SESSION_SECRET` existe, sinon `transition` (avertissement) ; dev : `transition` | **P0-S7.** Accès des clients à leur carte (voir « Accès client aux cartes »). `stricte` = jeton client exigé pour la carte complète, le tirage, le profil, les messages, le rattrapage, les droits RGPD ; `transition` = jetons émis et vérifiés, mais l'accès d'avant P0-S7 (lien ou contact seuls) reste admis. `stricte` sans `SESSION_SECRET` → refus de démarrer ; autre valeur → refus de démarrer. |
 | `NODE_ENV` | — | `production` active le mode production. Sur Render, la variable `RENDER` (posée par Render) l'active aussi. |
 | `DB_FILE` | `data/fidelite.db` | Chemin du fichier SQLite. |
 | `DEMO` | `0` | `1` = ajoute aussi les 2 commerces de démo (Atelier Coiff' Camille, Maison Lila) avec leurs données fictives, marqués `demo: true`. |
@@ -85,8 +103,12 @@ clé n'existe encore : rien n'a été testé contre un vrai Supabase. Ce qui a �
 
 **Choix du stockage** (au démarrage) : `SUPABASE_URL` **et** `SUPABASE_SERVICE_ROLE_KEY` définies → Supabase ; aucune des deux →
 SQLite (`DB_FILE`), exactement comme avant ; une seule des deux → refus de démarrer (pour ne jamais écrire par erreur dans un
-SQLite éphémère). `GET /api/v1/sante` indique `"stockage": "sqlite"` ou `"supabase"`. `npm run serveur` lit aussi un fichier
-`.env` s'il existe (modèle : `.env.example` à la racine ; `.env` est ignoré par git).
+SQLite éphémère). **En production (`NODE_ENV=production` ou `RENDER`), aucune des deux → refus de démarrer aussi (P0-S9) :**
+`[serveur] En production, Supabase est obligatoire…` — plus de bascule silencieuse vers un SQLite vide (sur Render, le
+fichier est perdu à chaque redéploiement ou réveil). Hors production, SQLite reste le défaut. `GET /api/v1/sante` indique
+`"stockage": "sqlite"` ou `"supabase"` — et, si SQLite en production (démarrage par un autre chemin),
+`"alerteStockage"` avec le message explicite. `npm run serveur` lit aussi un fichier `.env` s'il existe (modèle :
+`.env.example` à la racine ; `.env` est ignoré par git).
 
 **Variables** (modèle `.env.example`, placeholders seulement) :
 
@@ -158,18 +180,35 @@ doc** (compter quelques minutes, non garanti). Délai pour réactiver : **1 an**
 clés notés en S1 étaient périmés (voir « Variables » ci-dessus), et le délai de restauration trouvé (1 an) diffère de l'ancien
 chiffre de 90 jours qu'on trouve encore en ligne.
 
-**Egress — point à surveiller (estimation, pas une mesure).** Le front en mode API recharge **tout l'état** du commerce
-toutes les 10 s tant qu'un écran commerçant est visible (`INTERVALLE_RECHARGEMENT_MS`, `src/store.tsx`), et le serveur relit
+**Egress — mesuré (P1-P1, 11/11/2026), pas une estimation.** Le front en mode API recharge **tout l'état** du commerce
+toutes les 30 s tant qu'un écran commerçant est visible (`INTERVALLE_RECHARGEMENT_MS`, `src/store.tsx`), et le serveur relit
 alors clients, tirages et avis dans Supabase. Tailles mesurées sur le seed : ~430 octets par client, ~210 par tirage, ~265 par
-avis. Avec 100 clients et 100 tirages, ~65 Ko par rechargement ; une tablette ouverte 12 h/jour = ~4 300 rechargements/jour
-≈ 280 Mo/jour ≈ **8 Go/mois avant compression** — au-dessus des 5 Go. Le `fetch` de Node demande des réponses compressées
-(gzip) ; si l'API Supabase compresse et facture les octets compressés, le volume serait plusieurs fois plus faible —
-**non vérifié** (les pages lues ne le disent pas). Au lancement (0 client) c'est négligeable. **À faire** : regarder l'usage d'egress dans
-le dashboard Supabase (page Usage) après 1 à 2 semaines ; s'il approche 5 Go, passer l'intervalle à 30 ou 60 s (une
-constante) ou fermer l'écran commerçant quand il ne sert pas.
+avis. Mesure locale (vrais octets UTF-8, `tests/egress-p1-p1.test.ts`, 150 clients / 100 visites / journal 100 entrées,
+1 onglet visible 12 h/j, 30 j) : HTTP `/etat` 69 210 o + `/commerces` 1 088 o = 70 298 o par rechargement →
+**3,04 Go/mois côté navigateur, 3,50 Go/mois côté PostgREST** (lignes lues avec les colonnes sélectionnées —
+proxy de l'egress Supabase, pas la mesure dashboard) à 30 s — **sous les 5 Go gratuits**. À 300 clients :
+4,68 Go HTTP / 5,60 Go PostgREST — **seuil 5 Go côté PostgREST vers ~257 clients** : un rechargement différentiel
+deviendra alors nécessaire (non fait : il exigerait un point de reprise côté serveur). La compression P2-Q2
+(gzip/brotli, voir « Compression des réponses ») réduit le flux serveur → navigateur, **pas** l'egress
+Supabase → serveur. La minuterie caisse 15 s (`GET /caisse`, 240 o) ne pèse que 0,02 Go/mois ; un 2e onglet
+double le rechargement périodique. **Reste : l'egress réel dans le dashboard Supabase** (Database → Usage ou
+Settings → Usage — non lu : pas d'accès navigateur sur la VM de développement).
 
 **Taille de base** : quelques centaines d'octets par client, tirage ou avis → 500 Mo représentent des centaines de milliers
 d'enregistrements ; pas un sujet pour un restaurant.
+
+**Plafond PostgREST — pagination serveur (P0-S18).** PostgREST plafonne une réponse à **1 000 lignes** par défaut : une
+lecture de liste sans `.range()` s'arrête silencieusement à 1 000 lignes. Toutes les lectures de listes passent donc par
+`lirePages` (`server/stockage-supabase.ts`, pages de 1 000 lignes, tri déterministe obligatoire sinon une ligne peut être
+lue deux fois ou jamais) : `commerces()`, `clients()`, `tirages()`, `tiragesClient()`, `tiragesParCode()`, `avis()`,
+`membres()` (et déjà `compteursEvenements()`). Les lectures d'une seule ligne et celles à limite explicite (`journal`,
+`envois`) ne paginent pas. Conséquence : `GET …/etat`, l'export CSV et les statistiques (`src/lib/stats.ts`) sont complets
+au-delà de 1 000 clients / tirages / avis — l'écran Clients affiche déjà la liste par pages de 50 (« Charger plus »).
+Résiduel : le bilan de `supprimerClient` compte les lignes supprimées renvoyées par PostgREST (plafonné à 1 000 par
+table) — la suppression elle-même n'est pas plafonnée, seul le chiffre du journal peut être un minimum si un client
+avait plus de 1 000 tirages. Les lectures ne sont pas « snapshot » : une écriture concurrente pendant une lecture
+paginée (fenêtre < 1 s) peut dupliquer ou omettre une ligne — les stats et l'export tolèrent une ligne de plus ou de
+moins, et la pagination par curseur n'a pas été jugée utile (revue Codex P0-S18 point 2).
 
 ### Validation de la migration (S2) — exécutée sur Postgres local, PAS sur Supabase
 
@@ -209,10 +248,10 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 |---|---|---|
 | `POST /sessions` | PIN / code dans le corps | **P0-S1.** `{ role: 'commerce', commerceId, pin }`, `{ role: 'admin', pin }` ou `{ role: 'equipe', commerceId, code }` → 201 `{ jeton, role, commerceId?, membreNom?, expireLe }`. Même anti-bruteforce que les en-têtes (401 / 429), re-hachage scrypt au passage. 503 si `SESSION_SECRET` absente. |
 | `DELETE /sessions` | `X-Session` | **P0-S1.** Révoque le jeton (« Verrouiller ») → `{ ok: true }` ; idempotent ; 401 si jeton absent ou falsifié. |
-| `GET /sante` | public | `{ ok, version, mode, stockage, demo, integrations }` — `integrations` (V3) : `{ googleWallet, appleWallet: 'en_suspens', googleBusinessProfile, sms, email }`, chacun `false` tant que rien n'est configuré ; `smsPrestataire: 'Brevo' \| 'Twilio'` présent seulement si `sms` est `true` (nom du prestataire SMS effectif, pour la page de confidentialité) ; `modeTest: true` présent seulement si `BREVO_MODE_TEST=1` (aucun envoi réel). `migrations` : `{ cartiz, programme, relances }` — `relances` = migration 0007 (table `envois`) appliquée. |
+| `GET /sante` | public | `{ ok, version, mode, stockage, demo, integrations }` — `integrations` (V3) : `{ googleWallet, appleWallet: 'en_suspens', googleBusinessProfile, sms, email }`, chacun `false` tant que rien n'est configuré ; `smsPrestataire: 'Brevo' \| 'Twilio'` présent seulement si `sms` est `true` (nom du prestataire SMS effectif, pour la page de confidentialité) ; `modeTest: true` présent seulement si `BREVO_MODE_TEST=1` (aucun envoi réel). `migrations` : `{ cartiz, programme, relances, mesure }` — `relances` = migration 0007 (table `envois`), `mesure` = migration 0008 (table `evenements_jour`). Les migrations 0009 (auth client) et 0010 (compteurs publics) ne figurent pas dans `/sante` : 0009 se vérifie par `GET /api/v1/sante/acces-client` → `migration: true`, 0010 par `select count(*) from public.compteurs_publics;` sans erreur (voir « Migration 0009 » / « Migration 0010 »). |
 | `GET /commerces` | public | Fiches publiques (jamais de PIN ni de hash). |
 | `GET /commerces/:id` | public | Une fiche publique. |
-| `GET /cartes/:clientId` | public | **Ajout V2** (page `#/carte/:clientId` et état de la roue) : `{ client (sans téléphone ni e-mail), commerce (fiche publique), jeu: { statut: 'pret' \| 'sansVisite' \| 'dejaJoue', lotDuJour, codeDuJour, remisDuJour } }`. P0-U3 : `codeDuJour` = code gagnant du tirage **du jour** de ce client (null si perdant ou pas de tirage), re-servi à son titulaire (autre téléphone, cache vidé) ; aucune autre route publique ne renvoie de code. 404 inconnue, 409 commerce inactif. P1-C3 : `historiqueLots` = lots gagnés à la roue (20 derniers, perdants exclus) `{ lot, date, statut: 'valable' \| 'remis' \| 'expire' }`, **sans aucun code**. |
+| `GET /cartes/:clientId` | public | **Ajout V2** (page `#/carte/:clientId` et état de la roue) : `{ client (sans téléphone ni e-mail), commerce (fiche publique), jeu: { statut: 'pret' \| 'sansVisite' \| 'dejaJoue', lotDuJour, codeDuJour, remisDuJour } }`. P0-U3 : `codeDuJour` = code gagnant du tirage **du jour** de ce client (null si perdant ou pas de tirage). P0-S19 : il n'est servi qu'au titulaire authentifié (jeton client de la carte, `Authorization: Bearer`) — sans jeton : null, même en vue complète (mode transition) ; aucune autre route publique ne renvoie de code en mode strict (en transition, le tirage et l'export RGPD par contact seul renvoient encore des codes — voir « Modes »). 404 inconnue, 409 commerce inactif. P1-C3 : `historiqueLots` = lots gagnés à la roue (20 derniers, perdants exclus) `{ lot, date, statut: 'valable' \| 'remis' \| 'expire' }`, **sans aucun code**. |
 | `POST /cartes/retrouver` | public | **P1-C3** (« Carte introuvable », audit F-12). `{ contact }` → **toujours 202 `{ ok: true, envoi }`**, que le contact ait une carte ou non ; `envoi` = un prestataire est configuré pour ce canal (Brevo pour un numéro comme pour un e-mail, Twilio en repli pour un numéro — état du serveur, déjà public dans `/sante`). Si `envoi`, la recherche et l'envoi du lien (`/c/<id>` en SMS, `#/carte/<id>` en e-mail) se font **après** la réponse (le temps de réponse ne trahit rien) ; 3 envois max par contact et par 24 h. Sans prestataire : rien n'est cherché ni envoyé. 400 si le contact est illisible ; limite `ficheClientParIp`. |
 | `POST /commerces` | admin | `{ nom, type, lienGoogle?, pin, …réglages? }` → crée le commerce (défauts de `nouveauCommerce`). |
 | `PATCH /commerces/:id` | commerçant | Réglages : `nom, type, logo, lienGoogle, coordonnees, recompense, seuilTampons, lots, reglesReponseAuto, actif`. Tout autre champ → 400. Réapplique les règles d'avis (comme le front). |
@@ -221,10 +260,10 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `DELETE /commerces/:id/logo` | commerçant | **P1-B5.** « Revenir au logo par défaut » : `logo` vidé, image effacée de `meta` → `{ commerce }`. Idempotent. |
 | `PUT /commerces/:id/pin` | commerçant ou admin | `{ pin }` : change le PIN (PIN perdu → l'admin le réinitialise). |
 | `GET /commerces/:id/etat` | commerçant | `{ commerce, clients, tirages, avis }`. |
-| `POST /commerces/:id/clients` | public ou commerçant | `{ prenom, contact }` → inscrit ou retrouve (201 / 200 + `existant`). En public : réponse sans téléphone ni e-mail, commerce actif requis. Un PIN fourni est toujours vérifié. |
+| `POST /commerces/:id/clients` | public ou commerçant | `{ prenom, contact }` → inscrit ou retrouve. **P2-S13 (signaux uniformisés) : en public, même statut 201 et même forme `{ client }`, sans `existant` (nouvelle carte : + `jeton` ; carte existante : pas de jeton, « Retrouver ma carte » / comptoir ; mode strict : 409 sans donnée). Résiduels : la présence du jeton distingue création et reprise, et la carte renvoyée permet de lire `jeu.statut` sans jeton en mode transition (fermé en mode strict).** Avec PIN : 201 / 200 + `existant` (le personnel voit déjà les clients). En public : réponse sans téléphone ni e-mail, commerce actif requis. Un PIN fourni est toujours vérifié. |
 | `POST /commerces/:id/clients/:clientId/visite` | commerçant | `validerVisite` (1 tampon). |
 | `POST /commerces/:id/clients/:clientId/recompense` | commerçant | `offrirRecompense` (report de l'excédent) ; 409 si pas encore débloquée. |
-| `POST /commerces/:id/tirages` | **public** | `{ contact, prenom? }` → retrouve / crée le client, vérifie **côté serveur** la visite du jour et le tirage du jour (409 sinon), tire le lot côté serveur, l'enregistre → `{ lot, code, date, perdant }`. |
+| `POST /commerces/:id/tirages` | **public** | `{ contact, prenom? }` → retrouve / crée le client, vérifie **côté serveur** la visite du jour et le tirage du jour, tire le lot côté serveur, l'enregistre → `{ lot, code, date, perdant }`. **P2-S13 : refus 409 à message UNIQUE, identique sans visite ou déjà joué (la raison précise reste visible par le titulaire via `jeu.statut` de `GET /cartes/:id`).** |
 | `POST /commerces/:id/avis` | commerçant | `{ auteur, note 1-5, texte?, date? }` (saisie manuelle / simulation) + `appliquerRegles`. |
 | `PATCH /commerces/:id/avis/:avisId` | commerçant | `{ reponse?: texte \| null, brouillon?: texte \| null }` puis `appliquerRegles` (un brouillon supprimé peut donc être reproposé si la règle « brouillon » est active). |
 | `GET /commerces/:id/export.csv` | commerçant | Clients en CSV (UTF-8 avec BOM, séparateur `;` pour Excel FR) : `prenom;telephone;email;tampons;visites;derniereVisite;creeLe`. |
@@ -238,7 +277,8 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `GET /cartes/:clientId` (complément) | public | Génère à l'ouverture les messages dus (relance 30 j, anniversaire) si ces règles sont actives ; renvoie aussi `menuDisponible`. Jamais `actionsTraitees` ni `clesMessages`. |
 | `POST /cartes/:clientId/lus` | public | Marque les messages de la carte comme lus. |
 | `PATCH /commerces/:id` (complément) | commerçant | Aussi : `eurosParPoint` (0,10 à 1 000), `catalogue` (`[{ id?, nom, cout, description? }]`, 30 max), `messagesAuto` (`{ bienvenue, recompense, presque, inactif, anniversaire, avis }`), `apparence` (`{ couleur?, fond?, banniere? }`, refus si contraste < 4,5:1 ou bannière non https). |
-| `GET /commerces/:id/caisse` | code équipe ou commerçant | `X-Equipe-Code: <4 chiffres>` → `{ auteur, commerce, clients }` (401 si code faux, compte dans l'anti-bruteforce). |
+| `GET /commerces/:id/caisse` | code équipe ou commerçant | **P0-S14 (vue minimale).** `X-Equipe-Code: <4 chiffres>` → `{ auteur, commerce, clients, total, page, limite }` (401 si code faux, compte dans l'anti-bruteforce). Sans `?q=` : `clients` est **vide** — plus jamais la liste des clients ni le journal. Avec `?q=<prénom, téléphone ou e-mail>&page=&limite=` (limite 1–50, défaut 20) : seuls les clients correspondants, paginés côté serveur ; `total` = tous les correspondants. `commerce` est réduit à ce que le comptoir affiche et calcule (nom, logo, seuil, récompense, catalogue, taux de points, niveaux) : jamais les lots (probabilités) ni les réglages internes. |
+| `GET /commerces/:id/caisse/clients/:clientId` | code équipe ou commerçant | **P0-S14.** Fiche d'un seul client à la demande (scan QR, sélection) → `{ client }` (contact et soldes, sans messages ni données techniques). 404 si inconnu. |
 | `POST /commerces/:id/caisse/passage` | code équipe ou commerçant | `{ clientId, actionId, faitLe?, montantCentimes? }` → 1 tampon + points ; **409 si déjà un passage ce jour-là** ; `actionId` déjà reçu → `dejaTraite: true`, rien n'est recompté ; `faitLe` accepté s'il date de < 72 h (file hors ligne). Journalisé. |
 | `POST /commerces/:id/caisse/recompense` | idem | `{ clientId, actionId, faitLe? }` → récompense tampons (409 avant le seuil). Journalisé. |
 | `POST /commerces/:id/caisse/echange` | idem | `{ clientId, recompenseId, actionId, faitLe? }` → échange de points (409 solde insuffisant), tracé `{ soldeAvant, soldeApres, auteur }`, idempotent. Journalisé. |
@@ -256,11 +296,12 @@ Erreurs : toujours `{ "erreur": "message en français" }` — 400 validation, 40
 | `POST /commerces/:id/clients` (complément P1-C1) | public ou commerçant | Prénom **optionnel des deux côtés** (`prenom` absent ou `""`) ; seul le téléphone ou l'e-mail est obligatoire. La page de jeu n'envoie plus de prénom : il est demandé après le tirage (route suivante). |
 | `POST /commerces/:id/clients/:clientId/prenom` | public (carte + contact) | **P1-C1.** `{ prenom, contact }` → `{ client }` (carte publique, sans contact). Prénom demandé sur l'écran de gain, **seulement si la carte n'en a pas** : **409** si elle en a déjà un (personne ne renomme la carte d'un autre), **403** si le contact ne correspond pas à la carte (même contrôle que les routes RGPD), 400 vide / > 40 car., 404 carte inconnue. Ne touche ni au tirage ni au jeu du jour. Limite `ficheClientParIp`. |
 | `POST /commerces/:id/clients/:clientId/message-prive` | public (carte + contact) | **P1-C4.** `{ contact, note, texte }` → **201** `{ ok, message: { id, creeLe } }` (ni carte ni contact dans la réponse). Proposé sur l'écran de gain quand le client choisit **3★ ou moins** dans l'app, avant le lien Google (qui reste affiché). Stocké dans `clients.donnees.messagesPrives` (aucune migration), visible par le commerce dans `GET …/etat` (écran #/avis), **jamais renvoyé par `GET /cartes/:id`**, **jamais expédié** (ni SMS ni e-mail). **403** contact différent, 400 note hors 1–5 entier / texte vide / > 1000 car., 404 carte inconnue, **429** au-delà de 3 messages par carte et par jour (20 conservés au plus). Limite `ficheClientParIp` par IP **et** par carte. Effacé avec la fiche (RGPD) et inclus dans l'export individuel. |
-| `POST /commerces/:id/clients/:clientId/relance` | commerçant | **P1-B3.** `{ modele?: 'bienvenue' \| 'proche' \| 'inactif' \| 'anniversaire', canal?: 'sms' \| 'email', message? }` (modèle **ou** message libre ; canal par défaut : téléphone → SMS, sinon e-mail). **501** sans prestataire pour ce canal (cas actuel : rien n'est envoyé) ; **409** sans consentement, sans contact pour ce canal, ou même modèle déjà envoyé à ce client aujourd'hui (Paris) ; **503** migration 0007 absente (pas d'envoi sans anti-doublon) ; **502** prestataire en erreur ; 200 `{ envoye, canal, modele, envoi }`. Chaque tentative, même refusée, est journalisée dans `envois`. |
+| `POST /commerces/:id/clients/:clientId/relance` | commerçant | **P1-B3.** `{ modele?: 'bienvenue' \| 'proche' \| 'inactif' \| 'anniversaire', canal?: 'sms' \| 'email', message? }` (modèle **ou** message libre ; canal par défaut : téléphone → SMS, sinon e-mail). **501** sans prestataire pour ce canal (sans prestataire configuré — en production Brevo est configuré, en mode test : rien de réel ne part) ; **409** sans consentement, sans contact pour ce canal, ou même modèle déjà envoyé à ce client aujourd'hui (Paris) ; **503** migration 0007 absente (pas d'envoi sans anti-doublon) ; **502** prestataire en erreur ; 200 `{ envoye, canal, modele, envoi }`. Chaque tentative, même refusée, est journalisée dans `envois`. |
 | `GET /commerces/:id/envois` | commerçant | **P1-B3.** Journal des relances (200 dernières, `?client=<id>` pour un client) → `{ envois: [{ clientPrenom, date, modele, canal, statut, declencheur, auteur, raison? }], migration }`. Aussi dans `GET …/etat` (`envois`). Jamais le téléphone, l'e-mail ni le texte. |
 | `POST /commerces/:id/stop-sms` | public (signature Twilio) | **P1-B3.** Webhook Twilio « A message comes in » : `Body` = STOP / ARRET / DESINSCRIPTION… (casse et accents ignorés, 1er mot) → consentement du client de ce numéro (`From`) retiré, journalisé ; autre mot : rien. **501** sans Twilio configuré, **403** si `X-Twilio-Signature` est fausse. Répond un TwiML vide. **SMS via Brevo → 501 aussi** (expéditeur alphanumérique : pas de réponse possible ; voir « SMS / e-mail » et `docs/BREVO.md` §6). |
 | `POST /desinscription/:clientId/:jeton` | public (jeton HMAC) | **P1-B3.** Lien de désinscription des e-mails (page `#/desinscription/<clientId>/<jeton>`, bouton « Me désinscrire ») et One-Click `List-Unsubscribe-Post`. Jeton = HMAC du commerce + client (secret tiré une fois, gardé dans `meta`). Idempotent → `{ ok, commerce }` ; 404 lien invalide. |
 | `GET /c/:clientId` (hors `/api`) | public | **P1-B3.** Lien court des SMS → 302 vers `/#/carte/<clientId>`. |
+| `GET /d/:clientId/:jeton` (hors `/api`) | public | **P1-B9.** Lien court de désinscription des SMS de relance → 302 vers `/#/desinscription/<clientId>/<jeton>` (le jeton n'est pas vérifié ici : c'est la page qui appelle `POST /api/v1/desinscription/…` après un clic de confirmation). |
 | `GET /commerces/:id/clients/:clientId/export.csv` | commerçant | **P1-B6.** Toutes les données de CE client en CSV (même format que l'export global : `;`, BOM, anti-injection) : profil, contact, tampons, points, visites, récompenses, échanges, tirages (lot, code, remise), rattrapages, consentement (date, origine), messages, relances. Une ligne par donnée : `rubrique;date;libelle;valeur`. Rien d'un autre client (le parrain n'apparaît que par « oui »), jamais de PIN / hash / code équipe ni d'identifiant technique. Journalisé (action `rgpd`). |
 | `DELETE /commerces/:id/clients/:clientId` | commerçant (pas l'équipe) | **P1-B6.** Corps obligatoire `{ "confirmation": "SUPPRIMER" }` (400 sinon). Suppression définitive avec la **cascade** décrite dans « RGPD » ci-dessous → `{ ok, bilan: { client, tirages, journal, parrainages, rattrapages, envois } }`. Journalisé SANS prénom, contact ni identifiant (qui, quand, motif, combien). 404 client inconnu. |
 | `GET /commerces/:id/purge` | commerçant | **P1-B6.** Avertissement avant purge → `{ conservationMois, maintenant, clients: [{ id, prenom, derniereActivite, purgeLe, statut: 'due' \| 'bientot', protection? }] }` : clients dont la date de purge (dernière visite, à défaut inscription, + durée) est passée ou tombe dans les 30 jours. `protection` = raison de ne PAS purger (exclu par le commerce, récompense en attente valable, plat en réserve valable, visite oubliée en attente). |
@@ -303,11 +344,109 @@ redémarrage du serveur. Supabase → **SQL Editor** → coller `supabase/migrat
 (rejouable). Vérifier : `select relname, relrowsecurity from pg_class where relname = 'sessions_revoquees';` → 1 ligne,
 `true`. Annulation : `0005_sessions_revoquees.down.sql` (supprime la table ; sans effet sur les données métier).
 
+### Accès client aux cartes (P0-S7, audit F-03)
+
+Avant P0-S7, connaître l'identifiant d'une carte (`cl-<horodatage base36>-<4 caractères>`, prévisible) suffisait à la
+lire en entier, à la modifier et à jouer à sa place ; connaître un téléphone suffisait à reprendre la carte (inscription)
+et à tirer la roue à la place du client. Désormais :
+
+- **Identifiant imprévisible** : `cl-` + UUID v4 (`nouvelIdClient`, `src/lib/fidelite.ts`), tiré **par le serveur** à la
+  création. Les cartes existantes gardent leur identifiant (aucune donnée réécrite) : voir « période de grâce ».
+- **Jeton client** (`Authorization: Bearer <jeton>`) : même format et même secret que les sessions
+  (`v1.<base64url(JSON)>.<HMAC-SHA256(SESSION_SECRET)>`), contenu `{ typ: 'client', jti, cid (carte), com (commerce),
+  ver, exp }` — jamais accepté comme session, ni l'inverse (`typ` ≠ `role`). **30 jours**, renouvelé par la page
+  (`POST /cartes/:id/jeton` avec le jeton) dès qu'il reste moins de 15 jours. Rangé dans le `localStorage` du téléphone
+  (`src/lib/jetonCarte.ts`, repli en mémoire si le stockage est bloqué).
+- **1re preuve = le téléphone qui s'inscrit** : `POST /commerces/:id/clients` (public) renvoie le jeton de la NOUVELLE
+  carte. Un contact **déjà inscrit** sans preuve → **409** « ce contact a déjà une carte ici » : ni la carte, ni son
+  identifiant, ni jeton, rien de modifié, aucun doublon (compté comme échec d'accès). Limite assumée : cette réponse dit
+  qu'un contact a une carte dans CE commerce — inhérent à une inscription sans code à usage unique (SMS / e-mail non
+  branchés), bornée par les limites par IP / par contact et par l'anti-bruteforce.
+- **Autres preuves** : **lien d'accès** à usage unique (`typ: 'lien'`, échangé par `POST /cartes/:id/jeton { lien }`) —
+  au comptoir (fiche client → « Afficher le QR d'accès à sa carte », équipe ou gérant, **15 min**, journalisé) ou dans le
+  message « Retrouver ma carte » (**24 h**, seulement si un prestataire SMS / e-mail est branché ; jamais renvoyé à
+  l'écran du demandeur). Usage unique : son `jti` est rangé dans `sessions_revoquees` (0005) ; en plus, pendant
+  l'échange, le `jti` est **réservé en mémoire** (`reserverPendant`, test et réservation synchrones) : deux échanges
+  simultanés du même lien → un seul jeton, l'autre 401. **Limite** : cette réservation ne vaut que pour UNE instance
+  (Render aujourd'hui) ; avec plusieurs instances, la fenêtre entre « déjà révoqué ? » et « révoquer » (allers-retours
+  Supabase) reviendrait — il faudrait alors une consommation atomique en base (insertion conditionnelle du `jti`).
+  Comptoir : « Générer un nouveau lien d'accès » remplace le QR affiché ; l'ancien lien n'est pas révoqué (il faudrait
+  révoquer toute la carte) mais reste à usage unique et tombe à son expiration (15 min).
+- **Ce que le jeton protège** (mode strict ; 401 uniforme sinon, que la carte existe ou non) : `GET /cartes/:id` en vue
+  **complète** (sans jeton : vue **limitée** = tampons + jeu du jour, sans prénom, messages, historique, demandes ni
+  contact) et, dans tous les modes, le **code gagnant du jour** (`jeu.codeDuJour`, P0-S19 : servi au titulaire
+  authentifié seulement — sans jeton : null, même en vue complète en mode transition) ; aucune autre route publique ne renvoie de code en mode strict.
+  `POST /cartes/:id/lus`, `/donnees` et `/suppression` (jeton **et** contact), `…/clients/:id/profil`, `…/rattrapage`
+  (demande du client), `…/prenom`, `…/message-prive`, et **`POST …/tirages`** (le joueur est la carte du jeton ; le
+  contact du corps n'est plus lu — la règle « 1 tirage par jour après visite validée » est inchangée).
+- **Révocation** : version d'accès par carte dans `meta` (`acces_client:<commerce>:<client>`, absente = 0) ; tout jeton
+  ou lien d'une version antérieure est refusé. `POST /cartes/:id/revocation` (le client, avec son jeton : « Déconnecter
+  tous mes appareils ») et `POST /commerces/:id/clients/:id/revocation-acces` (gérant). La version est supprimée avec la
+  carte (RGPD). Choisi plutôt qu'une table : pas de nouvelle table à sauvegarder (14 tables inchangées), `meta` est
+  déjà sauvegardée et lisible par service_role seul.
+- **Anti-bruteforce** : jeton falsifié / d'une autre carte / d'un autre commerce, lien invalide, identifiant inconnu,
+  contact déjà inscrit → échec compté dans `tentatives_auth` (portée `client`, clé `client-ip:<ip>`) : **30 échecs
+  sans pause de 10 min → IP bloquée** (429, 10 min doublés à chaque série, 24 h max), persistant (migration 0009).
+  Compteur séparé de celui des PIN : des clients sur le wifi du restaurant ne bloquent pas la tablette du gérant.
+  Jeton expiré ou révoqué : 401 sans compter (usure normale).
+- **Période de grâce des anciennes cartes** : jusqu'au **10/02/2027 00:00 (Paris)** — `GRACE_ANCIENS_ID_JUSQU_AU`,
+  `server/app.ts` (90 jours après le déploiement prévu le 12/11/2026 ; décaler la constante si le déploiement glisse).
+  Jusque-là, l'ancien lien / QR / lien court ouvre la vue limitée **et** donne un jeton sans autre preuve (la page le
+  demande seule : migration transparente au 1er accès) ; un bandeau prévient que l'ancien lien seul cessera d'ouvrir la
+  carte. Après : l'ancien identifiant seul → 404 (comme une carte inconnue), plus de jeton ; un jeton obtenu avant
+  reste valable jusqu'à son expiration (et se renouvelle) ; sinon lien d'accès du comptoir ou « Retrouver ma carte ».
+  Les nouveaux identifiants n'ont jamais eu cette faculté. **Une ancienne carte révoquée au moins une fois** (version
+  d'accès > 0, par le client ou le commerce) **perd la grâce tout de suite** : son ancien lien seul → 401 ; elle ne se
+  rouvre que par un lien d'accès (comptoir, « Retrouver ma carte ») — sinon la révocation se contournerait en
+  rechargeant la page.
+- **Liens courts** `/c/<id>` (SMS de relance) : redirection inchangée vers `#/carte/<id>` (vue limitée sans jeton) ;
+  `/c/<id>?a=<lien d'accès>` (SMS « Retrouver ma carte ») → `#/carte/<id>?acces=<lien>`, échangé puis retiré de l'adresse.
+- **Modes** (`AUTH_CLIENT`) : `stricte` en production ; `transition` = tout ce qui précède est émis et un jeton présent
+  est toujours vérifié, mais l'accès d'avant P0-S7 reste admis (lien seul = vue complète, contact seul = tirage, contact
+  existant = carte renvoyée **sans** jeton). Utile le temps d'un déploiement (anciens fronts en cache) ; les appels sans
+  jeton sont comptés : `GET /api/v1/sante/acces-client` → `{ mode, jetons, migration, graceAnciensLiensJusquAu,
+  accesSansJeton }` (route à part : le contenu de `/sante` est figé). Les tests historiques tournent dans ce mode.
+  **Résiduel P0-S19 (revue Codex, points 1–2) :** en transition, un contact seul suffit encore à obtenir des codes —
+  `POST …/tirages` renvoie le code du tirage qu'il vient de faire, et `POST /cartes/:id/donnees` (export RGPD, contact
+  seul) liste les codes de tous les tirages du client. En production le mode est `stricte` par défaut (dès que
+  `SESSION_SECRET` existe) : ces deux routes y exigent alors le jeton, et aucun code ne sort sans authentification.
+
+### Migration 0009 (portée « client » de l'anti-bruteforce, P0-S7) — à appliquer en production
+
+**Avant toute migration : une sauvegarde.** `node --env-file=.env scripts/sauvegarde-base.mjs` (voir « Sauvegarde /
+export » et `docs/SAUVEGARDE.md`) — à lancer par l'opérateur, jamais par un lot automatique.
+Puis Supabase → **SQL Editor** → coller `supabase/migrations/0009_auth_client.sql` → **Run** (rejouable). Elle élargit la
+contrainte `portee` de `tentatives_auth` (0006) à `'client'` et crée le marqueur `auth_client_active()` (lecture seule,
+service_role seul). Aucune table, aucune donnée client. Vérifier : `GET /api/v1/sante/acces-client` → `migration: true`.
+Sans elle, tout marche, mais les échecs d'accès client sont comptés **en mémoire seulement** (perdus au redémarrage ;
+avertissement `[securite]` dans les journaux). Annulation : `0009_auth_client.down.sql` (retire les seuls compteurs
+de portée `client`, remet la contrainte d'origine, garde les versions d'accès).
+
+### Migration 0010 (compteurs publics persistants, P0-S20) — à appliquer en production
+
+**Avant toute migration : une sauvegarde.** `node --env-file=.env scripts/sauvegarde-base.mjs` (voir « Sauvegarde /
+export » et `docs/SAUVEGARDE.md`) — à lancer par l'opérateur, jamais par un lot automatique. **Ne pas appliquer sans
+cette sauvegarde : la procédure a été testée sur Postgres local (PGlite, `tests/migration-pglite.test.ts`), pas sur la
+base de production — aucune migration n'est appliquée par ce lot, ni en production, ni ailleurs.**
+Puis Supabase → **SQL Editor** → coller `supabase/migrations/0010_compteurs_publics.sql` → **Run** (rejouable). Elle
+crée la table `compteurs_publics` (`cle`, `debut`, `n` ; RLS activée, seul `service_role` y a droit ; la clé reprend
+l'identifiant déjà utilisé par l'anti-bruteforce — IP, contact, identifiant de carte — sans nom ni contenu client).
+Vérifier : `select count(*) from public.compteurs_publics;` → 0 ligne, sans erreur (et les logs Render ne montrent
+plus l'avertissement `[securite] compteurs publics comptés en mémoire seulement` au démarrage). Sans elle, tout
+marche, mais les compteurs des routes publiques sont **en mémoire seulement** (perdus au redémarrage ; avertissement
+`[securite]` dès le démarrage). La sauvegarde exigée avant la migration n'échoue pas pour autant : `compteurs_publics`
+est une table **optionnelle** de la sauvegarde (compteurs éphémères d'une minute) — exportée vide tant que la migration
+n'est pas appliquée, et un ancien export à 14 tables se restaure sans elle. Annulation :
+`0010_compteurs_publics.down.sql` (supprime la table : les compteurs en cours sont perdus — ce ne sont que des
+fenêtres d'une minute — sans effet sur les données métier). La sauvegarde couvre désormais **15 tables** (la 0010
+ajoute `compteurs_publics` aux 14 de P0-S5).
+
 ### Migration 0003 (modules caisse / points / équipe / messages / menu) — à appliquer en production
 
-La base Supabase en ligne ne se met pas à jour toute seule. Tant que `0003_cartiz.sql` n'est pas exécutée, les nouvelles
-routes qui touchent `equipe`, `journal` ou `menus` répondent 500 (table absente) — **et les routes historiques qui écrivent
-désormais dans le journal (visite, récompense, caisse) aussi**. À faire une fois, dans l'ordre :
+La base Supabase en ligne ne se met pas à jour toute seule. Depuis P0-S11, **le serveur refuse de démarrer** en Supabase
+tant que `0003_cartiz.sql` (journal d'audit) ou `0004_programme.sql` (traces du programme) n'est pas exécutée : message
+explicite nommant la migration (voir « Atomicité (P0-S11) »). Sauvegarde d'abord (`node --env-file=.env
+scripts/sauvegarde-base.mjs`). À faire une fois, dans l'ordre :
 1. supabase.com → projet **asian-home-fidelite** → **SQL Editor** → *New query* ;
 2. coller tout le contenu de `supabase/migrations/0003_cartiz.sql` → **Run** (rejouable : sans risque si exécuté deux fois) ;
 3. vérifier : `select relname, relrowsecurity from pg_class where relname in ('equipe','journal','menus');` → 3 lignes, `true` ;
@@ -319,8 +458,94 @@ Exemple :
 curl -s -X POST localhost:3001/api/v1/commerces -H 'X-Admin-PIN: 000000' -H 'Content-Type: application/json' \
   -d '{"nom":"Chez Lin","type":"restaurant","pin":"4321"}'
 curl -s -X POST localhost:3001/api/v1/commerces/c-asian-home-paris/tirages -H 'Content-Type: application/json' \
-  -d '{"contact":"06 12 34 56 78"}'          # → 409 tant que la visite du jour n'est pas validée
+  -H 'Authorization: Bearer <jeton reçu à l’inscription>' -d '{}'   # → 409 tant que la visite du jour n'est pas validée
+                                                                    #   (sans jeton : 401 en mode strict)
 ```
+
+## Atomicité (P0-S11, audit F-10)
+
+**SQLite** : rien à faire, rien de changé. `transaction` = `BEGIN IMMEDIATE … COMMIT` (tout ou rien), et les
+transactions passent une par une (file d'attente, `server/stockage.ts`) : aucune autre requête ne s'intercale.
+
+**Supabase** : PostgREST n'offre **pas** de transaction sur plusieurs requêtes HTTP. `transaction` y garde seulement les
+versions lues (une carte par requête) ; chaque écriture est atomique à elle seule, et les écritures sensibles sont
+protégées par la base elle-même :
+
+| Écriture | Protection | Effet d'un conflit |
+| --- | --- | --- |
+| Réglages du commerce (PATCH), logo (PUT / DELETE) — **nouveau P0-S11** | verrou optimiste : commerce relu DANS la transaction, `UPDATE … WHERE id = ? AND version = <lue>` | 0 ligne → 409 « Modification simultanée : réessayez. » ; rien n'est écrasé en silence |
+| Visite, récompense, caisse, avis | même verrou optimiste (clients, avis) | 409 « réessayez », aucun tampon perdu ni compté deux fois |
+| Inscription | contrainte unique `(commerce_id, cle_contact)` | le 2e INSERT est refusé, le serveur relit le client existant |
+| Tirage | index unique `(commerce_id, client_id, jour à Paris)` | 2e tirage du jour refusé (409) |
+| Remise d'un gain | `UPDATE … WHERE donnees->remis IS NULL` | 2e remise refusée (409 « déjà remis ») |
+| Caisse (file hors ligne) | `actionId` idempotent mémorisé dans le client | un rejeu répond `dejaTraite`, rien n'est recompté |
+
+`version` est incrémentée par le trigger `incrementer_version` (0001, recréé par la 0003 pour la base live qui ne
+l'avait pas). Hors `transaction`, ou si la ligne n'a pas été relue dedans, `majCommerce` / `majClient` / `majAvis`
+écrivent sans condition (comportement d'avant) : les routes relisent donc la ligne dans la transaction.
+
+**Ordre d'écriture : métier, puis journal.** Le fait (client, commerce, parrain) est écrit d'abord ; l'entrée de journal
+et les traces d'audit ensuite. Pourquoi : une interruption entre les deux peut **perdre une entrée de journal**, mais
+jamais créer un journal mensonger (action tracée mais pas faite) ni compter deux fois. P0-S11 a remis dans cet ordre
+les trois routes qui ne le respectaient pas : le parrainage (parrain + journal + trace étaient écrits AVANT le filleul :
+un conflit sur le filleul laissait le parrain crédité, et un nouvel essai pouvait le créditer une 2e fois), la caisse
+(journal « parrainage ») et la décision de rattrapage (journal écrit avant le client).
+
+**Reprise du crédit parrain (revue Codex P0-S11).** Le filleul étant écrit d'abord (`parrainagePaye: true`), un 409 sur
+le parrain ne pouvait plus être réparé par un nouvel essai (la caisse répond `dejaTraite`, le rattrapage est déjà
+traité) : deux premières visites simultanées de deux filleuls du même parrain perdaient un crédit. `ecrire()` réessaie
+donc **une fois** le crédit du parrain sur `ErreurConflit` : parrain relu frais dans la même transaction, parrainage
+recalculé (plafond annuel compris), puis crédit + journal + trace réécrits. Seul le 409 du crédit parrain est repris ;
+journal et trace ne sont jamais rejoués après un crédit réussi. Parrain disparu entre-temps → erreur d'origine ; plafond
+atteint entre-temps → pas de crédit, trace écrite avec `pointsParrain: 0`. `ecrire()` renvoie le texte FINAL du journal
+du passage (revue Codex, 2e passe) : si la reprise recalcule le crédit (plafond atteint entre-temps), le journal dit
+ce qui a vraiment été crédité, pas le calcul initial. **Fenêtre résiduelle** : deux conflits successifs sur la ligne
+du parrain dans la même requête → l'erreur remonte : filleul marqué payé, crédit parrain perdu, visible par le 409
+renvoyé à l'opérateur (à corriger à la main sur la fiche du parrain).
+
+**Logo refusé : image restaurée (revue Codex P0-S11, 2e passe).** Chaque envoi écrit un blob immuable
+`logo:<id>:<version>` en plus du pointeur `logo:<id>` : l'adresse `?v=<version>` retrouve toujours ses propres
+octets, même si un autre envoi a écrasé le pointeur entre-temps. Le PUT prend un instantané du logo avant d'écrire
+et, en cas d'échec, remet le pointeur sur l'image que l'adresse désigne (l'ancienne si un PATCH a gagné, celle du
+PUT gagnant sinon, lue dans son blob versionné) ; son propre blob est supprimé au mieux s'il n'est désigné par
+aucune adresse ; l'erreur d'origine est toujours celle renvoyée. Le DELETE ne vide le pointeur que s'il contient
+encore l'image que ce DELETE a remplacée (adresse lue DANS la transaction) et ne supprime le blob correspondant
+que si l'adresse courante ne le désigne plus. Le GET sans version sert le pointeur, ou à défaut l'image désignée
+par la fiche du commerce — un pointeur effacé par une suppression arrivée entre-temps ne casse plus l'adresse
+gagnante. Une vieille adresse `?v=` ne sert plus les octets d'un nouvel envoi : 404, pas une mauvaise image.
+**Fenêtres résiduelles** : la suppression d'un blob orphelin reste une vérification-puis-écriture (un envoi des
+mêmes octets qui gagnerait exactement entre les deux laisserait une adresse sans blob, réparable par un nouvel
+envoi) ; les blobs remplacés restent en `meta` tant qu'aucun nouvel envoi ne les nettoie (une ligne par ancien logo).
+
+**Garde au démarrage.** Sous Supabase, `creerServeur` refuse de démarrer si la migration `0003_cartiz.sql` (journal)
+ou `0004_programme.sql` (parrainages, demandes de rattrapage) manque — erreur explicite nommant la migration et la
+sauvegarde. `ajouterJournal`, `ajouterParrainage` et `ajouterDemandeRattrapage` ne masquent plus leur absence
+(`ErreurMigrationManquante` remonte, plus de `console.warn` qui continue). Les migrations 0005 à 0009 gardent leur repli
+documenté (mémoire, lecture vide, 503). SQLite crée tout son schéma : pas de garde.
+
+**Aucune migration pour ce lot** : colonne `version` + trigger (0001), table `journal` (0003), index unique des tirages
+(0001) existent déjà. **Avant toute migration** (ici : appliquer la 0003 / 0004 si ce n'est pas fait), une sauvegarde
+par l'opérateur : `node --env-file=.env scripts/sauvegarde-base.mjs` (ou `npm run sauvegarde`, aide : `--aide`,
+procédure : `docs/SAUVEGARDE.md`). Jamais lancée par un lot automatique contre la production.
+
+**Ce qui reste NON atomique (compensation, pas transaction).**
+- Une suite d'écritures interrompue entre deux requêtes HTTP (panne réseau, crash Render) n'est pas annulée : ex. le
+  PATCH d'un commerce enregistre les réglages puis échoue sur un des avis réévalués ; un parrain peut ne pas être
+  crédité si l'écriture du filleul a réussi juste avant la panne ; le logo (fichier puis adresse) garde l'ancien affiché.
+- **Journal en panne après écriture métier (revue Codex, 2e passe — non corrigé).** L'erreur remonte (plus de silence),
+  mais rien n'est restauré : une caisse rejouée répond `dejaTraite` sans recréer la trace, une visite historique
+  rejouée peut ajouter un 2e tampon. Le corriger demande un journal rejouable / une boîte d'envoi durable — nouveau lot,
+  pas une compensation.
+- **PATCH réglages + avis partiels (revue Codex, 2e passe — non corrigé).** Le commerce est écrit avant les avis, dans
+  la même `transaction` (atomique sous SQLite, pas sous Supabase) : un conflit sur un avis laisse les nouveaux réglages
+  et les premiers avis modifiés, puis 409. Même remède que ci-dessus (reprise durable), hors périmètre du lot.
+- Compensation choisie : ordre métier-puis-journal, verrous optimistes, contraintes uniques, `actionId` idempotent.
+- Écartée : une fonction RPC transactionnelle générique. Elle réécrirait toute la logique métier (programme,
+  parrainage, niveaux…) en PL/pgSQL — double implémentation, risque de divergence avec `src/lib/` — pour un gain nul sur
+  les conflits réellement observés (simultanéité), déjà tranchés par la base.
+- Hors périmètre : la route visite historique (`POST /clients/:id/visite`) n'a pas de garde « 1 tampon par jour »
+  (audit F-11, lot P1-S12). Deux visites **séquentielles** le même jour restent possibles ; seule la **simultanéité**
+  est tranchée par le verrou optimiste.
 
 ## Sécurité (minimale, assumée)
 
@@ -362,13 +587,13 @@ compte sur deux compteurs, rangés dans la table `tentatives_auth` (migration 00
 - Table absente (0006 pas appliquée sous Supabase) ou base indisponible : comptage **en mémoire** (comme avant P0-S2, perdu
   au redémarrage), un avertissement dans les logs, jamais de 500.
 
-**Routes publiques** — compteurs en mémoire par fenêtre fixe d'une minute (perdus au redémarrage, sans gravité à cette
-échelle) ; au-delà : 429 + `Retry-After` (secondes). Seuils dans `LIMITES_PUBLIQUES` (`server/app.ts`) :
+**Routes publiques** — compteurs par fenêtre fixe d'une minute (P0-S20 : **persistants**, voir ci-dessous) ; au-delà :
+429 + `Retry-After` (secondes). Seuils dans `LIMITES_PUBLIQUES` (`server/app.ts`) :
 
 | Seuil | Valeur / min | Routes | Pourquoi cette valeur |
 |---|---|---|---|
 | `lectureParIp` | 120 | `GET /cartes/:id`, `POST /cartes/:id/lus`, `GET /commerces`, `GET /commerces/:id`, `GET /commerces/:id/menu` | plusieurs clients sur le wifi du restaurant (même IP), pages qui se rafraîchissent |
-| `lectureParCarte` | 30 | `GET /cartes/:id` + `POST /cartes/:id/lus` | une carte ouverte se recharge toutes les 10 s (6 / min) ; marge ×5 |
+| `lectureParCarte` | 30 | `GET /cartes/:id` + `POST /cartes/:id/lus` | la page de jeu en attente de validation vérifie le statut toutes les 10 s (6 / min, `INTERVALLE_VERIFICATION_MS`, `src/lib/attenteVisite.ts`) ; la carte publique, elle, se recharge au montage et au retour au premier plan, pas périodiquement ; marge ×5 sur le pire cas |
 | `inscriptionParIp` | 10 | `POST /commerces/:id/clients` sans PIN | une tablée qui s'inscrit d'un coup ; bloque l'inscription en masse |
 | `inscriptionParContact` | 5 | idem, par numéro / e-mail normalisé dans ce commerce | une personne ne s'inscrit qu'une fois ; freine l'énumération (F-12) |
 | `tirageParIp` | 20 | `POST /commerces/:id/tirages` | 1 tirage / jour / client ; laisse une salle pleine jouer |
@@ -381,6 +606,159 @@ Les routes authentifiées (gérant, caisse, admin) ne sont **pas** limitées : l
 tout rejouer d'un coup. L'IP est celle de `X-Forwarded-For` derrière Render (`TRUST_PROXY`) ; si Render ne réécrit pas
 cet en-tête, un attaquant peut la falsifier (non vérifié, audit F-06) : les compteurs par carte, par contact et par
 cible tiennent quand même.
+
+**Journal des lectures sensibles (P2-S15)** — un échantillon des lectures `GET /cartes/:id` et
+`GET /commerces` (liste) est journalisé (stdout, `console.info`, préfixe `[lecture-sensible]`) pour détecter
+une énumération (F-12) :
+
+| Ligne | Quand |
+|---|---|
+| `[lecture-sensible] carte id=<empreinte> ip=… statut=…` | chaque lecture de carte échantillonnée (200, 401, 404, 429…) |
+| `[lecture-sensible] commerces ip=… statut=… nb=…` | chaque lecture de la liste des commerces échantillonnée |
+
+- **Échantillonnage (volume)** : `journalLectures: { taux }` dans `creerServeur` (défaut **0,1** : 1 lecture
+  sur 10) ; 0 = rien, 1 = tout (tests) ; un taux non fini (`NaN`) retombe sur le défaut. À 0,1, une rafale
+  de 100 sondages laisse ~10 lignes — assez pour la détecter, sans noyer les logs en trafic normal (la page
+  de jeu en attente de validation vérifie le statut toutes les 10 s : 6 lectures/min → ~0,6 ligne/min à 0,1 ;
+  la carte publique se recharge au montage et au retour au premier plan, pas périodiquement).
+  En moyenne, moins d'1 ligne/min par carte active.
+  **Plafond : 600 lignes/min** (option `plafond`) — au-delà, les lignes sont comptées puis résumées en une
+  seule ligne à la minute suivante (`plafond … lignes/min atteint : N ligne(s) supprimée(s)`) : l'attaque
+  reste visible par son volume. Pour enquêter sur une attaque en cours, monter le taux (redéploiement) ou
+  s'appuyer sur les lignes `[securite] BLOCAGE` (non échantillonnées ; les 429, elles, ne sont pas
+  journalisées systématiquement).
+- **Détection** : dans les logs Render, chercher beaucoup d'`id=` distincts depuis une même `ip=` sur une
+  courte période, et/ou une majorité de `statut=404` (sondage d'identifiants inexistants) — un client
+  légitime relit toujours la MÊME carte (même empreinte) et obtient 200. Exemple de rafale : 20
+  identifiants distincts, 20 × 404, même IP (test `tests/journal-lectures-p2-s15.test.ts`).
+- **Vie privée** : l'identifiant de carte n'est JAMAIS écrit en clair dans ces lignes — empreinte SHA-256
+  tronquée à 12 car. hex. (48 bits : assez pour compter les identifiants distincts). C'est une
+  **pseudonymisation, pas une anonymisation** : le hash sans sel permet de vérifier des identifiants
+  candidats (notamment les anciens identifiants prévisibles) — il ne révèle rien à qui ne connaît pas
+  l'identifiant, mais ne résiste pas à une recherche par dictionnaire (un HMAC avec secret dédié serait
+  l'étape suivante si cette résistance devenait requise). Les identifiants sont aussi masqués dans les
+  logs d'erreur internes (`console.error`, chemins `/cartes/…`, `/desinscription/…`, `/clients/…`). Seule
+  l'IP est en clair (nécessaire pour l'enquête, comme dans les lignes `[securite]`). Aucun prénom, contact,
+  code gagnant ni contenu client dans ces lignes.
+- **Limites honnêtes** : l'échantillonnage est aléatoire par lecture (`Math.random`) — une rafale de moins
+  de ~30 sondages peut ne laisser aucune ligne à 0,1 ; les lectures réussies d'un client légitime sont
+  échantillonnées comme les autres (pas de distinction succès/échec). Les journaux Render Free ont une
+  rétention limitée : en cas d'incident, exporter les logs vite.
+
+**Persistance des compteurs publics (P0-S20, migration 0010)** — la limitation reste appliquée **en mémoire** (aucune
+latence ajoutée à la requête) ; un compteur n'est écrit en base qu'à partir de la **moitié de son seuil**
+(`SEUIL_PERSISTANCE_COMPTEURS = 1/2`, `server/app.ts`), en arrière-plan, sans jamais bloquer la requête. En trafic
+normal : **zéro écriture** — la page de jeu en attente vérifie le statut toutes les 10 s (6 lectures/min),
+sous la moitié du seuil de 30 (`lectureParCarte`, 15) ; les écrans commerçant rechargent l'état toutes les
+30 s via le store (2 lectures/min sur `GET …/etat`, autre compteur). Une ligne = 73 à 92 octets de JSON (mesuré, clé + horodatage + nombre) ; un compteur chaud
+ou bloqué, lui, survit à un redémarrage ou un réveil Render (rechargé au démarrage, fenêtres passées ignorées). Les
+écritures par clé et par fenêtre sont **bornées** : le compteur sature à son seuil (une requête déjà bloquée ne
+ré-écrit pas — au plus `seuil − seuil/2 + 1` écritures par clé et par minute) et **sérialisées par clé** (une écriture
+ancienne ne peut pas écraser un blocage plus récent). Les lignes dont la fenêtre est passée sont supprimées à chaque
+écriture et au démarrage. La clé reprend l'identifiant déjà utilisé par l'anti-bruteforce (`tentatives_auth`, 0006) :
+IP, contact normalisé (téléphone ou e-mail en clair), identifiant de carte — sans nom, sans code gagnant, sans contenu
+client. **Limites honnêtes :** une seule instance (Render aujourd'hui) — à plusieurs instances, chaque instance
+garderait ses propres compteurs en mémoire et la base ne servirait qu'au redémarrage, pas à la limitation distribuée,
+et l'écriture d'une autre instance peut encore ramener un compteur en arrière. Table absente (0010 pas appliquée) ou
+base indisponible : comptage **en mémoire** (perdu au redémarrage), avec un avertissement `[securite]` **dès le
+démarrage**, jamais de 500. La persistance en base a été préférée à la documentation seule parce que le coût mesuré est
+négligeable en trafic normal (zéro écriture) et borné en attaque (voir la borne ci-dessus, la 429 arrêtant ensuite le
+compteur).
+
+### Logs structurés et alertes (P2-Q6)
+
+**Une ligne JSON par réponse terminée** (`server/logs.ts`, `journaliserRequete`, branché au centre du gestionnaire
+HTTP — `res.on('finish')`, donc une ligne par réponse envoyée, quel que soit le chemin de sortie : succès, erreur,
+304, redirection, page statique). Une connexion interrompue avant la fin de la réponse ne produit aucune ligne
+(son statut serait inconnu). Émise sur stdout (`console.info`, comme les lignes `[securite]` et
+`[lecture-sensible]`) :
+
+```json
+{"type":"requete","niveau":"info","horodatage":"2026-11-11T13:00:00.000Z","methode":"GET","route":"/api/v1/sante","statut":200,"dureeMs":3,"ip":"127.0.0.1"}
+```
+
+| Champ | Contenu |
+|---|---|
+| `type` | Toujours `"requete"` (distingue ces lignes des futures lignes structurées). |
+| `niveau` | `"info"` (statut < 400), `"avertissement"` (4xx), `"erreur"` (5xx). |
+| `horodatage` | ISO 8601, horloge réelle du serveur (pas l'horloge injectable des tests). |
+| `methode`, `route` | Méthode HTTP ; chemin **masqué** (voir ci-dessous), sans requête. |
+| `statut` | Statut HTTP envoyé. |
+| `dureeMs` | Millisecondes entre la réception de la requête et l'envoi de la réponse (entier ≥ 0). |
+| `ip` | IP vue par le serveur (déjà journalisée par les lignes `[securite]`, nécessaire pour enquêter sur une rafale). |
+
+**Ce qui n'y figure jamais** : aucun secret, PIN, jeton, téléphone ou e-mail brut, aucun identifiant de carte
+ou de client brut, aucun code gagnant, aucun en-tête ni corps. La requête (`?…`) est jetée : elle peut porter
+un jeton d'accès (`?acces=…`) ou un contact (`?q=…`). Dans le chemin, seuls restent en clair les mots
+littéraux des routes (relevés du routeur : `sante`, `commerces`, `cartes`, `clients`, `caisse`, `gains`, …)
+et l'identifiant d'un commerce CONNU du serveur (ensemble chargé au démarrage, après la création du commerce
+seed, et complété à chaque création de commerce), mais seulement à sa place (après `commerces`, `r` ou
+`menu`) : un préfixe `c-…` ne prouve pas qu'un segment est un commerce public (un e-mail forgé
+`c-alice@example.com` dans un chemin 404 est masqué). Tout autre segment est remplacé par son empreinte SHA-256 tronquée (12 car. hex., même
+procédé que P2-S15) : identifiant de carte ou de client, jeton, code gagnant — et n'importe quel segment
+inconnu (téléphone, e-mail, secret glissé dans un chemin 404 forgé). La liste blanche échoue en sécurité :
+oublier un mot littéral ne fait que rendre une ligne moins lisible, jamais fuiter. Le chemin est normalisé
+comme le routeur avant d'être masqué (segments vides supprimés, décodage par segment) : un nom encodé
+(`/api/v1/%63artes/<id>`) ou un segment vide (`/api/v1/cartes//<id>`) ne contourne pas le masquage. La
+journalisation ne fait jamais échouer une requête (écriture en `try/catch`, comme P2-S15) : l'IP est lue à
+la réception, quand le socket existe encore — au moment de `finish`, il peut déjà être détruit (corps
+abandonné après une 413, par exemple) et `req.socket` vaut `null` (`ipDe` se replie alors sur `'?'`).
+
+**Volume.** Une ligne par réponse, petite (environ 150 à 220 octets — une ligne caisse représentative atteint
+207 octets) : de l'ordre de quelques milliers de lignes par jour pour un restaurant, davantage si plusieurs
+pages restent ouvertes (le store recharge toutes les 30 s, soit une requête par page ouverte). Sans
+échantillonnage — en trafic normal, un 500 n'est pas manqué par un tirage au sort. (Le journal
+`[lecture-sensible]`, lui, reste échantillonné à 0,1 : il sert à détecter une énumération, pas à compter
+les erreurs.)
+
+**Lire les logs.** En local : stdout du serveur. En production : dashboard Render → service → **Logs**.
+La rétention dépend du forfait du workspace : **7 jours en Hobby (l'offre gratuite)**, 14 jours en Pro,
+30 jours en Scale / Enterprise — et Render supprime les lignes au-delà de **6 000 lignes/minute/instance**
+([docs Render](https://render.com/docs/logging), vérifié le 11/11/2026). En cas d'incident, exporter les logs
+vite ; sous une rafale au-delà de 6 000 lignes/min, des lignes peuvent manquer. Exemples (`jq`, une ligne
+JSON par ligne) — attention, stdout mélange les lignes JSON et les lignes texte (`[securite]`,
+`[lecture-sensible]`, `[serveur]`) : ne garder que les lignes JSON avant `jq`, sinon `jq` échoue sur la
+première ligne texte :
+
+```sh
+# Toutes les erreurs 5xx, les plus récentes d'abord
+grep '^{' logs.txt | jq -s -c 'sort_by(.horodatage) | reverse | .[] | select(.niveau == "erreur")'
+# 429 par IP sur la dernière heure (rafale ?)
+grep '^{' logs.txt | jq -r 'select(.statut == 429 and .horodatage > (now - 3600 | todate)) | .ip' | sort | uniq -c | sort -rn | head
+# 401 sur /sessions par IP (tentatives de PIN)
+grep '^{' logs.txt | jq -r 'select(.statut == 401 and .route == "/api/v1/sessions") | .ip' | sort | uniq -c | sort -rn | head
+# Requêtes les plus lentes
+grep '^{' logs.txt | jq -s 'sort_by(-.dureeMs) | .[0:10] | .[] | "\(.dureeMs)ms \(.methode) \(.route) \(.statut)"'
+```
+
+**Alertes à surveiller — procédure seulement, rien n'est branché.** Aucun envoi automatique d'alerte
+(e-mail, SMS, webhook, service tiers payant type PagerDuty) n'est configuré, volontairement : le critère
+AUDIT.md (« alerte reçue sur staging lors d'un 500 provoqué ») suppose un staging qui n'existe pas encore
+et un canal d'alerte à choisir (coût et bruit à calibrer — une alerte qui sonne à chaque 429 du wifi du
+restaurant ne sert à rien). **Statut honnête : ce lot livre les logs + la procédure, pas l'alerte.**
+La moitié réalisable du critère est couverte par un test : une 500 réelle émet une ligne de niveau
+`erreur` (`tests/logs-structures-p2-q6.test.ts`, « émission simulée ») — c'est le signal qu'une alerte
+consommerait. La seconde moitié (une alerte réellement reçue sur staging lors d'un 500 provoqué) reste
+à faire : elle suppose un staging (à créer, voir `docs/DEPLOIEMENT.md` §6) et un canal choisi. Ce qui est
+en place, c'est le **signal** (les lignes JSON) et la **procédure** ci-dessous ; le branchement d'un canal
+reste à décider (voir « Ce qui n'est pas branché »).
+
+| Signal | Ce que ça veut dire | Que faire |
+|---|---|---|
+| `niveau: "erreur"` (5xx), même une seule ligne | Bug serveur (exception non HTTP, base en panne, migration manquante…) | Noter `horodatage` + `route`, reproduire en local / staging, corriger ; une 5xx sur `POST …/tirages` ou `POST …/caisse/passage` est prioritaire (un client au comptoir). |
+| Beaucoup de `statut: 429` depuis une même `ip` en quelques minutes | Rafale : attaque, ou un client légitime qui martèle (page restée ouverte, boucle) | Croiser avec les lignes `[securite] BLOCAGE` (même IP ?) ; si c'est le wifi du restaurant, vérifier qu'aucun commerçant n'est bloqué par ses propres erreurs de PIN (le blocage se lève seul, 10 min doublées à chaque série, 24 h max). |
+| Beaucoup de `statut: 401` sur `/api/v1/sessions` depuis une même `ip` | Tentatives de PIN / code (brute-force) | Croiser avec `[securite] échec …` / `BLOCAGE` ; rien à faire si le blocage tient (c'est son rôle) ; si un commerçant légitime est bloqué, attendre la fin du blocage (ou le lever en base, voir « Migration 0006 »). |
+| Beaucoup de `statut: 401` sur `/api/v1/cartes/<empreinte>` depuis une même `ip` | Tentatives d'accès à des cartes (jetons falsifiés, liens expirés) | Croiser avec `[lecture-sensible]` (beaucoup d'empreintes distinctes + 404 = sondage, P2-S15) ; en mode `stricte`, c'est le comportement attendu (401 uniforme). |
+| Beaucoup de `statut: 404` sur `/api/v1/cartes/<empreinte>` | Sondage d'identifiants (énumération F-12) | Voir « Journal des lectures sensibles » (détection par empreintes distinctes + 404 depuis une même IP). |
+| `dureeMs` élevé (> 1 000 ms) sur une route, répété | Lenteur (base, Supabase, réveil Render) | Vérifier si c'est le premier appel après une veille Render (~1 min, normal en Free) ou une lenteur durable (dashboard Supabase, taille de base). |
+
+**Routine recommandée (pas une automatisation).** À chaque signalement d'incident (« ça ne marche pas »,
+« je suis bloqué ») : ouvrir les logs Render sur la fenêtre du signalement et filtrer `niveau == "erreur"`
+puis `statut == 429` / `401` pour l'IP concernée. Une fois par semaine : un coup d'œil aux 5xx (une seule
+ligne suffit à justifier une correction). **Ce qui n'est pas branché** : aucune alerte automatique, aucun
+transfert des logs hors Render, aucune rétention longue — les logs Render Free sont éphémères ; pour une
+alerte réelle (e-mail sur 500, webhook sur blocage), il faudra choisir un canal (e-mail de l'opérateur,
+webhook gratuit) et le brancher sur ces lignes, sans toucher à leur format.
 
 ### Migration 0006 (anti-bruteforce persistant) — à appliquer en production
 
@@ -437,7 +815,38 @@ personnalisé le jour où il existe).
 
 Tous les fichiers statiques ont un `ETag` faible (taille + date de modification) : `If-None-Match` correspondant → 304.
 
-## Mise en production : Supabase (base) + Render Free (serveur) — aucun déploiement n'a été fait
+### Compression des réponses (P2-Q2)
+
+Le serveur compresse lui-même ses réponses (`server/app.ts`, `preparerCorps` / `envoyerCorps`, `node:zlib`) — il ne
+dépend pas du proxy Render (non vérifié) :
+
+- **Codages** : brotli (qualité 5, préféré à qualité égale) ou gzip (niveau 6), selon `Accept-Encoding` (RFC 9110 :
+  l'explicite prime sur le joker `*`, `q=0` = refusé, `q>1` ramené à 1, casse ignorée). Sans `Accept-Encoding`
+  (service worker hors ligne, `fetch` des tests) : réponse d'identité.
+- **Seuil** : 1 024 octets — en dessous, la compression coûte plus qu'elle ne rapporte (en-têtes + CPU).
+  **Types compressibles seulement** : texte (`text/*`, `application/json`, `application/manifest+json`,
+  `application/xml`, `image/svg+xml`) — images et polices déjà compressées ne le sont pas.
+- **Cache** : les variantes compressées des **fichiers statiques** sont gardées en mémoire (clé = chemin absolu +
+  ETag, 128 entrées max, vidage complet au-delà — un déploiement ≈ 25 fichiers) ; les réponses **JSON / CSV** sont
+  recompressées à chaque fois (corps différent à chaque requête).
+- **`Vary: Accept-Encoding`** ajouté (fusionné avec `Vary: Origin` du CORS, jamais remplacé) ; `Content-Encoding`
+  et `Content-Length` (du corps compressé) sont posés. Testé : `tests/compression-p2-q2.test.ts` (choix du codage,
+  seuil, types, cache, `Vary`).
+- **Portée** : la compression réduit le flux **serveur → navigateur**, pas l'egress Supabase → serveur (voir
+  « Egress — mesuré ») : c'est le volume PostgREST qui compte pour les 5 Go gratuits.
+
+### Page menu prérendue et lien court QR (hors `/api`)
+
+| Méthode et chemin | Accès | Effet |
+|---|---|---|
+| `GET /r/:commerceId` | public | **P2-Q3.** Lien court du QR vitrine → 302 vers `/?via=qr#/jouer/<id>`. Le scan est compté **avant** la redirection (compteur anonyme `scan`, migration 0008), même si la page de jeu ne se charge jamais. Commerce inconnu ou en pause : redirection sans compteur. Limite par IP (dépassée : redirection sans comptage, jamais d'erreur). HEAD : sonde, pas comptée. `?via=qr` dit à la page de ne pas re-signaler le scan (sinon double comptage). |
+| `GET /menu/:commerceId` | public | **P2-Q4.** Page menu prérendue (HTML statique, `server/prerendu.ts`) : titre, description, canonical et Open Graph propres à la page, JSON-LD `Menu` (`MenuSection` / `MenuItem`, prix en EUR), plats, descriptions, prix (« Prix sur place » si non confirmé) et allergènes. Cache 5 min (`public, max-age=300`, ETag faible → 304). Commerce en pause → page « Menu indisponible » (200, `noindex`). Commerce inconnu ou `/menu` sans id → 404 (pas la SPA en 200 : pas de soft 404). Tout texte venu du commerçant est échappé (corps ET JSON-LD). Limite par IP comme les autres lectures publiques. Détail : `docs/SEO.md`. |
+
+## Mise en production : Supabase (base) + Render Free (serveur) — en production depuis le 09/11/2026
+
+**Staging et retour arrière : voir `docs/DEPLOIEMENT.md` (P0-S10)** — 2e service `asian-home-fidelite-staging`
+(branche `autonome/integration`, base Supabase de test séparée), retour arrière en une commande
+(`scripts/rollback-render.mjs`), compatibilité des migrations 0001–0010, procédure après écritures partielles.
 
 **Pourquoi deux services.** Supabase héberge la **base** (Postgres), pas le serveur Node `server/` (routes, PIN, tirage).
 Il faut donc aussi un hébergeur pour `server/`. Retenu : **Render « Free Web Service »** (0 €). Depuis que les données sont
@@ -488,13 +897,20 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
 2. Copier **tout** le contenu de `supabase/migrations/0001_schema_initial.sql` → **Run** → « Success. No rows returned ».
 3. Nouvelle requête, même chose avec `supabase/migrations/0002_rls.sql` → **Run**. **Dans cet ordre** (0002 modifie les
    tables créées par 0001). Les deux fichiers sont rejouables : une erreur → corriger et relancer sans risque.
+   Puis, dans l'ordre, `0003_cartiz.sql` à `0010_compteurs_publics.sql` (chacun : coller → **Run**). Pour la
+   production actuelle, 0001–0008 sont déjà appliquées (10/11/2026) et **0009–0010 restent à appliquer à la mise en
+   production finale** (voir `docs/DEPLOIEMENT.md` § 5) ; pour un nouveau projet ou le staging, appliquer les dix.
 4. Vérifier, dans une nouvelle requête :
    ```sql
    select relname as table_, relrowsecurity as rls
    from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' order by 1;
    ```
-   Attendu : **5 lignes** `avis`, `clients`, `commerces`, `meta`, `tirages`, toutes avec `rls = true`. Le **Table Editor**
-   doit aussi afficher les 5 tables (sans badge d'avertissement « RLS disabled »). Si Supabase propose d'ajouter des
+   Attendu : **15 lignes** (`avis`, `clients`, `commerces`, `compteurs_publics`, `demandes_rattrapage`, `envois`,
+   `equipe`, `evenements_jour`, `journal`, `menus`, `meta`, `parrainages`, `sessions_revoquees`, `tentatives_auth`,
+   `tirages`), toutes avec `rls = true` — **14 lignes** si seules 0001–0008 ont été appliquées (`compteurs_publics`
+   manque : c'est la 0010), 5 lignes seulement (`avis`, `clients`, `commerces`, `meta`, `tirages`)
+   si seules 0001–0002 ont été appliquées. Le **Table Editor**
+   doit aussi afficher les tables (sans badge d'avertissement « RLS disabled »). Si Supabase propose d'ajouter des
    policies : **ne pas en ajouter** (c'est voulu, voir `0002_rls.sql`).
 
 **c. Récupérer les 2 variables** (libellés d'après la doc du 09/11/2026 — **à confirmer à l'écran**)
@@ -556,7 +972,8 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
    le même client est retrouvé (pas de doublon).
 3. Roulette → **Copier le lien de la page de jeu** (ou scanner le QR) et l'ouvrir **sur votre téléphone**, entrer le même
    numéro → « Pour jouer, validez d'abord votre visite du jour au comptoir. »
-4. Sur l'écran commerçant : Clients → **Valider une visite (+1)** → la roue du téléphone se débloque (≤ 10 s) → tourner → un lot et
+4. Sur l'écran commerçant : Clients → **Valider une visite (+1)** → la roue du téléphone se débloque (la page de jeu
+   vérifie le statut toutes les 10 s tant que la roue est verrouillée — en général quelques secondes) → tourner → un lot et
    un **code** ; le même code apparaît côté commerçant (Tableau de bord / Roulette).
 5. Retourner sur la page de jeu → **2e tirage refusé** (« déjà tourné la roue »).
 6. Clients → **Exporter (CSV)** → le fichier s'ouvre dans Excel avec les accents corrects.
@@ -575,8 +992,9 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
   inactivité, on veut des **sauvegardes quotidiennes** (7 jours gardés — le gratuit n'en a **aucune**), ou l'usage approche
   500 Mo de base / 5 Go d'egress (page Usage du dashboard). Le Pro enlève la mise en pause, ajoute les sauvegardes,
   8 Go de disque, 250 Go d'egress, support e-mail, 10 $ de crédits de calcul inclus. **Dépense à valider par vous.**
-- Sans Pro, sauvegarde = **export CSV régulier** (Clients → Exporter), et pour une sauvegarde complète
-  `pg_dump` ou `supabase db dump` (CLI Supabase) avec le mot de passe de base de l'étape a.
+- Sans Pro, sauvegarde complète = **`npm run sauvegarde`** (P0-S5, les 15 tables via l'API, chiffrée) : voir
+  « Sauvegarde / export » et `docs/SAUVEGARDE.md`. En complément possible : `pg_dump` ou `supabase db dump` (CLI
+  Supabase) avec le mot de passe de base de l'étape a.
 
 **g. Données SQLite existantes**
 - **Rien à migrer pour le vrai restaurant** : Asian Home Paris n'a jamais été en production ; sa base réelle est vide
@@ -592,10 +1010,17 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
 ### Sauvegarde / export
 
 - `GET /api/v1/commerces/:id/export.csv` (PIN) : liste des clients, à télécharger régulièrement (ouvrable dans Excel).
-- Supabase Free : **aucune sauvegarde automatique** → CSV régulier + `pg_dump` / `supabase db dump` si besoin (voir f).
+- Supabase Free : **aucune sauvegarde automatique** côté Supabase. **Sauvegarde complète (P0-S5)** :
+  `node --env-file=.env scripts/sauvegarde-base.mjs` (ou `npm run sauvegarde`, variables déjà exportées) exporte les 15 tables (toutes lignes, toutes
+  colonnes) via PostgREST + clé service_role, en `sauvegardes/asian-home-<horodatage>.json.gz` (gitignoré), chiffré
+  AES-256-GCM si `SAUVEGARDE_CLE_CHIFFREMENT` est définie, rétention 30 jours / 30 fichiers ; échec → `ERREUR SAUVEGARDE`,
+  sortie 1, aucun fichier. Vérification : `npm run restaurer -- <fichier> --cible pglite --verifier` (base locale
+  jetable ; Supabase refusé). Procédure complète, RPO 24 h / RTO 1–2 h, copie hors VM, restauration manuelle vers
+  Supabase et limites : **`docs/SAUVEGARDE.md`**.
 - SQLite (dev / Render Starter + disque) : copier le fichier `data/fidelite.db` serveur arrêté (ou
-  `sqlite3 fidelite.db ".backup copie.db"`).
-- Pas encore de route de sauvegarde complète ni d'import (tirages, avis, historique) : voir « Limites ».
+  `sqlite3 fidelite.db ".backup copie.db"`) — le script ci-dessus ne lit que Supabase.
+- Toujours **pas de route HTTP** de sauvegarde ni d'import, et pas de restauration automatique vers Supabase (manuelle,
+  `docs/SAUVEGARDE.md` § 8).
 
 ## RGPD (P1-B6)
 
@@ -643,24 +1068,34 @@ appelle `GET …/purge` à chaque ouverture et affiche l'avertissement (cartes d
 protection, bouton « Exclure ») ; la purge n'a lieu que quand le gérant clique « Purger N clients… » et tape `PURGER`
 (`POST …/purge`). Jamais purgés : client exclu, récompense en attente encore valable, plat en réserve valable, visite
 oubliée en attente de décision. Chaque purge est journalisée (auteur, date, durée, nombre de clients et de lignes).
+**Rappel périodique (P1-G1)** : le tableau de bord affiche le même résumé (`resumeRappelPurge`, `src/lib/rgpd.ts` —
+cartes à purger maintenant / dans moins de 30 jours, avec le lien vers Clients) à chaque ouverture, en mode API
+seulement — calculé depuis les clients chargés dans le navigateur. Une carte protégée au-delà de la conservation
+n'y apparaît pas (elle reste listée dans Clients avec sa protection) ; l'écran Clients (`GET …/purge`, relu à
+chaque ouverture) reste la liste de référence. **Purge automatique refusée explicitement (P1-G1)** : aucune suppression planifiée, à l'ouverture de l'état
+ou par minuteur — la suppression reste un geste du commerçant, avec la cascade ci-dessus.
 
 ## Limites honnêtes
 
 - SQLite : 1 seule instance (fichier local). Sous Supabase, plusieurs instances partagent la base ; l'anti-bruteforce
   y est relu au premier usage de chaque clé puis gardé en cache par instance (prévu pour 1 instance Render).
-- Limitation des routes publiques : en mémoire, remise à zéro au redémarrage (fenêtres d'une minute). Pas de CAPTCHA.
-- Pas de comptes utilisateurs : un PIN par commerce, partagé par l'équipe ; pas de journal « qui a fait quoi ».
-- Le client se reconnaît par son téléphone / e-mail sans vérification (pas de SMS de confirmation) : quelqu'un qui
-  connaît le numéro d'un client voit son prénom et ses tampons, et peut jouer à sa place s'il a une visite validée ce jour-là.
+- Limitation des routes publiques : en mémoire, compteurs chauds ou bloqués persistés en base (P0-S20, migration 0010)
+  et rechargés au redémarrage ; fenêtres d'une minute. Pas de CAPTCHA.
+- Pas de comptes utilisateurs nominatifs : un PIN par commerce, partagé par l'équipe ; le **journal d'audit**
+  (table `journal`, migration 0003) trace qui (gérant ou membre d'équipe) a fait quoi et quand.
+- Le client se reconnaît par son téléphone / e-mail sans vérification (pas de SMS de confirmation) : en mode
+  `transition`, quelqu'un qui connaît le numéro d'un client voit son prénom et ses tampons, et peut jouer à sa
+  place s'il a une visite validée ce jour-là. En mode `stricte` (production), un jeton client est exigé : le
+  numéro seul ne suffit plus (voir « Accès client aux cartes »).
 - Pas de route d'import. Suppression d'un client et purge de conservation : voir « RGPD (P1-B6) » (aucune purge
   planifiée autonome : rien ne tourne sur Render Free sans requête).
-- Le code serveur n'est pas vérifié par `tsc` (pas de `@types/node` installé, pour ne rien ajouter) : il est couvert par les tests HTTP.
-- Le front en mode API (V2) recharge tout l'état toutes les 10 s : avec le PIN admin, une requête `/etat` par
+- Le code serveur est vérifié par `tsc` (`npm run typecheck:server`, `tsconfig.server.json` + `@types/node`, P0-S21) ; il est couvert aussi par les tests HTTP.
+- Le front en mode API (V2) recharge tout l'état toutes les 30 s : avec le PIN admin, une requête `/etat` par
   commerce. Suffisant pour quelques commerces ; au-delà, prévoir une route agrégée ou un rechargement incrémental.
 - `GET /cartes/:clientId` (V2) parcourt les commerces pour trouver le client (pas d'index par identifiant seul) :
   sans importance à cette échelle.
 
-## Intégrations préparées (V3) — aucun compte créé ; relances SMS / e-mail branchées en P1-B3 (sans clés)
+## Intégrations préparées (V3) — compte Brevo créé le 11/11/2026 (mode test) ; Google / Wallet : aucun compte
 
 | Fichier | Rôle |
 |---|---|
@@ -725,13 +1160,20 @@ migration à appliquer, table déjà fermée à `anon` / `authenticated` (RLS, 0
 clé dérivée de `GOOGLE_CLIENT_SECRET` : une copie de la base seule ne livre pas le refresh token. Le client secret reste
 dans la variable d'environnement et ne transite jamais par le front.
 
-### SMS / e-mail — relances branchées (P1-B3), SMS via Brevo (lot « Brancher Brevo »), en attente des clés
+### SMS / e-mail — relances branchées (P1-B3), SMS via Brevo (lot « Brancher Brevo »), compte créé le 11/11/2026, mode test actif
 
-**État réel (10/11/2026)** : tout le parcours est codé et testé contre des prestataires **simulés** ; aucune clé Twilio ni
-Brevo n'existe, donc en production **rien ne part** : la route relance répond 501 et la tentative est journalisée
-« non branché ». Le code d'appel n'a jamais été exécuté contre le vrai Twilio ni le vrai Brevo. **Fournisseur choisi :
-Brevo** (SMS + e-mail, une seule clé API) ; Twilio n'est plus que le repli SMS si Brevo SMS n'est pas configuré.
-Procédure complète de mise en service : **`docs/BREVO.md`** (compte, clé API, expéditeurs, coûts, test).
+**État réel (11/11/2026)** : tout le parcours est codé et testé contre des prestataires **simulés** ; le
+**compte Brevo a été créé et activé le 11/11 au matin** (clé API v3 « Asian Home Fidelite », expéditeur
+« Asian Home Paris » validé, expéditeur SMS `ASIANHOME`), les **5 variables Render
+sont posées** (`BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `BREVO_SMS_SENDER`,
+`BREVO_MODE_TEST=1`), déploiement « Live » le 11/11 à 08h18 ; `/sante` vérifié à 08h18 :
+`integrations.sms: true, email: true, smsPrestataire: 'Brevo', modeTest: true`. **Aucun envoi réel fait**
+(mode test : e-mail en sandbox Brevo, SMS simulé). Twilio reste le repli SMS, **non configuré**.
+**Non re-vérifié dans ce lot** (lecture de `/sante` en production en délai dépassé, probablement le réveil
+Render — à re-vérifier au prochain passage). Le code d'appel n'a jamais été exécuté contre le vrai Twilio
+ni le vrai Brevo en envoi réel. **Fournisseur choisi : Brevo** (SMS + e-mail, une seule clé API) ; Twilio
+n'est plus que le repli SMS si Brevo SMS n'est pas configuré. Procédure complète de mise en service et
+recette réelle (accord explicite requis) : **`docs/BREVO.md`** (compte, clé API, expéditeurs, coûts, test).
 
 **Mode test (consigne du 10/11/2026 : aucun envoi réel pendant le développement)** : `BREVO_MODE_TEST=1` —
 e-mail en sandbox Brevo (`X-Sib-Sandbox: drop` : Brevo valide la requête et répond 201 + `messageId`, rien livré,
@@ -747,16 +1189,19 @@ explicite — voir `docs/BREVO.md` §5).
   (`consentementRelance`, `consentementRelanceLe`, `consentementRelanceOrigine` : `inscription`, `commercant`, `stop-sms`,
   `lien-email`) — preuve datée, sans migration. Tout changement est journalisé (action `consentement`).
 - **Modèles** (`src/lib/relances.ts`, fonctions pures) : bienvenue, récompense proche (8-9 tampons sur 10, ou carte pleine),
-  inactif 30 jours, anniversaire. SMS en alphabet GSM ≤ 160 caractères (1 SMS facturé), nom du commerce, lien court `/c/<id>`,
-  mention « STOP ». E-mail : objet + corps vouvoyés, lien vers la carte, lien de désinscription en pied.
+  inactif 30 jours, anniversaire. SMS en alphabet GSM, nom du commerce, lien court `/c/<id>`, mention
+  « STOP : <lien court de désinscription `/d/<id>/<jeton>`> » (P1-B9 — « répondez STOP » est impossible avec
+  l'expéditeur alphanumérique Brevo ; la plupart des SMS font 2 segments, facturés 2 SMS). E-mail : objet + corps
+  vouvoyés, lien vers la carte, lien de désinscription en pied.
 - **STOP (SMS)** : webhook `POST /api/v1/commerces/<id>/stop-sms`, signé par Twilio — **seulement quand les SMS
   partent via Twilio**. **Choix** : désinscription traitée par l'app (pas seulement par la liste d'opposition native
   de Twilio) pour que le consentement de la fiche reflète le STOP. Selon le pays et le type d'expéditeur, Twilio peut
   aussi gérer ses propres mots-clés STOP (à vérifier à l'activation). **SMS via Brevo : pas de réponse STOP possible**
   (expéditeur alphanumérique `ASIANHOME`, pas de numéro destinataire) ; Brevo gère sa propre liste noire quand une
-  réponse est possible, et la route `stop-sms` répond 501 — le consentement se retire alors depuis la fiche client,
-  le lien de désinscription des e-mails, ou auprès du commerçant (voir `docs/BREVO.md` §6).
-- **Désinscription (e-mail)** : **Choix** : lien de l'app (`#/desinscription/<clientId>/<jeton HMAC>`, retrait au clic,
+  réponse est possible, et la route `stop-sms` répond 501 — le consentement se retire alors par le lien de
+  désinscription porté par chaque SMS (P1-B9, `STOP : <lien court /d/…>` → page `#/desinscription`, même jeton HMAC
+  que les e-mails), depuis la fiche client, ou auprès du commerçant (voir `docs/BREVO.md` §6).
+- **Désinscription (e-mail et SMS)** : **Choix** : lien de l'app (`#/desinscription/<clientId>/<jeton HMAC>`, retrait au clic,
   pas à l'ouverture — un antivirus qui suit les liens ne désinscrit personne) + en-têtes `List-Unsubscribe` /
   `List-Unsubscribe-Post` (bouton « Se désabonner » de Gmail…). Brevo n'ajoute pas de lien de désinscription aux e-mails
   transactionnels (`v3/smtp/email`), d'où la route de l'app.
@@ -800,12 +1245,16 @@ l'entonnoir et le test A/B du tableau de bord restent vides (avec un message), *
 coûts des lots, séries visites / tirages / gains et comparaison au mois précédent marchent (ils viennent des tirages et des
 visites déjà en base). Annulation : `0008_mesure.down.sql` (supprime les compteurs et la fonction ; aucune donnée client).
 
-## Migration future (écrite avant S1 — Supabase est désormais préparé et la procédure écrite, voir plus haut)
+## Migration future — OBSOLÈTE (Supabase est la base de production depuis le 09/11/2026)
 
-Supabase ou Firebase seraient la voie suivante quand :
+Ce qui suit décrivait la voie suivante **avant** S1 — elle a eu lieu : Supabase est désormais la base de
+production (`server/stockage-supabase.ts`), pas une migration future. Ce qui resterait, un jour, si les besoins
+dépassent l'architecture actuelle :
+
 - un commerce dépasse **quelques centaines de clients actifs** ou qu'il y a **beaucoup de commerces** (plusieurs instances, sauvegardes gérées) ;
 - on a besoin de **temps réel** (le comptoir voit le tirage au moment où il a lieu, sans rechargement) ;
 - on veut de vrais **comptes** (e-mail / mot de passe par employé) au lieu d'un PIN.
 
-Migration prévue simple : la forme des données (`src/types.ts`) ne change pas ; il faudrait réécrire `server/stockage.ts`
-(ou remplacer le serveur par des fonctions Supabase) en gardant les mêmes routes, et importer les données depuis `fidelite.db`.
+La forme des données (`src/types.ts`) ne changerait pas ; il faudrait alors réécrire `server/stockage.ts`
+(ou remplacer le serveur par des fonctions Supabase) en gardant les mêmes routes, et importer les données
+depuis `fidelite.db` (SQLite de dev — la base de production, elle, est déjà chez Supabase).

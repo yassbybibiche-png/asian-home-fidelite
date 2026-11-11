@@ -6,11 +6,17 @@ Les fichiers sont servis localement par l'app (pas de hotlink).
 | Fichier | Contenu | Source |
 |---|---|---|
 | `logo.png` (600×600) | Logo officiel ASIAN HOUSE (chapeau conique, blanc sur noir) | Page Facebook Asian House Paris (fb.com, photo 424198893163205) |
+| `logo-petit.webp` (192×192, 4 900 o) | Même logo, réduit pour l'écran de chargement (affiché à 96×96) et pour le logo du commerce dans l'app (affiché 64×64, `LogoCommerce` — boucle t5) — dérivé de `logo.png` par redimensionnement (Pillow, WebP q80), boucle t2 | Dérivé de `logo.png` ci-dessus, pas une nouvelle source |
 | `hero-plats.jpg` (1024×683) | Plateau de plats vu de dessus : sushis, makis, saumon, nouilles, riz, dessert mangue | Page Facebook Asian House Paris (photo 424198889829872) |
-| `table-sushis.jpg` (2268×4032) | Table dressée : bao buns, plateau de sushis, cocktails, gobelet « ASIAN HOME » | Instagram @asianhomeparis — affiche du reel C0mvZW_iQ24 |
+| `hero-plats-petit.webp` (720×180, 27 382 o) | Même plateau, recadré au ratio de la bannière de la carte (affichée ~390×96) — dérivé de `hero-plats.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucles t6 (720×480) puis t7 (720×180, le rendu est très proche : l'`object-cover` recadrait déjà au centre, bande visible 720×177) | Dérivé de `hero-plats.jpg` ci-dessus, pas une nouvelle source |
+| `table-sushis.jpg` (788×1400 sur disque — original Instagram 2268×4032) | Table dressée : bao buns, plateau de sushis, cocktails, gobelet « ASIAN HOME » | Instagram @asianhomeparis — affiche du reel C0mvZW_iQ24 |
+| `table-sushis-petit.webp` (720×590, 51 402 o) | Même table dressée, recadrée au ratio de la carte (affichée ~390×320) — dérivé de `table-sushis.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucles t4 (720×1279) puis t9 (720×590, le menu montre approximativement le centre 720×413 de cette bande à ~390 px, la carte approximativement la bande entière) | Dérivé de `table-sushis.jpg` ci-dessus, pas une nouvelle source |
 | `cocktails.jpg` (640×1136) | Cocktails signature Koh Samui / Tokyo / Piña Colada (texte de la publication inclus dans l'image) | Instagram @asianhomeparis — affiche du reel DY2lhwmIIN1 |
+| `cocktails-petit.webp` (640×210, 12 334 o) | Mêmes cocktails, recadrés approximativement au ratio de la photo de catégorie (h-32, ~390 px de large) — dérivé de `cocktails.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `cocktails.jpg` ci-dessus, pas une nouvelle source |
 | `interieur.jpg` (675×900, converti depuis WebP) | Salle du restaurant : plafond d'ombrelles, tables dressées, sans personne | Galerie du restaurant sur desicorner.fr (page Asian Home Paris) |
+| `interieur-petit.webp` (675×443, 36 914 o) | Même salle, recadrée approximativement au ratio d'affichage (h-64, ~390 px de large) — dérivé de `interieur.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `interieur.jpg` ci-dessus, pas une nouvelle source |
 | `sushis-ardoise.jpg` (614×408) | Rouleau de sushis sur ardoise, filigrane « ASIAN HOME » | Galerie du restaurant sur lacarte.menu (Asian Home Paris) |
+| `sushis-ardoise-petit.webp` (614×201, 11 090 o) | Même rouleau, recadré approximativement au ratio de la photo de catégorie (h-32, ~390 px de large) — dérivé de `sushis-ardoise.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `sushis-ardoise.jpg` ci-dessus, pas une nouvelle source |
 
 ## Écartés (et pourquoi)
 - `ig-plat-decouverte.jpg` (post Instagram DCxJgxusyvd) : montre une personne identifiable dans la salle — non utilisé.
@@ -34,12 +40,15 @@ photo d'un autre restaurant, aucune personne identifiable.
 
 | Fichier | Contenu | Source |
 |---|---|---|
-| `menu-makis.jpg` (614×408) | Rouleau de makis (dragon/tiger) sur ardoise noire, filigrane « ASIAN HOME » au chapeau conique | Galerie lacarte.menu, photo 34229454 (contribution client sur la page du restaurant) |
+| `menu-makis.jpg` (614×408) | Rouleau de makis (dragon/tiger) sur ardoise noire, filigrane « ASIAN HOME » au chapeau conique | Galerie lacarte.menu, photo 34229454 (contribution client sur la page du restaurant) — **non rattachée à aucun plat depuis P1-M3 (11/11/2026)** : un seul rouleau pour deux plats différents, impossible de dire lequel elle montre ; voir `docs/PHOTOS-MANQUANTES.md` |
 | `menu-loc-lac.jpg` (1109×720) | Loc Lac : bœuf caramélisé, riz rouge, œuf au plat, salade, rosace de tomate | Galerie lacarte.menu, photo 122145160 |
 | `menu-nouilles-crevettes.jpg` (1140×720) | Nouilles sautées aux crevettes, bol bleu, tomate en rosace, baguettes | Galerie lacarte.menu, photo 122145184 |
 | `menu-mango-sticky-rice.jpg` (411×412) | Mango sticky rice : mangue et riz gluant coco | Galerie lacarte.menu, photo 95703556 |
+| `menu-mango-sticky-rice-petit.webp` (411×134, 12 054 o) | Même dessert, recadré approximativement au ratio de la photo de catégorie (h-32, ~390 px de large) — dérivé de `menu-mango-sticky-rice.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `menu-mango-sticky-rice.jpg` ci-dessus, pas une nouvelle source |
 | `menu-plat-riz.jpg` (424×408) | Plat thaï non identifié précisément : bol de riz + bol de soupe en grès, rose de gingembre — photo d'ambiance, non rattachée à un plat précis | Galerie lacarte.menu, photo 36412305 |
+| `menu-plat-riz-petit.webp` (424×139, 6 586 o) | Même plat, recadré approximativement au ratio de la photo de catégorie (h-32, ~390 px de large) — dérivé de `menu-plat-riz.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `menu-plat-riz.jpg` ci-dessus, pas une nouvelle source |
 | `interieur-salon.jpg` (320×240) | Coin salon : fauteuils velours bleu nuit, rideaux violets, tableau oiseau tropical, sans personne | Galerie lacarte.menu, photo 58544655 (image du restaurant) |
+| `interieur-salon-petit.webp` (320×157, 5 560 o) | Même salon, recadré approximativement au ratio d'affichage (h-48, ~390 px de large) — dérivé de `interieur-salon.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `interieur-salon.jpg` ci-dessus, pas une nouvelle source |
 
 Notes :
 - `menu-loc-lac.jpg` (207 Ko) et `menu-nouilles-crevettes.jpg` (303 Ko)
@@ -111,7 +120,11 @@ fichier reste ici, rattaché à aucun plat.
   (p. 4, 65,818 → 413,1049) montre le même plat en plus basse résolution — non extrait.
 - **Mango Stick** → `menu-mango-sticky-rice.jpg` (vérifiée) : le PDF (p. 6,
   160,683 → 426,860) montre aussi le plat mais n'apporte rien — non extrait.
-- **8 Maki Tiger / 8 Maki Chicken Dragon** → `menu-makis.jpg` partagée, comme avant.
+- **8 Maki Tiger / 8 Maki Chicken Dragon** : SANS photo depuis P1-M3 (11/11/2026) — la photo
+  partagée `menu-makis.jpg` a été détachée : contribution client (lacarte.menu, pas une photo
+  fournie par le restaurant), un seul rouleau pour deux plats différents, impossible de dire
+  lequel elle montre. Le fichier est gardé, non rattaché, en attendant 2 photos distinctes du
+  commerçant (voir `docs/PHOTOS-MANQUANTES.md`).
 
 ### Photos du PDF NON rattachées (et pourquoi)
 - **Love Bao** (p. 3, en haut à droite) : la photo montre un bol de

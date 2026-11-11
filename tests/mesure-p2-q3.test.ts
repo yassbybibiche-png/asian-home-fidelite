@@ -12,7 +12,7 @@ import type { AddressInfo } from 'node:net'
 
 import { creerServeur, type OptionsServeur } from '../server/app.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
-import { signalerScan } from '../src/data/jeuApi.ts'
+import { marquerScanSignale, signalerScan } from '../src/data/jeuApi.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import {
   ACCROCHE_GENERIQUE,
@@ -39,6 +39,7 @@ import {
   variation,
   type DonneesMesure,
 } from '../src/lib/mesure.ts'
+import { comparerOffreSemaine, JOURS_OFFRE, visitesParJourSemaine } from '../src/lib/mesure-offre.ts'
 import { TRADUCTIONS_EN, traduire } from '../src/lib/langue.ts'
 import type { Client, CompteurEvenement, Lot, Tirage } from '../src/types.ts'
 
@@ -322,14 +323,31 @@ describe('Signal « page de jeu ouverte » : une fois par onglet, rien que le ty
     await new Promise((r) => setImmediate(r))
   })
 
+  test('marquerScanSignale (?via=qr, scan déjà compté par /r/) : un signalement ultérieur ne part pas, même sans stockage', () => {
+    const appels: unknown[][] = []
+    const api = { signalerEvenement: async (...a: unknown[]) => void appels.push(a) as never }
+    const memoire = new Map<string, string>()
+    const session = { getItem: (k: string) => memoire.get(k) ?? null, setItem: (k: string, v: string) => void memoire.set(k, v), removeItem: (k: string) => void memoire.delete(k) }
+    // Arrivée par /r/ puis rechargement (la requête ?via=qr a été retirée) : pas de deuxième scan.
+    marquerScanSignale(session, 'c9')
+    assert.equal(signalerScan(api as never, 'c9', session), false)
+    // Stockage indisponible : la garde mémoire suffit pour cet affichage.
+    marquerScanSignale(null, 'c10')
+    assert.equal(signalerScan(api as never, 'c10', null), false)
+    assert.deepEqual(appels, [])
+  })
+
   test('client API : POST …/evenements avec { type } seulement', () => {
     const api = source('src/data/api.ts')
     assert.match(api, /requete\('POST', `\/commerces\/\$\{enc\(commerceId\)\}\/evenements`, \{ corps: \{ type \}, delaiMs: 5_000 \}\)/)
   })
 
-  test('page de jeu : scan signalé à l’ouverture (mode serveur) ; accroche A/B ; garde consentement intacte', () => {
+  test('page de jeu : scan signalé à l’ouverture (mode serveur) sauf après la redirection /r/ (?via=qr, déjà comptée) ; accroche A/B ; garde consentement intacte', () => {
     const jouer = source('src/pages/Jouer.tsx')
-    assert.match(jouer, /useEffect\(\(\) => void signalerScan\(api, commerce\.id, stockageSession\(\)\), \[api, commerce\.id\]\)/)
+    assert.match(jouer, /window\.location\.search === '\?via=qr'/)
+    assert.match(jouer, /marquerScanSignale\(stockageSession\(\), commerce\.id\)/)
+    assert.match(jouer, /else void signalerScan\(api, commerce\.id, stockageSession\(\)\)/)
+    assert.match(jouer, /window\.history\.replaceState\(null, '', `\$\{window\.location\.pathname\}\$\{window\.location\.hash\}`\)/)
     assert.match(jouer, /const accroche = accrocheJeu\(commerce, jourParis\(new Date\(\)\)\)/)
     assert.match(jouer, /\{t\(accroche\.modele, accroche\.valeurs\)\}/)
     assert.doesNotMatch(jouer, /useState\(true\)|defaultChecked/)
@@ -538,5 +556,65 @@ describe('Documentation des tests A/B', () => {
     assert.match(doc, /manuel/i)
     assert.match(doc, /varianteDuJour/)
     assert.match(doc, /aucune identité|Aucune identité/)
+    // Test 2 outillé (P2-Q3, trou bouché ici) : la comparaison est calculée par le tableau de bord, pas à la main.
+    assert.match(doc, /comparerOffreSemaine/)
+    assert.match(doc, /Test A\/B · offre de la semaine/)
+    assert.match(doc, /\/r\//)
+  })
+})
+
+// ---------- Test A/B « offre de la semaine » (test 2, outillé) ----------
+
+describe('Test A/B « offre de la semaine » : visites par jour de semaine sur deux périodes de 4 semaines', () => {
+  // 2026-10-05 et 2026-11-02 sont des lundis (2026-11-09 = lundi, cf. libellés ci-dessus).
+  const clients = [
+    { visites: ['2026-10-06T12:00:00Z', '2026-10-06T19:00:00Z', '2026-10-08T12:00:00Z', '2026-10-11T12:00:00Z', '2026-10-04T12:00:00Z'] },
+    { visites: ['2026-11-03T12:00:00Z', '2026-11-05T12:00:00Z', '2026-11-05T19:00:00Z', '2026-11-05T20:00:00Z', '2026-11-04T12:00:00Z', '2026-11-30T12:00:00Z'] },
+  ]
+
+  test('28 jours par période, lundi en premier ; hors fenêtre ignoré', () => {
+    assert.equal(JOURS_OFFRE, 28)
+    assert.deepEqual(visitesParJourSemaine(clients, '2026-10-05'), { jours: [0, 2, 0, 1, 0, 0, 1], total: 4 })
+    assert.deepEqual(visitesParJourSemaine(clients, '2026-11-02'), { jours: [0, 1, 1, 3, 0, 0, 0], total: 5 })
+  })
+
+  test('comparaison : jours, totaux et variation nette', () => {
+    const r = comparerOffreSemaine(clients, '2026-10-05', '2026-11-02')!
+    assert.deepEqual(r.A.jours, [0, 2, 0, 1, 0, 0, 1])
+    assert.deepEqual(r.B.jours, [0, 1, 1, 3, 0, 0, 0])
+    assert.equal(r.A.total, 4)
+    assert.equal(r.B.total, 5)
+    assert.equal(r.variationNette, 25)
+    // L'ordre des périodes ne change rien aux chiffres, seulement le sens de la variation.
+    assert.equal(comparerOffreSemaine(clients, '2026-11-02', '2026-10-05')!.variationNette, -20)
+  })
+
+  test('périodes qui se chevauchent ou dates invalides : null (on ne compare pas une période avec elle-même)', () => {
+    for (const [a, b] of [
+      ['2026-10-05', '2026-10-05'],
+      ['2026-10-05', '2026-10-12'],
+      ['2026-10-05', '2026-11-01'],
+      ['2026-10-05', '2026-02-30'],
+      ['2026-13-01', '2026-11-02'],
+      ['pas-un-jour', '2026-11-02'],
+    ] as const) {
+      assert.equal(comparerOffreSemaine(clients, a, b), null, `${a} / ${b}`)
+    }
+    // Fenêtres adjacentes (B commence le lendemain de la fin de A) : valides.
+    assert.notEqual(comparerOffreSemaine(clients, '2026-10-05', '2026-11-02'), null)
+  })
+
+  test('aucune visite : totaux à 0, variation nulle (pas de pourcentage inventé)', () => {
+    const r = comparerOffreSemaine([], '2026-10-05', '2026-11-02')!
+    assert.deepEqual([r.A.total, r.B.total, r.variationNette], [0, 0, null])
+    assert.deepEqual(r.A.jours, [0, 0, 0, 0, 0, 0, 0])
+  })
+
+  test('tableau de bord : section « offre de la semaine », deux dates, comparaison calculée', () => {
+    const mesure = source('src/components/Mesure.tsx')
+    assert.match(mesure, /Test A\/B · offre de la semaine/)
+    assert.match(mesure, /comparerOffreSemaine\(clients, debutOffreA, debutOffreB\)/)
+    assert.match(mesure, /JOURS_SEMAINE_COURTS\.map/)
+    assert.match(mesure, /type="date"/)
   })
 })

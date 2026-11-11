@@ -207,6 +207,14 @@ export interface CommercePublic {
   testAccroche?: true
 }
 
+/**
+ * Commerce vu en caisse (P0-S14) : seulement ce que le comptoir affiche et calcule (nom, logo, seuil, récompense,
+ * catalogue, taux de points, programme des niveaux). Jamais les lots et leurs probabilités, ni les réglages internes
+ * (réponses auto, messages auto, relances, tests A/B, conservation, dates, liens) — et jamais les clients ni le journal,
+ * qui ne partent plus qu'à la demande (recherche paginée, fiche client).
+ */
+export type CommerceCaisse = Pick<Commerce, 'id' | 'nom' | 'logo' | 'seuilTampons' | 'recompense' | 'catalogue' | 'eurosParPoint' | 'programme'>
+
 export type TypeMessageAuto = 'bienvenue' | 'recompense' | 'presque' | 'inactif' | 'anniversaire' | 'avis'
 export type ReglesMessages = Record<TypeMessageAuto, boolean>
 
@@ -246,7 +254,7 @@ export interface MembreEquipe {
   creeLe: string
 }
 
-export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi' | 'gain' | 'consentement' | 'avisGoogle' | 'rgpd'
+export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi' | 'gain' | 'consentement' | 'avisGoogle' | 'rgpd' | 'acces'
 
 /** Parrainage réussi (trace d'audit ; les points sont sur les cartes des deux clients). */
 export interface Parrainage {

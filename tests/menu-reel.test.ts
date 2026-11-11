@@ -3,16 +3,16 @@
 // photos rattachées aux bons plats, recherche/filtres, contrastes ≥ 4,5:1 des paires texte/fond utilisées.
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 
-import { COMPTE_CATEGORIES_REELLES, COMPTE_PLATS_REELS, PLATS_SIGNATURE, estSignature, menuReelAsianHome } from '../src/data/menu-reel.ts'
+import { COMPTE_CATEGORIES_REELLES, COMPTE_PLATS_REELS, PLATS_SIGNATURE, PRIX_A_CONFIRMER, estSignature, masquerPrixNonConfirmes, menuReelAsianHome } from '../src/data/menu-reel.ts'
 import { ID_ASIAN_HOME, VISUELS, photoCategorie } from '../src/lib/visuels.ts'
 import { LIBELLE_PRIX_ABSENT, bandeauPrixManquants, compterPlats, correspondPlat, filtrerMenu, validerMenu, ErreurMenu } from '../src/lib/menu.ts'
 import { formaterPrix } from '../src/lib/points.ts'
 
 // Retapé depuis la carte officielle (brief P1-B1), indépendamment de src/data/menu-reel.ts : [nom, prix en centimes].
 const CARTE: [string, [string, number | null][]][] = [
-  ['Salades & accompagnements', [['Choux', 250], ['Edamame', 400], ['Wakame', 400], ['Soupe Miso', 250], ['Riz Nature', 250], ['Riz Thaï', 890]]],
+  ['Salades & accompagnements', [['Choux', 250], ['Edamame', 400], ['Wakame', 400], ['Soupe Miso', 250], ['Riz Nature', 250], ['Riz Thaï', null]]],
   [
     'California x6 — option Crispy +0,50 €',
     [
@@ -67,7 +67,7 @@ const CARTE: [string, [string, number | null][]][] = [
     [['Mi Prat', 1390], ['Pad Thaï', 1390], ['Crousti Poulet', 1490], ['Khao Prat', 1390], ['Curry Vert', 1390], ['Tigre qui pleure', 1590], ['Loc Lac', 1490], ['Bo Bun', 1390]],
   ],
   ['Menu Midi (lundi au vendredi)', [['Midi Asian', 1390], ['Asian Love', 1390], ['Banh Mi', 990], ['Menu Enfant', 990]]],
-  ['Spécialités du chef', [['8 Maki Tiger', 1390], ['8 Maki Chicken Dragon', 1390], ['6 Maki Gold', 10000]]],
+  ['Spécialités du chef', [['8 Maki Tiger', 1390], ['8 Maki Chicken Dragon', 1390], ['6 Maki Gold', null]]],
   ['Desserts', [['Mango Stick', 890], ['Tiramisu', 890], ['Dessert du jour', 890]]],
   [
     'Boissons',
@@ -138,29 +138,81 @@ describe('Carte officielle (Heyzine, relevée le 10/11/2026) → src/data/menu-r
       menu.categories.map((c) => c.produits.map((p) => [p.nom, p.prix])),
       CARTE.map(([, ps]) => ps),
     )
-    // Double calcul : 78 lignes tarifées, total 706,30 € (somme des prix de la carte).
+    // Double calcul : 76 lignes tarifées affichées (78 imprimées − 2 prix non confirmés masqués, P1-M1),
+    // total 597,40 € (somme des prix affichés : 706,30 € imprimés − 8,90 € − 100,00 €).
     const prix = plats().map((p) => p.prix)
-    assert.equal(prix.filter((p) => p !== null).length, 78)
-    assert.equal(prix.reduce<number>((s, p) => s + (p ?? 0), 0), 70630)
+    assert.equal(prix.filter((p) => p !== null).length, 76)
+    assert.equal(prix.reduce<number>((s, p) => s + (p ?? 0), 0), 59740)
     assert.equal(formaterPrix(650).replace(/\s/g, ' '), '6,50 €')
   })
 
-  test('les 3 plats hors carte, et eux seuls, sont à prix null (« Prix sur place »)', () => {
+  test('5 plats sans prix (« Prix sur place ») : les 2 prix non confirmés masqués (P1-M1) + les 3 hors carte', () => {
     const sansPrix = plats().filter((p) => p.prix === null)
-    assert.deepEqual(sansPrix.map((p) => p.nom), ['Thaï-sty Krusty', 'Bœuf Basilic', 'Boisson 33cl'])
+    assert.deepEqual(sansPrix.map((p) => p.nom), ['Riz Thaï', '6 Maki Gold', 'Thaï-sty Krusty', 'Bœuf Basilic', 'Boisson 33cl'])
     for (const p of sansPrix) assert.equal(formaterPrix(p.prix), LIBELLE_PRIX_ABSENT)
     assert.equal(LIBELLE_PRIX_ABSENT, 'Prix sur place')
-    assert.deepEqual(menuReelAsianHome().categories.at(-1)!.produits.map((p) => p.nom), sansPrix.map((p) => p.nom))
+    // Les 3 hors carte restent seuls dans la dernière catégorie ; les 2 prix masqués restent dans leur catégorie d'origine.
+    assert.deepEqual(menuReelAsianHome().categories.at(-1)!.produits.map((p) => p.nom), ['Thaï-sty Krusty', 'Bœuf Basilic', 'Boisson 33cl'])
+    assert.equal(menuReelAsianHome().categories[0].produits.at(-1)!.nom, 'Riz Thaï')
+    assert.equal(menuReelAsianHome().categories[12].produits.at(-1)!.nom, '6 Maki Gold')
   })
 
-  test('prix « à vérifier » importés tels qu’imprimés : Riz Thaï 8,90 € et 6 Maki Gold 100,00 € (sans description)', () => {
+  test('prix « à vérifier » MASQUÉS (P1-M1) : Riz Thaï et 6 Maki Gold sans prix affiché, valeurs imprimées documentées seulement', () => {
     const riz = plats().find((p) => p.nom === 'Riz Thaï')!
     const gold = plats().find((p) => p.nom === '6 Maki Gold')!
-    assert.equal(riz.prix, 890)
-    assert.equal(formaterPrix(riz.prix).replace(/\s/g, ' '), '8,90 €')
-    assert.equal(gold.prix, 10000)
-    assert.equal(formaterPrix(gold.prix).replace(/\s/g, ' '), '100,00 €')
+    assert.equal(riz.prix, null)
+    assert.equal(gold.prix, null)
+    assert.equal(formaterPrix(riz.prix), LIBELLE_PRIX_ABSENT)
+    assert.equal(formaterPrix(gold.prix), LIBELLE_PRIX_ABSENT)
     assert.equal(gold.description, undefined)
+    // Les valeurs imprimées restent tracées (référence commerçant), jamais affichées dans le menu.
+    assert.deepEqual(
+      PRIX_A_CONFIRMER.map((p) => [p.nom, p.prixImprime]),
+      [
+        ['Riz Thaï', 890],
+        ['6 Maki Gold', 10000],
+      ],
+    )
+    assert.ok(PRIX_A_CONFIRMER.every((p) => p.motif.length > 0))
+  })
+
+  test('#/menu applique le masque au menu affiché (carte de repli ou menu enregistré)', () => {
+    const tsx = readFileSync(new URL('../src/pages/MenuPublic.tsx', import.meta.url), 'utf8')
+    assert.match(tsx, /masquerPrixNonConfirmes\(repliReel \? menuReelAsianHome\(\) : menu\)/)
+  })
+
+  test('masquerPrixNonConfirmes : un menu enregistré avant le lot avec les anciens montants ne les affiche plus', () => {
+    const ancien = {
+      categories: [
+        {
+          id: 'c1',
+          nom: 'Salades & accompagnements',
+          produits: [
+            { id: 'p1', nom: 'Riz Thaï', prix: 890, allergenes: [] },
+            { id: 'p2', nom: 'Riz Nature', prix: 250, allergenes: [] },
+          ],
+        },
+        {
+          id: 'c2',
+          nom: 'Spécialités du chef',
+          produits: [
+            { id: 'p3', nom: '6 Maki Gold', prix: 10000, allergenes: [] },
+            // Prix corrigé par le commerçant (10,00 €) : affiché, pas masqué.
+            { id: 'p4', nom: '6 Maki Gold', prix: 1000, allergenes: [] },
+          ],
+        },
+      ],
+    }
+    const masque = masquerPrixNonConfirmes(ancien as never)
+    assert.equal(masque.categories[0].produits[0].prix, null)
+    assert.equal(masque.categories[0].produits[1].prix, 250)
+    assert.equal(masque.categories[1].produits[0].prix, null)
+    assert.equal(masque.categories[1].produits[1].prix, 1000)
+    // Le menu d'origine n'est pas modifié.
+    assert.equal(ancien.categories[0].produits[0].prix, 890)
+    assert.equal(ancien.categories[1].produits[0].prix, 10000)
+    // La carte de repli est déjà masquée : l'application du masque ne change rien.
+    assert.deepEqual(masquerPrixNonConfirmes(menuReelAsianHome()), menuReelAsianHome())
   })
 
   test('descriptions = texte de la carte uniquement ; aucun allergène inventé', () => {
@@ -183,14 +235,14 @@ describe('Carte officielle (Heyzine, relevée le 10/11/2026) → src/data/menu-r
   test('le menu officiel passe la validation serveur (81 plats > ancienne limite de 60) ; un prix non entier reste refusé', () => {
     const valide = validerMenu(menuReelAsianHome(), ID_ASIAN_HOME, new Date())
     assert.equal(compterPlats(valide), 81)
-    assert.equal(valide.categories[0].produits[5].prix, 890)
+    assert.equal(valide.categories[0].produits[5].prix, null)
     assert.throws(() => validerMenu({ categories: [{ nom: 'E', produits: [{ nom: 'N', prix: 6.5, allergenes: [] }] }] }, ID_ASIAN_HOME, new Date()), ErreurMenu)
     assert.throws(() => validerMenu({ categories: [{ nom: 'E', produits: [{ nom: 'N', prix: -1, allergenes: [] }] }] }, ID_ASIAN_HOME, new Date()), ErreurMenu)
   })
 
-  test('bandeau « prix non renseignés » : affiché pour la carte officielle (3 plats sans prix), masqué si tous les prix sont là', () => {
+  test('bandeau « prix non renseignés » : affiché pour la carte officielle (5 plats sans prix), masqué si tous les prix sont là', () => {
     assert.match(bandeauPrixManquants(menuReelAsianHome())!, /Certains prix/)
-    const complet = { categories: menuReelAsianHome().categories.slice(0, -1) }
+    const complet = { categories: menuReelAsianHome().categories.map((c) => ({ ...c, produits: c.produits.map((p) => ({ ...p, prix: p.prix ?? 100 })) })) }
     assert.equal(bandeauPrixManquants(complet), null)
     const rien = { categories: [{ id: 'c', nom: 'E', produits: [{ id: 'p', nom: 'N', prix: null, allergenes: [] }] }] }
     assert.match(bandeauPrixManquants(rien)!, /les prix ne sont pas encore renseignés/)
@@ -203,18 +255,19 @@ describe('Photos rattachées aux bons plats (vraies photos du restaurant uniquem
     return p ? (p.photo ?? null) : undefined
   }
 
-  test('makis → menu-makis.jpg ; Loc Lac → menu-loc-lac.jpg ; Mango Stick → menu-mango-sticky-rice.jpg', () => {
-    assert.equal(photoDe('8 Maki Chicken Dragon'), VISUELS.menuMakis)
-    assert.equal(photoDe('8 Maki Tiger'), VISUELS.menuMakis)
+  test('makis SANS photo depuis P1-M3 (photo partagée détachée) ; Loc Lac → menu-loc-lac.jpg ; Mango Stick → menu-mango-sticky-rice.jpg', () => {
+    assert.equal(photoDe('8 Maki Chicken Dragon'), null)
+    assert.equal(photoDe('8 Maki Tiger'), null)
     assert.equal(photoDe('Loc Lac'), VISUELS.menuLocLac)
     assert.equal(photoDe('Mango Stick'), VISUELS.menuMangoStickyRice)
   })
-  test('Mi Prat → photo légendée du PDF (P1-B2), plus menu-nouilles-crevettes.jpg ; 13 plats photographiés, pas un de plus', () => {
+  test('Mi Prat → photo légendée du PDF (P1-B2), plus menu-nouilles-crevettes.jpg ; 11 plats photographiés, pas un de plus', () => {
     assert.equal(photoDe('Mi Prat'), '/visuels/menu-mi-prat.webp')
     for (const p of plats()) assert.notEqual(p.photo, VISUELS.menuNouillesCrevettes, p.nom)
+    for (const p of plats()) assert.notEqual(p.photo, VISUELS.menuMakis, p.nom)
     assert.deepEqual(
       plats().filter((p) => p.photo).map((p) => p.nom).sort(),
-      ['8 Maki Chicken Dragon', '8 Maki Tiger', 'Bo Bun', 'Crousti Poulet', 'Curry Vert', 'Dynamite', 'Khao Prat', 'Loc Lac', 'Mango Stick', 'Mi Prat', 'Pad Thaï', 'Poke Bowl', 'Tigre qui pleure'],
+      ['Bo Bun', 'Crousti Poulet', 'Curry Vert', 'Dynamite', 'Khao Prat', 'Loc Lac', 'Mango Stick', 'Mi Prat', 'Pad Thaï', 'Poke Bowl', 'Tigre qui pleure'],
     )
   })
   test('menu-plat-riz.jpg n’est rattachée à aucun plat nommé (photo d’ambiance seulement)', () => {
@@ -282,21 +335,21 @@ describe('DA sombre : contrastes texte/fond ≥ 4,5:1 (WCAG AA)', () => {
     return (clair + 0.05) / (sombre + 0.05)
   }
   const NUIT = '#111111' // noir [ESTIMÉ] Instagram
-  const OR = '#c9a227' // doré [ESTIMÉ] Instagram
+  const MAGENTA = '#ff2e9a' // magenta clair, texte sur noir (P0-D1)
   const LAQUE = '#b3262d' // rouge laque (valeur certifiée de la charte actuelle)
 
-  test('titres dorés et texte blanc sur fond noir', () => {
+  test('titres magenta et texte blanc sur fond noir', () => {
     assert.ok(contraste('#ffffff', NUIT) >= 4.5, `blanc/noir : ${contraste('#ffffff', NUIT).toFixed(1)}`)
-    assert.ok(contraste(OR, NUIT) >= 4.5, `or/noir : ${contraste(OR, NUIT).toFixed(1)}`)
-    assert.ok(contraste('#f2d48a', NUIT) >= 4.5, `or clair/noir : ${contraste('#f2d48a', NUIT).toFixed(1)}`)
+    assert.ok(contraste(MAGENTA, NUIT) >= 4.5, `magenta/noir : ${contraste(MAGENTA, NUIT).toFixed(1)}`)
+    assert.ok(contraste('#ff4d6d', NUIT) >= 4.5, `magenta doux/noir : ${contraste('#ff4d6d', NUIT).toFixed(1)}`)
     assert.ok(contraste('#f5c2be', NUIT) >= 4.5, `laque claire/noir : ${contraste('#f5c2be', NUIT).toFixed(1)}`)
   })
   test('rouge laque conservé comme accent (texte blanc dessus, texte laque sur ivoire)', () => {
     assert.ok(contraste('#ffffff', LAQUE) >= 4.5, `blanc/laque : ${contraste('#ffffff', LAQUE).toFixed(1)}`)
     assert.ok(contraste('#7f1a1f', '#f7f5f2') >= 4.5, `laque foncée/ivoire : ${contraste('#7f1a1f', '#f7f5f2').toFixed(1)}`)
-    assert.ok(contraste('#1f2937', '#f2d48a') >= 4.5, `encre/or clair (roue) : ${contraste('#1f2937', '#f2d48a').toFixed(1)}`)
+    assert.ok(contraste('#111111', '#ff2e9a') >= 4.5, `noir/magenta clair (roue) : ${contraste('#111111', '#ff2e9a').toFixed(1)}`)
   })
-  test('texte doré foncé sur fond clair (badges, étoiles)', () => {
+  test('texte foncé sur fond clair (badges, étoiles)', () => {
     assert.ok(contraste('#92400e', '#ffffff') >= 4.5, `amber-800/blanc : ${contraste('#92400e', '#ffffff').toFixed(1)}`)
     assert.ok(contraste('#92400e', '#fef3c7') >= 4.5, `amber-800/amber-100 : ${contraste('#92400e', '#fef3c7').toFixed(1)}`)
   })

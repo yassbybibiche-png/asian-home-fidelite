@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 
 @theme {
-  /* Rouge laque sobre (Asian Home Paris) ; blanc sur 500 : contraste ≈ 6,8:1. */
+  /* Rouge laque (Asian Home Paris) : réserve danger/erreur uniquement, jamais en primaire — blanc sur 500 : contraste 6,5:1 (recalculé, P0-D1). */
   --color-marque-50: #fdf3f2;
   --color-marque-100: #fbe3e1;
   --color-marque-200: #f5c2be;
@@ -10,14 +10,19 @@
   --color-marque-600: #9c1f26;
   --color-marque-700: #7f1a1f;
   --color-marque-800: #5e1317;
-  /* Or des étoiles et des récompenses (décor ; le texte doré utilise amber-800, contraste ≥ 4,5:1). */
-  --color-or-300: #f2d48a;
-  --color-or-400: #c9a227; /* [ESTIMÉ — DA Instagram @asianhomeparis, relevé 10/11/2026 : doré des coupes et du nom TOKYO ; texte doré sur fond sombre uniquement, contraste ≈ 8,9:1 sur #111111] */
-  --color-or-500: #d4a73c;
-  /* Registre nocturne Instagram (10/11/2026) : noir profond [ESTIMÉ] + lumières rose/violet. */
+  /* Magenta (carte du restaurant, P0-D1) : clair = texte sur noir, foncé = fond de bouton (texte blanc).
+     Contrastes recalculés (WCAG, P0-D1) : 300 #ff4d6d sur #111111 = 5,88:1 ; 400 #ff2e9a sur #111111 = 5,49:1 ;
+     500 #d1006f + blanc = 5,33:1 ; 600 #c4007a + blanc = 5,79:1 ; 700 #a1005e + blanc = 7,84:1. */
+  --color-magenta-300: #ff4d6d;
+  --color-magenta-400: #ff2e9a;
+  --color-magenta-500: #d1006f;
+  --color-magenta-600: #c4007a;
+  --color-magenta-700: #a1005e;
+  --color-magenta-900: #2a0a1e;
+  /* Registre nocturne : noir profond [ESTIMÉ] + magenta + violet. */
   --color-nuit-950: #111111; /* [ESTIMÉ] noir du logo et des ardoises ; blanc dessus : contraste ≈ 18,9:1 */
   --color-nuit-900: #1b1b22;
-  --color-neon-500: #ff4d6d; /* [ESTIMÉ] lumière rose/magenta du soir — décor uniquement, jamais en texte */
+  --color-nuit-800: #26262e;
   --color-violet-nuit: #3b2d8f; /* [ESTIMÉ] lumière bleu-violet du soir — décor uniquement */
   /* Fond chaud, légèrement ivoire, plus doux qu'un gris froid. */
   --color-fond: #f7f5f2;
@@ -29,6 +34,9 @@
   --font-titre: ui-serif, 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
   --shadow-douce: 0 1px 2px rgb(17 24 39 / 0.04), 0 4px 16px -4px rgb(17 24 39 / 0.08);
   --shadow-relief: 0 2px 4px rgb(17 24 39 / 0.06), 0 12px 32px -8px rgb(17 24 39 / 0.18);
+  /* Ombre du bouton primaire : le magenta vient du token (color-mix), jamais en rgb() en dur
+     — la garde tests/theme.test.ts interdit toute valeur du thème sous forme rgb() hors theme.ts. */
+  --shadow-bouton: 0 1px 0 rgb(255 255 255 / 0.15) inset, 0 2px 6px -1px color-mix(in srgb, var(--color-magenta-700) 35%, transparent);
 }
 
 html {
@@ -52,7 +60,7 @@ h3 {
 
 /* Focus clavier visible partout, discret au toucher. */
 :where(a, button, select, summary, input[type='checkbox'], [role='radio'], [role='tab'], [role='switch'], [tabindex]):focus-visible {
-  outline: 3px solid var(--color-marque-200);
+  outline: 3px solid var(--color-magenta-400);
   outline-offset: 2px;
   border-radius: 0.75rem;
 }
@@ -77,7 +85,7 @@ h3 {
   }
 }
 
-/* #/jouer, attente de la visite validée (P0-U4) : point doré qui pulse, halo qui s'élargit. */
+/* #/jouer, attente de la visite validée (P0-U4) : point magenta qui pulse, halo qui s'élargit. */
 @keyframes attente-halo {
   0% {
     transform: scale(1);
@@ -102,20 +110,20 @@ h3 {
 /* Champs de formulaire lisibles et faciles à toucher (≥ 48 px de haut). */
 @layer components {
   .champ {
-    @apply block w-full min-h-12 rounded-xl border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 shadow-[inset_0_1px_2px_rgb(17_24_39/0.04)] transition-colors placeholder:text-gray-500 focus:border-marque-500 focus:ring-2 focus:ring-marque-200 focus:outline-none aria-invalid:border-red-500;
+    @apply block w-full min-h-12 rounded-xl border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 shadow-[inset_0_1px_2px_rgb(17_24_39/0.04)] transition-colors placeholder:text-gray-500 focus:border-magenta-600 focus:ring-2 focus:ring-magenta-300 focus:outline-none aria-invalid:border-red-500;
   }
   .etiquette {
     @apply mb-1.5 block text-sm font-semibold text-gray-700;
   }
   /* Boutons : primaire (laque), secondaire (contour), états nets — pression, focus, chargement, désactivé. */
   .bouton {
-    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-marque-500 px-5 py-3 text-center text-base font-semibold text-white shadow-[0_1px_0_rgb(255_255_255/0.15)_inset,0_2px_6px_-1px_rgb(127_26_31/0.35)] transition hover:bg-marque-600 active:scale-[0.98] active:bg-marque-700 disabled:cursor-not-allowed disabled:bg-gray-500 disabled:shadow-none disabled:active:scale-100 aria-disabled:cursor-not-allowed;
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-magenta-500 px-5 py-3 text-center text-base font-semibold text-white shadow-bouton transition hover:bg-magenta-600 active:scale-[0.98] active:bg-magenta-700 disabled:cursor-not-allowed disabled:bg-gray-500 disabled:shadow-none disabled:active:scale-100 aria-disabled:cursor-not-allowed;
   }
   .bouton-secondaire {
     @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-5 py-3 text-center text-base font-semibold text-gray-800 shadow-[0_1px_2px_rgb(17_24_39/0.05)] transition hover:border-gray-400 hover:bg-gray-50 active:scale-[0.98] active:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-500 disabled:active:scale-100;
   }
   .lien {
-    @apply inline-flex min-h-11 items-center font-semibold text-marque-600 underline decoration-marque-200 underline-offset-4 hover:decoration-marque-500;
+    @apply inline-flex min-h-11 items-center font-semibold text-magenta-700 underline decoration-magenta-300 underline-offset-4 hover:decoration-magenta-500;
   }
   .carte {
     @apply rounded-2xl bg-white p-4 shadow-douce ring-1 ring-gray-900/5 sm:p-5;
@@ -126,28 +134,28 @@ h3 {
   .surtitre {
     @apply text-xs font-semibold tracking-[0.12em] text-gray-600 uppercase;
   }
-  /* Registre nocturne Instagram : en-têtes et héros sombres (noir + doré, rouge laque en accent). */
+  /* Registre nocturne : en-têtes et héros sombres (noir + magenta, halos magenta et violet). */
   .hero-sombre {
     background:
-      radial-gradient(120% 90% at 85% 0%, rgb(255 77 109 / 0.22), transparent 55%),
-      radial-gradient(120% 100% at 0% 0%, rgb(59 45 143 / 0.35), transparent 55%),
-      linear-gradient(160deg, #111111 0%, #1b1b22 60%, #2a1216 100%);
-    color: #fff;
+      radial-gradient(120% 90% at 85% 0%, color-mix(in srgb, var(--color-magenta-400) 25%, transparent), transparent 55%),
+      radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--color-violet-nuit) 35%, transparent), transparent 55%),
+      linear-gradient(160deg, #111111 0%, #1b1b22 60%, #2a0a1e 100%);
+    color: #ffffff;
   }
-  /* Titre façon logo : serif, capitales espacées, doré sur fond sombre (contraste ≈ 8,9:1). */
-  .titre-or {
-    @apply font-titre font-bold tracking-[0.14em] text-or-400 uppercase;
+  /* Titre façon logo : serif, capitales espacées, magenta clair sur fond sombre (contraste 5,49:1, recalculé P0-D1). */
+  .titre-magenta {
+    @apply font-titre font-bold tracking-[0.14em] text-magenta-400 uppercase;
   }
   .surtitre-sombre {
-    @apply text-xs font-semibold tracking-[0.18em] text-or-300 uppercase;
+    @apply text-xs font-semibold tracking-[0.18em] text-magenta-300 uppercase;
   }
   /* Pilule de filtre sur fond sombre (menu public, roue). */
   .puce-sombre {
-    @apply min-h-11 shrink-0 rounded-full bg-white/10 px-4 text-sm font-semibold text-white ring-1 ring-white/30 transition hover:bg-white/20 aria-pressed:bg-or-400 aria-pressed:text-nuit-950 aria-pressed:ring-or-400 aria-selected:bg-or-400 aria-selected:text-nuit-950 aria-selected:ring-or-400;
+    @apply min-h-11 shrink-0 rounded-full bg-white/10 px-4 text-sm font-semibold text-white ring-1 ring-white/30 transition hover:bg-white/20 aria-pressed:bg-magenta-400 aria-pressed:text-nuit-950 aria-pressed:ring-magenta-400 aria-selected:bg-magenta-400 aria-selected:text-nuit-950 aria-selected:ring-magenta-400;
   }
   /* Filtres en pilules (listes clients, avis, accès). */
   .puce {
-    @apply min-h-11 shrink-0 rounded-full bg-white px-4 text-sm font-semibold text-gray-700 ring-1 ring-gray-300 transition hover:ring-gray-400 aria-selected:bg-marque-500 aria-selected:text-white aria-selected:ring-marque-500 aria-pressed:bg-marque-500 aria-pressed:text-white aria-pressed:ring-marque-500;
+    @apply min-h-11 shrink-0 rounded-full bg-white px-4 text-sm font-semibold text-gray-700 ring-1 ring-gray-300 transition hover:ring-gray-400 aria-selected:bg-magenta-500 aria-selected:text-white aria-selected:ring-magenta-500 aria-pressed:bg-magenta-500 aria-pressed:text-white aria-pressed:ring-magenta-500;
   }
   /* Messages d'état cohérents. */
   .alerte-succes {
@@ -158,7 +166,7 @@ h3 {
     @apply -my-2.5 -ml-2.5 inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center;
   }
   .case-a-cocher {
-    @apply h-6 w-6 shrink-0 cursor-pointer accent-marque-500;
+    @apply h-6 w-6 shrink-0 cursor-pointer accent-magenta-600;
   }
   .etoile {
     @apply inline-flex h-12 w-12 items-center justify-center rounded-xl transition-transform active:scale-90;
@@ -167,12 +175,12 @@ h3 {
     animation: apparition 0.35s ease-out both;
   }
   .attente-pulse {
-    @apply relative inline-flex h-3 w-3 shrink-0 rounded-full bg-or-400;
+    @apply relative inline-flex h-3 w-3 shrink-0 rounded-full bg-magenta-400;
     animation: attente-point 1.6s ease-in-out infinite;
   }
   .attente-pulse::after {
     content: '';
-    @apply absolute inset-0 rounded-full bg-or-400;
+    @apply absolute inset-0 rounded-full bg-magenta-400;
     animation: attente-halo 1.6s ease-out infinite;
   }
 }
@@ -231,7 +239,7 @@ h3 {
 
 .tampon-nouveau {
   animation: tampon-pose 0.6s cubic-bezier(0.2, 0.8, 0.3, 1.2) both;
-  box-shadow: 0 0 0 3px var(--color-or-400);
+  box-shadow: 0 0 0 3px var(--color-magenta-400);
 }
 
 /* Mouvement réduit : point fixe (pas de clignotement accéléré par la règle globale), le texte reste. Pas de confettis. */
@@ -243,8 +251,245 @@ h3 {
   .confettis {
     display: none;
   }
-  /* Le nouveau tampon reste signalé par son contour doré, sans mouvement. */
+  /* Le nouveau tampon reste signalé par son contour magenta, sans mouvement. */
   .tampon-nouveau {
     animation: none;
   }
+}
+
+/* =====================================================================================
+ * Corps sombres côté client (P1-D2, AUDIT.md §6.2/§6.3).
+ * Appliqués par `src/App.tsx` (`.page-client` autour des pages #/jouer, #/carte, #/menu).
+ * Règles NON stratifiées, en fin de feuille : elles priment sur les couches Tailwind
+ * (components, utilities) quelle que soit leur spécificité, sans toucher aux composants.
+ * Correspondances et ratios : `src/theme.ts` (PAGE_CLIENT_SOMBRE) — ne rien changer ici sans
+ * mettre à jour le tableau et `tests/corps-sombres-p1-d2.test.ts`. Aucun hex dans ce bloc :
+ * les couleurs viennent des tokens du thème ou de blancs translucides.
+ * Îlots clairs conservés : alertes sémantiques (amber / green / red, jamais converties)
+ * et carte de fidélité (`[data-surface-claire]`, restaurations en fin de bloc).
+ * ===================================================================================== */
+.page-client {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: var(--color-nuit-950);
+  color: var(--color-white);
+}
+
+/* Cartes et titres partagés : surface sombre, texte blanc. */
+.page-client .carte {
+  background-color: var(--color-nuit-900);
+  --tw-ring-color: rgb(255 255 255 / 0.1);
+}
+.page-client .titre-carte {
+  color: var(--color-white);
+}
+.page-client .surtitre {
+  color: var(--color-magenta-300);
+}
+.page-client .etiquette {
+  color: rgb(255 255 255 / 0.85);
+}
+
+/* Champs sombres : fond surface2, bordure claire, texte blanc, placeholder lisible. */
+.page-client .champ {
+  background-color: var(--color-nuit-800);
+  border-color: rgb(255 255 255 / 0.25);
+  color: var(--color-white);
+}
+.page-client .champ::placeholder {
+  color: rgb(255 255 255 / 0.65);
+}
+.page-client .champ:focus {
+  border-color: var(--color-magenta-600);
+}
+/* Champ invalide : la bordure rouge du socle (`aria-invalid:border-red-500`, en couche Tailwind)
+   était écrasée par la bordure sombre — règle explicite, rouge clair (5,43:1 sur surface2),
+   anneau de focus rouge lui aussi. */
+.page-client .champ[aria-invalid='true'] {
+  border-color: var(--color-red-400);
+}
+.page-client .champ[aria-invalid='true']:focus {
+  border-color: var(--color-red-400);
+  --tw-ring-color: var(--color-red-400);
+}
+
+/* Bouton secondaire sombre ; désactivé terne ; lien magenta clair (jamais magenta-700, 3,54:1). */
+.page-client .bouton-secondaire {
+  background-color: rgb(255 255 255 / 0.1);
+  border-color: rgb(255 255 255 / 0.3);
+  color: var(--color-white);
+}
+.page-client .bouton-secondaire:hover {
+  background-color: rgb(255 255 255 / 0.2);
+}
+.page-client .bouton-secondaire:disabled {
+  background-color: rgb(255 255 255 / 0.05);
+  color: rgb(255 255 255 / 0.45);
+}
+.page-client .lien {
+  color: var(--color-magenta-400);
+}
+/* Lien dans une alerte claire (ambre/vert/rouge, jamais converties) : le magenta clair (3,31:1
+   sur ambre-50) échoue AA — le lien garde le magenta foncé (7,56/7,49/7,17:1). */
+.page-client .bg-amber-50 .lien,
+.page-client .bg-green-50 .lien,
+.page-client .bg-red-50 .lien {
+  color: var(--color-magenta-700);
+}
+
+/* Pilules sombres ; sélectionnée = magenta bouton, texte blanc (comme sur fond clair). */
+.page-client .puce {
+  background-color: rgb(255 255 255 / 0.1);
+  color: var(--color-white);
+  --tw-ring-color: rgb(255 255 255 / 0.3);
+}
+.page-client .puce[aria-selected='true'],
+.page-client .puce[aria-pressed='true'] {
+  background-color: var(--color-magenta-500);
+  color: var(--color-white);
+  --tw-ring-color: var(--color-magenta-500);
+}
+
+/* Textes gris clair → clairs (hiérarchie conservée : 900 blanc, 800 gris-200, 700 gris-300, 600 gris-400). */
+.page-client .text-gray-900 {
+  color: var(--color-white);
+}
+.page-client .text-gray-800 {
+  color: var(--color-gray-200);
+}
+.page-client .text-gray-700 {
+  color: var(--color-gray-300);
+}
+.page-client .text-gray-600 {
+  color: var(--color-gray-400);
+}
+/* Textes colorés sur fond sombre : magenta bouton → magenta clair, erreur/ok éclaircis. */
+.page-client .text-magenta-700 {
+  color: var(--color-magenta-400);
+}
+.page-client .text-red-700 {
+  color: var(--color-red-300);
+}
+.page-client .text-green-800 {
+  color: var(--color-green-300);
+}
+/* Note d'étoiles (InvitationAvis) : texte ambre foncé (2,41:1 sur surface) → blanc, lisible sans
+   introduire de token ambre dans cette feuille (garde P0-D1 : ambre = alerte/étoiles seulement,
+   les étoiles elles-mêmes gardent leur couleur ambre). Le badge clair (ui.tsx, pastille ambre sur
+   fond ambre clair) garde sa couleur. */
+.page-client .text-amber-800:not(.rounded-full) {
+  color: var(--color-white);
+}
+
+/* Fonds clairs → sombres (les alertes ambre / vert / rouge ne sont pas converties). */
+.page-client .bg-white {
+  background-color: var(--color-nuit-900);
+}
+.page-client .bg-gray-50 {
+  background-color: rgb(255 255 255 / 0.05);
+}
+.page-client .bg-gray-100 {
+  background-color: rgb(255 255 255 / 0.1);
+}
+.page-client .bg-gray-200 {
+  background-color: rgb(255 255 255 / 0.15);
+}
+.page-client .bg-fond {
+  background-color: var(--color-nuit-900);
+}
+.page-client .bg-fond\/95 {
+  background-color: color-mix(in srgb, var(--color-nuit-950) 95%, transparent);
+}
+.page-client .active\:bg-gray-50:active {
+  background-color: rgb(255 255 255 / 0.08);
+}
+
+/* Filets et séparateurs clairs → blancs translucides. */
+.page-client .ring-gray-900\/5 {
+  --tw-ring-color: rgb(255 255 255 / 0.08);
+}
+.page-client .ring-gray-200 {
+  --tw-ring-color: rgb(255 255 255 / 0.15);
+}
+.page-client .ring-gray-300 {
+  --tw-ring-color: rgb(255 255 255 / 0.3);
+}
+.page-client .border-gray-100 {
+  border-color: rgb(255 255 255 / 0.08);
+}
+.page-client .border-gray-200 {
+  border-color: rgb(255 255 255 / 0.15);
+}
+.page-client .border-gray-400 {
+  border-color: rgb(255 255 255 / 0.3);
+}
+.page-client .divide-gray-100 > :not(:last-child) {
+  border-color: rgb(255 255 255 / 0.08);
+}
+
+/* Îlot clair : la carte de fidélité reste un objet clair (fond configurable par commerce).
+   Restaurations — chaque correspondance sombre est annulée dans ce sous-arbre, dans le même ordre. */
+.page-client [data-surface-claire] .text-gray-900 {
+  color: var(--color-gray-900);
+}
+.page-client [data-surface-claire] .text-gray-800 {
+  color: var(--color-gray-800);
+}
+.page-client [data-surface-claire] .text-gray-700 {
+  color: var(--color-gray-700);
+}
+.page-client [data-surface-claire] .text-gray-600 {
+  color: var(--color-gray-600);
+}
+.page-client [data-surface-claire] .surtitre {
+  color: var(--color-gray-600);
+}
+.page-client [data-surface-claire] .text-magenta-700 {
+  color: var(--color-magenta-700);
+}
+.page-client [data-surface-claire] .bg-white {
+  background-color: var(--color-white);
+}
+/* L'élément porteur lui-même : `[data-surface-claire] .bg-white` ne cible que les descendants —
+   la section porte `bg-white` ET l'attribut, il faut la règle accolée (sans elle, le corps de la
+   carte devenait sombre avec des textes restaurés en gris foncé — illisible, vu en capture). */
+.page-client [data-surface-claire].bg-white {
+  background-color: var(--color-white);
+}
+/* Bouton secondaire dans l'îlot clair (parrainage, CarteFidelite) : la conversion sombre
+   (texte blanc, fond blanc translucide) le rendait invisible sur la carte blanche — restauré
+   à sa définition claire (fond blanc, texte gris-800, filet gris-300, survol gris-50). */
+.page-client [data-surface-claire] .bouton-secondaire {
+  background-color: var(--color-white);
+  border-color: var(--color-gray-300);
+  color: var(--color-gray-800);
+}
+.page-client [data-surface-claire] .bouton-secondaire:hover {
+  background-color: var(--color-gray-50);
+  border-color: var(--color-gray-400);
+}
+.page-client [data-surface-claire] .bg-gray-50 {
+  background-color: var(--color-gray-50);
+}
+.page-client [data-surface-claire] .bg-gray-100 {
+  background-color: var(--color-gray-100);
+}
+.page-client [data-surface-claire] .bg-gray-200 {
+  background-color: var(--color-gray-200);
+}
+.page-client [data-surface-claire] .ring-gray-900\/5 {
+  --tw-ring-color: rgb(17 24 39 / 0.05);
+}
+.page-client [data-surface-claire] .ring-gray-200 {
+  --tw-ring-color: var(--color-gray-200);
+}
+.page-client [data-surface-claire] .border-gray-400 {
+  border-color: var(--color-gray-400);
+}
+
+/* Carte de gain (Jouer, `data-resultat="gain"`) : dégradé clair (magenta pâle → blanc) — le seul
+   dégradé clair côté client. Avec les textes passés en blanc, le contraste tombait ; le dégradé
+   devient sombre (teinte magenta en haut, nuit en bas), texte blanc 17,12:1 en bas. */
+.page-client [data-resultat='gain'] {
+  background-image: linear-gradient(to bottom, color-mix(in srgb, var(--color-magenta-500) 14%, transparent), var(--color-nuit-900));
 }

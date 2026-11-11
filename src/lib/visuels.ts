@@ -17,15 +17,41 @@ export const VISUELS = {
   logo: '/visuels/logo.png',
   /** Plateau de plats vu de dessus (sushis, makis, saumon, nouilles, riz, mangue). */
   heroPlats: '/visuels/hero-plats.jpg',
+  /** Même plateau, recadré au ratio de la bannière (720×180, WebP q75, ~27 Ko) —
+      le JPEG 1024×683 (177 Ko) reste le repli (boucle t6 : variante 720×480 ;
+      boucle t7 : recadrage centré au ratio d'affichage 390×96 — l'object-cover
+      jetait ~63 % des pixels de la variante 720×480 (bande visible 720×177),
+      le rendu est très proche, avec des différences de redimensionnement et
+      de compression). */
+  heroPlatsPetit: '/visuels/hero-plats-petit.webp',
   /** Table dressée : bao buns, plateau de sushis, cocktails. */
   tableSushis: '/visuels/table-sushis.jpg',
+  /** Même table dressée, recadrée au ratio de la carte (720×590, WebP q75, ~51 Ko)
+      pour l'en-tête du menu et de la carte — le JPEG 788×1400 (196 Ko) reste le repli
+      (boucle t4 : variante 720×1279 ; boucle t9 : recadrage centré à la bande visible
+      de la carte 720×590 — le menu montre approximativement le centre 720×413 de cette
+      bande à la largeur de référence ~390 px, la carte approximativement la bande
+      entière ; le rendu est très proche sur les deux pages). */
+  tableSushisPetit: '/visuels/table-sushis-petit.webp',
   /** Cocktails signature Kohsamui / Tokyo / Piña Colada. */
   cocktails: '/visuels/cocktails.jpg',
+  /** Mêmes cocktails, recadrés au ratio de la photo de catégorie (640×210, WebP q75, ~12 Ko) —
+      le JPEG 640×1136 (69 Ko) reste le repli (boucle t10, photo paresseuse). */
+  cocktailsPetit: '/visuels/cocktails-petit.webp',
   /** Salle du restaurant : plafond d'ombrelles, tables dressées, sans personne. */
   interieur: '/visuels/interieur.jpg',
+  /** Même salle, recadrée au ratio d'affichage (675×443, WebP q75, ~37 Ko) —
+      le JPEG 675×900 (131 Ko) reste le repli (boucle t10, photo paresseuse). */
+  interieurPetit: '/visuels/interieur-petit.webp',
   /** Rouleau de sushis sur ardoise. */
   sushisArdoise: '/visuels/sushis-ardoise.jpg',
-  /** Makis sur ardoise, filigrane ASIAN HOME (8 Maki Chicken Dragon / 8 Maki Tiger). */
+  /** Même rouleau, recadré au ratio de la photo de catégorie (614×201, WebP q75, ~11 Ko) —
+      le JPEG 614×408 (30 Ko) reste le repli (boucle t10, photo paresseuse). */
+  sushisArdoisePetit: '/visuels/sushis-ardoise-petit.webp',
+  /** Rouleau de makis sur ardoise, filigrane ASIAN HOME — NON rattaché à aucun plat depuis P1-M3 :
+      contribution client sur lacarte.menu (pas une photo fournie par le restaurant), un seul rouleau
+      pour deux plats différents (8 Maki Tiger / 8 Maki Chicken Dragon), impossible de dire lequel
+      elle montre. Fichier gardé en attendant 2 photos distinctes du commerçant. */
   menuMakis: '/visuels/menu-makis.jpg',
   /** Loc Lac : bœuf caramélisé, riz rouge, œuf au plat. */
   menuLocLac: '/visuels/menu-loc-lac.jpg',
@@ -36,10 +62,19 @@ export const VISUELS = {
   menuNouillesCrevettes: '/visuels/menu-nouilles-crevettes.jpg',
   /** Mango sticky rice : mangue et riz gluant coco (Mango Stick). */
   menuMangoStickyRice: '/visuels/menu-mango-sticky-rice.jpg',
+  /** Même dessert, recadré au ratio de la photo de catégorie (411×134, WebP q75, ~12 Ko) —
+      le JPEG 411×412 (61 Ko) reste le repli (boucle t10, photo paresseuse). */
+  menuMangoStickyRicePetit: '/visuels/menu-mango-sticky-rice-petit.webp',
   /** Plat thaï non identifié précisément (riz + soupe en grès) : photo d'ambiance de catégorie uniquement, jamais d'un plat nommé. */
   menuPlatRiz: '/visuels/menu-plat-riz.jpg',
+  /** Même plat, recadré au ratio de la photo de catégorie (424×139, WebP q75, ~6,6 Ko) —
+      le JPEG 424×408 (39 Ko) reste le repli (boucle t10, photo paresseuse). */
+  menuPlatRizPetit: '/visuels/menu-plat-riz-petit.webp',
   /** Coin salon : fauteuils velours bleu nuit, rideaux violets, sans personne. */
   interieurSalon: '/visuels/interieur-salon.jpg',
+  /** Même salon, recadré au ratio d'affichage (320×157, WebP q75, ~5,6 Ko) —
+      le JPEG 320×240 (22 Ko) reste le repli (boucle t10, photo paresseuse). */
+  interieurSalonPetit: '/visuels/interieur-salon-petit.webp',
 } as const
 
 /**
@@ -60,6 +95,12 @@ export const PHOTOS_PDF = {
   tigreQuiPleure: photoPdf('tigre-qui-pleure'),
   boBun: photoPdf('bo-bun'),
 } as const
+
+/** Variante légère du logo par défaut (192×192, WebP q80, 4,9 Ko) : écran de
+ * chargement (index.html, boucle t2) et logo du commerce dans l'app
+ * (LogoCommerce, boucle t5 — le PNG 600×600 est affiché 64×64).
+ * Hors de VISUELS : tests/visuels.test.ts exige > 10 000 o par entrée. */
+export const LOGO_DEFAUT_PETIT = '/visuels/logo-petit.webp'
 
 /** Identifiant stable du commerce Asian Home Paris (seed + production). */
 export const ID_ASIAN_HOME = 'c-asian-home-paris'
@@ -89,6 +130,8 @@ export function estLogoLocal(logo: string): boolean {
 
 export interface PhotoCategorie {
   src: string
+  /** Variante WebP légère, recadrée au ratio d'affichage (boucle t10) — le JPEG reste le repli. */
+  srcPetit: string
   alt: string
 }
 
@@ -100,18 +143,18 @@ export interface PhotoCategorie {
 export function photoCategorie(nom: string): PhotoCategorie | null {
   const n = nom.toLowerCase()
   if (n.includes('sushi') || n.includes('maki') || n.includes('sashimi') || n.includes('jap')) {
-    return { src: VISUELS.sushisArdoise, alt: 'Rouleau de sushis sur ardoise' }
+    return { src: VISUELS.sushisArdoise, srcPetit: VISUELS.sushisArdoisePetit, alt: 'Rouleau de sushis sur ardoise' }
   }
   if (n.includes('boisson') || n.includes('cocktail')) {
-    return { src: VISUELS.cocktails, alt: 'Cocktails signature : Kohsamui, Tokyo et Piña Colada' }
+    return { src: VISUELS.cocktails, srcPetit: VISUELS.cocktailsPetit, alt: 'Cocktails signature : Kohsamui, Tokyo et Piña Colada' }
   }
   if (n.includes('thaï') || n.includes('thai')) {
     // Plat thaï non identifié précisément : illustre la catégorie, jamais un plat nommé.
-    return { src: VISUELS.menuPlatRiz, alt: 'Plat thaï : riz et soupe en grès' }
+    return { src: VISUELS.menuPlatRiz, srcPetit: VISUELS.menuPlatRizPetit, alt: 'Plat thaï : riz et soupe en grès' }
   }
   if (n.includes('dessert')) {
     // Le Mango Stick, dessert photographié du restaurant : illustre la catégorie.
-    return { src: VISUELS.menuMangoStickyRice, alt: 'Mango sticky rice : mangue et riz gluant coco' }
+    return { src: VISUELS.menuMangoStickyRice, srcPetit: VISUELS.menuMangoStickyRicePetit, alt: 'Mango sticky rice : mangue et riz gluant coco' }
   }
   return null
 }

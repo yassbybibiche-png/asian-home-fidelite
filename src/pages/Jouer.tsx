@@ -17,14 +17,15 @@ import {
 import { estAsianHome } from '../lib/visuels'
 import { attributsChamp, avecPrenom, etatSaisieContact, virgulePrenom, type ModeContact } from '../lib/inscriptionJeu'
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ReponseCarte, type ResultatTirage } from '../data/api'
-import { lancerTirage, memoireJoueur, signalerScan, type JoueurMemorise } from '../data/jeuApi'
+import { assurerJetonClient, avecJetonClient, lancerTirage, marquerScanSignale, memoireJoueur, signalerScan, type JoueurMemorise } from '../data/jeuApi'
+import { memoireJetons } from '../lib/jetonCarte'
 import { accrocheJeu, jourParis } from '../lib/mesure'
 import {
   delaiResultat,
   detecterPlateforme,
   dureeConfettis,
   estInstallee,
-  etapesEcranAccueil,
+  etapesEcranAccueilLangue,
   genererConfettis,
   MOTIF_VIBRATION_GAIN,
   MOTIF_VIBRATION_PERDU,
@@ -101,12 +102,12 @@ function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; 
         <div className="flex justify-center">
           <LogoCommerce commerce={commerce} taille="lg" />
         </div>
-        <h1 className="titre-or mt-3 text-2xl">{commerce.nom}</h1>
-        <p className="mt-1 font-semibold text-or-300">{t(accroche.modele, accroche.valeurs)}</p>
+        <h1 className="titre-magenta mt-3 text-2xl">{commerce.nom}</h1>
+        <p className="mt-1 font-semibold text-magenta-300">{t(accroche.modele, accroche.valeurs)}</p>
         {commerce.coordonnees && <p className="mt-1 text-sm text-white/70">{commerce.coordonnees}</p>}
       </header>
 
-      <div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-or-400/30">
+      <div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-magenta-400/30">
         <Roue lots={commerce.lots} rotation={rotation} />
         <LegendeRoue lots={commerce.lots} />
       </div>
@@ -148,7 +149,7 @@ export function MessageSansVisite({
       <ol className="space-y-2" aria-label={t('Pour débloquer la roue')}>
         {ETAPES_VALIDATION.map((etape, i) => (
           <li key={etape} className="flex items-start gap-3 rounded-xl bg-fond p-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-nuit-950 font-bold text-or-400" aria-hidden>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-nuit-950 font-bold text-magenta-400" aria-hidden>
               {i + 1}
             </span>
             <span className="pt-1 text-gray-800">{t(etape)}</span>
@@ -167,7 +168,7 @@ export function MessageSansVisite({
       ) : (
         <div className="hero-sombre flex items-center justify-center gap-3 rounded-xl px-4 py-3" role="status" aria-live="polite" aria-busy="true" data-attente="en-cours">
           <span className="attente-pulse" aria-hidden />
-          <span className="font-semibold text-or-300">{t(TEXTE_ATTENTE)}</span>
+          <span className="font-semibold text-magenta-300">{t(TEXTE_ATTENTE)}</span>
         </div>
       )}
       <p className="text-center text-sm text-gray-600">{t('1 visite validée = 1 participation par jour.')}</p>
@@ -219,6 +220,22 @@ function MessageDejaJoue({ prenom, lot, code, remis }: { prenom: string; lot: st
       )}
       {remis ? <p className="mt-2 font-semibold text-green-800">{t('✓ Lot déjà remis au comptoir. Bon appétit !')}</p> : code && <CodeGagnant code={code} />}
       <p className="mt-2 text-sm text-gray-600">{t(TEXTE_DEJA_JOUE)}</p>
+    </section>
+  )
+}
+
+/** Tirage refusé en 401 (P0-S7) : l'accès de ce téléphone à la carte a expiré ou a été révoqué. */
+export function AccesCartePerdu({ lienCarte }: { lienCarte: string }) {
+  const { t } = useLangue()
+  return (
+    <section className="carte space-y-3 text-center" role="alert" data-acces="perdu">
+      <p className="titre-carte">{t('Votre carte n’est plus ouverte sur ce téléphone')}</p>
+      <p className="text-gray-700">
+        {t('Pour des raisons de sécurité, l’accès a expiré ou a été retiré. Retrouvez votre carte avec votre téléphone ou votre e-mail, ou demandez au comptoir le QR d’accès à votre carte : vous pourrez ensuite tourner la roue.')}
+      </p>
+      <a href={lienCarte} className="bouton w-full">
+        {t('Retrouver ma carte')}
+      </a>
     </section>
   )
 }
@@ -395,15 +412,34 @@ function stockageSession(): Storage | null {
 }
 
 function JouerApi({ api }: { api: ClientApi }) {
-  const { param } = useRoute()
+  const { page, param } = useRoute()
   const [commerce, setCommerce] = useState<CommercePublic | null>(null)
   const [erreur, setErreur] = useState<'inconnu' | 'horsLigne' | null>(null)
+  // Revue Codex P0-D1, point 5 : identifiant de la demande en cours — une réponse arrivée
+  // après une navigation jouer/A → jouer/B ne doit pas écraser le commerce B, et l'ancien
+  // commerce ne reste pas affiché pendant le chargement du nouveau.
+  const demandeEnCours = useRef<string | null>(null)
 
   const charger = useCallback(() => {
+    // P0-D1 : la route peut déjà être #/carte/<id-client> quand ce composant se re-rend une
+    // dernière fois avant d'être démonté (les abonnements useRoute d'App et de JouerApi ne se
+    // mettent pas à jour dans le même rendu) : ne jamais appeler api.commerce avec
+    // l'identifiant client — c'était un 404 en console à chaque « Voir ma carte » après un gain.
+    if (page !== 'jouer') return
     if (!param) return setErreur('inconnu')
     setErreur(null)
-    api.commerce(param).then(setCommerce, (e) => setErreur(e instanceof ErreurApi && e.statut === 404 ? 'inconnu' : 'horsLigne'))
-  }, [api, param])
+    if (demandeEnCours.current !== param) setCommerce(null)
+    const demande = param
+    demandeEnCours.current = demande
+    api.commerce(demande).then(
+      (c) => {
+        if (demandeEnCours.current === demande) setCommerce(c)
+      },
+      (e) => {
+        if (demandeEnCours.current === demande) setErreur(e instanceof ErreurApi && e.statut === 404 ? 'inconnu' : 'horsLigne')
+      },
+    )
+  }, [api, page, param])
   useEffect(charger, [charger])
   const { t } = useLangue()
 
@@ -413,11 +449,18 @@ function JouerApi({ api }: { api: ClientApi }) {
   return verifierCommerce(commerce) ?? <PartieApi key={commerce.id} api={api} commerce={commerce} />
 }
 
-function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic }) {
+function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: CommercePublic }) {
   const memoire = useMemo(() => memoireJoueur(stockageLocal(), commerce.id), [commerce.id])
+  // P0-S7 : jeton client du joueur, rangé sur ce téléphone ; chaque appel « carte » de la page (lecture, tirage, prénom,
+  // message privé) le porte, via cette API.
+  const jetons = useMemo(() => memoireJetons(stockageLocal()), [])
+  const joueurActif = useRef<string | null>(null)
+  const api = useMemo(() => avecJetonClient(apiServeur, jetons, () => joueurActif.current), [apiServeur, jetons])
+  const essaisJeton = useRef(new Set<string>())
   // Code de parrainage dans le lien partagé (#/jouer/<id>?parrain=AH-XXXXXX) : attaché à l'inscription.
   const parrain = useMemo(() => /[?&]parrain=([A-Za-z0-9-]+)/.exec(window.location.hash)?.[1], [])
   const [joueur, setJoueur] = useState<JoueurMemorise | null>(null)
+  useEffect(() => void (joueurActif.current = joueur?.clientId ?? null), [joueur])
   const [memorise, setMemorise] = useState(() => memoire.joueur())
   const [jeu, setJeu] = useState<ReponseCarte['jeu'] | null>(null)
   const [etape, setEtape] = useState<Etape>('pret')
@@ -425,6 +468,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
   const [gain, setGain] = useState<ResultatTirage | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [enCours, setEnCours] = useState(false)
+  const [accesPerdu, setAccesPerdu] = useState(false)
   const [horsLigne, setHorsLigne] = useState(false)
   const [menuDisponible, setMenuDisponible] = useState(() => estAsianHome(commerce))
   const minuterie = useRef<number | undefined>(undefined)
@@ -434,13 +478,32 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
   const { t } = useLangue()
   const visiteValidee = useVisiteValidee(jeu?.statut)
   // Mesure anonyme (P2-Q3) : page de jeu ouverte, une fois par onglet ; seul le type part, jamais la carte.
-  useEffect(() => void signalerScan(api, commerce.id, stockageSession()), [api, commerce.id])
+  // Arrivée par la redirection courte du QR (`/r/` : la seule requête émise est `?via=qr`) : le scan est déjà
+  // compté par le serveur, on ne le recompte pas — et on pose le marqueur de l'onglet AVANT de retirer la
+  // requête, sinon un rechargement ou un remontage recompterait le scan (revue Codex P2-Q3/P2-Q4).
+  // La requête est retirée de l'adresse : une ouverture directe de #/jouer plus tard dans le même onglet
+  // est alors comptée normalement.
+  useEffect(() => {
+    if (window.location.search === '?via=qr') {
+      marquerScanSignale(stockageSession(), commerce.id)
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`)
+    } else void signalerScan(api, commerce.id, stockageSession())
+  }, [api, commerce.id])
 
   // État du jeu du jour, vu par le serveur (visite validée ? déjà joué ?). Renvoie le statut, ou null en cas d'échec.
   const majStatut = useCallback(
     async (j: JoueurMemorise): Promise<StatutJeu | null> => {
       try {
-        const r = await api.carte(j.clientId)
+        await assurerJetonClient(api, jetons, j.clientId, { dejaEssaye: essaisJeton.current })
+        let r: ReponseCarte
+        try {
+          r = await api.carte(j.clientId)
+        } catch (e) {
+          // Jeton refusé (révoqué entre-temps) : oublié ; la carte se relit sans (vue limitée, qui garde le jeu du jour).
+          if (!(e instanceof ErreurApi && e.statut === 401 && jetons.lire(j.clientId))) throw e
+          jetons.ecrire(j.clientId, null)
+          r = await api.carte(j.clientId)
+        }
         setJeu(r.jeu)
         setMenuDisponible((m) => m || !!r.menuDisponible)
         setMessage(null)
@@ -460,7 +523,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
         return null
       }
     },
-    [api, memoire],
+    [api, memoire, jetons],
   )
 
   useEffect(() => {
@@ -519,6 +582,13 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
     setMessage(null)
     const issue = await lancerTirage(api, commerce, joueur.contact, joueur.prenom)
     setEnCours(false)
+    if (!issue.ok && issue.accesRefuse) {
+      // P0-S7 : jeton expiré (30 jours) ou révoqué — ce téléphone ne peut plus jouer pour cette carte. Plutôt qu'une
+      // erreur sèche : le chemin pour la retrouver (carte → « Retrouver ma carte », ou QR du comptoir).
+      jetons.ecrire(joueur.clientId, null)
+      setAccesPerdu(true)
+      return
+    }
     if (!issue.ok) {
       // Refusé par le serveur ou serveur injoignable : la roue ne tourne pas, aucun lot n'est affiché.
       setMessage(issue.message)
@@ -557,7 +627,8 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
             commerceId={commerce.id}
             nomCommerce={commerce.nom}
             onEnvoyer={async (contactSaisi, consentementRelance) => {
-              const { client } = await api.inscrirePublic(commerce.id, '', contactSaisi, parrain, consentementRelance)
+              const { client, jeton, expireLe } = await api.inscrirePublic(commerce.id, '', contactSaisi, parrain, consentementRelance)
+              if (jeton && expireLe) jetons.ecrire(client.id, { jeton, expireLe })
               choisirJoueur({ clientId: client.id, prenom: client.prenom, contact: contactSaisi.trim() })
             }}
           />
@@ -586,7 +657,8 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
         <MessageDejaJoue
           prenom={joueur.prenom}
           lot={jeu.lotDuJour}
-          // Code re-servi par le serveur (autre téléphone, cache vidé) ; mémoire du téléphone en repli (serveur d'avant P0-U3).
+          // Code re-servi par le serveur au titulaire authentifié seulement (P0-S19 : jeton client, porté par
+          // l'API — sans jeton, `jeu.codeDuJour` vaut null) ; mémoire du téléphone en repli (tirage fait ici).
           code={jeu.codeDuJour ?? (codeDuJour && !codeDuJour.perdant ? codeDuJour.code : undefined)}
           remis={jeu.remisDuJour}
         />
@@ -601,6 +673,8 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
           />
           {!horsLigne && <MessageErreur>{message}</MessageErreur>}
         </>
+      ) : accesPerdu ? (
+        <AccesCartePerdu lienCarte={`#/carte/${joueur.clientId}`} />
       ) : (
         <>
           {visiteValidee && <VisiteValidee />}
@@ -687,7 +761,7 @@ function Identification({
       <p className="titre-carte">{t('Pour jouer, votre téléphone ou votre e-mail suffit')}</p>
       {parrain && (
         <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">
-          👥 Vous êtes parrainé(e) ! Inscrivez-vous : vous gagnerez 50 points à votre 1re visite, et votre ami aussi.
+          {t('👥 Vous êtes parrainé(e) ! Inscrivez-vous : vous gagnerez 50 points à votre 1re visite, et votre ami aussi.')}
         </p>
       )}
       <div>
@@ -698,7 +772,7 @@ function Identification({
               type="button"
               aria-pressed={mode === m}
               onClick={() => choisirMode(m)}
-              className={`min-h-11 rounded-xl text-sm font-semibold ring-1 ${mode === m ? 'bg-nuit-950 text-or-300 ring-nuit-950' : 'bg-white text-gray-700 ring-gray-300'}`}
+              className={`min-h-11 rounded-xl text-sm font-semibold ring-1 ${mode === m ? 'bg-nuit-950 text-magenta-300 ring-nuit-950' : 'bg-white text-gray-700 ring-gray-300'}`}
             >
               {t(m === 'tel' ? '📱 Téléphone' : '✉️ E-mail')}
             </button>
@@ -812,7 +886,7 @@ function CodeGagnant({ code }: { code: string }) {
   return (
     <div className="mt-3 space-y-2" data-code-gagnant>
       <p className="text-sm text-gray-600">{t(TEXTE_CODE_A_MONTRER)}</p>
-      <p className="rounded-xl border-2 border-dashed border-or-500 bg-amber-50 py-4 font-mono text-4xl font-extrabold tracking-[0.3em] text-gray-900 select-all">
+      <p className="rounded-xl border-2 border-dashed border-magenta-500 bg-magenta-500/10 py-4 font-mono text-4xl font-extrabold tracking-[0.3em] text-gray-900 select-all">
         {code}
       </p>
       {/* Le code n'est accepté en caisse que le jour du tirage (P0-U3). */}
@@ -864,8 +938,10 @@ function Confettis() {
 export function GarderCarte({ lienCarte }: { lienCarte: string }) {
   const [ouvert, setOuvert] = useState(false)
   const plateforme = useMemo(() => detecterPlateforme(navigator.userAgent, navigator.maxTouchPoints ?? 0), [])
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
   if (estInstallee()) return null
+  // Nom de l'appareil dans la langue courante (modèle {appareil} ; « iPhone » / « Android » sont identiques en EN).
+  const appareil = plateforme === 'ios' ? 'iPhone' : plateforme === 'android' ? 'Android' : langue === 'en' ? 'your phone' : 'votre téléphone'
   return (
     <div className="mt-3 text-left" data-garder-carte={plateforme}>
       <button type="button" className="bouton w-full" aria-expanded={ouvert} aria-controls="garder-carte" onClick={() => setOuvert((o) => !o)}>
@@ -873,11 +949,9 @@ export function GarderCarte({ lienCarte }: { lienCarte: string }) {
       </button>
       {ouvert && (
         <div id="garder-carte" className="apparition mt-3 space-y-2 rounded-xl bg-fond p-3 text-sm text-gray-800">
-          <p className="font-semibold text-gray-900">
-            {plateforme === 'ios' ? 'Sur iPhone' : plateforme === 'android' ? 'Sur Android' : 'Sur votre téléphone'} : ajoutez votre carte à l’écran d’accueil
-          </p>
+          <p className="font-semibold text-gray-900">{t('Sur {appareil} : ajoutez votre carte à l’écran d’accueil', { appareil })}</p>
           <ol className="list-decimal space-y-1 pl-5">
-            {etapesEcranAccueil(plateforme).map((e) => (
+            {etapesEcranAccueilLangue(plateforme, langue).map((e) => (
               <li key={e}>{e}</li>
             ))}
           </ol>
@@ -909,13 +983,13 @@ export function Resultat({ lot, prenom, code, lienCarte }: { lot: string; prenom
       </section>
     )
   return (
-    <section className="carte apparition bg-gradient-to-b from-amber-50 to-white text-center ring-2 ring-or-500" role="status" aria-live="polite" data-resultat="gain">
+    <section className="carte apparition bg-gradient-to-b from-magenta-500/10 to-white text-center ring-2 ring-magenta-500" role="status" aria-live="polite" data-resultat="gain">
       <Confettis />
       <p className="text-5xl" aria-hidden>
         🎉
       </p>
       <p className="mt-2 text-lg font-bold">{t('{bravo}, vous avez gagné :', { bravo: avecPrenom(t('Bravo'), prenom) })}</p>
-      <p className="mt-1 font-titre text-4xl leading-tight font-bold break-words text-marque-600">{lot}</p>
+      <p className="mt-1 font-titre text-4xl leading-tight font-bold break-words text-magenta-700">{lot}</p>
       {code ? (
         <CodeGagnant code={code} />
       ) : (

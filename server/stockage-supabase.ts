@@ -9,12 +9,22 @@
 //   (ErreurConflit), le serveur relit alors le client existant ;
 // • tirage : index unique (commerce_id, client_id, jour à Paris) → un 2e tirage le même jour est rejeté par la base ;
 // • remise d'un gain de la roue (P0-U3) : UPDATE conditionnel « … AND donnees->remis IS NULL » → une seule remise par code ;
-// • visite / récompense / avis : verrou optimiste. Dans une `transaction`, chaque client ou avis lu garde sa `version` ;
-//   l'écriture se fait « WHERE id = ? AND version = <lue> » (la base incrémente `version` à chaque UPDATE). Si une
-//   autre requête a écrit entre-temps → 0 ligne → ErreurConflit (409 « réessayez ») : aucun tampon n'est perdu ni compté
-//   deux fois en silence.
-// Ce qui n'est PAS garanti : une suite d'écritures interrompue au milieu (panne réseau) n'est pas annulée — ex. le PATCH
-// d'un commerce peut enregistrer les réglages puis échouer sur un des avis réévalués.
+// • visite / récompense / avis / réglages et logo du commerce (P0-S11) : verrou optimiste. Dans une `transaction`, chaque
+//   commerce, client ou avis lu garde sa `version` ; l'écriture se fait « WHERE id = ? AND version = <lue> » (la base
+//   incrémente `version` à chaque UPDATE, trigger `incrementer_version` de la 0001, recréé par la 0003). Si une autre
+//   requête a écrit entre-temps → 0 ligne → ErreurConflit (409 « réessayez ») : aucun tampon n'est perdu ni compté deux
+//   fois, aucun réglage n'en écrase un autre en silence. Hors `transaction` (ou ligne non relue dedans) : écriture
+//   inconditionnelle — d'où la relecture DANS la transaction côté routes ;
+// • caisse : `actionId` idempotent (un rejeu de la file hors ligne répond `dejaTraite`, rien n'est recompté) ;
+// • journal d'audit (0003) et traces du programme (0004) : jamais ignorés. Sans leur table, `ajouterJournal` /
+//   `ajouterParrainage` / `ajouterDemandeRattrapage` lèvent ErreurMigrationManquante, et `creerServeur` refuse de démarrer
+//   en Supabase sans ces deux migrations (P0-S11).
+// Ce qui n'est PAS garanti (compensation, pas transaction) : une suite d'écritures interrompue entre deux requêtes HTTP
+// (panne réseau, crash) n'est pas annulée — ex. le PATCH d'un commerce peut enregistrer les réglages puis échouer sur un
+// des avis réévalués. Les routes écrivent le fait métier PUIS le journal : une interruption peut perdre une entrée de
+// journal, jamais créer un journal mensonger ni compter deux fois. Une fonction RPC transactionnelle générique a été
+// écartée : elle réécrirait la logique métier en PL/pgSQL (double implémentation) sans gain sur les conflits observés.
+// Détails : server/README.md, « Atomicité (P0-S11) ».
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createClient, type PostgrestError } from '@supabase/supabase-js'
 import type { Avis, Client, Commerce, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
@@ -28,7 +38,12 @@ const TABLES_0006 = ['tentatives_auth']
 const TABLES_0007 = ['envois']
 /** 0008_mesure.sql : la table et la fonction d'incrément (appelée par `rpc`, rangée sous le nom de la table). */
 const TABLES_0008 = ['evenements_jour']
-/** Lignes lues par requête : PostgREST (Supabase) plafonne une réponse à 1 000 lignes par défaut. */
+/** 0010_compteurs_publics.sql : la table des compteurs des limites publiques. */
+const TABLES_0010 = ['compteurs_publics']
+/** Lignes lues par requête (P0-S18) : PostgREST (Supabase) plafonne une réponse à 1 000 lignes par défaut — toute
+ * lecture de liste passe donc par `lirePages` (boucle `.range()`), sinon listes, exports et statistiques seraient
+ * silencieusement incomplets au-delà du plafond. Les lectures d'une seule ligne (`eq('id', …)`, `clientParContact`,
+ * `journal` / `envois` à limite explicite) gardent `lire` (une requête). */
 const PAGE = 1000
 
 /** Lecture d'une table de la migration 0003 : vide tant que la migration n'est pas appliquée (l'existant continue de marcher). */
@@ -80,6 +95,8 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     const { data, error } = await requete
     if (error) {
       if (error.code === '23505') throw new ErreurConflit(`Doublon refusé par la base (${table}) : ${error.message}`)
+      // Portée `client` refusée par la contrainte d'origine de la 0006 (23514) : migration 0009 pas encore appliquée.
+      if (error.code === '23514' && table === 'tentatives_auth') throw new ErreurMigrationManquante(table, '0009_auth_client.sql')
       // Table inconnue (PostgREST : PGRST205 ; Postgres : 42P01) → migration 0003 / 0004 / 0005 pas encore appliquée.
       // Fonction inconnue (PostgREST : PGRST202 ; Postgres : 42883) → idem pour la fonction d'incrément de la 0008.
       if (error.code === 'PGRST205' || error.code === '42P01' || error.code === 'PGRST202' || error.code === '42883') {
@@ -89,6 +106,7 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
         if (TABLES_0006.includes(table)) throw new ErreurMigrationManquante(table, '0006_tentatives_auth.sql')
         if (TABLES_0007.includes(table)) throw new ErreurMigrationManquante(table, '0007_relances.sql')
         if (TABLES_0008.includes(table)) throw new ErreurMigrationManquante(table, '0008_mesure.sql')
+        if (TABLES_0010.includes(table)) throw new ErreurMigrationManquante(table, '0010_compteurs_publics.sql')
       }
       throw new Error(`Supabase (${table}) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
     }
@@ -103,8 +121,30 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     return lignes.map((l) => l.donnees as T)
   }
 
+  /**
+   * Lecture COMPLÈTE d'une liste, par pages de `PAGE` lignes (P0-S18) : la dernière page (< `PAGE` lignes) arrête
+   * la boucle ; une liste d'exactement N × `PAGE` lignes coûte une requête vide de plus. `construire` refait une
+   * requête neuve par page (mêmes filtres et même tri, seule la fenêtre `.range()` change) : le tri doit donc être
+   * déterministe, sinon une ligne pourrait être lue deux fois ou jamais. Versions mémorisées comme dans `lire`.
+   */
+  async function lireLignesPages<T extends Ligne = Ligne>(table: string, construire: (debut: number, fin: number) => PromiseLike<Resultat>): Promise<T[]> {
+    const tout: T[] = []
+    for (let debut = 0; ; debut += PAGE) {
+      const lignes = (await ok<Ligne[]>(table, construire(debut, debut + PAGE - 1))) as T[]
+      const carte = versions.getStore()
+      if (carte) for (const l of lignes) if (l.id && l.version != null) carte.set(`${table}:${l.id}`, l.version)
+      tout.push(...lignes)
+      if (lignes.length < PAGE) return tout
+    }
+  }
+
+  /** Comme `lire`, mais sur toute la liste (toutes les pages). */
+  async function lirePages<T>(table: string, construire: (debut: number, fin: number) => PromiseLike<Resultat>): Promise<T[]> {
+    return (await lireLignesPages(table, construire)).map((l) => l.donnees as T)
+  }
+
   /** UPDATE de `donnees`, conditionné à la version lue dans la transaction en cours (verrou optimiste). */
-  async function majVersionnee(table: 'clients' | 'avis', id: string, donnees: unknown) {
+  async function majVersionnee(table: 'commerces' | 'clients' | 'avis', id: string, donnees: unknown) {
     const lue = versions.getStore()?.get(`${table}:${id}`)
     let requete = sb.from(table).update({ donnees }).eq('id', id)
     if (lue != null) requete = requete.eq('version', lue)
@@ -122,19 +162,22 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
 
     meta: async (cle) => (await ok<{ valeur: string }[]>('meta', sb.from('meta').select('valeur').eq('cle', cle)))[0]?.valeur,
     majMeta: async (cle, valeur) => void (await ok('meta', sb.from('meta').upsert({ cle, valeur }, { onConflict: 'cle' }))),
+    supprimerMeta: async (cle) => void (await ok('meta', sb.from('meta').delete().eq('cle', cle))),
 
-    commerces: () => lire<Commerce>('commerces', sb.from('commerces').select('donnees').order('ordre')),
-    commerce: async (id) => (await lire<Commerce>('commerces', sb.from('commerces').select('donnees').eq('id', id)))[0],
+    commerces: () => lirePages<Commerce>('commerces', (debut, fin) => sb.from('commerces').select(AVEC_VERSION).order('ordre').range(debut, fin)),
+    commerce: async (id) => (await lire<Commerce>('commerces', sb.from('commerces').select(AVEC_VERSION).eq('id', id)))[0],
     pin: async (id) => {
       const [l] = await ok<{ pin_hash: string; pin_sel: string }[]>('commerces', sb.from('commerces').select('pin_hash,pin_sel').eq('id', id))
       return l && ({ hash: l.pin_hash, sel: l.pin_sel } satisfies Pin)
     },
     ajouterCommerce: async (c, pin) =>
       void (await ok('commerces', sb.from('commerces').insert({ id: c.id, donnees: c, pin_hash: pin.hash, pin_sel: pin.sel }))),
-    majCommerce: async (c) => void (await ok('commerces', sb.from('commerces').update({ donnees: c }).eq('id', c.id))),
+    // Verrou optimiste (P0-S11) dans une `transaction` qui a relu le commerce ; hors transaction : écriture inconditionnelle.
+    majCommerce: (c) => majVersionnee('commerces', c.id, c),
     majPin: async (id, pin) => void (await ok('commerces', sb.from('commerces').update({ pin_hash: pin.hash, pin_sel: pin.sel }).eq('id', id))),
 
-    clients: (commerceId) => lire<Client>('clients', sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).order('ordre')),
+    clients: (commerceId) =>
+      lirePages<Client>('clients', (debut, fin) => sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).order('ordre').range(debut, fin)),
     client: async (commerceId, id) =>
       (await lire<Client>('clients', sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).eq('id', id)))[0],
     /** Déduplication : même règle que le front (`cleContact` : 0033 / +33 / 06…, e-mail en minuscules). */
@@ -144,20 +187,30 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       void (await ok('clients', sb.from('clients').insert({ id: c.id, commerce_id: c.commerceId, cle_contact: cleContact(c), donnees: c }))),
     majClient: (c) => majVersionnee('clients', c.id, c),
 
-    tirages: (commerceId) => lire<Tirage>('tirages', sb.from('tirages').select('donnees').eq('commerce_id', commerceId).order('date', { ascending: false })),
+    tirages: (commerceId) =>
+      lirePages<Tirage>('tirages', (debut, fin) => sb.from('tirages').select('donnees').eq('commerce_id', commerceId).order('date', { ascending: false }).order('id').range(debut, fin)),
     tiragesClient: (commerceId, clientId) =>
-      lire<Tirage>('tirages', sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('client_id', clientId)),
+      // Tri explicite (date croissante) : sans lui, l'ordre des pages ne serait pas stable d'une requête à l'autre.
+      // Même ordre que l'ancienne lecture sans tri (insertion = dates croissantes dans les tests et en pratique).
+      // Départage par `id` (P0-S18, revue Codex point 1) : sans lui, deux lignes de même date à cheval sur une
+      // frontière de page pourraient être ordonnées différemment d'une requête à l'autre et lues deux fois ou jamais.
+      lirePages<Tirage>('tirages', (debut, fin) =>
+        sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('client_id', clientId).order('date', { ascending: true }).order('id').range(debut, fin),
+      ),
     ajouterTirage: async (t) =>
       void (await ok('tirages', sb.from('tirages').insert({ id: t.id, commerce_id: t.commerceId, client_id: t.clientId, date: t.date, donnees: t }))),
     // Code gagnant et remise (P0-U3) : dans le JSONB `donnees`, sans migration. La table `tirages` n'a pas de colonne
     // `version` : la garde est la condition « donnees->remis IS NULL » de l'UPDATE lui-même. Postgres verrouille la ligne,
     // et une 2e requête simultanée réévalue la condition après la 1re → 0 ligne → false (jamais deux remises).
     tiragesParCode: (commerceId, code) =>
-      lire<Tirage>('tirages', sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('donnees->>code', code).order('date', { ascending: false })),
+      lirePages<Tirage>('tirages', (debut, fin) =>
+        sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('donnees->>code', code).order('date', { ascending: false }).order('id').range(debut, fin),
+      ),
     marquerTirageRemis: async (t) =>
       (await ok<unknown[]>('tirages', sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->remis', null).select('id'))).length > 0,
 
-    avis: (commerceId) => lire<Avis>('avis', sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).order('date', { ascending: false })),
+    avis: (commerceId) =>
+      lirePages<Avis>('avis', (debut, fin) => sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).order('date', { ascending: false }).order('id').range(debut, fin)),
     unAvis: async (commerceId, id) => (await lire<Avis>('avis', sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).eq('id', id)))[0],
     ajouterAvis: async (a) => void (await ok('avis', sb.from('avis').insert({ id: a.id, commerce_id: a.commerceId, date: a.date, donnees: a }))),
     majAvis: (a) => majVersionnee('avis', a.id, a),
@@ -165,9 +218,9 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     // ---- Cartiz (0003_cartiz.sql) ----
     membres: async (commerceId) => {
       const lignes = await ouVide(
-        ok<{ donnees: MembreEquipe; code_hash: string; code_sel: string }[]>(
+        lireLignesPages<{ donnees: MembreEquipe; code_hash: string; code_sel: string }>(
           'equipe',
-          sb.from('equipe').select('donnees,code_hash,code_sel').eq('commerce_id', commerceId).order('ordre'),
+          (debut, fin) => sb.from('equipe').select('donnees,code_hash,code_sel').eq('commerce_id', commerceId).order('ordre').range(debut, fin),
         ),
         [],
       )
@@ -187,15 +240,9 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     supprimerMembre: async (commerceId, id) => void (await ok('equipe', sb.from('equipe').delete().eq('commerce_id', commerceId).eq('id', id))),
     journal: (commerceId, limite) =>
       ouVide(lire<EntreeJournal>('journal', sb.from('journal').select('donnees').eq('commerce_id', commerceId).order('date', { ascending: false }).limit(limite)), []),
-    ajouterJournal: async (e) => {
-      try {
-        await ok('journal', sb.from('journal').insert({ id: e.id, commerce_id: e.commerceId, date: e.date, donnees: e }))
-      } catch (err) {
-        // Migration 0003 pas appliquée : l'action (visite, récompense…) reste enregistrée, seule la trace manque.
-        if (!(err instanceof ErreurMigrationManquante)) throw err
-        console.warn(`[stockage] journal non écrit (${e.action}) : ${err.message}`)
-      }
-    },
+    // Jamais avalé (P0-S11) : sans la 0003, ErreurMigrationManquante remonte. Le serveur refuse d'ailleurs de démarrer
+    // en Supabase sans elle (`creerServeur`), une trace d'audit ne peut donc plus manquer en silence.
+    ajouterJournal: async (e) => void (await ok('journal', sb.from('journal').insert({ id: e.id, commerce_id: e.commerceId, date: e.date, donnees: e }))),
     menu: async (commerceId) => (await ouVide(lire<Menu>('menus', sb.from('menus').select('donnees').eq('commerce_id', commerceId)), []))[0],
     schemaCartiz: async () => {
       try {
@@ -208,23 +255,11 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     },
     majMenu: async (m) => void (await ok('menus', sb.from('menus').upsert({ commerce_id: m.commerceId, donnees: m }, { onConflict: 'commerce_id' }))),
 
-    // ---- Programme (0004_programme.sql) : traces d'audit, ignorées tant que la migration manque ----
-    ajouterParrainage: async (p: Parrainage) => {
-      try {
-        await ok('parrainages', sb.from('parrainages').insert({ id: p.id, commerce_id: p.commerceId, parrain_id: p.parrainId, filleul_id: p.filleulId, date: p.date, donnees: p }))
-      } catch (err) {
-        if (!(err instanceof ErreurMigrationManquante)) throw err
-        console.warn(`[stockage] parrainage non tracé : ${err.message}`)
-      }
-    },
-    ajouterDemandeRattrapage: async (d: DemandeRattrapageTrace) => {
-      try {
-        await ok('demandes_rattrapage', sb.from('demandes_rattrapage').insert({ id: d.id, commerce_id: d.commerceId, client_id: d.clientId, date: d.date, donnees: d }))
-      } catch (err) {
-        if (!(err instanceof ErreurMigrationManquante)) throw err
-        console.warn(`[stockage] demande de rattrapage non tracée : ${err.message}`)
-      }
-    },
+    // ---- Programme (0004_programme.sql) : traces d'audit. Sans la migration : ErreurMigrationManquante (P0-S11) ----
+    ajouterParrainage: async (p: Parrainage) =>
+      void (await ok('parrainages', sb.from('parrainages').insert({ id: p.id, commerce_id: p.commerceId, parrain_id: p.parrainId, filleul_id: p.filleulId, date: p.date, donnees: p }))),
+    ajouterDemandeRattrapage: async (d: DemandeRattrapageTrace) =>
+      void (await ok('demandes_rattrapage', sb.from('demandes_rattrapage').insert({ id: d.id, commerce_id: d.commerceId, client_id: d.clientId, date: d.date, donnees: d }))),
     schemaProgramme: async () => {
       try {
         for (const t of TABLES_0004) await ok(t, sb.from(t).select('*').limit(0))
@@ -274,6 +309,54 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       )
     },
     effacerTentativesAuth: async (cle) => void (await ok('tentatives_auth', sb.from('tentatives_auth').delete().eq('cle', cle))),
+    // ---- Accès client (0009_auth_client.sql) : marqueur `auth_client_active()` (lecture seule, aucune ligne écrite) ----
+    schemaAuthClient: async () => {
+      const { error } = await sb.rpc('auth_client_active')
+      if (!error) return true
+      if (error.code === 'PGRST202' || error.code === '42883') return false
+      throw new Error(`Supabase (auth_client_active) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
+    },
+
+    // ---- Compteurs publics (0010_compteurs_publics.sql) : tant que la migration manque, le serveur compte en mémoire ----
+    // Lecture paginée (`lireLignesPages`, P0-S18) : PostgREST plafonne une réponse à 1 000 lignes — sans pagination,
+    // des compteurs chauds ou bloqués ne seraient pas restaurés au-delà du plafond (revue Codex point 3).
+    compteursPublics: async () => {
+      const lignes = await ouVide(
+        lireLignesPages('compteurs_publics', (debut, fin) => sb.from('compteurs_publics').select('cle,debut,n').order('cle').range(debut, fin)),
+        [],
+      )
+      return (lignes as unknown as { cle: string; debut: string; n: number }[]).map((l) => ({ cle: l.cle, debut: l.debut, n: Number(l.n) }))
+    },
+    enregistrerCompteurPublic: async (c, purgerAvant) => {
+      try {
+        // Fenêtres passées : plus utiles, supprimées au passage.
+        await ok('compteurs_publics', sb.from('compteurs_publics').delete().lt('debut', purgerAvant))
+      } catch (err) {
+        if (err instanceof ErreurMigrationManquante) throw err
+        console.warn(`[stockage] nettoyage des compteurs publics reporté : ${err instanceof Error ? err.message : err}`)
+      }
+      await ok(
+        'compteurs_publics',
+        sb.from('compteurs_publics').upsert({ cle: c.cle, debut: c.debut, n: c.n }, { onConflict: 'cle' }),
+      )
+    },
+    purgerCompteursPublics: async (avant) => {
+      try {
+        await ok('compteurs_publics', sb.from('compteurs_publics').delete().lt('debut', avant))
+      } catch (err) {
+        if (err instanceof ErreurMigrationManquante) return // table absente : rien à purger
+        throw err
+      }
+    },
+    schemaCompteursPublics: async () => {
+      try {
+        await ok('compteurs_publics', sb.from('compteurs_publics').select('*').limit(0))
+        return true
+      } catch (e) {
+        if (e instanceof ErreurMigrationManquante) return false
+        throw e
+      }
+    },
 
     // ---- Relances (0007_relances.sql) : tant que la migration manque, le journal se lit vide et aucun envoi ne part ----
     ajouterEnvoi: async (e) =>

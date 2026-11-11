@@ -6,14 +6,15 @@
 // - /api/… n'est JAMAIS intercepté ni mis en cache : la carte, les tampons et la file hors ligne de la caisse
 //   (src/lib/fileCaisse.ts) parlent toujours directement au serveur, comme sans service worker.
 // - Pages (navigation) : réseau d'abord (un déploiement est pris tout de suite), sinon l'app gardée en cache,
-//   sinon la page hors ligne minimale.
+//   sinon la page hors ligne minimale. Une page prérendue (/menu/<id>, P2-Q4) est un autre document que la SPA :
+//   elle est gardée sous sa propre adresse, jamais sous « / » (sinon la caisse hors ligne afficherait le menu).
 // - /assets/… (noms avec hash, immuables) : cache d'abord. Autres fichiers (visuels, icônes, manifest) : cache puis
 //   mise à jour en arrière-plan.
 const VERSION = 'fideliz-v1'
 const CACHE_APP = `${VERSION}-app`
 const CACHE_FICHIERS = `${VERSION}-fichiers`
 const PAGE_HORS_LIGNE = '/hors-ligne.html'
-const A_PRECHARGER = ['/', PAGE_HORS_LIGNE, '/hors-ligne.css', '/manifest.webmanifest', '/icones/icone-192.png', '/visuels/logo.png']
+const A_PRECHARGER = ['/', PAGE_HORS_LIGNE, '/hors-ligne.css', '/manifest.webmanifest', '/icones/icone-192.png', '/visuels/logo.png', '/visuels/logo-petit.webp']
 /** Au-delà, les plus anciens fichiers en cache sont retirés (anciens déploiements). */
 const MAX_FICHIERS = 120
 
@@ -43,20 +44,26 @@ async function limiter(cache) {
 async function page(requete) {
   try {
     const r = await fetch(requete)
-    // L'app (index.html) est la même pour toutes les routes du front : gardée sous « / ».
+    // L'app (index.html) est la même pour toutes les routes du front : gardée sous « / ». Une page prérendue
+    // (/menu/<id>) est un autre document : gardée sous sa propre adresse, sinon elle écraserait la SPA et la
+    // caisse hors ligne afficherait le menu au lieu de l'application (P2-Q4, revue Codex).
     if (r.ok && !r.redirected && (r.headers.get('content-type') || '').includes('text/html')) {
       const copie = r.clone()
-      caches.open(CACHE_APP).then((c) => c.put('/', copie))
+      const url = new URL(requete.url)
+      caches.open(CACHE_APP).then((c) => c.put(url.pathname === '/' ? '/' : requete.url, copie))
     }
     return r
   } catch {
-    return (await caches.match('/')) || (await caches.match(PAGE_HORS_LIGNE)) || Response.error()
+    return (await caches.match(requete)) || (await caches.match('/')) || (await caches.match(PAGE_HORS_LIGNE)) || Response.error()
   }
 }
 
 async function fichier(requete, immuable) {
   const cache = await caches.open(CACHE_FICHIERS)
-  const enCache = await cache.match(requete)
+  // Repli : les fichiers préchargés à l'installation vivent dans CACHE_APP (boucle t2 — avant,
+  // un fichier préchargé mais jamais demandé en ligne n'était pas servi hors ligne : `fichier()`
+  // ne consultait que CACHE_FICHIERS, alors que `caches.match` cherche dans tous les caches).
+  const enCache = (await cache.match(requete)) || (await caches.match(requete))
   if (enCache && immuable) return enCache
   const reseau = fetch(requete).then(async (r) => {
     if (r.ok && r.type === 'basic') {

@@ -7,10 +7,39 @@ import { banniereCommerce, VISUELS } from '../lib/visuels'
 import { dateRelative } from '../lib/format'
 import { urlAbsolue } from '../router'
 import { cleTamponsVus, lotsEnAttente, tamponsNouveaux, texteExpiration, texteProgression, type GainDuJour } from '../lib/carte'
-import { LogoCommerce, QrCode } from './ui'
+import { LogoCommerce } from './ui'
 import { useLangue } from './Langue'
-import { texteProgressionLangue } from '../lib/langue'
-import { useEffect, useState } from 'react'
+import { JOURS_SEMAINE_EN, localeDate, texteProgressionLangue, type Langue } from '../lib/langue'
+import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+
+/** QR personnel : `qrcode-generator` (~21 Ko minifiés) est chargé en différé (boucle t1) —
+  il ne pèse pas sur le bundle initial, et le carré blanc du repli évite tout saut de mise en page. */
+const QrCode = lazy(() => import('./QrCode').then((m) => ({ default: m.QrCode })))
+
+/**
+ * Frontière locale au QR (revue Codex boucle t1, point 1) : `Suspense` ne traite pas un
+ * import rejeté (fichier différé absent — hors ligne avant toute ouverture de la carte,
+ * ou onglet ouvert avant un déploiement). Sans elle, la frontière d'`App.tsx` remplacerait
+ * toute la page par son message d'erreur ; ici seule la case du QR affiche un repli, la
+ * carte (tampons, points) reste visible. Le QR suit la règle des pages différées (P2-Q2) :
+ * disponible hors ligne après une première ouverture en ligne, pas avant.
+ */
+class ErreurQr extends Component<{ children: ReactNode; message: string }, { erreur: boolean }> {
+  state = { erreur: false }
+  static getDerivedStateFromError() {
+    return { erreur: true }
+  }
+  render() {
+    if (this.state.erreur) {
+      return (
+        <div className="flex h-40 w-40 items-center justify-center bg-white px-2 text-center text-sm text-gray-600" role="alert">
+          {this.props.message}
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 /**
  * Tampons gagnés depuis la dernière ouverture de la carte sur ce téléphone (P1-C3), à animer. La valeur vue est
@@ -36,7 +65,7 @@ function useTamponsNouveaux(clientId: string, tampons: number, actif: boolean): 
   return nouveaux
 }
 
-const dateCourte = (iso: string) => new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+const dateCourte = (iso: string, langue: Langue) => new Date(iso).toLocaleDateString(localeDate(langue), { day: 'numeric', month: 'short' })
 
 /** Colonnes de la grille de tampons : rangées régulières (5 pour 10 tampons, 4 pour 8…). */
 function colonnes(seuil: number): string {
@@ -97,6 +126,17 @@ export function CarteFidelite({
   const [copie, setCopie] = useState(false)
   // Langue : anglais possible sur #/carte seulement ; la fiche commerçant reste en français (useLangue y renvoie 'fr').
   const { langue, t } = useLangue()
+  /** Expiration d'un lot en attente (P2-Q1, revue Codex point 9) : l'appel texteExpiration(…) est conservé
+   *  (épinglé par carte-pwa-p1-c3.test.ts:312) ; les deux formes fixes passent par t(), la forme datée
+   *  est reformulée avec la date localisée. Si le libellé FR change un jour, le préfixe ne correspond
+   *  plus et la forme retombe en français — le test de couverture EN signale alors la clé orpheline. */
+  const expirationLot = (r: { expireLe?: string }): string => {
+    const texte = texteExpiration(r.expireLe, maintenant)
+    if (langue === 'en' && r.expireLe && texte.startsWith('Valable jusqu’au ')) {
+      return t('Valable jusqu’au {date}', { date: new Date(r.expireLe).toLocaleDateString(localeDate(langue), { day: 'numeric', month: 'short' }) })
+    }
+    return t(texte)
+  }
   async function copierLien() {
     try {
       await navigator.clipboard.writeText(lienParrainage)
@@ -108,25 +148,37 @@ export function CarteFidelite({
   }
 
   return (
-    <section className="overflow-hidden rounded-3xl bg-white shadow-relief ring-1 ring-gray-900/5" style={estCouleur(fond) ? { backgroundColor: fond } : undefined}>
+    <section
+      data-surface-claire
+      className="overflow-hidden rounded-3xl bg-white shadow-relief ring-1 ring-gray-900/5"
+      style={estCouleur(fond) ? { backgroundColor: fond } : undefined}
+    >
       {banniere && (
-        <img
-          src={banniere}
-          alt={banniere === VISUELS.heroPlats ? 'Plateau de plats d’Asian Home Paris vu de dessus : sushis, makis, saumon, nouilles, riz et dessert à la mangue' : ''}
-          className="h-24 w-full object-cover"
-        />
+        <picture className="block">
+          {banniere === VISUELS.heroPlats && <source srcSet={VISUELS.heroPlatsPetit} type="image/webp" />}
+          <img
+            src={banniere}
+            alt={banniere === VISUELS.heroPlats ? 'Plateau de plats d’Asian Home Paris vu de dessus : sushis, makis, saumon, nouilles, riz et dessert à la mangue' : ''}
+            className="h-24 w-full object-cover"
+          />
+        </picture>
       )}
-      {/* Recto : bandeau nocturne (noir + laque profonde, filet doré) façon carte physique. */}
+      {/* Recto : bandeau nocturne (noir + magenta profond, filet magenta) façon carte physique. */}
       <div
-        className={`relative overflow-hidden px-5 pt-5 pb-6 text-white ${styleBandeau ? '' : 'bg-gradient-to-br from-nuit-950 via-[#2a1216] to-marque-800 ring-1 ring-or-400/40 ring-inset'}`}
+        className={`relative overflow-hidden px-5 pt-5 pb-6 text-white ${styleBandeau ? '' : 'bg-gradient-to-br from-nuit-950 via-magenta-900 to-magenta-700 ring-1 ring-magenta-400/40 ring-inset'}`}
         style={styleBandeau}
       >
-        <div className="pointer-events-none absolute -top-16 -right-12 h-44 w-44 rounded-full border-[18px] border-or-400/20" aria-hidden />
+        <div className="pointer-events-none absolute -top-16 -right-12 h-44 w-44 rounded-full border-[18px] border-magenta-400/20" aria-hidden />
         <div className="relative flex items-center gap-3">
           <LogoCommerce commerce={commerce} taille="md" />
           <div className="min-w-0">
             <div className="truncate font-titre text-lg font-bold tracking-[0.08em] uppercase">{commerce.nom}</div>
-            <div className="text-sm text-or-300">{t('Carte de fidélité')}</div>
+            {/* Sous-titre en BLANC, pas en magenta clair : le fond du bandeau peut être la couleur
+              personnalisée du commerce (apparence.couleur, ex. le magenta bouton) — le magenta
+              clair dessus ne vaudrait que 1,66:1. Le blanc est garanti AA par problemesApparence
+              (≥ 4,5:1 sur la couleur) et assombrir() ne fait que foncer le dégradé
+              (revue Codex P0-D1, point 1). */}
+            <div className="text-sm text-white">{t('Carte de fidélité')}</div>
           </div>
         </div>
         <div className="relative mt-5 flex items-end justify-between gap-3">
@@ -169,9 +221,9 @@ export function CarteFidelite({
                 style={rang > 0 ? { animationDelay: `${rang * 150}ms` } : undefined}
                 className={`flex aspect-square w-full max-w-12 items-center justify-center rounded-full text-sm font-bold ${rang >= 0 && plein ? 'tampon-nouveau ' : ''}${
                   plein
-                    ? 'bg-marque-500 text-white shadow-[inset_0_-2px_0_rgb(0_0_0/0.15)]'
+                    ? 'bg-magenta-500 text-white shadow-[inset_0_-2px_0_rgb(0_0_0/0.15)]'
                     : dernier
-                      ? 'border-2 border-dashed border-or-500 bg-amber-50 text-amber-800'
+                      ? 'border-2 border-dashed border-magenta-500 bg-magenta-500/10 text-magenta-700'
                       : 'border-2 border-dashed border-gray-400 text-gray-600'
                 }`}
               >
@@ -190,21 +242,21 @@ export function CarteFidelite({
           aria-valuenow={tampons}
           aria-label={t('Progression vers la récompense')}
         >
-          <div className="h-full rounded-full bg-gradient-to-r from-marque-500 via-marque-600 to-or-400 transition-all duration-500" style={{ width: `${pct}%` }} />
+          <div className="h-full rounded-full bg-gradient-to-r from-magenta-500 via-magenta-600 to-magenta-400 transition-all duration-500" style={{ width: `${pct}%` }} />
         </div>
         <p className="mt-1.5 flex justify-between text-sm text-gray-600">
           <span>{debloquee ? t('Carte complète') : texteProgressionLangue(restants, commerce, langue, texteProgression)}</span>
-          <span className="font-semibold text-marque-600">{pct} %</span>
+          <span className="font-semibold text-magenta-700">{pct} %</span>
         </p>
         {nouveaux.length > 0 && (
-          <p className="apparition mt-2 text-center text-sm font-semibold text-marque-700" role="status">
-            ✨ +{nouveaux.length} tampon{nouveaux.length > 1 ? 's' : ''} depuis votre dernière ouverture de la carte
+          <p className="apparition mt-2 text-center text-sm font-semibold text-magenta-700" role="status">
+            {t('✨ +{n} tampon{s} depuis votre dernière ouverture de la carte', { n: nouveaux.length, s: nouveaux.length > 1 ? 's' : '' })}
           </p>
         )}
 
         {debloquee ? (
-          <div className="apparition mt-4 rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100 p-4 text-amber-900 ring-2 ring-or-500" role="status">
-            <p className="surtitre text-amber-800">{t('Récompense en attente')}</p>
+          <div className="apparition mt-4 rounded-2xl bg-magenta-500/10 p-4 text-gray-900 ring-2 ring-magenta-500" role="status">
+            <p className="surtitre text-magenta-700">{t('Récompense en attente')}</p>
             <p className="mt-1 text-lg font-bold">🎉 {commerce.recompense}</p>
             <p className="mt-1 text-sm">{t('À demander au comptoir.')}</p>
           </div>
@@ -216,33 +268,35 @@ export function CarteFidelite({
 
         {/* Programme : niveau, prochain palier, défi, récompenses en attente, réserve, offre hebdo, parrainage. */}
         {niveau.nom !== 'Membre' && (
-          <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
-            <span className="font-bold">{niveau.nom === 'VIP' ? '👑 VIP — nos clients les plus fidèles' : `⭐ ${niveau.nom}`}</span>
+          <p className="mt-4 rounded-xl bg-magenta-500/10 p-3 text-sm text-gray-900 ring-1 ring-magenta-500/40">
+            <span className="font-bold">{niveau.nom === 'VIP' ? t('👑 VIP — nos clients les plus fidèles') : `⭐ ${niveau.nom}`}</span>
             <span className="block text-sm">{niveau.avantages}</span>
           </p>
         )}
         {palier && (
           <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-900 ring-1 ring-red-200">
-            <span className="font-semibold">Plus que {palier.restantes} visite{palier.restantes > 1 ? 's' : ''} avant : </span>
+            <span className="font-semibold">{t('Plus que {n} visite{s} avant :', { n: palier.restantes, s: palier.restantes > 1 ? 's' : '' })}</span>{' '}
             {palier.palier.libelle}
           </p>
         )}
         {defi && (
           <div className="mt-4 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-900/5">
             <p className="text-sm font-semibold text-gray-900">
-              🎯 Défi : {defiProgression}/{defi.objectif} visites en {defi.jours} jours
+              {t('🎯 Défi : {a}/{b} visites en {jours} jours', { a: defiProgression, b: defi.objectif, jours: defi.jours })}
             </p>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-200" role="progressbar" aria-valuemin={0} aria-valuemax={defi.objectif} aria-valuenow={defiProgression} aria-label="Progression du défi">
-              <div className="h-full rounded-full bg-marque-500" style={{ width: `${Math.round((defiProgression / defi.objectif) * 100)}%` }} />
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-200" role="progressbar" aria-valuemin={0} aria-valuemax={defi.objectif} aria-valuenow={defiProgression} aria-label={t('Progression du défi')}>
+              <div className="h-full rounded-full bg-magenta-500" style={{ width: `${Math.round((defiProgression / defi.objectif) * 100)}%` }} />
             </div>
             <p className="mt-1 text-sm text-gray-700">
-              {defi.objectif - defiProgression > 0 ? `Plus que ${defi.objectif - defiProgression} visite${defi.objectif - defiProgression > 1 ? 's' : ''} → ${defi.recompense}` : `${defi.recompense} gagné !`}
+              {defi.objectif - defiProgression > 0
+                ? t('Plus que {n} visite{s} → {recompense}', { n: defi.objectif - defiProgression, s: defi.objectif - defiProgression > 1 ? 's' : '', recompense: defi.recompense })
+                : t('{recompense} gagné !', { recompense: defi.recompense })}
             </p>
           </div>
         )}
         {enAttente.length > 0 && (
-          <div className="mt-4 rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100 p-4 text-amber-900 ring-2 ring-or-500" role="status">
-            <p className="surtitre text-amber-800">{t('À retirer au comptoir')}</p>
+          <div className="mt-4 rounded-2xl bg-magenta-500/10 p-4 text-gray-900 ring-2 ring-magenta-500" role="status">
+            <p className="surtitre text-magenta-700">{t('À retirer au comptoir')}</p>
             <ul className="mt-1 space-y-1.5">
               {enAttente.map((r) => (
                 <li key={r.id} className="text-sm">
@@ -254,7 +308,7 @@ export function CarteFidelite({
                       {t('Code à montrer :')} <span className="font-mono font-bold tracking-widest">{r.code}</span>
                     </span>
                   )}
-                  <span className="block text-sm">{t(texteExpiration(r.expireLe, maintenant))}</span>
+                  <span className="block text-sm">{expirationLot(r)}</span>
                 </li>
               ))}
             </ul>
@@ -262,20 +316,20 @@ export function CarteFidelite({
         )}
         {reserve && (
           <p className="mt-4 rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">
-            <span className="font-semibold">🍜 Plat en réserve</span> — un plat offert à utiliser avant le {dateCourte(reserve.expireLe)}.
+            <span className="font-semibold">{t('🍜 Plat en réserve')}</span> — {t('Un plat offert à utiliser avant le {date}.', { date: dateCourte(reserve.expireLe, langue) })}
           </p>
         )}
         {offreHebdo.actif && (
           <p className="mt-4 rounded-xl bg-gray-50 p-3 text-sm text-gray-700 ring-1 ring-gray-900/5">
             {offreAujourdhui ? (
               <>
-                <span className="font-semibold">Aujourd’hui, membres : </span>
+                <span className="font-semibold">{t('Aujourd’hui, membres :')}</span>{' '}
                 {offreAujourdhui.libelle}
                 {offreAujourdhui.condition ? ` ${offreAujourdhui.condition}` : ''}
               </>
             ) : (
               <>
-                <span className="font-semibold">Tous les {JOURS_SEMAINE[offreHebdo.jour]}s, membres : </span>
+                <span className="font-semibold">{t('Tous les {jour}s, membres :', { jour: langue === 'en' ? JOURS_SEMAINE_EN[offreHebdo.jour] : JOURS_SEMAINE[offreHebdo.jour] })}</span>{' '}
                 {offreHebdo.libelle}
                 {offreHebdo.condition ? ` ${offreHebdo.condition}` : ''}
               </>
@@ -284,12 +338,12 @@ export function CarteFidelite({
         )}
         {parrainage.actif && client.codeParrainage && (
           <div className="mt-4 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-900/5">
-            <p className="text-sm font-semibold text-gray-900">👥 Parrainez un ami, vous gagnez chacun {parrainage.pointsFilleul} points</p>
+            <p className="text-sm font-semibold text-gray-900">{t('👥 Parrainez un ami, vous gagnez chacun {n} points', { n: parrainage.pointsFilleul })}</p>
             <p className="mt-1 text-sm text-gray-700">
-              Votre code : <span className="font-mono font-bold text-marque-700">{client.codeParrainage}</span> — votre ami le saisit à son inscription, vous gagnez vos points à sa 1re visite.
+              {t('Votre code :')} <span className="font-mono font-bold text-magenta-700">{client.codeParrainage}</span> — {t('Votre ami le saisit à son inscription, vous gagnez vos points à sa 1re visite.')}
             </p>
             <button type="button" className="bouton-secondaire mt-2 w-full" onClick={() => void copierLien()}>
-              {copie ? '✓ Lien copié !' : 'Copier mon lien de parrainage'}
+              {copie ? t('✓ Lien copié !') : t('Copier mon lien de parrainage')}
             </button>
           </div>
         )}
@@ -317,7 +371,17 @@ export function CarteFidelite({
         {!sansQr && (
           <div className="mt-5 flex flex-col items-center border-t border-dashed border-gray-200 pt-5">
             <div className="rounded-2xl bg-white p-2 ring-1 ring-gray-200">
-              <QrCode texte={urlAbsolue('carte', client.id)} className="h-40 w-40" titre={`QR code personnel de ${client.prenom}`} />
+              <ErreurQr message={t('QR code indisponible pour le moment. Rechargez la page pour réessayer.')}>
+                <Suspense
+                  fallback={
+                    <div className="flex h-40 w-40 items-center justify-center bg-white px-2 text-center text-sm text-gray-600" role="status">
+                      {t('Chargement du QR code…')}
+                    </div>
+                  }
+                >
+                  <QrCode texte={urlAbsolue('carte', client.id)} className="h-40 w-40" titre={`QR code personnel de ${client.prenom}`} />
+                </Suspense>
+              </ErreurQr>
             </div>
             <p className="mt-2 text-center text-sm text-gray-600">{t('À présenter en caisse pour valider votre visite')}</p>
             <p className="mt-1 text-sm text-gray-600">

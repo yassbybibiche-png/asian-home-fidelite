@@ -10,7 +10,8 @@ import { ETAPES_CONNEXION_GOOGLE, GUIDE_GOOGLE_BUSINESS, TEXTE_AVIS_DEMO, TEXTE_
 import { BadgeDemo, EnTete, Etoiles, MessageErreur, Vide } from '../components/ui'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { messagesPrivesDuCommerce, type MessagePriveCommerce } from '../lib/messagePrive'
-import { googleDejaLu, marquerGoogleLu } from '../lib/ecransCommercant'
+import { googleDejaLu, marquerGoogleLu, type Recapitulatif } from '../lib/ecransCommercant'
+import { Confirmation } from '../components/Confirmation'
 
 /** État Google Business Profile (P1-B4) : null = non configuré sur le serveur, mode local ou état inconnu. */
 const ContexteGoogle = createContext<{ etat: EtatGoogle | null; relire(): void }>({ etat: null, relire: () => {} })
@@ -204,7 +205,7 @@ function ApercuInvitation() {
   return (
     <details className="carte mb-4">
       <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 font-bold">
-        Invitation à l’avis vue par le client <span className="text-sm font-semibold text-marque-600">aperçu</span>
+        Invitation à l’avis vue par le client <span className="text-sm font-semibold text-magenta-700">aperçu</span>
       </summary>
       <p className="mt-2 text-sm text-gray-600">
         Après la roue, le client voit 5 étoiles déjà sélectionnées dans l’app (modifiables d’un tap), puis ouvre votre lien Google. Google ne permet pas de
@@ -230,6 +231,7 @@ function ConnecterGoogle() {
   const branche = !!etat?.configure
   // Replié une fois lu (P1-C6) : mémorisé sur l'appareil, le badge d'état reste visible dans le titre.
   const [lu, setLu] = useState(() => googleDejaLu(stockageLocal(), commerce.id))
+  const [demande, setDemande] = useState(false)
   const marquerLu = () => {
     marquerGoogleLu(stockageLocal(), commerce.id)
     setLu(true)
@@ -253,8 +255,15 @@ function ConnecterGoogle() {
     }
   }
   async function deconnecter() {
-    if (!window.confirm('Déconnecter Google ? Les avis déjà importés restent dans l’app.')) return
+    setDemande(false)
     if ((await executer(() => avecPin((a, api) => api.deconnecterGoogle(commerce.id, a)))).ok) relire()
+  }
+
+  const recapDeconnexion: Recapitulatif = {
+    titre: 'Déconnecter Google ?',
+    lignes: [['Avis importés', 'Restent dans l’app']],
+    confirmer: 'Déconnecter Google',
+    avertissement: 'Les avis déjà importés restent dans l’app.',
   }
 
   return (
@@ -273,9 +282,10 @@ function ConnecterGoogle() {
               <button className="bouton w-full" disabled={enCours} onClick={() => void importer()}>
                 {enCours ? 'Import…' : 'Importer les avis Google'}
               </button>
-              <button className="bouton-secondaire w-full" disabled={enCours} onClick={() => void deconnecter()}>
+              <button className="bouton-secondaire w-full" disabled={enCours} onClick={() => setDemande(true)}>
                 Déconnecter Google
               </button>
+              {demande && <Confirmation recap={recapDeconnexion} enCours={enCours} onConfirmer={() => void deconnecter()} onAnnuler={() => setDemande(false)} />}
             </>
           ) : (
             <>
@@ -305,7 +315,7 @@ function ConnecterGoogle() {
       {commerce.lienGoogle && (
         <p className="mt-3 text-sm text-gray-700">
           En attendant, le moyen réel de recevoir des avis est le lien « laisser un avis » (QR de la roulette) :{' '}
-          <a href={commerce.lienGoogle} target="_blank" rel="noopener noreferrer" className="font-semibold text-marque-600 underline">
+          <a href={commerce.lienGoogle} target="_blank" rel="noopener noreferrer" className="font-semibold text-magenta-700 underline">
             ouvrir le lien ↗
           </a>
         </p>
@@ -375,7 +385,7 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
                 type="button"
                 onClick={() => setTexte(texteModele(m.cle, a, commerce))}
                 className={`min-h-11 rounded-full px-3 text-sm font-semibold ring-1 ${
-                  modeleSuggere(a) === m.cle ? 'bg-marque-50 text-marque-700 ring-marque-200' : 'bg-white text-gray-700 ring-gray-300'
+                  modeleSuggere(a) === m.cle ? 'bg-magenta-500/10 text-magenta-700 ring-magenta-500/30' : 'bg-white text-gray-700 ring-gray-300'
                 }`}
               >
                 {m.libelle}
@@ -385,7 +395,8 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
           <label className="sr-only" htmlFor={`rep-${a.id}`}>
             Réponse à {a.auteur}
           </label>
-          <textarea id={`rep-${a.id}`} className="champ min-h-32" value={texte} onChange={(e) => setTexte(e.target.value)} />
+          {/* Réponses plafonnées à 2 000 caractères côté serveur (route PATCH avis) ; Google accepte 4 096. */}
+          <textarea id={`rep-${a.id}`} className="champ min-h-32" maxLength={2000} value={texte} onChange={(e) => setTexte(e.target.value)} />
           <MessageErreur>{erreur && `Non enregistré : ${erreur}`}</MessageErreur>
           <div className="grid grid-cols-2 gap-2">
             <button

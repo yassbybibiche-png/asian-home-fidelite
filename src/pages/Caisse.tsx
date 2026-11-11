@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { MESSAGE_MODE_SERVEUR, messageErreur, useStore } from '../store'
 import { useRoute } from '../router'
-import type { Client, Commerce, EntreeJournal } from '../types'
+import type { Client, CommerceCaisse, EntreeJournal } from '../types'
 import { echangerContreSession, ErreurApi, type AccesCaisse, type ClientApi, type GainCaisse } from '../data/api'
 import { messageGain, normaliserCodeGagnant } from '../lib/roulette'
 import { creerCoffrePin, rangementIndexedDb } from '../data/coffrePin'
@@ -38,10 +38,18 @@ function stockage(type: 'localStorage' | 'sessionStorage'): Storage | null {
 }
 
 interface Cache {
-  commerce: Commerce
+  commerce: CommerceCaisse
+  /** Clients déjà vus sur cet appareil (recherche, scan, actions) : c'est tout ce que la caisse garde — jamais la liste complète (P0-S14). */
   clients: Client[]
   auteur: EntreeJournal['auteur']
   synchroLe: string
+}
+
+/** Ajoute / met à jour des clients dans la liste des clients connus, sans doublon, dans l'ordre de première vue. */
+function fusionnerClients(connus: Client[], recus: Client[]): Client[] {
+  const parId = new Map(connus.map((c) => [c.id, c]))
+  for (const c of recus) parId.set(c.id, c)
+  return [...parId.values()]
 }
 
 const LIBELLES: Record<TypeActionCaisse, string> = { passage: 'Passage', recompense: 'Récompense', echange: 'Échange de points', attente: 'Récompense en attente', reserve: 'Plat en réserve' }
@@ -51,7 +59,8 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
   const file = useMemo(() => creerFileCaisse(stockage('localStorage'), `fidelite:caisse:file:v1:${commerceId}`), [commerceId])
   // Codes vérifiés en ligne aujourd'hui sur cet appareil (empreintes) : seul usage, le mode dégradé hors ligne.
   const codesDuJour = useMemo(() => creerCodesDuJour(stockage('localStorage'), `fidelite:caisse:codes-du-jour:v1:${commerceId}`), [commerceId])
-  const cleCache = `fidelite:caisse:cache:v1:${commerceId}`
+  // Cache v2 (P0-S14, revue Codex point 2) : la v1 contenait la liste complète des clients — abandonnée, jamais relue.
+  const cleCache = `fidelite:caisse:cache:v2:${commerceId}`
 
   // Accès de la caisse : session équipe (jeton, cas normal) ou code équipe (repli : serveur sans sessions).
   // Hors ligne, l'accès mémorisé reste utilisable tel quel : les actions vont dans la file, rien n'est vérifié
@@ -67,9 +76,14 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
   const degradeRef = useRef(false)
   const accesRef = useRef<AccesCaisse | null>(null)
   const reponses = useRef(new Map<string, Client>())
+  const donneesRef = useRef<Cache | null>(null)
+  // Client sélectionné dans le comptoir (pour rafraîchir sa fiche à chaque synchro).
+  const choisiIdRef = useRef<string | null>(null)
 
-  const ecrireCache = useCallback(
+  /** Écriture brute du cache (sans fusion) : seule voie pour RETIRER un client (revue Codex P0-S14, point 3). */
+  const persisterCache = useCallback(
     (c: Cache | null) => {
+      donneesRef.current = c
       setDonnees(c)
       try {
         if (c) stockage('localStorage')?.setItem(cleCache, JSON.stringify(c))
@@ -81,6 +95,25 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
     [cleCache],
   )
 
+  const ecrireCache = useCallback(
+    (c: Cache | null) => {
+      // Les clients connus ne s'effacent jamais par un chargement : la caisse ne reçoit plus la liste (P0-S14),
+      // les fiches vues s'accumulent ici (recherche, scan, actions) et servent hors ligne.
+      const fusionne = c && donneesRef.current ? { ...c, clients: fusionnerClients(donneesRef.current.clients, c.clients) } : c
+      persisterCache(fusionne)
+    },
+    [persisterCache],
+  )
+
+  /** Met à jour un ou plusieurs clients connus (après recherche, scan ou action), sans toucher au reste du cache. */
+  const majClientsConnus = useCallback(
+    (recus: Client[]) => {
+      const courant = donneesRef.current
+      if (courant) ecrireCache({ ...courant, clients: fusionnerClients(courant.clients, recus) })
+    },
+    [ecrireCache],
+  )
+
   const charger = useCallback(
     async (a = accesRef.current) => {
       if (!a) return
@@ -89,6 +122,19 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
         ecrireCache({ commerce: r.commerce, clients: r.clients, auteur: r.auteur, synchroLe: new Date().toISOString() })
         setEnLigne(true)
         setErreurAcces(null)
+        // Fiche du client sélectionné rafraîchie : une action faite sur une autre tablette se voit ici.
+        const choisi = choisiIdRef.current
+        if (choisi) {
+          try {
+            majClientsConnus([await api.clientCaisse(commerceId, a, choisi)])
+          } catch (e) {
+            // Client supprimé entre-temps : retiré des clients connus (écriture SANS fusion, sinon il reviendrait).
+            if (e instanceof ErreurApi && e.statut === 404) {
+              const courant = donneesRef.current
+              if (courant) persisterCache({ ...courant, clients: courant.clients.filter((c) => c.id !== choisi) })
+            }
+          }
+        }
         // Fin du mode dégradé : le serveur vient d'accepter le code (mémorisé comme un déverrouillage en ligne).
         if (degradeRef.current && 'code' in a) {
           degradeRef.current = false
@@ -111,7 +157,63 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
         } else setErreurAcces(messageErreur(e))
       }
     },
-    [api, codesDuJour, coffre, commerceId, ecrireCache],
+    [api, codesDuJour, coffre, commerceId, ecrireCache, majClientsConnus, persisterCache],
+  )
+
+  /**
+   * Recherche paginée côté serveur (P0-S14) : la tablette ne reçoit que les clients correspondants.
+   * Hors ligne : repli sur les clients déjà vus sur cet appareil (`horsLigne: true`).
+   */
+  const rechercher = useCallback(
+    async (q: string, page = 1): Promise<{ clients: Client[]; total: number; horsLigne?: boolean }> => {
+      const a = accesRef.current
+      if (!a) return { clients: [], total: 0 }
+      try {
+        const r = await api.caisse(commerceId, a, { q, page, limite: 8 })
+        setEnLigne(true)
+        majClientsConnus(r.clients)
+        return { clients: r.clients, total: r.total }
+      } catch (e) {
+        if (e instanceof ErreurApi && e.horsLigne) {
+          setEnLigne(false)
+          const connus = (donneesRef.current?.clients ?? []).filter((c) => correspondRecherche(c, q))
+          return { clients: connus.slice((page - 1) * 8, page * 8), total: connus.length, horsLigne: true }
+        }
+        throw e
+      }
+    },
+    [api, commerceId, majClientsConnus],
+  )
+
+  /**
+   * Fiche d'un client à la demande (scan QR, revue Codex P0-S14 point 4) : le serveur d'abord, en ligne — la fiche
+   * en cache ne sert que hors ligne (solde périmé sinon : un passage sur une autre tablette ne se verrait pas).
+   * Un 404 retire le client des clients connus (supprimé entre-temps). Null = inconnu / hors ligne et jamais vu.
+   */
+  const ficheClient = useCallback(
+    async (id: string): Promise<Client | null> => {
+      const a = accesRef.current
+      if (a) {
+        try {
+          const client = await api.clientCaisse(commerceId, a, id)
+          majClientsConnus([client])
+          return client
+        } catch (e) {
+          if (e instanceof ErreurApi && e.statut === 404) {
+            const courant = donneesRef.current
+            if (courant) persisterCache({ ...courant, clients: courant.clients.filter((c) => c.id !== id) })
+            return null
+          }
+          if (e instanceof ErreurApi && e.horsLigne) {
+            setEnLigne(false)
+            return donneesRef.current?.clients.find((c) => c.id === id) ?? null
+          }
+          throw e
+        }
+      }
+      return donneesRef.current?.clients.find((c) => c.id === id) ?? null
+    },
+    [api, commerceId, majClientsConnus, persisterCache],
   )
 
   const envoyer = useCallback(
@@ -158,9 +260,19 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
 
   // Démarrage : session (ou code, en repli) mémorisée chiffrée pour cet onglet ? Données en cache affichées tout de suite (hors ligne).
   useEffect(() => {
+    // Ancien cache v1 (liste complète, avant P0-S14) : supprimé, jamais relu.
+    try {
+      stockage('localStorage')?.removeItem(`fidelite:caisse:cache:v1:${commerceId}`)
+    } catch {
+      // stockage indisponible : la v1 reste orpheline, jamais lue
+    }
     try {
       const brut = stockage('localStorage')?.getItem(cleCache)
-      if (brut) setDonnees(JSON.parse(brut) as Cache)
+      if (brut) {
+        const lu = JSON.parse(brut) as Cache
+        donneesRef.current = lu
+        setDonnees(lu)
+      }
     } catch {
       // cache illisible : ignoré
     }
@@ -287,7 +399,12 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
       erreurAcces={erreurAcces}
       onGain={gain}
       onAgir={agir}
-      onClientMaj={(c) => ecrireCache({ ...donnees, clients: donnees.clients.map((x) => (x.id === c.id ? c : x)) })}
+      onClientMaj={(c) => majClientsConnus([c])}
+      onRechercher={rechercher}
+      onFicheClient={ficheClient}
+      onChoisir={(id) => {
+        choisiIdRef.current = id
+      }}
       onOublierRefus={() => setEtatFile(file.oublierRefusees())}
       onSynchroniser={() => void synchroniser()}
       onVerrouiller={() => void verrouiller()}
@@ -295,7 +412,7 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
   )
 }
 
-function Deverrouillage({ commerce, erreur, onCode, attente }: { commerce?: Commerce; erreur: string | null; onCode(c: string): Promise<void>; attente: number }) {
+function Deverrouillage({ commerce, erreur, onCode, attente }: { commerce?: CommerceCaisse; erreur: string | null; onCode(c: string): Promise<void>; attente: number }) {
   const [saisi, setSaisi] = useState('')
   const [enCours, setEnCours] = useState(false)
   async function envoyer(e: FormEvent) {
@@ -356,6 +473,9 @@ function Comptoir({
   onGain,
   onAgir,
   onClientMaj,
+  onRechercher,
+  onFicheClient,
+  onChoisir,
   onOublierRefus,
   onSynchroniser,
   onVerrouiller,
@@ -368,6 +488,9 @@ function Comptoir({
   onGain(quoi: 'verifier' | 'remettre', code: string): Promise<GainCaisse>
   onAgir(type: TypeActionCaisse, c: Client, extra?: { montantCentimes?: number; recompenseId?: string }): Promise<Resultat>
   onClientMaj(c: Client): void
+  onRechercher(q: string, page?: number): Promise<{ clients: Client[]; total: number; horsLigne?: boolean }>
+  onFicheClient(id: string): Promise<Client | null>
+  onChoisir(id: string): void
   onOublierRefus(): void
   onSynchroniser(): void
   onVerrouiller(): void
@@ -383,22 +506,99 @@ function Comptoir({
   const [demande, setDemande] = useState<DemandeConfirmation | null>(null)
   const rechercheRef = useRef<HTMLInputElement>(null)
   const choisi = clients.find((c) => c.id === choisiId) ?? null
-  const resultats = recherche.trim() ? clients.filter((c) => correspondRecherche(c, recherche)).slice(0, 8) : []
-  const centimes = analyserMontant(montant)
-  const enAttente = (c: Client) => etatFile.attente.filter((a) => a.clientId === c.id).length
+  // Recherche paginée côté serveur (P0-S14) : la tablette ne reçoit que les clients correspondants (8 par page).
+  const [resultats, setResultats] = useState<Client[]>([])
+  const [totalResultats, setTotalResultats] = useState(0)
+  const [pageResultats, setPageResultats] = useState(1)
+  const [rechercheEnCours, setRechercheEnCours] = useState(false)
+  const [rechercheHorsLigne, setRechercheHorsLigne] = useState(false)
+  const [erreurRecherche, setErreurRecherche] = useState<string | null>(null)
+  const [voirPlusEnCours, setVoirPlusEnCours] = useState(false)
+  const numeroRecherche = useRef(0)
+
+  // Recherche différée (300 ms) : 2 caractères minimum (une lettre seule correspondrait à trop de clients).
+  useEffect(() => {
+    // Toute saisie invalide la requête précédente, même vide ou d'une lettre (revue Codex P0-S14, point 5) : sa
+    // réponse ne doit jamais repeupler les résultats.
+    const numero = ++numeroRecherche.current
+    const q = recherche.trim()
+    setErreurRecherche(null)
+    if (q.length < 2) {
+      setResultats([])
+      setTotalResultats(0)
+      setPageResultats(1)
+      setRechercheHorsLigne(false)
+      setRechercheEnCours(false)
+      return
+    }
+    setRechercheEnCours(true)
+    const minuterie = window.setTimeout(() => {
+      void onRechercher(q, 1)
+        .then((r) => {
+          if (numero !== numeroRecherche.current) return
+          setResultats(r.clients)
+          setTotalResultats(r.total)
+          setPageResultats(1)
+          setRechercheHorsLigne(!!r.horsLigne)
+        })
+        .catch((e) => {
+          // Une erreur (401, 500…) n'est pas « aucun client » : elle s'affiche (revue Codex P0-S14, point 7).
+          if (numero === numeroRecherche.current) {
+            setResultats([])
+            setTotalResultats(0)
+            setErreurRecherche(messageErreur(e))
+          }
+        })
+        .finally(() => {
+          if (numero === numeroRecherche.current) setRechercheEnCours(false)
+        })
+    }, 300)
+    return () => window.clearTimeout(minuterie)
+  }, [recherche, onRechercher])
+
+  async function voirPlus() {
+    const q = recherche.trim()
+    if (q.length < 2 || resultats.length >= totalResultats || voirPlusEnCours) return
+    // Garde de génération (revue Codex P0-S14, point 6) : une page d'une ancienne recherche ne se mélange jamais à la courante.
+    const numero = numeroRecherche.current
+    setVoirPlusEnCours(true)
+    try {
+      const r = await onRechercher(q, pageResultats + 1)
+      if (numero !== numeroRecherche.current || rechercheRef.current?.value.trim() !== q) return
+      setResultats((anciens) => [...anciens, ...r.clients.filter((c) => !anciens.some((x) => x.id === c.id))])
+      setTotalResultats(r.total)
+      setPageResultats(pageResultats + 1)
+      setRechercheHorsLigne(!!r.horsLigne)
+    } catch (e) {
+      setAnnonce({ type: 'refus', texte: messageErreur(e) })
+    } finally {
+      setVoirPlusEnCours(false)
+    }
+  }
 
   const surQr = useCallback(
     (texte: string) => {
       setScanner(false)
       const id = clientIdDepuisQr(texte)
-      const c = id && clients.find((x) => x.id === id)
-      if (c) {
-        setChoisiId(c.id)
-        setAnnonce(null)
-      } else setAnnonce({ type: 'refus', texte: 'QR non reconnu : ce n’est pas une carte de ce commerce. Cherchez le client par son prénom ou son numéro.' })
+      if (!id) {
+        setAnnonce({ type: 'refus', texte: 'QR non reconnu : ce n’est pas une carte de ce commerce. Cherchez le client par son prénom ou son numéro.' })
+        return
+      }
+      // Fiche à la demande (P0-S14) : le scan ne liste plus les clients, il charge la carte scannée.
+      void onFicheClient(id)
+        .then((c) => {
+          if (c) {
+            onChoisir(c.id)
+            setChoisiId(c.id)
+            setAnnonce(null)
+          } else setAnnonce({ type: 'refus', texte: 'QR non reconnu : ce n’est pas une carte de ce commerce. Cherchez le client par son prénom ou son numéro.' })
+        })
+        .catch((e) => setAnnonce({ type: 'refus', texte: messageErreur(e) }))
     },
-    [clients],
+    [onFicheClient, onChoisir],
   )
+  const centimes = analyserMontant(montant)
+  const enAttente = (c: Client) => etatFile.attente.filter((a) => a.clientId === c.id).length
 
   async function agir(type: TypeActionCaisse, extra: { montantCentimes?: number; recompenseId?: string } = {}) {
     if (!choisi || enCours) return
@@ -432,7 +632,8 @@ function Comptoir({
     if (!d) return
     if (d.type === 'echange') void agir('echange', { recompenseId: d.recompense.id })
     else if (d.type === 'attente') void agir('attente', { recompenseId: d.attente.id })
-    else void agir(d.type)
+    // 'consentement' et 'rattrapage-refus' n'existent que sur la fiche client, jamais ici.
+    else if (d.type === 'recompense' || d.type === 'reserve') void agir(d.type)
   }
 
   const statut = libelleFile(etatFile, enLigne)
@@ -508,6 +709,7 @@ function Comptoir({
                   <button
                     className="flex min-h-12 w-full items-center justify-between gap-3 py-2 text-left"
                     onClick={() => {
+                      onChoisir(c.id)
                       setChoisiId(c.id)
                       setRecherche('')
                       setAnnonce(null)
@@ -525,7 +727,20 @@ function Comptoir({
               ))}
             </ul>
           )}
-          {recherche.trim() && !resultats.length && <p className="text-sm text-gray-600">Aucun client trouvé. Inscription : depuis la page de jeu (QR vitrine) ou Clients.</p>}
+          {totalResultats > resultats.length && (
+            <button className="min-h-11 w-full text-sm font-semibold text-gray-700 underline" disabled={voirPlusEnCours} onClick={() => void voirPlus()}>
+              {voirPlusEnCours ? 'Chargement…' : `Voir plus (${totalResultats - resultats.length} autre${totalResultats - resultats.length > 1 ? 's' : ''})`}
+            </button>
+          )}
+          {recherche.trim().length === 1 && <p className="text-sm text-gray-600">Tapez au moins 2 caractères pour chercher.</p>}
+          {rechercheEnCours && <p className="text-sm text-gray-600">Recherche…</p>}
+          {erreurRecherche && (
+            <p className="text-sm text-red-900" role="alert">
+              {erreurRecherche}
+            </p>
+          )}
+          {recherche.trim().length >= 2 && !rechercheEnCours && !erreurRecherche && !resultats.length && <p className="text-sm text-gray-600">Aucun client trouvé. Inscription : depuis la page de jeu (QR vitrine) ou Clients.</p>}
+          {rechercheHorsLigne && <p className="text-sm text-amber-900">Hors ligne : la recherche ne porte que sur les clients déjà vus sur cet appareil.</p>}
         </section>
       )}
 

@@ -106,7 +106,7 @@ describe('Catégorie active : la frappe ne la réinitialise pas', () => {
     assert.match(tsx, /className="sticky top-0 z-20[^"]*"/)
     assert.ok(tsx.indexOf('className="sticky top-0') < tsx.indexOf("aria-label={t('Catégories')}"), 'les onglets sont dans le bloc collant')
     assert.match(tsx, /aria-current=\{indique \? 'true' : undefined\}/)
-    assert.match(tsx, /after:bg-or-400/)
+    assert.match(tsx, /after:bg-magenta-400/)
     assert.match(tsx, /new IntersectionObserver/)
   })
 })

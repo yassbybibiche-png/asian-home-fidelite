@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useAction, useStore } from '../store'
 import type { Client, Commerce, ConfigProgramme, Lot, Palier, RecompensePoints, TypeCommerce } from '../types'
 import { TYPES_COMMERCE } from '../data/defaults'
@@ -53,6 +53,18 @@ function CompteurLibelle({ id, libelle }: { id: string; libelle: string }) {
   )
 }
 
+type OngletReglages = 'commerce' | 'fidelite' | 'roulette' | 'messages' | 'carte' | 'donnees'
+
+/** Découpe P1-C7 : 6 onglets, un seul formulaire — aucun réglage supprimé, 2 fieldsets déplacés pour des onglets thématiques contigus (« Points » après « Programme », « Réponses aux avis » après « Messages automatiques »). */
+const ONGLETS_REGLAGES: { id: OngletReglages; libelle: string }[] = [
+  { id: 'commerce', libelle: 'Commerce' },
+  { id: 'fidelite', libelle: 'Fidélité' },
+  { id: 'roulette', libelle: 'Roulette' },
+  { id: 'messages', libelle: 'Messages' },
+  { id: 'carte', libelle: 'Carte' },
+  { id: 'donnees', libelle: 'Données' },
+]
+
 export default function Reglages() {
   const { commerce } = useStore()
   // `key` : le brouillon repart de zéro quand on change de commerce.
@@ -65,6 +77,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   const [brouillon, setBrouillon] = useState<Commerce>(commerce)
   const [lotsEdites, setLotsEdites] = useState<Lot[]>(commerce.lots)
   const [enregistre, setEnregistre] = useState(false)
+  const [onglet, setOnglet] = useState<OngletReglages>('commerce')
 
   const lots = lotsEdites.map((l) => ({ ...l, libelle: l.libelle.trim() })).filter((l) => l.libelle)
   const probasValides = lots.every((l) => Number.isFinite(l.probabilite) && l.probabilite >= 0 && l.probabilite <= 100)
@@ -97,6 +110,34 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
     setEnregistre(false)
   }
 
+  /** Navigation clavier des onglets (P1-C7) : flèches, Début/Fin — le focus suit l'onglet actif (roving tabindex). */
+  function naviguerOnglets(e: KeyboardEvent<HTMLDivElement>) {
+    const i = ONGLETS_REGLAGES.findIndex((o) => o.id === onglet)
+    let suivant: number | null = null
+    if (e.key === 'ArrowRight') suivant = (i + 1) % ONGLETS_REGLAGES.length
+    else if (e.key === 'ArrowLeft') suivant = (i - 1 + ONGLETS_REGLAGES.length) % ONGLETS_REGLAGES.length
+    else if (e.key === 'Home') suivant = 0
+    else if (e.key === 'End') suivant = ONGLETS_REGLAGES.length - 1
+    if (suivant === null) return
+    e.preventDefault()
+    const id = ONGLETS_REGLAGES[suivant].id
+    setOnglet(id)
+    setTimeout(() => document.getElementById(`onglet-${id}`)?.focus(), 0)
+  }
+
+  /** Validation native (required, type=url, min/max) : un champ invalide dans un onglet masqué bloquerait
+      l'enregistrement sans rien montrer — on bascule sur son onglet puis on le focalise (P1-C7). */
+  function revelerChampInvalide(e: FormEvent) {
+    const champ = e.target as HTMLElement
+    const panneau = champ.closest('[role="tabpanel"]')
+    if (!panneau) return
+    const id = panneau.id.replace('reglages-', '') as OngletReglages
+    if (id === onglet) return
+    e.preventDefault()
+    setOnglet(id)
+    setTimeout(() => champ.focus(), 0)
+  }
+
   function majLot(i: number, lot: Lot | null) {
     setLotsEdites((ls) => (lot ? ls.map((l, j) => (j === i ? lot : l)) : ls.filter((_, j) => j !== i)))
     setEnregistre(false)
@@ -126,9 +167,28 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   }
 
   return (
-    <form onSubmit={enregistrer} className="space-y-6">
-      <EnTete titre="Réglages" sousTitre="Tout se règle ici, en un seul formulaire." />
+    <form onSubmit={enregistrer} onInvalid={revelerChampInvalide} className="space-y-6">
+      <EnTete titre="Réglages" sousTitre="Tout se règle ici, en un seul formulaire, par section." />
 
+      <div role="tablist" aria-label="Sections des réglages" className="flex flex-wrap gap-2" onKeyDown={naviguerOnglets}>
+        {ONGLETS_REGLAGES.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            role="tab"
+            id={`onglet-${o.id}`}
+            aria-selected={onglet === o.id}
+            aria-controls={`reglages-${o.id}`}
+            tabIndex={onglet === o.id ? 0 : -1}
+            onClick={() => setOnglet(o.id)}
+            className={onglet === o.id ? 'puce min-h-11 bg-magenta-700 font-semibold text-white' : 'puce min-h-11'}
+          >
+            {o.libelle}
+          </button>
+        ))}
+      </div>
+
+      <div id="reglages-commerce" role="tabpanel" aria-labelledby="onglet-commerce" hidden={onglet !== 'commerce'} className="space-y-6">
       <fieldset className="carte space-y-4">
         <legend className="sr-only">Le commerce</legend>
         <h2 className="titre-carte">Le commerce</h2>
@@ -214,7 +274,9 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           )}
         </div>
       </fieldset>
+      </div>
 
+      <div id="reglages-fidelite" role="tabpanel" aria-labelledby="onglet-fidelite" hidden={onglet !== 'fidelite'} className="space-y-6">
       <fieldset className="carte space-y-4">
         <legend className="sr-only">Fidélité</legend>
         <h2 className="titre-carte">Carte de fidélité</h2>
@@ -247,7 +309,6 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           {!seuilValide && <p className="mt-1 text-sm text-red-700">Entre 2 et 50 tampons.</p>}
         </div>
       </fieldset>
-
       <fieldset className="carte space-y-4">
         <legend className="sr-only">Programme de fidélité</legend>
         <h2 className="titre-carte">Programme de fidélité</h2>
@@ -419,7 +480,87 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           <Nombre id="rt-delai" libelle="Délai de signalement (jours)" valeur={programme.rattrapage?.delaiJours} defaut={30} min={7} max={90} onChange={(v) => majBloc('rattrapage', { delaiJours: v })} />
         </div>
       </fieldset>
+      <fieldset className="carte space-y-3">
+        <legend className="sr-only">Points</legend>
+        <h2 className="titre-carte">Points et récompenses à points</h2>
+        <div>
+          <label className="etiquette" htmlFor="taux">
+            Euros dépensés pour 1 point
+          </label>
+          <input
+            id="taux"
+            className="champ"
+            type="number"
+            inputMode="decimal"
+            min={0.1}
+            step={0.1}
+            value={Number.isNaN(taux) ? '' : taux}
+            onChange={(e) => maj('eurosParPoint', e.target.valueAsNumber)}
+          />
+          <p className={`mt-1 text-sm ${tauxValide ? 'text-gray-600' : 'text-red-700'}`}>
+            {tauxValide ? `${libelleTaux({ eurosParPoint: taux })} (saisi en caisse avec le montant).` : 'Entre 0,10 et 1 000 €.'}
+          </p>
+        </div>
+        <ul className="space-y-3">
+          {catalogue.map((r, i) => (
+            <li key={r.id} className="space-y-2 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-900/5">
+              <div className="flex gap-2">
+                <div className="min-w-0 flex-1">
+                  <label className="etiquette" htmlFor={`rp-nom-${i}`}>
+                    Récompense
+                  </label>
+                  <input
+                    id={`rp-nom-${i}`}
+                    className="champ"
+                    maxLength={80}
+                    placeholder="ex : 4 nems offerts"
+                    value={r.nom}
+                    onChange={(e) => (setCatalogue((c) => c.map((x, j) => (j === i ? { ...x, nom: e.target.value } : x))), setEnregistre(false))}
+                  />
+                </div>
+                <div className="w-28 shrink-0">
+                  <label className="etiquette" htmlFor={`rp-cout-${i}`}>
+                    Coût (pts)
+                  </label>
+                  <input
+                    id={`rp-cout-${i}`}
+                    className="champ text-right"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    value={Number.isNaN(r.cout) ? '' : r.cout}
+                    onChange={(e) => (setCatalogue((c) => c.map((x, j) => (j === i ? { ...x, cout: e.target.valueAsNumber } : x))), setEnregistre(false))}
+                  />
+                </div>
+              </div>
+              <label className="etiquette" htmlFor={`rp-desc-${i}`}>
+                Description (optionnelle)
+              </label>
+              <input
+                id={`rp-desc-${i}`}
+                className="champ"
+                maxLength={200}
+                value={r.description ?? ''}
+                onChange={(e) => (setCatalogue((c) => c.map((x, j) => (j === i ? { ...x, description: e.target.value } : x))), setEnregistre(false))}
+              />
+              <button type="button" className="min-h-11 text-sm font-semibold text-red-800 underline" onClick={() => (setCatalogue((c) => c.filter((_, j) => j !== i)), setEnregistre(false))}>
+                Retirer cette récompense
+              </button>
+            </li>
+          ))}
+        </ul>
+        {!catalogueValide && <p className="text-sm text-red-700">Chaque récompense doit avoir un nom et un coût entier ≥ 1 point.</p>}
+        <button
+          type="button"
+          className="bouton-secondaire w-full"
+          onClick={() => (setCatalogue((c) => [...c, { id: `rp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, nom: '', cout: 50 }]), setEnregistre(false))}
+        >
+          + Ajouter une récompense à points
+        </button>
+      </fieldset>
+      </div>
 
+      <div id="reglages-roulette" role="tabpanel" aria-labelledby="onglet-roulette" hidden={onglet !== 'roulette'} className="space-y-6">
       <fieldset className="carte space-y-2">
         <legend className="sr-only">Roulette</legend>
         <h2 className="titre-carte">Lots de la roulette</h2>
@@ -517,86 +658,9 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           onChange={(v) => maj('testsAB', { ...brouillon.testsAB, accroche: basculerAccroche(brouillon.testsAB?.accroche, v, jourParis(new Date())) })}
         />
       </fieldset>
+      </div>
 
-      <fieldset className="carte space-y-3">
-        <legend className="sr-only">Points</legend>
-        <h2 className="titre-carte">Points et récompenses à points</h2>
-        <div>
-          <label className="etiquette" htmlFor="taux">
-            Euros dépensés pour 1 point
-          </label>
-          <input
-            id="taux"
-            className="champ"
-            type="number"
-            inputMode="decimal"
-            min={0.1}
-            step={0.1}
-            value={Number.isNaN(taux) ? '' : taux}
-            onChange={(e) => maj('eurosParPoint', e.target.valueAsNumber)}
-          />
-          <p className={`mt-1 text-sm ${tauxValide ? 'text-gray-600' : 'text-red-700'}`}>
-            {tauxValide ? `${libelleTaux({ eurosParPoint: taux })} (saisi en caisse avec le montant).` : 'Entre 0,10 et 1 000 €.'}
-          </p>
-        </div>
-        <ul className="space-y-3">
-          {catalogue.map((r, i) => (
-            <li key={r.id} className="space-y-2 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-900/5">
-              <div className="flex gap-2">
-                <div className="min-w-0 flex-1">
-                  <label className="etiquette" htmlFor={`rp-nom-${i}`}>
-                    Récompense
-                  </label>
-                  <input
-                    id={`rp-nom-${i}`}
-                    className="champ"
-                    maxLength={80}
-                    placeholder="ex : 4 nems offerts"
-                    value={r.nom}
-                    onChange={(e) => (setCatalogue((c) => c.map((x, j) => (j === i ? { ...x, nom: e.target.value } : x))), setEnregistre(false))}
-                  />
-                </div>
-                <div className="w-28 shrink-0">
-                  <label className="etiquette" htmlFor={`rp-cout-${i}`}>
-                    Coût (pts)
-                  </label>
-                  <input
-                    id={`rp-cout-${i}`}
-                    className="champ text-right"
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    value={Number.isNaN(r.cout) ? '' : r.cout}
-                    onChange={(e) => (setCatalogue((c) => c.map((x, j) => (j === i ? { ...x, cout: e.target.valueAsNumber } : x))), setEnregistre(false))}
-                  />
-                </div>
-              </div>
-              <label className="etiquette" htmlFor={`rp-desc-${i}`}>
-                Description (optionnelle)
-              </label>
-              <input
-                id={`rp-desc-${i}`}
-                className="champ"
-                maxLength={200}
-                value={r.description ?? ''}
-                onChange={(e) => (setCatalogue((c) => c.map((x, j) => (j === i ? { ...x, description: e.target.value } : x))), setEnregistre(false))}
-              />
-              <button type="button" className="min-h-11 text-sm font-semibold text-red-800 underline" onClick={() => (setCatalogue((c) => c.filter((_, j) => j !== i)), setEnregistre(false))}>
-                Retirer cette récompense
-              </button>
-            </li>
-          ))}
-        </ul>
-        {!catalogueValide && <p className="text-sm text-red-700">Chaque récompense doit avoir un nom et un coût entier ≥ 1 point.</p>}
-        <button
-          type="button"
-          className="bouton-secondaire w-full"
-          onClick={() => (setCatalogue((c) => [...c, { id: `rp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, nom: '', cout: 50 }]), setEnregistre(false))}
-        >
-          + Ajouter une récompense à points
-        </button>
-      </fieldset>
-
+      <div id="reglages-messages" role="tabpanel" aria-labelledby="onglet-messages" hidden={onglet !== 'messages'} className="space-y-6">
       <fieldset className="carte space-y-1">
         <legend className="sr-only">Messages automatiques</legend>
         <h2 className="titre-carte pb-1">Messages automatiques</h2>
@@ -618,7 +682,34 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           </label>
         ))}
       </fieldset>
+      <fieldset className="carte divide-y divide-gray-100">
+        <legend className="sr-only">Réponses aux avis</legend>
+        <h2 className="titre-carte pb-2">Réponses automatiques aux avis</h2>
+        <Interrupteur
+          libelle="Répondre automatiquement aux 5★"
+          aide="La réponse modèle est appliquée aussitôt, marquée « auto »."
+          actif={brouillon.reglesReponseAuto.auto5Etoiles}
+          onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, auto5Etoiles: v })}
+        />
+        <Interrupteur
+          libelle="Répondre automatiquement aux avis 4★"
+          actif={brouillon.reglesReponseAuto.auto4Etoiles}
+          onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, auto4Etoiles: v })}
+        />
+        <Interrupteur
+          libelle="Proposer un brouillon pour les autres"
+          aide="Vous relisez et validez avant de marquer comme répondu."
+          actif={brouillon.reglesReponseAuto.brouillonAutres}
+          onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, brouillonAutres: v })}
+        />
+        <p className="pt-2 text-sm text-gray-600">
+          Les règles s’appliquent aux nouveaux avis et, à l’enregistrement, aux avis encore sans réponse ni brouillon (un brouillon existant n’est jamais remplacé). {estDemo ? 'Démo : a' : 'A'}ucune réponse n’est réellement
+          publiée sur Google.
+        </p>
+      </fieldset>
+      </div>
 
+      <div id="reglages-carte" role="tabpanel" aria-labelledby="onglet-carte" hidden={onglet !== 'carte'} className="space-y-6">
       <fieldset className="carte space-y-3">
         <legend className="sr-only">Apparence de la carte</legend>
         <h2 className="titre-carte">Apparence de la carte</h2>
@@ -667,7 +758,9 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           />
         </div>
       </fieldset>
+      </div>
 
+      <div id="reglages-donnees" role="tabpanel" aria-labelledby="onglet-donnees" hidden={onglet !== 'donnees'} className="space-y-6">
       <fieldset className="carte space-y-3">
         <legend className="sr-only">Données personnelles</legend>
         <h2 className="titre-carte">Données personnelles (RGPD)</h2>
@@ -682,32 +775,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           onChange={(v) => maj('conservationMois', v)}
         />
       </fieldset>
-
-      <fieldset className="carte divide-y divide-gray-100">
-        <legend className="sr-only">Réponses aux avis</legend>
-        <h2 className="titre-carte pb-2">Réponses automatiques aux avis</h2>
-        <Interrupteur
-          libelle="Répondre automatiquement aux 5★"
-          aide="La réponse modèle est appliquée aussitôt, marquée « auto »."
-          actif={brouillon.reglesReponseAuto.auto5Etoiles}
-          onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, auto5Etoiles: v })}
-        />
-        <Interrupteur
-          libelle="Répondre automatiquement aux avis 4★"
-          actif={brouillon.reglesReponseAuto.auto4Etoiles}
-          onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, auto4Etoiles: v })}
-        />
-        <Interrupteur
-          libelle="Proposer un brouillon pour les autres"
-          aide="Vous relisez et validez avant de marquer comme répondu."
-          actif={brouillon.reglesReponseAuto.brouillonAutres}
-          onChange={(v) => maj('reglesReponseAuto', { ...brouillon.reglesReponseAuto, brouillonAutres: v })}
-        />
-        <p className="pt-2 text-sm text-gray-600">
-          Les règles s’appliquent aux nouveaux avis et, à l’enregistrement, aux avis encore sans réponse ni brouillon (un brouillon existant n’est jamais remplacé). {estDemo ? 'Démo : a' : 'A'}ucune réponse n’est réellement
-          publiée sur Google.
-        </p>
-      </fieldset>
+      </div>
 
       {/* Au-dessus de la barre d'onglets (64 px + zone de sécurité de l'iPhone). */}
       <div className="sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-10 space-y-2 md:bottom-4">

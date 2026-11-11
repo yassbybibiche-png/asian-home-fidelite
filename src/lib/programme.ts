@@ -4,7 +4,7 @@
 // Toute la configuration vit sur le commerce (`programme`, tout optionnel) : absent = défauts ci-dessous,
 // un commerce existant sans configuration voit donc les défauts s'appliquer sans rien casser.
 import type { Client, Commerce, ConfigProgramme, DefiEnCours, Palier, RecompenseEnAttente, Reserve } from '../types'
-import { pointsPourMontant, soldePoints } from './points.ts'
+import { memeJourParis, pointsPourMontant, soldePoints } from './points.ts'
 import { validerVisite } from './fidelite.ts'
 
 export const JOUR = 24 * 60 * 60 * 1000
@@ -561,10 +561,9 @@ export function appliquerVisiteProgramme(client: Client, commerce: Commerce, cen
   return { client: c, evenements }
 }
 
-/** Passage en caisse : 1 tampon par jour maximum (même garde que `enregistrerPassage`). */
+/** Passage en caisse : 1 tampon par jour maximum (même garde que `enregistrerPassage`). Jour calendaire à Paris. */
 export function passageAvecProgramme(client: Client, commerce: Commerce, centimes: number, quand: Date, actionId?: string): { client: Client; evenements: EvenementPassage[] } {
-  const memeJour = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-  if (client.visites.some((v) => memeJour(new Date(v), quand))) {
+  if (client.visites.some((v) => memeJourParis(new Date(v), quand))) {
     throw new Error(`${client.prenom} a déjà un passage enregistré ce jour-là : 1 tampon par jour maximum.`)
   }
   return appliquerVisiteProgramme(client, commerce, centimes, quand, actionId)
@@ -580,8 +579,7 @@ export function rattrapageRecevable(client: Client, commerce: Commerce, dateVisi
   if (dateVisite.getTime() > maintenant.getTime()) return 'La visite ne peut pas être dans le futur.'
   if (maintenant.getTime() - dateVisite.getTime() > cfg.delaiJours * JOUR) return `Trop tard : une visite oubliée doit être signalée sous ${cfg.delaiJours} jours.`
   if (!Number.isInteger(montantCentimes) || montantCentimes < 0 || montantCentimes > 100_000_00) return 'Montant invalide (0 à 100 000 €).'
-  const memeJour = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-  if (client.visites.some((v) => memeJour(new Date(v), dateVisite))) return 'Une visite est déjà enregistrée ce jour-là.'
+  if (client.visites.some((v) => memeJourParis(new Date(v), dateVisite))) return 'Une visite est déjà enregistrée ce jour-là.'
   return null
 }
 

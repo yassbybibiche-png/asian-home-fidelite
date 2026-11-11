@@ -6,6 +6,18 @@ import { celluleCsv } from './csv.ts'
 /** Prix non vérifié : affiché tel quel, jamais remplacé par un montant inventé. */
 export const LIBELLE_PRIX_ABSENT = 'Prix sur place'
 
+/**
+ * Mention affichée pour un plat dont les allergènes ne sont pas renseignés (P1-M2) : explicite,
+ * pour ne jamais laisser croire que le plat est sans allergène. Tant que le commerçant n'a fourni
+ * aucun allergène, les 81 plats affichent cette mention.
+ */
+export const LIBELLE_ALLERGENES_ABSENTS = 'Allergènes : demander en caisse'
+
+/** Libellé allergènes d'un plat : la liste si elle est renseignée, sinon la mention explicite. */
+export function libelleAllergenes(produit: Pick<Produit, 'allergenes'>): string {
+  return produit.allergenes.length > 0 ? `Allergènes : ${produit.allergenes.join(', ')}` : LIBELLE_ALLERGENES_ABSENTS
+}
+
 /** Les 14 allergènes à déclarer (règlement UE 1169/2011). */
 export const ALLERGENES = [
   'Gluten',

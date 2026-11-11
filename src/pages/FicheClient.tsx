@@ -7,13 +7,16 @@ import { MENTION_ENVOI } from '../lib/integrations'
 import { JournalEnvois } from './Messages'
 import { recompenseDebloquee } from '../lib/fidelite'
 import { nomAffiche } from '../lib/inscriptionJeu'
-import { soldePoints, formaterPrix } from '../lib/points'
+import { passageCeJour, soldePoints, formaterPrix } from '../lib/points'
 import { analyserAnniversaire, anniversaireAffiche } from '../lib/messages'
 import { nouvelIdAction } from '../lib/fileCaisse'
 import { dateCourte, dateRelative } from '../lib/format'
 import { CarteFidelite } from '../components/CarteFidelite'
 import { EncartWallet, EnTete, MessageErreur, telecharger, Vide } from '../components/ui'
+import { QrCode } from '../components/QrCode'
 import { datePurge, dureeConservationMois, libelleDuree, nomFichierExportClient, protectionPurge } from '../lib/rgpd'
+import { recapitulatif, type DemandeConfirmation } from '../lib/ecransCommercant'
+import { Confirmation } from '../components/Confirmation'
 
 /** Mode serveur : points (échange contre le catalogue), historique des échanges, anniversaire, plat préféré. */
 function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: Commerce }) {
@@ -22,8 +25,17 @@ function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: 
   const [anniv, setAnniv] = useState(anniversaireAffiche(client.anniversaire))
   const [plat, setPlat] = useState(client.platPrefere ?? '')
   const [annonce, setAnnonce] = useState('')
+  const [demande, setDemande] = useState<DemandeConfirmation | null>(null)
   const valeur = analyserAnniversaire(anniv)
   const solde = soldePoints(client)
+
+  async function confirmerEchange() {
+    const d = demande
+    setDemande(null)
+    if (!d || d.type !== 'echange') return
+    const res = await executer(() => avecPin((a, api) => api.actionCaisse(commerce.id, a, 'echange', { clientId: client.id, recompenseId: d.recompense.id, actionId: nouvelIdAction() })))
+    if (res.ok) setAnnonce(`✓ Échange enregistré : ${d.recompense.nom}`)
+  }
 
   async function enregistrerAnniv(e: FormEvent) {
     e.preventDefault()
@@ -45,11 +57,7 @@ function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: 
               <button
                 className="bouton-secondaire min-h-12 w-full justify-between"
                 disabled={enCours || solde < r.cout}
-                onClick={async () => {
-                  if (!window.confirm(`Échanger ${r.cout} points contre « ${r.nom} » ?`)) return
-                  const res = await executer(() => avecPin((a, api) => api.actionCaisse(commerce.id, a, 'echange', { clientId: client.id, recompenseId: r.id, actionId: nouvelIdAction() })))
-                  if (res.ok) setAnnonce(`✓ Échange enregistré : ${r.nom}`)
-                }}
+                onClick={() => setDemande({ type: 'echange', recompense: r })}
               >
                 <span>Échanger : {r.nom}</span>
                 <span className="tabular-nums">{r.cout} pts</span>
@@ -96,6 +104,7 @@ function PointsEtAnniversaire({ client, commerce }: { client: Client; commerce: 
           {annonce}
         </p>
       )}
+      {demande && <Confirmation recap={recapitulatif(demande, client, commerce)} enCours={enCours} onConfirmer={() => void confirmerEchange()} onAnnuler={() => setDemande(null)} />}
     </section>
   )
 }
@@ -113,16 +122,17 @@ function Relances({ client, commerce }: { client: Client; commerce: Commerce }) 
   const { envois } = useDonneesCommerce()
   const { executer, enCours, erreur } = useAction()
   const [annonce, setAnnonce] = useState('')
+  const [demande, setDemande] = useState<DemandeConfirmation | null>(null)
   const [modele, setModele] = useState<ModeleRelance>(() => modelesSuggeres(client, commerce, new Date())[0] ?? 'bienvenue')
   const consenti = client.consentementRelance === true
   const canal = canalDuClient(client)
   const duClient = envois.filter((e) => e.clientId === client.id)
 
-  async function changerConsentement(valeur: boolean) {
-    const question = valeur
-      ? `${client.prenom} accepte-t-il (elle) de recevoir vos relances par SMS ou e-mail ? Ne cochez que si le client vous l’a dit.`
-      : `Retirer le consentement de ${client.prenom} ? Plus aucune relance ne lui sera envoyée.`
-    if (!window.confirm(question)) return
+  async function changerConsentement() {
+    const d = demande
+    setDemande(null)
+    if (!d || d.type !== 'consentement') return
+    const valeur = d.valeur
     setAnnonce('')
     const r = await executer(() => avecPin((a, api) => api.majClient(commerce.id, a, client.id, { consentementRelance: valeur })))
     if (r.ok) setAnnonce(valeur ? '✓ Consentement enregistré.' : '✓ Consentement retiré : plus aucune relance ne partira.')
@@ -148,7 +158,7 @@ function Relances({ client, commerce }: { client: Client; commerce: Commerce }) 
           </span>
         )}
       </p>
-      <button className="bouton-secondaire w-full" disabled={enCours} onClick={() => void changerConsentement(!consenti)}>
+      <button className="bouton-secondaire w-full" disabled={enCours} onClick={() => setDemande({ type: 'consentement', valeur: !consenti })}>
         {consenti ? 'Retirer le consentement' : 'Le client accepte les relances'}
       </button>
       {consenti && canal && (
@@ -180,6 +190,7 @@ function Relances({ client, commerce }: { client: Client; commerce: Commerce }) 
         <h3 className="etiquette">Envois à ce client</h3>
         <JournalEnvois envois={duClient} avecClient={false} />
       </div>
+      {demande && <Confirmation recap={recapitulatif(demande, client, commerce)} enCours={enCours} onConfirmer={() => void changerConsentement()} onAnnuler={() => setDemande(null)} />}
     </section>
   )
 }
@@ -189,8 +200,17 @@ function Rattrapages({ client, commerce }: { client: Client; commerce: Commerce 
   const { avecPin } = useStore()
   const { executer, enCours, erreur } = useAction()
   const [annonce, setAnnonce] = useState('')
+  const [demande, setDemande] = useState<DemandeConfirmation | null>(null)
   const enAttente = (client.demandesRattrapage ?? []).filter((d) => d.statut === 'en_attente')
   if (!enAttente.length) return null
+
+  async function confirmerRefus() {
+    const d = demande
+    setDemande(null)
+    if (!d || d.type !== 'rattrapage-refus') return
+    const r = await executer(() => avecPin((a, api) => api.deciderRattrapage(commerce.id, a, client.id, d.id, 'refuser')))
+    if (r.ok) setAnnonce('Demande refusée.')
+  }
   return (
     <section className="carte space-y-3">
       <h2 className="titre-carte">Visites oubliées à valider</h2>
@@ -217,11 +237,9 @@ function Rattrapages({ client, commerce }: { client: Client; commerce: Commerce 
               <button
                 className="bouton-secondaire min-h-11 flex-1"
                 disabled={enCours}
-                onClick={async () => {
-                  if (!window.confirm('Refuser cette visite oubliée ?')) return
-                  const r = await executer(() => avecPin((a, api) => api.deciderRattrapage(commerce.id, a, client.id, d.id, 'refuser')))
-                  if (r.ok) setAnnonce('Demande refusée.')
-                }}
+                onClick={() =>
+                  setDemande({ type: 'rattrapage-refus', id: d.id, date: new Date(d.date).toLocaleDateString('fr-FR'), montant: formaterPrix(d.montantCentimes) })
+                }
               >
                 Refuser
               </button>
@@ -235,6 +253,7 @@ function Rattrapages({ client, commerce }: { client: Client; commerce: Commerce 
           {annonce}
         </p>
       )}
+      {demande && <Confirmation recap={recapitulatif(demande, client, commerce)} enCours={enCours} onConfirmer={() => void confirmerRefus()} onAnnuler={() => setDemande(null)} />}
     </section>
   )
 }
@@ -329,6 +348,85 @@ function DonneesPersonnelles({ client, commerce }: { client: Client; commerce: C
   )
 }
 
+/**
+ * Accès du client à sa carte (P0-S7). QR d'accès : à montrer au client PRÉSENT au comptoir (téléphone changé, carte
+ * effacée) — il le scanne et retrouve sa carte complète sur son téléphone (15 min, une seule fois, journalisé).
+ * Révocation : tous ses téléphones perdent l'accès complet (téléphone perdu, carte ouverte par quelqu'un d'autre).
+ */
+function AccesCarteClient({ client, commerce }: { client: Client; commerce: Commerce }) {
+  const { avecPin } = useStore()
+  const { executer, enCours, erreur } = useAction()
+  const [lien, setLien] = useState<{ lien: string; expireLe: string } | null>(null)
+  const [confirmer, setConfirmer] = useState(false)
+  const [annonce, setAnnonce] = useState('')
+
+  async function afficherQr() {
+    setAnnonce('')
+    const r = await executer(() => avecPin((a, api) => api.lienAccesCarte(commerce.id, a, client.id)))
+    if (r.ok) setLien(r.valeur)
+  }
+
+  async function revoquer() {
+    const r = await executer(() => avecPin((a, api) => api.revoquerAccesCarte(commerce.id, a, client.id)))
+    if (!r.ok) return
+    setLien(null)
+    setConfirmer(false)
+    setAnnonce('✓ Accès révoqué : plus aucun téléphone n’ouvre la carte complète. Remettez un QR d’accès au client quand il se présente.')
+  }
+
+  return (
+    <section className="carte space-y-3">
+      <h2 className="titre-carte">Accès du client à sa carte</h2>
+      <p className="text-sm text-gray-600">
+        Nouveau téléphone, carte effacée ? Montrez ce QR au client présent au comptoir : il le scanne et retrouve sa carte complète (valable 15 min, une seule
+        fois).
+      </p>
+      {lien ? (
+        <div className="flex flex-col items-center gap-2">
+          <QrCode texte={lien.lien} titre="QR d’accès à la carte du client" />
+          <p className="text-sm text-gray-600">Valable jusqu’à {new Date(lien.expireLe).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}, une seule fois.</p>
+          {/* Expiré ou déjà scanné : un nouveau lien remplace ce QR à l'écran. L'ancien n'est pas révoqué (le serveur
+              ne le permet pas sans révoquer toute la carte) : il reste à usage unique et tombe à son expiration (15 min),
+              sans avoir quitté cet écran du comptoir. */}
+          <button type="button" className="bouton-secondaire min-h-11 w-full" disabled={enCours} onClick={() => void afficherQr()}>
+            Générer un nouveau lien d’accès
+          </button>
+        </div>
+      ) : (
+        <button type="button" className="bouton-secondaire min-h-11 w-full" disabled={enCours} onClick={() => void afficherQr()}>
+          Afficher le QR d’accès à sa carte
+        </button>
+      )}
+      {!confirmer ? (
+        <button type="button" className="bouton-secondaire min-h-11 w-full text-red-700" disabled={enCours} onClick={() => setConfirmer(true)}>
+          Révoquer tous ses accès…
+        </button>
+      ) : (
+        <div className="space-y-2 rounded-xl bg-red-50 p-3 ring-1 ring-red-200">
+          <p className="text-sm text-red-900">
+            Tous les téléphones de ce client perdent l’accès complet à sa carte (ses tampons et points ne changent pas). Pour la rouvrir, il faudra un nouveau
+            QR d’accès.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" className="bouton-secondaire min-h-11" disabled={enCours} onClick={() => setConfirmer(false)}>
+              Annuler
+            </button>
+            <button type="button" className="bouton min-h-11 bg-red-700 hover:bg-red-800 active:bg-red-900" disabled={enCours} onClick={() => void revoquer()}>
+              Révoquer
+            </button>
+          </div>
+        </div>
+      )}
+      <MessageErreur>{erreur && `Rien n’a été modifié : ${erreur}`}</MessageErreur>
+      {annonce && (
+        <p className="alerte-succes" role="status">
+          {annonce}
+        </p>
+      )}
+    </section>
+  )
+}
+
 /** Fiche client côté commerçant : la carte + les actions de caisse. */
 export default function FicheClient() {
   const { param } = useRoute()
@@ -344,7 +442,7 @@ export default function FicheClient() {
         <EnTete titre="Client introuvable" />
         <Vide>
           Ce client n’existe pas (ou la démo a été réinitialisée).{' '}
-          <a href="#/clients" className="font-semibold text-marque-600 underline">
+          <a href="#/clients" className="font-semibold text-magenta-700 underline">
             Retour à la liste
           </a>
         </Vide>
@@ -372,7 +470,7 @@ export default function FicheClient() {
         <h2 className="titre-carte">En caisse</h2>
         <button
           className="bouton w-full"
-          disabled={enCours}
+          disabled={enCours || passageCeJour(client, new Date())}
           onClick={async () => {
             if (!(await executer(() => validerVisite(client.id))).ok) return
             annoncer(
@@ -384,6 +482,7 @@ export default function FicheClient() {
         >
           Valider une visite (+1 tampon)
         </button>
+        {passageCeJour(client, new Date()) && <p className="text-sm text-gray-700">Déjà un passage aujourd’hui : 1 tampon par jour maximum.</p>}
         {debloquee && (
           <button
             className="bouton w-full bg-green-700 hover:bg-green-800 active:bg-green-900"
@@ -419,6 +518,7 @@ export default function FicheClient() {
       {mode === 'api' && <PointsEtAnniversaire client={client} commerce={commerce} />}
       {mode === 'api' && <Rattrapages client={client} commerce={commerce} />}
       {mode === 'api' && <Relances client={client} commerce={commerce} />}
+      {mode === 'api' && <AccesCarteClient client={client} commerce={commerce} />}
       {mode === 'api' && <DonneesPersonnelles client={client} commerce={commerce} />}
 
       <EncartWallet demo={estDemo} lienCarte={`#/carte/${client.id}`} />

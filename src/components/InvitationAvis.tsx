@@ -56,7 +56,7 @@ export function SelecteurEtoiles({ note, onChange }: { note: number; onChange(n:
             <path
               d="M12 2.8l2.83 5.73 6.32.92-4.57 4.46 1.08 6.3L12 17.24l-5.66 2.97 1.08-6.3-4.57-4.46 6.32-.92z"
               fill="currentColor"
-              stroke={remplie ? '#d97706' : '#d1d5db'}
+              stroke="currentColor"
               strokeWidth={1}
               strokeLinejoin="round"
             />
@@ -166,7 +166,7 @@ export function InvitationAvis({
           {t(libelleBoutonAvis(note))} ↗
         </a>
       ) : (
-        <p className="text-sm text-gray-600">(Le commerce n’a pas encore renseigné son lien Google.)</p>
+        <p className="text-sm text-gray-600">{t('(Le commerce n’a pas encore renseigné son lien Google.)')}</p>
       )}
       <p className="text-sm text-gray-600">{t(ouvert ? TEXTE_CONFIRMATION_GOOGLE : 'Sur Google, vous confirmez vous-même vos étoiles avant de publier.')}</p>
       {ouvert && lienCarte && (

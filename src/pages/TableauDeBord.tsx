@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useDonneesCommerce, useStore } from '../store'
 import { calculerChiffres, calculerChiffresCartes, noteMoyenne } from '../lib/stats'
+import { listePurge, resumeRappelPurge } from '../lib/rgpd'
 import { dateRelative } from '../lib/format'
 import { Etoiles, Vide } from '../components/ui'
 import { Mesure } from '../components/Mesure'
@@ -22,12 +23,13 @@ const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
   consentement: 'Consentement relances',
   avisGoogle: 'Avis Google',
   rgpd: 'Données personnelles',
+  acces: 'Accès à la carte',
 }
 
 function Chiffre({ valeur, libelle, aide }: { valeur: string | number; libelle: string; aide: string }) {
   return (
     <div className="carte relative overflow-hidden">
-      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-marque-500 to-marque-300" aria-hidden />
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-magenta-500 to-magenta-300" aria-hidden />
       <div className="surtitre">{libelle}</div>
       <div className="mt-1 text-3xl font-extrabold tracking-tight text-gray-900 tabular-nums">{valeur}</div>
       <div className="mt-0.5 text-sm text-gray-600">{aide}</div>
@@ -55,6 +57,11 @@ export default function TableauDeBord() {
   const moyenne = noteMoyenne(avis)
   const prenom = (id: string) => clients.find((c) => c.id === id)?.prenom ?? 'Client'
   const [toutLesGains, setToutLesGains] = useState(false)
+  // Rappel de purge RGPD (P1-G1) : calculé depuis les clients déjà chargés, sans appel serveur — le tableau de
+  // bord est ouvert à chaque passage du commerçant, c'est le rappel périodique. En mode démo, rien (données
+  // fictives). Rien n'est jamais purgé ici : le lien mène à l'écran Clients, où la purge se lance après saisie
+  // de « PURGER ».
+  const rappelPurge = mode === 'api' ? resumeRappelPurge(listePurge(clients, commerce, new Date())) : null
 
   return (
     <div className="space-y-6">
@@ -71,6 +78,23 @@ export default function TableauDeBord() {
           )}
         </p>
       </div>
+
+      {rappelPurge && rappelPurge.aPurger > 0 && (
+        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="alert">
+          <a href="#/clients" className="font-semibold underline">
+            {rappelPurge.aPurger} carte{rappelPurge.aPurger > 1 ? 's' : ''} à purger
+          </a>
+          {' — conservation dépassée (données personnelles). Voir dans Clients, puis purger après vérification.'}
+        </p>
+      )}
+      {rappelPurge && rappelPurge.aPurger === 0 && rappelPurge.bientot > 0 && (
+        <p className="rounded-xl bg-gray-50 p-3 text-sm text-gray-700 ring-1 ring-gray-200" role="status">
+          <a href="#/clients" className="font-semibold underline">
+            {rappelPurge.bientot} carte{rappelPurge.bientot > 1 ? 's' : ''} à purger dans moins de 30 jours
+          </a>
+          {' — conservation bientôt dépassée. Voir dans Clients.'}
+        </p>
+      )}
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Chiffre valeur={chiffres.clientsActifs} libelle="Clients actifs" aide="venus ces 30 derniers jours" />

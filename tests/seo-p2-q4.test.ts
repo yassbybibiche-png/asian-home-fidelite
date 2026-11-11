@@ -15,7 +15,7 @@ const RACINE = join(import.meta.dirname, '..')
 const lire = (f: string) => readFileSync(join(RACINE, f), 'utf8')
 const SITE = 'https://asian-home-fidelite.onrender.com'
 const html = lire('index.html')
-const seed = JSON.parse(lire('src/data/seed.json')) as { commerces: { nom: string; coordonnees: string }[] }
+const seed = JSON.parse(lire('src/data/seed.json')) as { commerces: { id: string; nom: string; coordonnees: string }[] }
 const AH = seed.commerces[0]
 
 function meta(attribut: 'name' | 'property', cle: string): string {
@@ -95,7 +95,7 @@ describe('P2-Q4 : données structurées Restaurant (JSON-LD), uniquement des fai
     assert.equal(ld['@type'], 'Restaurant')
     assert.equal(ld.name, AH.nom)
     assert.equal(ld.url, `${SITE}/`)
-    assert.equal(ld.hasMenu, `${SITE}/#/menu`)
+    assert.equal(ld.hasMenu, `${SITE}/menu/${AH.id}`, 'hasMenu = adresse prérendue du menu (P2-Q4, trou bouché)')
   })
 
   test('adresse et téléphone = coordonnées vérifiées (CONTACT_ASIAN_HOME, seed)', () => {
@@ -138,7 +138,7 @@ describe('P2-Q4 : données structurées Restaurant (JSON-LD), uniquement des fai
 })
 
 describe('P2-Q4 : robots.txt et sitemap.xml', () => {
-  test('robots.txt : tout autorisé sauf /api/, lien vers le sitemap', () => {
+  test('robots.txt : tout autorisé sauf /api/ et /r/, lien vers le sitemap', () => {
     const robots = lire('public/robots.txt')
     assert.match(robots, /^User-agent: \*$/m)
     assert.match(robots, /^Allow: \/$/m)
@@ -148,12 +148,12 @@ describe('P2-Q4 : robots.txt et sitemap.xml', () => {
     assert.doesNotMatch(robots, /^Disallow: \/\s*$/m)
   })
 
-  test('sitemap.xml : /, #/menu, #/jouer, limite du routeur par fragment documentée', () => {
+  test('sitemap.xml : / et /menu/<id> prérendu (plus de fragment, Google ignore tout ce qui suit « # »)', () => {
     const sitemap = lire('public/sitemap.xml')
     assert.match(sitemap, /^<\?xml version="1\.0" encoding="UTF-8"\?>/)
     assert.match(sitemap, /<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/)
     const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1])
-    assert.deepEqual(locs, [`${SITE}/`, `${SITE}/#/menu`, `${SITE}/#/jouer`])
+    assert.deepEqual(locs, [`${SITE}/`, `${SITE}/menu/${AH.id}`])
     // Aucune page privée (caisse, back-office, carte d'un client) dans le sitemap.
     assert.doesNotMatch(sitemap, /#\/(caisse|clients|reglages|admin|carte\/)/)
     assert.match(sitemap, /Google ignore tout ce qui suit « # »/)
