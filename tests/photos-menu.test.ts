@@ -69,7 +69,10 @@ describe('Fichiers WebP livrés (public/visuels/menu-*.webp)', () => {
     // Boucle t2 : le dossier contient aussi logo-petit.webp (variante du logo, pas une photo de
     // menu) — le filtre porte sur le préfixe menu-, l'exigence est inchangée : les 18 attendus
     // doivent exister et tout menu-*.webp supplémentaire fait échouer le test.
-    const presents = readdirSync(new URL('../public/visuels/', import.meta.url)).filter((f) => f.startsWith('menu-') && f.endsWith('.webp'))
+    // Boucle t10 : les variantes *-petit.webp (photos de catégories, pas des photos de plats
+    // du PDF) sont exclues du filtre — l'exigence porte sur les photos de plats, pas sur
+    // les variantes.
+    const presents = readdirSync(new URL('../public/visuels/', import.meta.url)).filter((f) => f.startsWith('menu-') && f.endsWith('.webp') && !f.endsWith('-petit.webp'))
     assert.deepEqual(presents.sort(), [...FICHIERS].sort())
   })
   test('le script d’extraction couvre exactement ces 9 plats', () => {

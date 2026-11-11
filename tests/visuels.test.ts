@@ -29,7 +29,11 @@ describe('Fichiers visuels (public/visuels/)', () => {
       assert.ok(existsSync(fichier), `${chemin} introuvable dans public/visuels/`)
       const taille = statSync(fichier).size
       assert.ok(taille <= POIDS_MAX_OCTETS, `${chemin} : ${taille} octets > ${POIDS_MAX_OCTETS}`)
-      assert.ok(taille > 10_000, `${chemin} : ${taille} octets, fichier suspect (trop petit)`)
+      assert.ok(taille > 3_000, `${chemin} : ${taille} octets, fichier suspect (trop petit)`)
+      // Garde abaissée 10 000 → 3 000 o (boucle t10) : les petites variantes légitimes
+      // (320×157, 5 560 o ; 424×139, 6 586 o) sont sous l'ancien seuil — la garde
+      // attrape toujours un fichier vide ou tronqué, et le format est vérifié
+      // par les contrôles RIFF/WEBP/VP8 des tests de boucle.
     })
   }
   test('tous les chemins sont servis localement (pas de hotlink)', () => {
@@ -67,8 +71,8 @@ describe('Association des visuels au commerce', () => {
 
 describe('Photo de catégorie de menu', () => {
   test('Sushis → rouleau sur ardoise ; Boissons / Cocktails → cocktails signature ; Thaï et Desserts illustrés', () => {
-    assert.deepEqual(photoCategorie('Sushis & Makis'), { src: VISUELS.sushisArdoise, alt: 'Rouleau de sushis sur ardoise' })
-    assert.deepEqual(photoCategorie('Boissons'), { src: VISUELS.cocktails, alt: 'Cocktails signature : Kohsamui, Tokyo et Piña Colada' })
+    assert.deepEqual(photoCategorie('Sushis & Makis'), { src: VISUELS.sushisArdoise, srcPetit: VISUELS.sushisArdoisePetit, alt: 'Rouleau de sushis sur ardoise' })
+    assert.deepEqual(photoCategorie('Boissons'), { src: VISUELS.cocktails, srcPetit: VISUELS.cocktailsPetit, alt: 'Cocktails signature : Kohsamui, Tokyo et Piña Colada' })
     assert.equal(photoCategorie('Cocktails signature')?.src, VISUELS.cocktails)
     // Plat thaï non identifié : illustre la catégorie, jamais un plat nommé.
     assert.equal(photoCategorie('Côté thaï')?.src, VISUELS.menuPlatRiz)

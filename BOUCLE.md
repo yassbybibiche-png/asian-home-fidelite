@@ -329,6 +329,79 @@ Séquence réelle : preuve documentée ici, puis revue Codex du tour
 (validation demandée sur ce point précis), puis fusion seulement si la
 revue valide.
 
+### Test épinglé par le tour 10 — preuve et validation Codex requise
+
+L'ajout de 6 variantes WebP à `VISUELS` casse `tests/visuels.test.ts`
+(« existe et pèse ≤ 250 Ko » : `interieur-salon-petit.webp : 5 560 o,
+fichier suspect (trop petit)` et `menu-plat-riz-petit.webp : 6 586 o,
+fichier suspect (trop petit)` — la garde exige `taille > 10_000`).
+Preuve que le test n'est pas faux dans son exigence, mais que sa garde
+« > 10 000 o » repose sur une prémisse caduque :
+- l'exigence (« chaque fichier de `VISUELS` existe, est un vrai visuel
+  non corrompu, et pèse ≤ 250 Ko ») est intacte : les deux fichiers sont
+  des WebP valides (RIFF/WEBP/VP8 + dimensions vérifiées par les autres
+  assertions du même test et par le nouveau test `boucle-t10`), rendus
+  par le navigateur dans la mesure ponctuelle (journal des requêtes +
+  `img.complete`) ;
+- la prémisse (« tout fichier < 10 000 o est suspect ») est fausse pour
+  des variantes légitimes et petites : 320×157 et 424×139 recadrées au
+  ratio d'affichage ne peuvent pas peser 10 Ko en WebP q75 sans
+  gonflement artificiel (qualité poussée sans gain visuel) — le
+  précédent t5 (`LOGO_DEFAUT_PETIT` hors `VISUELS` pour 4 900 o) montrait
+  déjà que le seuil ne convient pas aux petites variantes ;
+- la correction proposée (garde `> 10_000` → `> 3_000`) conserve
+  l'intention : un fichier vide ou minuscule échoue toujours — et
+  l'absence de troncature est vérifiée autrement que par la taille :
+  décodage intégral des 6 variantes par Pillow (`Image.load()`,
+  vérifié le 11/11/2026 : 6/6 OK) + rendu par le navigateur dans la
+  mesure ponctuelle (journal des requêtes + `img.complete`) ; aucune
+  assertion n'est retirée, seul le seuil change ; l'alternative
+  (2 constantes séparées hors `VISUELS` pour 2 fichiers sur 6) éclaterait
+  un même motif sur deux mécanismes pour un seuil arbitraire.
+Séquence réelle : preuve documentée ici, puis revue Codex du tour
+(validation demandée sur ce point précis), puis fusion seulement si la
+revue valide.
+
+### Second test épinglé par le tour 10 — preuve et validation Codex requise
+
+L'extension de l'interface `PhotoCategorie` (`srcPetit` ajouté, boucle t10)
+casse `tests/visuels.test.ts:74` (« Sushis → rouleau sur ardoise… » :
+`deepEqual` attend `{ src, alt }`, reçoit `{ src, srcPetit, alt }`).
+Preuve que le test n'est pas faux dans son exigence, mais qu'il épingle la
+forme exacte du retour :
+- l'exigence (« chaque catégorie connue renvoie la bonne photo et le bon
+  libellé, aucune photo inventée ») est intacte : `src` et `alt` sont
+  inchangés ; seul un champ s'ajoute, délibérément (la variante WebP) ;
+- la correction (ajouter `srcPetit` aux deux objets attendus du
+  `deepEqual`) ne retire aucune assertion et n'affaiblit aucune exigence
+  — les deux autres tests du même `describe` (qui lisent `?.src`)
+  passent sans modification.
+Séquence réelle : preuve documentée ici, puis revue Codex du tour
+(validation demandée sur ce point précis), puis fusion seulement si la
+revue valide.
+
+### Troisième test épinglé par le tour 10 — preuve et validation Codex requise
+
+L'ajout de 2 variantes `menu-*-petit.webp` casse
+`tests/photos-menu.test.ts` (« aucun autre menu-*.webp que les 18
+attendus » : 20 fichiers lus au lieu de 18).
+Preuve que le test n'est pas faux dans son exigence, mais que sa prémisse
+(« tout `menu-*.webp` du dossier est une photo de plat du PDF ») est
+caduque depuis t10 — même motif que le tour 2 (`logo-petit.webp`,
+déjà filtré par le préfixe) :
+- l'exigence (« exactement les 18 photos de plats du PDF, aucun autre »)
+  est intacte : les 2 nouveaux fichiers ne sont pas des photos de plats
+  (ce sont des variantes de photos de catégories, dérivées de JPEG de
+  galerie, pas de l'extraction PDF) ;
+- la correction proposée (une condition : exclure `*-petit.webp` du
+  filtre) conserve exactement l'exigence — les 18 photos de plats doivent
+  toujours exister et aucun autre `menu-*.webp` non-variante ne peut
+  apparaître ; le suffixe `-petit.webp` marque les variantes, comme
+  `logo-petit.webp` déjà exclu par le préfixe au tour 2.
+Séquence réelle : preuve documentée ici, puis revue Codex du tour
+(validation demandée sur ce point précis), puis fusion seulement si la
+revue valide.
+
 ## Baseline t0 (11/11/2026 ~14:35 UTC, HEAD `7395522`, `autonome/integration`)
 
 Mesure de référence avant le tour 1 (même protocole que P2-Q2, 2 passes) —
@@ -846,6 +919,88 @@ plusieurs fois — toujours un contexte unique d'au moins 2 lignes.
 **Décision : FUSIONNÉ** (gain LCP menu −228 ms moyen, 2/2 passes ; `#/jouer`
 plat comme attendu ; standard et Lighthouse plats ; bundle inchangé ;
 0 erreur). Tours sans gain consécutifs : **0**.
+
+### Tour 10 — `autonome/boucle-t10-photos-paresseuses` (fusionné)
+
+Sujet : les 6 photos d'ambiance / de catégories (`loading="lazy"`, sous le
+pli) sont encore des JPEG lourds (~350 Ko au total). Changement : 6 variantes
+WebP recadrées approximativement au ratio d'affichage (Pillow, q75) servies
+en premier via `<picture className="block">`, le JPEG restant le repli —
+carte : `interieur.jpg` (675×900, 131 Ko) → `interieur-petit.webp`
+(675×443, 36 914 o), `interieur-salon.jpg` (320×240, 22 Ko) →
+`interieur-salon-petit.webp` (320×157, 5 560 o) ; menu (`photoCategorie`,
+interface étendue avec `srcPetit`) : `sushis-ardoise.jpg` (614×408, 30 Ko)
+→ 614×201, 11 090 o ; `cocktails.jpg` (640×1136, 69 Ko) → 640×210,
+12 334 o ; `menu-plat-riz.jpg` (424×408, 39 Ko) → 424×139, 6 586 o ;
+`menu-mango-sticky-rice.jpg` (411×412, 61 Ko) → 411×134, 12 054 o.
+Total ~350 Ko → ~83 Ko (**−267 Ko**). 6 entrées `VISUELS` ajoutées ;
+documenté dans `public/visuels/SOURCES.md` ; JPEG intacts partout.
+Mesure ponctuelle (nouveau script versionné
+`scripts/mesurer-photos-paresseuses.mjs`, commerce « Asian Home Paris »,
+Pixel 7, Slow 4G + CPU ×4, SW bloqués, cache désactivé, navigateur relancé
+par passe ; carte : parcours complet puis défilement ; menu : chargement
+direct puis défilement) : durées de téléchargement du journal (fin − debut,
+indépendantes) — **avant** (ABAB, script corrigé) : interieur 1 116 /
+1 156 ms, salon 549 / 569 ms, sushis-ardoise 585 / 560 ms, cocktails
+980 / 975 ms, menu-plat-riz 563 / 590 ms, menu-mango 918 / 875 ms ;
+**après** (4 passes, 2 runs) : interieur-petit 631 / 629 ms puis 417 /
+617 ms (moyenne 574 ms, **−562 ms**), salon-petit 293 / 292 ms puis 291 /
+302 ms (moyenne 295 ms, **−264 ms**), sushis-ardoise-petit 280 / 252 ms
+puis 249 / 283 ms (moyenne 266 ms, **−307 ms**), cocktails-petit 368 /
+384 ms puis 381 / 391 ms (moyenne 381 ms, **−597 ms**),
+menu-plat-riz-petit 412 / 362 ms puis 363 / 364 ms (moyenne 375 ms,
+**−202 ms**), menu-mango-petit 355 / 384 ms puis 374 / 361 ms (moyenne
+369 ms, **−528 ms**) ; `currentSrc` = les 6 variantes WebP ; état avant
+scroll vérifié (`currentSrc` vide, images non complètes — le lazy loading
+attend bien le défilement). Les délais scroll → chargé (cumulatifs, ceux
+du parcours) baissent aussi : carte ~1 150 → ~620 ms, menu ~1 100–1 900 →
+~800–1 500 ms. Le JPEG `menu-mango-sticky-rice.jpg` (61 660 o) se
+télécharge TOUJOURS (645–718 ms) — c'est la photo du plat « Mango Stick »
+(`src/data/menu-reel.ts:285`, vignette 64×64), pas la photo de catégorie :
+candidat t11 (vignette carrée WebP via `photoVignette`, la photo complète
+restant pour le détail).
+Mesures standard (2 passes) : premier affichage `#/jouer` 1 874 / 1 888 ms ;
+LCP 1 812 / 1 868 ms ; parcours 6 553 / 6 574 ms ; ouverture carte 680 / 663 ms ;
+menu direct 1 519 / 1 967 ms ; 0 erreur console, 0 requête échouée.
+Lighthouse t10 : 78 / 78 (TBT 890 / 850 ms, LCP 2,3 / 2,5 s) contre 78/86 à t9
+— plat. Bundle : JS initial 453 667 → 454 357 o (+690 o, +0,15 % — 6 entrées
+`VISUELS` + `<picture>` + `srcPetit`), CSS 70 766 o inchangé, total
+524 433 → 525 123 o, 24 chunks.
+Tests : suite complète **1200/1200** (1184 + 10 `tests/boucle-t10-photos-paresseuses.test.ts`
++ 6 tests auto : `tests/visuels.test.ts` génère un test par entrée `VISUELS`),
+75 fichiers ; E2E 3/3.
+Revue Codex t10 (5 points) : 1. les trois adaptations de tests **validées** —
+les fichiers valides de 5 560 et 6 586 o réfutent le seuil universel de
+10 000 o ; `srcPetit` dans les `deepEqual` vérifie le nouveau contrat ;
+exclure les variantes du catalogue des 18 photos PDF est cohérent —
+**corrigé** : l'affirmation « 3 000 o + en-têtes garantissent l'absence de
+troncature » est retirée de `BOUCLE.md` (remplacée par le décodage intégral
+Pillow, 6/6 OK, + le rendu navigateur) ; le filtre exclut tout futur
+`*-petit.webp` — **noté** : l'idéal serait d'exclure les variantes
+déclarées explicitement (le suffixe `-petit.webp` est la convention
+déclarée de toutes les variantes, conservée) ; 2. recadrages fondés,
+mise en page préservée — **corrigé** : les ratios documentés ne
+correspondaient pas exactement aux dimensions CSS réelles (racine 17 px,
+marges, padding `.carte`) — « affichée ~390×256 » → « h-64, ~390 px de
+large » (et idem pour les 5 autres) ; cadrages à vérifier aux largeurs
+extrêmes (`object-cover` peut encore couper les côtés) — **noté pour le
+rapport final** ; 3. gain valable, preuve temporelle partiellement fondée —
+**corrigé avant confirmation** : timeouts non masqués, durées indépendantes
+du journal + `currentSrc` + état avant scroll, ABAB (stash/rebuild) avec
+le script corrigé — les chiffres rapportés sont les durées de
+téléchargement, pas les délais cumulatifs du parcours ; 4. Mango Stick =
+meilleur candidat t11 — **retenu** (`photoVignette`, déjà utilisée par le
+composant) ; les JPEG loc-lac et nouilles (non téléchargés) n'ont aucune
+priorité ; 5. fusion favorable sous réserve des corrections ci-dessus —
+« tous les visuels optimisés » **non revendiqué** (Mango Stick subsiste) ;
+ensuite : DA, puis TBT seulement avec un levier identifié.
+Incident de documentation en cours de tour : la sous-section Parcours t10
+s'est insérée après t4 au lieu d'après t9 (un `old_text` ambigu — le
+paragraphe de clôture « 6,7–6,9 s » apparaît deux fois). Corrigée en
+déplaçant le bloc au bon endroit par script (ancre : fin de la section t9).
+**Décision : FUSIONNÉ** (gains de téléchargement −202 à −597 ms sur les 6
+photos, 2/2 passes avant et 4/4 après ; standard et Lighthouse plats ;
+bundle +0,15 % ; 0 erreur). Tours sans gain consécutifs : **0**.
 
 ### Tour 8 — `autonome/boucle-t8-tbt-longues-taches` (annulé — aucun levier au-dessus du bruit)
 
