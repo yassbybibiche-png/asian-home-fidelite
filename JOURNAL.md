@@ -1,5 +1,72 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P2-Q2 « Performance » (AUDIT.md §7 ; compression + mesures)
+- **Compression gzip/brotli côté serveur** (`server/app.ts`, `envoyerCorps`/`preparerCorps`,
+  `tests/compression-p2-q2.test.ts`, 7 tests) : brotli préféré (qualité 5) puis gzip (niveau 6)
+  pour les réponses textuelles ≥ 1 024 o (JS/CSS/HTML/SVG/XML/JSON/manifest/CSV) ; images et polices
+  déjà compressées jamais recompressées ; cache en mémoire des variantes par chemin absolu + ETag
+  (borné à 128 entrées) ; `Vary: Accept-Encoding` fusionné avec `Vary: Origin` du CORS (jamais
+  remplacé, `securite-s4.test.ts:185` vérifié) ; 304 inchangée ; HEAD avec les mêmes en-têtes que GET
+  (`Content-Encoding` + `Content-Length` compressé), sans corps ; négociation RFC 9110 (explicite
+  prime sur `*`, casse ignorée, qualité mal formée = 0, plus forte qualité gagnante, brotli préféré à
+  égalité) ; sans `Accept-Encoding` (service worker hors ligne, `fetchFaux`) : identité, comme avant.
+  Statiques, JSON API (menu public), XML, erreurs et exports CSV passent par le même helper.
+- **Ratios mesurés (build frais)** : JS initial 480 934 o → brotli 143 901 o (29,9 %), gzip 152 485 o ;
+  CSS 70 722 o → brotli 10 857 o ; total initial 551 656 o → brotli 154 758 o (28,0 %) ; tous les
+  assets JS+CSS 867 897 o → brotli 253 375 o (29,2 %) ; chunk initial 352 857 o → brotli 102 097 o ;
+  `index.html` 6 097 o → brotli 2 032 o.
+- **Mesures honnêtes, 2 passes Playwright + 2 passes Lighthouse, serveur local**
+  (`node_modules/.cache/mesure-p2-q2/`, SCORES.md) : premier affichage `#/jouer` 2 428 / 2 285 ms
+  (était 4 043–4 241 ms à P1-U1 — **seuil < 4 s atteint pour la première fois**) ; LCP 2 368 / 2 272 ms
+  (était 4 016–4 224 ms — **seuil < 2,5 s atteint en Slow 4G Playwright**) ; parcours scan → lot
+  6 988 / 6 954 ms (était 8 727–9 155 ms ; validation caisse 5,0 s contre 6,7–6,9 s, taps identiques) ;
+  menu par hash 930 / 1 092 ms, direct 1 764 / 1 765 ms (LCP 1 684 / 1 780 ms — en hausse de ~0,4 s
+  vs P1-U1, cause non établie) ; ouverture de la carte 710 / 622 ms (était 559 / 515 ms, en hausse
+  de ~0,15 s, cause non établie) ; 0 erreur console, 0 requête échouée. **Lighthouse 73 / 81**
+  (était 79/79 — **seuil ≥ 95 non atteint**, critère d'arrêt de la boucle toujours non rempli) :
+  FCP 0,8 s, LCP 3,2 / 2,6 s (était 4,6 s), TBT 840 / 660 ms (était 240 / 270 ms — **en hausse**,
+  cause non établie : le JS arrive plus tôt, le travail de la file principale se concentre dans la
+  fenêtre mesurée — hypothèse, non vérifiée — et la calibration CPU de Lighthouse sur cette VM
+  partagée est mise en cause par son propre avertissement), CLS 0, TTI 3,3 / 3,0 s (était 4,7/4,8 s).
+  Le TBT est le prochain levier (découpage du JS initial, report du travail hors du chemin critique).
+  **Vérification Render non faite** : la compression du proxy Render (production interdite d'accès)
+  n'est pas vérifiée d'ici — le serveur Node compresse lui-même, donc le gain vaut aussi derrière
+  un proxy qui ne compresse pas ; si Render compresse déjà, le serveur ne recompresse pas (le
+  `Content-Encoding` déjà posé n'est pas re-traité ici — non vérifié en production).
+- **Bundle (build frais)** : JS initial 480 934 o, CSS 70 722 o, total 551 656 o, JS total 797 175 o,
+  22 chunks, plus gros 352 857 o (< 500 000 o). Le non-gzipé croît (+8 189 o vs P1-U1, dont +6 361 o
+  nets P2-Q1 — dictionnaire EN + code — et +1 828 o des lots P0-S11/P1-M2/P1-M3 ; CSS +58 o) mais
+  le servi compressé chute (total initial brotli 154 758 o) — écart accepté et documenté (SCORES.md).
+- **Revue Codex (0 bloquant, 3 majeurs / 2 mineurs / 1 remarque, `node_modules/.cache/p2-q2-revue-codex.txt`,
+  tous fondés et corrigés)** : 1. [Majeur] collision du cache entre fichiers (clé = ETag seul) →
+  clé = chemin absolu + ETag. 2. [Majeur] joker `*` mal négocié (`*, br;q=0` renvoyait br,
+  `*;q=0.5` renvoyait l'identité) → explicite prime sur `*`, joker paramétré reconnu. 3. [Majeur]
+  HEAD annonçant la longueur brute → `preparerCorps` partagé (HEAD = mêmes en-têtes que GET, sans
+  corps) + test corrigé. 4. [Mineur] casse/qualités mal formées (`BR`, `q=oops`, `q=-1`,
+  `br;q=0.1, gzip;q=1` choisissait br) → casse ignorée, qualité invalide = 0, plus forte qualité
+  gagnante. 5. [Mineur] exports CSV non compressés → routés par `envoyerCorps` + test (20 clients,
+  export brotli vérifié). 6. [Remarque] le hors-ligne n'est pas validé par le fichier de test →
+  libellé précisé (le hors-ligne est couvert par `performance-bundle-p2-q2` et `carte-pwa-p1-c3`,
+  ce fichier vérifie le contrat serveur — identité sans `Accept-Encoding`). Validé par ailleurs :
+  fusion `Vary`, 304, types couverts, arithmétique SCORES.md, TBT signalé honnêtement.
+- **Piège SCORES.md (2 tests en échec, corrigé sans toucher aux tests)** : `tests/mesure-p1-u1.test.ts`
+  épingle le record P1-U1 — titre de section `## Bundle … — après P1-U1` + chiffres 472745/70664/
+  543409, et parse la sous-section parcours P1-U1 (5 lignes de tableau, span jusqu'à `## Cohérence
+  DA`). Ma première mise à jour (titre renommé « après P2-Q2 », chiffres remplacés, tableau P2-Q2
+  de même forme ajouté dans la plage) cassait les 2 tests. Correction : titre P1-U1 et chiffres
+  P1-U1 restaurés en tête de section, chiffres P2-Q2 dans une sous-section « Après P2-Q2 », et
+  tableau du parcours P2-Q2 avec une colonne d'écart vs P1-U1 (3 colonnes — il ne correspond plus
+  au motif 2 colonnes du test, et l'écart est l'information utile d'une re-mesure). Le test
+  `scores-p0-u0` (fraîcheur à 5 %) passe aussi : les chiffres P1-U1 en tête sont à 1,0–1,9 %
+  du build frais. Leçon : dans SCORES.md, ne jamais renommer une section épinglée ni ajouter un
+  tableau de même forme dans sa plage — ajouter après, sous forme distincte.
+- **Tests : 1085 → 1092 (+7)**, suite verte, `npx tsc -p .` propre, typecheck serveur inclus dans
+  `npm test`. Aucun test existant modifié, aucune fonction supprimée. Commit `1ad77e8`, fusion
+  `--no-ff` `426efcc`, branches `autonome/p2-q2-performance` et `autonome/integration` poussées.
+- **Non vérifié :** rendu sur téléphone réel ; délai à froid Render (~60 s, estimation) ; compression
+  effective en production (Render) ; le TBT en hausse (cause non établie) ; le menu direct et
+  l'ouverture de la carte en légère hausse (causes non établies, échantillon de 2 passes).
+
 ## 11/11/2026 — P2-Q1 « Accessibilité / textes » (AUDIT.md §7 ; lot déjà fusionné 1e40b68 : vérification + trous)
 - **Vérification de l'état livré** : P2-Q1 et P2-Q2 étaient déjà fusionnés dans `autonome/integration` — le
   travail consiste en une vérification de l'état livré + le comblement des trous restants, pas une refonte.
