@@ -1,5 +1,39 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P1-M1 « Prix à vérifier + hors carte » (AUDIT.md §7)
+- **Contexte :** le commerçant n'a confirmé ni Riz Thaï 8,90 € ni 6 Maki Gold 100,00 € (valeurs
+  imprimées sur la carte, §8 n° 5). Les deux prix sont donc **masqués** (`prix: null`, « Prix sur
+  place ») au lieu d'être affichés ; les 3 plats hors carte restent sans prix, sans fusion décidée
+  seule (Thaï-sty Krusty / Crousti Poulet, Bœuf Basilic, Boisson 33cl = décisions commerçant).
+- **Code :** `src/data/menu-reel.ts` — Riz Thaï et 6 Maki Gold à `null` ; nouvelle constante
+  `PRIX_A_CONFIRMER` (valeurs imprimées + motif, référence uniquement, jamais affichée dans le menu
+  public) ; nouveaux helpers `estPrixNonConfirme()` et `masquerPrixNonConfirmes(menu)`.
+  `src/pages/MenuPublic.tsx` applique le masque au menu affiché, repli comme menu enregistré.
+  `src/pages/MenuCarte.tsx` : texte commerçant précisé (valeurs imprimées visibles côté commerçant
+  uniquement, pour confirmation/correction ; si le prix confirmé est exactement la valeur imprimée,
+  prévenir l'équipe — elle reste masquée tant que `PRIX_A_CONFIRMER` n'est pas mise à jour).
+  `docs/MENU-OFFICIEL-2026-11-10.md` mis à jour (76 prix affichés, 5 sans prix).
+- **Comptes vérifiés :** 81 plats, **76 prix affichés, 5 sans prix** (Riz Thaï, 6 Maki Gold,
+  Thaï-sty Krusty, Bœuf Basilic, Boisson 33cl), somme des prix affichés **597,40 €**
+  (706,30 € imprimés − 8,90 € − 100,00 €). Aucun autre plat/prix touché.
+- **Tests : 1006 → 1008 (+2, `tests/menu-reel.test.ts` : masque sur menu enregistré ancien,
+  application du masque dans `#/menu`)**, suite verte, `npx tsc -p .` propre (typecheck serveur
+  inclus dans `npm test`). Tests existants mis à jour vers le nouvel état attendu (CARTE, total,
+  5 sans prix, `tests/cartiz.test.ts` : aller-retour serveur du menu officiel) — aucun test affaibli.
+- **Revue Codex (3 points, `/tmp/codex-revue-p1-m1.txt`) — tous traités :**
+  1. [Artefact, ignoré] « Diff vide » : la revue a tourné avant le commit, sur des modifications
+     non commitées — résolu par le commit lui-même.
+  2. [Fondé] Menu enregistré avant le lot avec les anciens montants restait affiché → correctif :
+     `masquerPrixNonConfirmes()` appliqué dans `#/menu` à tout menu affiché (repli ou enregistré) ;
+     un prix corrigé (ex. 10,00 €) n'est pas masqué ; testé.
+  3. [Fondé] « Jamais affichées dans l'app » factuellement faux (valeurs visibles dans
+     `#/menuCarte`, protégée par PIN) → libellés corrigés en « jamais affichées dans le menu public ».
+- **Attent le commerçant :** confirmer Riz Thaï (8,90 € imprimés ?) et 6 Maki Gold (100,00 € imprimés,
+  probable coquille pour 10,00 € ?) ; trancher les 3 plats hors carte (fusion Thaï-sty Krusty /
+  Crousti Poulet ? Bœuf Basilic toujours servi ? Boisson 33cl à remplacer par Soda / Evian ?).
+- **Non vérifié :** menu enregistré en production (non lisible depuis ici ; l'audit du 10/11 le
+  disait vide — le masque d'affichage couvre le cas où il ne le serait plus) ; rien touché en production.
+
 ## 09/11/2026 — Programme de fidélité (benchmark concurrents, 11 nouveautés)
 - Benchmark lu avant de coder : `~/workspace/benchmark-fidelite-restaurant-2026-11-09.md`,
   `~/workspace/benchmark-fidelite-restaurant/benchmark-fidelite-chaines-2026-11-09.md`,

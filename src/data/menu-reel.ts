@@ -1,11 +1,15 @@
 // Carte officielle d'Asian Home Paris — 16 catégories, 81 plats.
 // Source : carte officielle du restaurant publiée sur Heyzine (PDF 6 pages,
 // https://cdnm.heyzine.com/files/uploaded/64e5dc5d723c717e149bb6d08eb6fee86589eb69.pdf),
-// relevée le 10/11/2026 : 78 lignes tarifées + 3 plats hors carte gardés de
+// relevée le 10/11/2026 : 78 lignes tarifées sur la carte imprimée + 3 plats hors carte gardés de
 // l'ancien menu (Uber Eats), sans prix. Détails : docs/MENU-OFFICIEL-2026-11-10.md.
 //
-// Prix en centimes, tels qu'imprimés sur la carte — y compris les 2 prix « à
-// vérifier » (Riz Thaï 8,90 €, 6 Maki Gold 100,00 €), importés sans correction.
+// Prix en centimes. P1-M1 (11/11/2026) : 2 des 78 prix imprimés ne sont PAS confirmés par le
+// commerçant — ils sont MASQUÉS (prix null, affichés « Prix sur place ») tant qu'il ne les
+// confirme pas, et ne sont affichés nulle part dans le menu public. Leurs valeurs imprimées restent
+// documentées dans PRIX_A_CONFIRMER ci-dessous (référence uniquement, jamais affichée en public —
+// visible côté commerçant dans #/menuCarte pour confirmation ou correction).
+// Il reste donc 76 prix affichés et 5 plats sans prix (2 à confirmer + 3 hors carte).
 // Descriptions : texte de la carte uniquement (Dynamite et les 3 plats hors carte
 // gardent leur description Uber Eats). Aucun allergène sur la carte : listes vides.
 // Photos : uniquement les vraies photos du restaurant dans public/visuels/ (voir
@@ -25,6 +29,40 @@ import { ID_ASIAN_HOME, PHOTOS_PDF } from '../lib/visuels.ts'
 
 /** Plats signature mis en avant (best-sellers cités dans les avis et sur Instagram). */
 export const PLATS_SIGNATURE = ['Dynamite', 'Thaï-sty Krusty', 'Love Bao', 'Loc Lac', '8 Maki Chicken Dragon', '8 Maki Tiger'] as const
+
+/**
+ * Prix imprimés sur la carte officielle mais NON confirmés par le commerçant (P1-M1) :
+ * masqués dans le menu public (prix null → « Prix sur place ») tant qu'il ne les confirme pas.
+ * Les valeurs imprimées sont conservées ici à titre de référence uniquement — elles ne sont
+ * pas affichées dans le menu public ; elles restent visibles côté commerçant (#/menuCarte)
+ * pour qu'il puisse les confirmer ou les corriger. Retirer une entrée de cette liste quand le
+ * commerçant confirme le prix (alors seulement, le prix saisi s'affichera).
+ */
+export const PRIX_A_CONFIRMER = [
+  { nom: 'Riz Thaï', prixImprime: 890, motif: 'Incohérent avec Riz Nature 2,50 € (même catégorie).' },
+  { nom: '6 Maki Gold', prixImprime: 10000, motif: 'Environ 15× les autres makis (6,00–6,90 €) ; probable coquille pour 10,00 €.' },
+] as const
+
+/** Vrai si ce couple (nom, prix) est un prix imprimé non confirmé : il ne doit pas s'afficher. */
+export function estPrixNonConfirme(nom: string, prix: number | null): boolean {
+  return prix !== null && PRIX_A_CONFIRMER.some((p) => p.nom === nom && p.prixImprime === prix)
+}
+
+/**
+ * Masque les prix non confirmés d'un menu quelconque (carte de repli ou menu enregistré par le
+ * commerçant) : un menu enregistré AVANT ce lot avec les anciens montants ne les affiche plus
+ * dans le menu public. Un prix différent de la valeur imprimée (ex. Maki Gold corrigé à 10,00 €)
+ * n'est pas touché. Ne modifie pas le menu d'origine.
+ */
+export function masquerPrixNonConfirmes(menu: Menu): Menu {
+  return {
+    ...menu,
+    categories: menu.categories.map((c) => ({
+      ...c,
+      produits: c.produits.map((p) => (estPrixNonConfirme(p.nom, p.prix) ? { ...p, prix: null } : p)),
+    })),
+  }
+}
 
 export const estSignature = (nom: string): boolean => (PLATS_SIGNATURE as readonly string[]).includes(nom)
 
@@ -56,8 +94,9 @@ export function menuReelAsianHome(): Menu {
           plat('reel-o-wakame', 'Wakame', 400),
           plat('reel-c1-p2', 'Soupe Miso', 250),
           plat('reel-c1-p3', 'Riz Nature', 250),
-          // Prix imprimé sur la carte (p. 2) — incohérent avec le Riz Nature, à confirmer par le commerçant.
-          plat('reel-c1-p5', 'Riz Thaï', 890),
+          // P1-M1 : prix imprimé 8,90 € non confirmé par le commerçant → masqué (« Prix sur place »).
+          // Valeur imprimée conservée dans PRIX_A_CONFIRMER, jamais affichée.
+          plat('reel-c1-p5', 'Riz Thaï', null),
         ],
       },
       {
@@ -209,8 +248,9 @@ export function menuReelAsianHome(): Menu {
             "Poulet croustillant, avocat, cheese, sauce chili thaï, recouvert d'avocat, mayonnaise spicy et oignon frit.",
             '/visuels/menu-makis.jpg',
           ),
-          // Prix imprimé sur la carte (p. 6), sans description — probable coquille pour 10,00 €, à confirmer.
-          plat('reel-o-maki-gold', '6 Maki Gold', 10000),
+          // P1-M1 : prix imprimé 100,00 € non confirmé par le commerçant → masqué (« Prix sur place »).
+          // Valeur imprimée conservée dans PRIX_A_CONFIRMER, jamais affichée.
+          plat('reel-o-maki-gold', '6 Maki Gold', null),
         ],
       },
       {

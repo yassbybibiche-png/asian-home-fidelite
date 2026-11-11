@@ -6,7 +6,9 @@ Remplace [MENU-REEL.md](MENU-REEL.md) (ancien menu de 39 plats sans prix, source
 
 - **Carte officielle du restaurant**, publiée sur Heyzine — PDF de 6 pages :
   `https://cdnm.heyzine.com/files/uploaded/64e5dc5d723c717e149bb6d08eb6fee86589eb69.pdf`.
-- Relevée et lue le **10/11/2026** : **78 lignes tarifées**, prix confirmés visuellement sur le PDF.
+- Relevée et lue le **10/11/2026** : **78 lignes tarifées** sur la carte imprimée, prix lus visuellement
+  sur le PDF. **P1-M1 (11/11/2026) : 2 de ces prix ne sont pas confirmés par le commerçant — ils sont
+  masqués dans l'app (« Prix sur place »), voir § ci-dessous. 76 prix sont donc affichés, 5 plats sans prix.**
 - Code : `src/data/menu-reel.ts` → `menuReelAsianHome()` (16 catégories, **81 plats** = 78 de la carte
   + 3 plats hors carte gardés de l'ancien menu). C'est le **menu de repli public** : tant que le menu
   enregistré du commerce est vide (cas de la production au 10/11), `#/menu` affiche cette carte.
@@ -19,7 +21,7 @@ Remplace [MENU-REEL.md](MENU-REEL.md) (ancien menu de 39 plats sans prix, source
 
 | # | Catégorie | Plats |
 |---|---|---|
-| 1 | Salades & accompagnements | Choux 2,50 · Edamame 4,00 · Wakame 4,00 · Soupe Miso 2,50 · Riz Nature 2,50 · Riz Thaï **8,90 ⚠** |
+| 1 | Salades & accompagnements | Choux 2,50 · Edamame 4,00 · Wakame 4,00 · Soupe Miso 2,50 · Riz Nature 2,50 · Riz Thaï **masqué ⚠** |
 | 2 | California x6 — option Crispy +0,50 € | Saumon Avocat · Saumon Cheese · Thon Cuit Mayo Avocat Concombre · Poulet Avocat · Veggie Avocat Concombre · Crevettes Tempura Avocat — 6,50 ; Foie Gras Figue Amande 7,00 |
 | 3 | Maki Green x6 | 6 variantes — 6,90 |
 | 4 | Maki Black x6 | 6 variantes — 6,00 |
@@ -31,7 +33,7 @@ Remplace [MENU-REEL.md](MENU-REEL.md) (ancien menu de 39 plats sans prix, source
 | 10 | Entrées thaï | Gyoza Crevette ou Légume x4 6,90 · Nems au Poulet x4 6,90 · Crevettes Tempura x4 6,90 · Bœuf au Fromage Fait Maison x2 4,90 · Boulettes de Poulet Fait Maison x2 4,90 · Brochette de Poulet Fait Maison x2 4,90 · Tartare Saumon Avocat 8,90 · Dynamite 8,90 · Love Bao 9,90 |
 | 11 | Plats thaï | Mi Prat 13,90 · Pad Thaï 13,90 · Crousti Poulet 14,90 · Khao Prat 13,90 · Curry Vert 13,90 · Tigre qui pleure 15,90 · Loc Lac 14,90 · Bo Bun 13,90 |
 | 12 | Menu Midi (lundi au vendredi) | Midi Asian 13,90 · Asian Love 13,90 · Banh Mi 9,90 · Menu Enfant 9,90 |
-| 13 | Spécialités du chef | 8 Maki Tiger 13,90 · 8 Maki Chicken Dragon 13,90 · 6 Maki Gold **100,00 ⚠** |
+| 13 | Spécialités du chef | 8 Maki Tiger 13,90 · 8 Maki Chicken Dragon 13,90 · 6 Maki Gold **masqué ⚠** |
 | 14 | Desserts | Mango Stick · Tiramisu · Dessert du jour — 8,90 |
 | 15 | Boissons | Evian / San Pellegrino 2,90 · Soda 3,50 · Asian Drink 3,90 · Calypso 3,90 · Bubble Tea 5,00 · Piña Colada 7,50 · Cocktail Kohsamui 7,50 · Cocktail Tokyo 7,50 |
 | 16 | Hors carte (prix à confirmer) | Thaï-sty Krusty · Bœuf Basilic · Boisson 33cl — sans prix (« Prix sur place ») |
@@ -40,12 +42,21 @@ Noms complets et descriptions exactes : `src/data/menu-reel.ts` (vérifiés un p
 Descriptions = texte de la carte uniquement ; Dynamite et les 3 plats hors carte gardent leur description Uber Eats.
 Aucune description inventée (ex. 6 Maki Gold, Dessert du jour, Choux : sans description).
 
-## ⚠ 2 prix à confirmer par le commerçant (importés tels qu'imprimés, non corrigés)
+## ⚠ 2 prix à confirmer par le commerçant — MASQUÉS dans l'app (P1-M1, 11/11/2026)
 
-1. **Riz Thaï 8,90 €** (p. 2) — incohérent avec Riz Nature 2,50 €, mais c'est le prix imprimé
+Le commerçant n'a confirmé ni l'un ni l'autre : **aucun des deux n'est affiché dans le menu public**.
+Les deux plats ont `prix: null` dans `src/data/menu-reel.ts` et s'affichent « Prix sur place » dans `#/menu` comme dans
+`#/menuCarte`. Leurs valeurs imprimées sont conservées dans `PRIX_A_CONFIRMER` (`src/data/menu-reel.ts`)
+à titre de référence uniquement — jamais affichées dans le menu public (visibles côté commerçant dans
+`#/menuCarte`, pour confirmation ou correction). Pour les afficher, le commerçant corrige le prix
+dans `#/menuCarte` (ou confirme la valeur imprimée) ; l'app n'invente rien. **Sécurité supplémentaire :**
+`masquerPrixNonConfirmes()` (`src/data/menu-reel.ts`, appliqué par `#/menu`) masque aussi ces deux valeurs
+si un menu enregistré avant ce lot les contenait encore — le menu public ne les affiche dans aucun cas.
+
+1. **Riz Thaï — 8,90 € imprimés** (p. 2) — incohérent avec Riz Nature 2,50 €, mais c'est le prix imprimé
    (un avis client citait déjà une « portion de riz à 8 € »).
-2. **6 Maki Gold 100,00 €** (p. 6, sans description) — environ 15× les autres makis : probable
-   coquille pour 10,00 €. Affiché 100,00 € tant que le commerçant ne l'a pas corrigé dans `#/menuCarte`.
+2. **6 Maki Gold — 100,00 € imprimés** (p. 6, sans description) — environ 15× les autres makis : probable
+   coquille pour 10,00 €. **Ne jamais afficher 100,00 € sans sa confirmation explicite.**
 
 ## 3 plats gardés hors carte
 
@@ -163,7 +174,8 @@ Halal · Instagram / Snapchat @AsianHomeParis · Livraison Deliveroo et Uber Eat
 2. **Lien Uber Eats** du restaurant → Réglages, champ « Lien Uber Eats ».
 3. linktr.ee/asianhomefrance : pas affiché dans l'app (non demandé).
 4. Allergènes de chaque plat ; confirmation des badges épicé / végétarien déduits.
-5. Les 2 prix à confirmer (Riz Thaï 8,90 €, 6 Maki Gold 100,00 €) et les 3 plats hors carte sans prix.
+5. Les 2 prix à confirmer (Riz Thaï 8,90 € imprimés, 6 Maki Gold 100,00 € imprimés) — **masqués
+   (« Prix sur place ») depuis P1-M1** en attendant sa confirmation — et les 3 plats hors carte sans prix.
 
 Les liens exacts de commande ne sont pas inventés : aucun lien Deliveroo / Uber Eats dans le code ni le seed
 (vérifié par `tests/menu-client-p1-c5.test.ts`).
