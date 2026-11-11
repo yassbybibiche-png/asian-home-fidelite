@@ -3,7 +3,7 @@
 // Logique pure (aucune dépendance React) : le serveur décide de tout, le front ne fait qu'afficher.
 // Toute la configuration vit sur le commerce (`programme`, tout optionnel) : absent = défauts ci-dessous,
 // un commerce existant sans configuration voit donc les défauts s'appliquer sans rien casser.
-import type { Client, Commerce, ConfigProgramme, DefiEnCours, Palier, RecompenseEnAttente, Reserve } from '../types'
+import type { Client, Commerce, ConfigProgramme, DecisionParrainage, DefiEnCours, Palier, RecompenseEnAttente, Reserve } from '../types'
 import { ACTIONS_MEMORISEES, memeJourParis, pointsPourMontant, soldePoints } from './points.ts'
 import { validerVisite } from './fidelite.ts'
 
@@ -323,9 +323,24 @@ export function parrainageDu(
 ): { filleul: Client; parrain: Client | null; parrainAuPlafond: boolean } | null {
   const cfg = configParrainage(commerce)
   if (!cfg.actif || filleul.parrainId !== parrain.id || filleul.parrainagePaye || filleul.visites.length !== 1) return null
-  const filleulApres: Client = { ...filleul, parrainagePaye: true, points: soldePoints(filleul) + cfg.pointsFilleul }
-  if (parrainagesAnnee(parrain, quand) >= cfg.plafondAn) return { filleul: filleulApres, parrain: null, parrainAuPlafond: true }
+  const auPlafond = parrainagesAnnee(parrain, quand) >= cfg.plafondAn
+  // Revue Codex finale : la décision (montants de la configuration du moment, plafond, date) est écrite avec les points
+  // du filleul, dans la même ligne — une reprise après panne l'exécute telle quelle (`parrainSelonDecision`).
+  const decision: DecisionParrainage = {
+    parrainId: parrain.id,
+    pointsFilleul: cfg.pointsFilleul,
+    pointsParrain: auPlafond ? 0 : cfg.pointsParrain,
+    auPlafond,
+    date: quand.toISOString(),
+  }
+  const filleulApres: Client = { ...filleul, parrainagePaye: true, points: soldePoints(filleul) + cfg.pointsFilleul, parrainageEnAttente: decision }
+  if (auPlafond) return { filleul: filleulApres, parrain: null, parrainAuPlafond: true }
   return { filleul: filleulApres, parrain: parrainCredite(parrain, filleul.id, cfg.pointsParrain, quand), parrainAuPlafond: false }
+}
+
+/** Parrain crédité selon une décision persistée (reprise) : montant et date de la décision, jamais ceux du rejeu. */
+export function parrainSelonDecision(parrain: Client, filleulId: string, decision: DecisionParrainage): Client {
+  return parrainCredite(parrain, filleulId, decision.pointsParrain, new Date(decision.date))
 }
 
 /** Parrain crédité pour ce filleul : points, date (plafond annuel) et marqueur `filleulsRegles`, dans le même objet. */
@@ -344,6 +359,8 @@ export function filleulRegle(parrain: Client, filleulId: string): boolean {
 }
 
 /**
+ * Reprise des DOSSIERS HÉRITÉS (filleul payé sans `parrainageEnAttente`, d'avant la revue Codex finale) — les autres
+ * reprennent leur décision persistée (`parrainSelonDecision`).
  * Reprise du crédit du parrain (point Codex 2) : le filleul est déjà payé (ses points sont sur sa carte) mais le
  * marqueur du parrain ne le contient pas. Mêmes conditions que `parrainageDu` sans exiger « pas encore payé » ni
  * « exactement 1 visite » (la reprise peut venir d'un passage suivant) : programme actif, bon parrain, filleul payé

@@ -359,6 +359,17 @@ export interface Menu {
   majLe: string
 }
 
+/** Règlement de parrainage décidé à la 1re visite du filleul (revue Codex finale) : montants, plafond et date figés. */
+export interface DecisionParrainage {
+  parrainId: string
+  pointsFilleul: number
+  /** Points effectivement dus au parrain (0 s'il était au plafond annuel). */
+  pointsParrain: number
+  auPlafond: boolean
+  /** Date (ISO) du passage du filleul : date du crédit, de `parrainagesGagnes` et de la trace d'audit. */
+  date: string
+}
+
 export interface Client {
   id: string
   commerceId: string
@@ -411,6 +422,13 @@ export interface Client {
    * points (une seule ligne, donc atomique). Absent sur les parrains crédités avant ce marqueur.
    */
   filleulsRegles?: string[]
+  /**
+   * Côté filleul (revue Codex finale) : décision de règlement prise à sa 1re visite, écrite avec ses points de
+   * parrainage. Une reprise (panne après l'écriture du filleul) exécute CETTE décision — jamais la configuration ni la
+   * date du jour du rejeu. Effacée au passage suivant une fois la trace d'audit écrite. Interne : ni carte publique
+   * ni caisse.
+   */
+  parrainageEnAttente?: DecisionParrainage
   /** Paliers déjà remis au comptoir (seuils). */
   paliersOfferts?: number[]
   /** Récompenses gagnées, à retirer au comptoir. */

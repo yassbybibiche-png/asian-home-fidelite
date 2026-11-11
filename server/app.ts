@@ -6,12 +6,12 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, CommerceCaisse, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, CommerceCaisse, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
-import { canalDuClient, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
+import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
 import { estPerdant, lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
 import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePrive.ts'
@@ -28,6 +28,7 @@ import {
   genererCodeParrainage,
   niveauClient,
   parrainageDu,
+  parrainSelonDecision,
   passageAvecProgramme,
   peutCompleterProfil,
   rattrapageRecevable,
@@ -780,13 +781,15 @@ function contactOuErreur(v: unknown) {
 function cartePublique(c: Client) {
   // Messages privés (P1-C4) : destinés au commerce seul, jamais renvoyés sur le lien de la carte.
   // `filleulsRegles` (point Codex 2) : ids d'autres clients, donnée technique du règlement de parrainage.
-  const { telephone: _t, email: _e, actionsTraitees: _a, clesMessages: _k, messagesPrives: _p, filleulsRegles: _f, ...reste } = c
+  // `parrainageEnAttente` (revue Codex finale) : décision interne du règlement, même traitement.
+  const { telephone: _t, email: _e, actionsTraitees: _a, clesMessages: _k, messagesPrives: _p, filleulsRegles: _f, parrainageEnAttente: _r, ...reste } = c
   return reste
 }
 
 /** Client vu en caisse : contact (pour la recherche) et soldes, sans la boîte de réception ni les données techniques. */
 function clientCaisse(c: Client) {
-  const { messages: _m, clesMessages: _k, actionsTraitees: _a, ...reste } = c
+  // Revue Codex finale, point 6 : marqueur et décision de parrainage sont techniques (ids d'autres clients).
+  const { messages: _m, clesMessages: _k, actionsTraitees: _a, filleulsRegles: _f, parrainageEnAttente: _r, ...reste } = c
   return reste
 }
 
@@ -1983,7 +1986,8 @@ export async function creerServeur(o: OptionsServeur) {
   // partiel (commerce, client, modèle, jour) sur ces deux statuts refuse en dernier recours une 2e réservation le même
   // jour (ErreurConflit → « refuse », sans appel au prestataire). C'est déjà ce qui protégeait d'un redémarrage du
   // serveur (cette Map est en mémoire). Les échecs du prestataire (statut `erreur`) ne sont pas une panne de tournée :
-  // on ne les retente pas dans la même tournée. Un délai dépassé (statut `incertain`, point Codex 10 : chaque appel est
+  // on ne les retente pas dans la même tournée, ni à la reprise d'une tournée interrompue le même jour (`echecAutoDuJour`,
+  // revue Codex finale ; le renvoi manuel reste possible). Un délai dépassé (statut `incertain`, point Codex 10 : chaque appel est
   // borné par DELAI_PRESTATAIRE_MS) compte comme un envoi pour `relanceAutoDue` : jamais de renvoi automatique.
   const tournees = new Map<string, string>()
   const tourneesActives = new Set<string>()
@@ -2007,7 +2011,10 @@ export async function creerServeur(o: OptionsServeur) {
         const deja = await st.envois(commerce.id, 50, client.id)
         // Une seule relance automatique par client et par tournée : l'anniversaire passe avant.
         const modele = (['anniversaire', 'inactif'] as const).find((x) => regles[x] && relanceAutoDue(x, client, deja, t))
-        if (modele) await relancer(commerce, client, { modele, declencheur: 'auto', auteur: 'Automatique' }, site)
+        // Revue Codex finale, point 5 : le modèle retenu a déjà échoué chez le prestataire aujourd'hui (tentative de la
+        // tournée interrompue) → client déjà traité, rien de plus (ni ce modèle ni un autre en repli). Filtre posé ici,
+        // à côté de la règle « une relance par client et par tournée » qu'il prolonge, et pas dans `relanceAutoDue`.
+        if (modele && !echecAutoDuJour(modele, deja, t)) await relancer(commerce, client, { modele, declencheur: 'auto', auteur: 'Automatique' }, site)
       }
       tournees.set(commerce.id, jour)
     })()
@@ -2158,6 +2165,10 @@ export async function creerServeur(o: OptionsServeur) {
           // Point Codex 2 : une reprise concurrente (rejeu de caisse) a pu créditer ce filleul entre-temps — son marqueur
           // le dit, ne rien recréditer ni retracer.
           if (frais && filleulRegle(frais, filleulApres.id)) return ''
+          // Plafond revérifié sur le parrain frais (deux filleuls simultanés ne le dépassent pas). Si ce recalcul passe
+          // « au plafond », la décision persistée du filleul dit encore « crédit » : c'est la trace à 0 point écrite
+          // juste après qui clôt le dossier. Seule une panne sur CETTE trace ferait exécuter la décision à la reprise
+          // (un parrainage au-delà du plafond, jamais un crédit perdu) — risque assumé (revue Codex finale).
           const r2 = frais ? parrainageDu(filleulApres, frais, commerce, quand) : null
           if (!frais || !r2) throw e
           parrainCredite = r2.parrain
@@ -2202,12 +2213,26 @@ export async function creerServeur(o: OptionsServeur) {
    *    si une date de visite du filleul y figure, le crédit a été versé — ne pas recréditer.
    * Reprise seulement si AUCUN signe n'est présent. Plafond recalculé sur l'état frais du parrain : au plafond, la trace
    * est écrite à 0 point pour clore le dossier.
+   *
+   * Revue Codex finale : ce qui précède ne vaut plus que pour les DOSSIERS HÉRITÉS (filleul payé sans
+   * `parrainageEnAttente`). Un filleul qui porte sa décision persistée est repris par `reprendreDecision` : montants,
+   * plafond et date du passage initial, jamais ceux du jour du rejeu (points Codex 1 à 4).
    */
   async function reprendreParrainage(commerce: Commerce, filleul: Client, parrain: Client, quand: Date): Promise<{ filleul: Client; texte: string; ecrire: () => Promise<string> }> {
     const rien = { filleul, texte: '', ecrire: async () => '' }
+    if (filleul.parrainageEnAttente) return reprendreDecision(commerce, filleul, parrain, filleul.parrainageEnAttente)
     const r = repriseParrainageDue(filleul, parrain, commerce, quand)
     if (!r) return rien
-    if (filleul.visites.some((v) => (parrain.parrainagesGagnes ?? []).includes(v))) return rien
+    // Signe 3 (dates) réservé aux parrains SANS marqueur (`filleulsRegles` absent) — point Codex 1 : chez un parrain déjà
+    // passé par le marqueur, une date commune avec un AUTRE filleul (même horodatage, visite ultérieure commune) donnait
+    // un faux « déjà payé » qui bloquait pour toujours un crédit dû. Ce parrain-là se lit sur son marqueur (signe 1,
+    // dans `repriseParrainageDue`) et sur la trace (signe 2).
+    // Risque résiduel assumé : un dossier d'avant P0-S11 sans trace (0004 absente à l'époque), dont le parrain a été
+    // crédité alors (date dans `parrainagesGagnes`, aucun marqueur) PUIS crédité par le nouveau système pour un autre
+    // filleul (le marqueur existe désormais, sans ce filleul) : le signe 3 ne s'applique plus et ce vieux dossier
+    // serait recrédité une fois. Il faut cumuler panne d'avant P0-S11, migration 0004 absente et nouveau filleul payé
+    // depuis : rare, et sans perte pour personne (un crédit en trop, jamais un crédit perdu).
+    if (parrain.filleulsRegles === undefined && filleul.visites.some((v) => (parrain.parrainagesGagnes ?? []).includes(v))) return rien
     if (await st.parrainageDuFilleul(commerce.id, filleul.id)) return rien
     const texteReprise = (credite: Client | null, avant: Client) =>
       credite
@@ -2247,6 +2272,64 @@ export async function creerServeur(o: OptionsServeur) {
       }
       await st.ajouterParrainage(trace)
       return texteJournal
+    }
+    return { filleul, texte, ecrire }
+  }
+
+  /**
+   * Reprise sur décision persistée (revue Codex finale) : le filleul porte `parrainageEnAttente`, écrit avec ses points.
+   * - trace d'audit présente → règlement terminé ; la décision est retirée du filleul (l'appelant qui écrit le filleul
+   *   — passage suivant — l'efface ; le rejeu de caisse, qui ne réécrit pas le filleul, la laisse : sans effet) ;
+   * - marqueur `filleulsRegles` du parrain contenant ce filleul → crédit versé, audit non (point Codex 2) : trace et
+   *   journal seulement, aux montants et à la date de la décision, jamais un second crédit ;
+   * - sinon → crédit du parrain exécuté tel que décidé (0 au plafond), même si les primes ont changé ou si le
+   *   programme a été désactivé depuis (point 3), avec la date du passage initial pour le plafond annuel et la
+   *   trace (point 4).
+   */
+  async function reprendreDecision(commerce: Commerce, filleul: Client, parrain: Client, d: DecisionParrainage): Promise<{ filleul: Client; texte: string; ecrire: () => Promise<string> }> {
+    if (d.parrainId !== parrain.id) return { filleul, texte: '', ecrire: async () => '' }
+    if (await st.parrainageDuFilleul(commerce.id, filleul.id)) {
+      const { parrainageEnAttente: _d, ...termine } = filleul
+      return { filleul: termine, texte: '', ecrire: async () => '' }
+    }
+    const date = new Date(d.date)
+    const texte = d.auPlafond
+      ? `Parrainage (reprise) : parrain au plafond annuel, rien pour ${parrain.prenom} (parrain de ${filleul.prenom})`
+      : `Parrainage (reprise) : +${d.pointsParrain} points pour ${parrain.prenom} (parrain de ${filleul.prenom})`
+    const ecrire = async (): Promise<string> => {
+      if (!d.auPlafond) {
+        let credite = parrain
+        if (!filleulRegle(parrain, filleul.id)) {
+          credite = parrainSelonDecision(parrain, filleul.id, d)
+          try {
+            await st.majClient(credite)
+          } catch (e) {
+            // Parrain modifié entre-temps : relu frais. Marqueur présent = un règlement concurrent vient de verser ce
+            // crédit et écrit lui-même la trace — ne rien recréditer ni retracer. Sinon, décision réexécutée UNE fois.
+            if (!(e instanceof ErreurConflit)) throw e
+            const frais = await st.client(commerce.id, parrain.id)
+            if (!frais) throw e
+            if (filleulRegle(frais, filleul.id)) return ''
+            credite = parrainSelonDecision(frais, filleul.id, d)
+            await st.majClient(credite)
+          }
+        } else if (await st.parrainageDuFilleul(commerce.id, filleul.id)) {
+          // Audit seul : relu juste avant d'écrire (une autre reprise a pu le compléter entre-temps).
+          return ''
+        }
+        await journaliser(commerce.id, { type: 'gerant', nom: 'Gérant' }, 'parrainage', texte, credite, date)
+      }
+      const trace: Parrainage = {
+        id: `pr-${randomUUID()}`,
+        commerceId: commerce.id,
+        parrainId: parrain.id,
+        filleulId: filleul.id,
+        date: d.date,
+        pointsParrain: d.auPlafond ? 0 : d.pointsParrain,
+        pointsFilleul: d.pointsFilleul,
+      }
+      await st.ajouterParrainage(trace)
+      return texte
     }
     return { filleul, texte, ecrire }
   }
@@ -2308,8 +2391,10 @@ export async function creerServeur(o: OptionsServeur) {
 
   /**
    * Suppression d'un client et de sa cascade (voir `Stockage.supprimerClient`). Avant : les filleuls de ce client
-   * perdent leur lien `parrainId` vers lui (plus aucune donnée ne pointe vers la carte supprimée). Aucune entrée de
-   * journal ici : l'appelant journalise l'opération SANS prénom ni contact (sinon la trace garderait la donnée effacée).
+   * perdent leur lien `parrainId` vers lui (et leur décision de parrainage, qui le nomme), et son propre parrain perd
+   * son id dans `filleulsRegles` (revue Codex finale, point 6) : plus aucune donnée ne pointe vers la carte supprimée.
+   * Aucune entrée de journal ici : l'appelant journalise l'opération SANS prénom ni contact (sinon la trace garderait
+   * la donnée effacée).
    */
   async function supprimerClientCascade(commerceId: string, clientId: string): Promise<BilanSuppression> {
     // Version d'accès de la carte (P0-S7) : plus rien à protéger une fois la carte supprimée.
@@ -2318,8 +2403,19 @@ export async function creerServeur(o: OptionsServeur) {
       await st.transaction(async () => {
         const avant = await st.client(commerceId, filleul.id)
         if (!avant || avant.parrainId !== clientId) return
-        const { parrainId: _p, ...apres } = avant
+        const { parrainId: _p, parrainageEnAttente: _d, ...apres } = avant
         await st.majClient(apres)
+      })
+    }
+    // Même prudence côté parrain : relu dans sa transaction, réécrit seulement s'il porte encore ce marqueur. Une liste
+    // vidée reste `[]` (pas supprimée) : ce parrain reste « passé par le marqueur » pour `reprendreParrainage`.
+    const supprime = await st.client(commerceId, clientId)
+    if (supprime?.parrainId) {
+      const parrainId = supprime.parrainId
+      await st.transaction(async () => {
+        const avant = await st.client(commerceId, parrainId)
+        if (!avant || !(avant.filleulsRegles ?? []).includes(clientId)) return
+        await st.majClient({ ...avant, filleulsRegles: avant.filleulsRegles!.filter((id) => id !== clientId) })
       })
     }
     const bilan = await st.transaction(() => st.supprimerClient(commerceId, clientId))
