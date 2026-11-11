@@ -10,13 +10,14 @@ import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteCarte } from '../components/Squelette'
 import { BadgeDemo, BoutonCopier, EncartWallet, LienConfidentialite, LogoCommerce, MessageErreur, PiedPublic, telecharger } from '../components/ui'
 import { dateRelative } from '../lib/format'
-import { historiqueCarte, messageRechercheCarte, type GainDuJour, type LotHistorique } from '../lib/carte'
+import { historiqueCarte, messageRechercheCarte, type GainDuJour, type LigneHistorique, type LotHistorique } from '../lib/carte'
 import { lienCourtCarte } from '../lib/relances'
 import { estAsianHome, VISUELS } from '../lib/visuels'
 import { configRattrapage, peutCompleterProfil } from '../lib/programme'
 import { nomFichierExportClient } from '../lib/rgpd'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
+import { localeDate } from '../lib/langue'
 import { Confirmation } from '../components/Confirmation'
 
 /** Texte traduit dans la langue choisie (pages clientes). */
@@ -65,10 +66,33 @@ function BoiteReception({ messages, commerce }: { messages: MessageClient[]; com
   )
 }
 
+/** Libellé d'historique affiché (P2-Q1, revue Codex point 5) : les préfixes fixes sont traduits, les noms
+ *  (récompense, lot) ne le sont pas. historiqueCarte() reste en français (épinglé par
+ *  carte-pwa-p1-c3.test.ts:346) — l'adaptation se fait ici, par type ; l'échange n'a rien à traduire
+ *  (libellé du catalogue + « (−N points) », identique en anglais). Le contrat entre les libellés FR et
+ *  cet adaptateur est testé dans tests/vouvoiement-couverture-p2-q1.test.ts. */
+function libelleHistorique(l: LigneHistorique, t: (fr: string, valeurs?: Record<string, string | number>) => string): string {
+  switch (l.type) {
+    case 'visite':
+      return t('Visite validée (+1 tampon)')
+    case 'recompense':
+      return t('Récompense remise : {libelle}', { libelle: l.libelle.replace('Récompense remise : ', '') })
+    case 'defi':
+      return t('Défi réussi : {recompense}', { recompense: l.libelle.replace('Défi réussi : ', '') })
+    case 'roue': {
+      const m = /^Roue : (.*) \((retiré|non retiré, expiré|à retirer aujourd’hui)\)$/.exec(l.libelle)
+      if (!m) return l.libelle
+      return t('Roue : {lot} ({statut})', { lot: m[1], statut: t(m[2]) })
+    }
+    default:
+      return l.libelle
+  }
+}
+
 /** Historique des visites et des lots (P1-C3), replié : la carte et ses boutons restent en haut de page. */
 function Historique({ client, lotsRoue }: { client: Client; lotsRoue: LotHistorique[] }) {
   const lignes = historiqueCarte(client, lotsRoue)
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
   return (
     <details className="carte">
       <summary className="titre-carte min-h-11 cursor-pointer">{t('Historique des visites et des lots')}</summary>
@@ -76,8 +100,8 @@ function Historique({ client, lotsRoue }: { client: Client; lotsRoue: LotHistori
         <ul className="mt-3 divide-y divide-gray-100">
           {lignes.map((l, i) => (
             <li key={`${l.date}-${i}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
-              <span className="min-w-0 text-gray-900">{l.libelle}</span>
-              <span className="shrink-0 text-sm text-gray-600">{new Date(l.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+              <span className="min-w-0 text-gray-900">{libelleHistorique(l, t)}</span>
+              <span className="shrink-0 text-sm text-gray-600">{new Date(l.date).toLocaleDateString(localeDate(langue), { day: 'numeric', month: 'short', year: 'numeric' })}</span>
             </li>
           ))}
         </ul>
@@ -383,16 +407,18 @@ function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi
       {peutCompleterProfil(client) && (
         <form onSubmit={envoyerProfil} className="carte space-y-3">
           <h2 className="titre-carte">{t('Votre profil')}</h2>
-          <p className="text-sm text-gray-600">Pour recevoir votre récompense d’anniversaire et des offres sur vos plats préférés.</p>
+          <p className="text-sm text-gray-600">{t('Pour recevoir votre récompense d’anniversaire et des offres sur vos plats préférés.')}</p>
           <div>
             <label className="etiquette" htmlFor="cp-anniversaire">
-              Anniversaire (JJ/MM){client.anniversaire ? ` — enregistré : ${client.anniversaire.slice(3)}/${client.anniversaire.slice(0, 2)}` : ''}
+              {t('Anniversaire (JJ/MM)')}
+              {client.anniversaire ? t(' — enregistré : {valeur}', { valeur: `${client.anniversaire.slice(3)}/${client.anniversaire.slice(0, 2)}` }) : ''}
             </label>
             <input id="cp-anniversaire" className="champ" inputMode="numeric" placeholder="21/03" value={anniversaire} onChange={(e) => setAnniversaire(e.target.value)} />
           </div>
           <div>
             <label className="etiquette" htmlFor="cp-plat">
-              Plat préféré{client.platPrefere ? ` — enregistré : ${client.platPrefere}` : ''}
+              {t('Plat préféré')}
+              {client.platPrefere ? t(' — enregistré : {valeur}', { valeur: client.platPrefere }) : ''}
             </label>
             <input id="cp-plat" className="champ" maxLength={80} placeholder="ex : poulet satay" value={plat} onChange={(e) => setPlat(e.target.value)} />
           </div>
@@ -404,7 +430,7 @@ function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi
       {rattrapage.actif && (
         <form onSubmit={envoyerRattrapage} className="carte space-y-3">
           <h2 className="titre-carte">{t('J’ai oublié de scanner')}</h2>
-          <p className="text-sm text-gray-600">Signalez une visite oubliée (sous {rattrapage.delaiJours} jours) : le restaurant la validera et votre tampon + vos points seront crédités.</p>
+          <p className="text-sm text-gray-600">{t('Signalez une visite oubliée (sous {jours} jours) : le restaurant la validera et votre tampon + vos points seront crédités.', { jours: rattrapage.delaiJours })}</p>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="etiquette" htmlFor="cp-date">
@@ -430,13 +456,13 @@ function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi
           </button>
           {enAttente.length > 0 && (
             <p className="text-sm text-gray-700">
-              {enAttente.length} demande{enAttente.length > 1 ? 's' : ''} en attente de validation par le restaurant.
+              {t('{n} demande{s} en attente de validation par le restaurant.', { n: enAttente.length, s: enAttente.length > 1 ? 's' : '' })}
             </p>
           )}
         </form>
       )}
-      {message && <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">{message}</p>}
-      {erreur && <MessageErreur>{erreur}</MessageErreur>}
+      {message && <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">{t(message)}</p>}
+      {erreur && <MessageErreur>{t(erreur)}</MessageErreur>}
     </div>
   )
 }
@@ -453,7 +479,7 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
   const [enCours, setEnCours] = useState(false)
   const [demande, setDemande] = useState(false)
 
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
 
   async function agir(action: 'donnees' | 'suppression') {
     if (enCours) return
@@ -495,11 +521,11 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
       <summary className="titre-carte min-h-11 cursor-pointer">{t('Mes données personnelles')}</summary>
       <div className="mt-3 space-y-3">
         <p className="text-sm text-gray-600">
-          Recevez une copie de vos données ou demandez leur suppression. <LienConfidentialite commerceId={commerce.id} />
+          {t('Recevez une copie de vos données ou demandez leur suppression.')} <LienConfidentialite commerceId={commerce.id} />
         </p>
         {client.demandeSuppressionLe && (
           <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
-            Demande de suppression enregistrée le {new Date(client.demandeSuppressionLe).toLocaleDateString('fr-FR')} : le restaurant va supprimer votre carte.
+            {t('Demande de suppression enregistrée le {date} : le restaurant va supprimer votre carte.', { date: new Date(client.demandeSuppressionLe).toLocaleDateString(localeDate(langue)) })}
           </p>
         )}
         <div>
@@ -556,10 +582,10 @@ function VueLimitee({
   acces: AccesCarte
   lienRefuse: boolean
 }) {
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
   if (!commerce.actif) return <MessagePublic titre={commerce.nom}>La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
   const affiches = Math.min(tampons, commerce.seuilTampons)
-  const date = acces.graceJusquAu ? new Date(acces.graceJusquAu).toLocaleDateString('fr-FR') : ''
+  const date = acces.graceJusquAu ? new Date(acces.graceJusquAu).toLocaleDateString(localeDate(langue)) : ''
   return (
     <>
       <div className="mx-auto max-w-md space-y-4 px-4 pt-2 pb-12">
@@ -600,11 +626,11 @@ function VueLimitee({
 
 /** Carte à ancien identifiant (P0-S7) : protégée sur ce téléphone ; son ancien lien seul n'ouvrira plus rien après la grâce. */
 function BandeauGrace({ jusquAu }: { jusquAu: string }) {
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
   return (
     <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="note" data-grace>
       {t('Votre carte est maintenant protégée sur ce téléphone. Après le {date}, son ancien lien ou son ancien QR ne l’ouvriront plus seuls : gardez-la ici (ou ajoutez-la à l’écran d’accueil).', {
-        date: new Date(jusquAu).toLocaleDateString('fr-FR'),
+        date: new Date(jusquAu).toLocaleDateString(localeDate(langue)),
       })}
     </p>
   )

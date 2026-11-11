@@ -21,6 +21,14 @@
 // - le rouge laque #b3262d (blanc dessus 6,5:1) ne reste qu'en réserve danger/erreur : il n'est
 //   plus utilisé comme couleur primaire, titre ou décor — les états d'erreur actuels utilisent
 //   déjà les rouges Tailwind (red-*), inchangés (on ne magenta-ifie pas les états) ;
+// - gris de texte sur fond clair (P2-Q1, vérification 11/11/2026) : le gris-500 Tailwind vaut
+//   4,44:1 sur fond clair — sous AA de 0,06. La suggestion de l'audit (4,99:1) passe, mais le
+//   texte secondaire utilise déjà le gris-600 Tailwind partout (6,94:1 sur fond clair, 7,13:1
+//   sur ivoire, 7,56:1 sur blanc) : plus lisible, un seul token, aucun gris-500 en texte courant
+//   (seuls le placeholder des champs, le fond désactivé et le texte désactivé le gardent,
+//   4,83:1 sur blanc pour le placeholder ; le rail de l'interrupteur éteint est aussi en
+//   gris-500, usage de composant non textuel, seuil 3:1). Chiffres calculés sur les hex ;
+//   Tailwind 4 définit ces gris en OKLCH (écart d'environ 0,01 au plus).
 // - la teinte magenta exacte de la carte du restaurant n'a pas été relevée du PDF (AUDIT.md §8 n° 4) :
 //   la palette ci-dessous est un choix vérifié par le calcul, ajustable en 1 changement ici.
 export const THEME = {

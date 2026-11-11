@@ -10,8 +10,18 @@ import { LogoCommerce, PiedPublic } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
 import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
 import { estSignature, masquerPrixNonConfirmes, menuReelAsianHome, retirerPhotosDetachees } from '../data/menu-reel'
+import { enregistrerTraductions } from '../lib/langue'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
+
+/** Traductions des badges de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
+enregistrerTraductions({
+  '🌶 Épicé': '🌶 Spicy',
+  '🌶 Option épicée': '🌶 Spicy option',
+  '🌱 Végétarien': '🌱 Vegetarian',
+  '🌱 Option végétarienne': '🌱 Vegetarian option',
+  'Ce lien ne correspond à aucun commerce.': 'This link does not match any business.',
+})
 
 /** Page publique #/menu/<commerceId> (QR du menu, lien depuis la carte de fidélité). */
 export default function MenuPublic() {
@@ -97,7 +107,7 @@ export function MenuAffiche({
   const bandeauMidi = !!midi && estHeureMenuMidi(maintenant)
   const avecBadges = visibles.some((c) => c.produits.some((p) => badgesPlat(p).length))
   // Interface traduite (P2-Q1) ; les noms de plats et de catégories restent ceux du restaurant.
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
 
   // Indicateur de l'onglet actif : en « Toutes », la catégorie dont la section est à l'écran (suivi au défilement).
   const [enVue, setEnVue] = useState<string | null>(null)
@@ -243,11 +253,11 @@ export function MenuAffiche({
                                   <span className="font-semibold">{p.nom}</span>
                                   {/* Pastilles (étiquettes décoratives) : text-xs, 12,75 px, exception documentée (P2-Q1). */}
                                   {signature && (
-                                    <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">★ Signature</span>
+                                    <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('★ Signature')}</span>
                                   )}
                                   {badges.map((b) => (
-                                    <span key={b} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700" title={`Déduit de la description — ${MENTION_BADGE_DEDUIT}`}>
-                                      {LIBELLES_BADGES[b]}*<span className="sr-only"> ({MENTION_BADGE_DEDUIT})</span>
+                                    <span key={b} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700" title={t('Déduit de la description — {mention}', { mention: t(MENTION_BADGE_DEDUIT) })}>
+                                      {t(LIBELLES_BADGES[b])}*<span className="sr-only"> ({t(MENTION_BADGE_DEDUIT)})</span>
                                     </span>
                                   ))}
                                 </span>
@@ -273,7 +283,14 @@ export function MenuAffiche({
                                 </p>
                                 {badges.length > 0 && (
                                   <p className="text-sm text-gray-600">
-                                    {badges.map((b) => LIBELLES_BADGES[b]).join(' · ')} — {MENTION_BADGE_DEDUIT} auprès de l’équipe.
+                                    {langue === 'en'
+                                      ? t('{labels} — {mention} — ask the team.', {
+                                          labels: badges.map((b) => t(LIBELLES_BADGES[b])).join(' · '),
+                                          mention: t(MENTION_BADGE_DEDUIT),
+                                        })
+                                      : // Branche FR conservée telle quelle : menu-client-p1-c5.test.ts:246 épingle
+                                        // littéralement `{MENTION_BADGE_DEDUIT} auprès de l’équipe`.
+                                        `${badges.map((b) => t(LIBELLES_BADGES[b])).join(' · ')} — ${MENTION_BADGE_DEDUIT} auprès de l’équipe.`}
                                   </p>
                                 )}
                                 {/* P1-M2 : la ligne allergènes est toujours affichée — la liste si elle est
@@ -297,7 +314,7 @@ export function MenuAffiche({
           )}
         </>
       )}
-      {avecBadges && <p className="text-center text-sm text-gray-600">* 🌶 / 🌱 : déduit du nom ou de la description du plat, {MENTION_BADGE_DEDUIT} auprès de l’équipe.</p>}
+      {avecBadges && <p className="text-center text-sm text-gray-600">{t('* 🌶 / 🌱 : déduit du nom ou de la description du plat, {mention} auprès de l’équipe.', { mention: t(MENTION_BADGE_DEDUIT) })}</p>}
       {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}
       <p className="text-center text-sm text-gray-600">{t('Allergènes : demandez conseil à l’équipe en cas de doute.')}</p>
       <PiedPublic commerceId={commerce.id} />
