@@ -788,6 +788,113 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
     }
   })
 
+  test('P0-S11 (revue Codex) : deux logos envoyés simultanément — l’adresse gagnante sert l’image gagnante', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const png = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'logo.png')) // vrai PNG 600×600
+      const jpg = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'interieur.jpg')) // vrai JPEG
+      const port = (app.serveur.address() as AddressInfo).port
+      const base = `http://127.0.0.1:${port}/api/v1`
+      f.barriere('GET', 'meta') // instantanés simultanés : les deux PUT voient l'absence de logo
+      const [a, b] = await Promise.all([
+        fetch(`${base}/commerces/${AH}/logo`, { method: 'PUT', headers: PIN, body: png }).then(async (r) => ({ statut: r.status, contenu: await r.json() })),
+        fetch(`${base}/commerces/${AH}/logo`, { method: 'PUT', headers: PIN, body: jpg }).then(async (r) => ({ statut: r.status, contenu: await r.json() })),
+      ])
+      assert.deepEqual([a.statut, b.statut].sort(), [200, 409])
+      const gagnant = a.statut === 200 ? a : b
+      const octetsGagnant = a.statut === 200 ? png : jpg
+      const adresse = (gagnant.contenu as { commerce: Commerce }).commerce.logo!
+      assert.match(adresse, /\/logo\?v=/)
+      // L'adresse versionnée sert les octets de l'envoi gagnant, pas ceux du perdant ni les anciens.
+      const servi = await fetch(`http://127.0.0.1:${port}${adresse}`)
+      assert.equal(servi.status, 200)
+      assert.ok(Buffer.from(await servi.arrayBuffer()).equals(octetsGagnant), 'octets identiques à l’image gagnante')
+      // Sans version non plus : le pointeur suit l'adresse retenue.
+      const sansVersion = await fetch(`${base}/commerces/${AH}/logo`)
+      assert.equal(sansVersion.status, 200)
+      assert.ok(Buffer.from(await sansVersion.arrayBuffer()).equals(octetsGagnant))
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S11 (revue Codex) : logo envoyé pendant sa suppression — la suppression n’efface pas l’envoi gagnant', async () => {
+    const f = fauxPostgrest()
+    // Retient l'effacement du fichier par le DELETE : un envoi qui gagne entre-temps ne doit pas être effacé.
+    // (L'effacement est l'upsert `meta` qui vide `logo:<id>` ; sans lui, la course ne se produit jamais.)
+    let effacementRetenu = false
+    let libererEffacement: (() => void) | undefined
+    const fetchRetarde = async (entree: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const corps = init?.body ? (JSON.parse(String(init.body)) as { cle?: string; valeur?: string }) : undefined
+      if ((init?.method ?? 'GET') === 'POST' && corps?.cle === `logo:${AH}` && corps?.valeur === '') {
+        effacementRetenu = true
+        await new Promise<void>((ok) => {
+          libererEffacement = ok
+        })
+      }
+      return f.fetch(entree, init)
+    }
+    const { app, api } = await demarrer({ ...f, fetch: fetchRetarde as typeof fetch })
+    try {
+      const png = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'logo.png'))
+      const jpg = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'interieur.jpg'))
+      const port = (app.serveur.address() as AddressInfo).port
+      const base = `http://127.0.0.1:${port}/api/v1`
+      assert.equal((await fetch(`${base}/commerces/${AH}/logo`, { method: 'PUT', headers: PIN, body: png })).status, 200, 'un logo est déjà en place')
+      // Le DELETE vide le champ puis efface le fichier : on retient l'effacement.
+      const suppr = api('DELETE', `/commerces/${AH}/logo`, undefined, PIN)
+      for (let i = 0; i < 100 && !effacementRetenu; i++) await new Promise((r) => setTimeout(r, 50))
+      assert.ok(effacementRetenu, 'le DELETE a atteint son effacement de fichier')
+      // Entre-temps, un nouvel envoi gagne : son adresse est enregistrée.
+      assert.equal((await fetch(`${base}/commerces/${AH}/logo`, { method: 'PUT', headers: PIN, body: jpg })).status, 200)
+      libererEffacement?.()
+      assert.equal((await suppr).statut, 200)
+      // La suppression n'a pas effacé l'envoi gagnant : son adresse sert ses octets.
+      const commerce = (await api('GET', `/commerces/${AH}`, undefined, PIN)).contenu.commerce as Commerce
+      assert.match(commerce.logo ?? '', /\/logo\?v=/)
+      const servi = await fetch(`http://127.0.0.1:${port}${commerce.logo!}`)
+      assert.equal(servi.status, 200)
+      assert.ok(Buffer.from(await servi.arrayBuffer()).equals(jpg), 'octets identiques au JPEG envoyé')
+      const sansVersion = await fetch(`${base}/commerces/${AH}/logo`)
+      assert.equal(sansVersion.status, 200)
+      assert.ok(Buffer.from(await sansVersion.arrayBuffer()).equals(jpg))
+    } finally {
+      libererEffacement?.()
+      await app.fermer()
+    }
+  })
+
+  test('P0-S11 (revue Codex) : plafond atteint pendant la reprise du crédit parrain — le journal dit ce qui a vraiment été crédité', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      // Plafond annuel à 1 parrainage : le 2e crédit simultané est recalculé à 0 pendant la reprise.
+      assert.equal((await api('PATCH', `/commerces/${AH}`, { programme: { parrainage: { plafondAn: 1 } } }, PIN)).statut, 200)
+      const bob = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Bob', contact: '0611111111' }, PIN)).contenu.client as Client
+      const filleuls = [
+        (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Alice', contact: '0622222222', parrain: bob.codeParrainage }, PIN)).contenu.client as Client,
+        (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Chloé', contact: '0633333333', parrain: bob.codeParrainage }, PIN)).contenu.client as Client,
+      ]
+      const donnees = (id: string) => f.tables.clients.find((l) => l.id === id)!.donnees as Client
+      f.barriere('PATCH', 'clients')
+      const visites = await Promise.all(filleuls.map((c) => api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)))
+      assert.deepEqual(visites.map((v) => v.statut), [200, 200], JSON.stringify(visites.map((v) => v.contenu)))
+      assert.equal(soldePoints(donnees(bob.id)), 50 + 50, 'bienvenue + un seul parrainage (plafond 1)')
+      assert.equal(donnees(bob.id).parrainagesGagnes?.length, 1)
+      const traces = f.tables.parrainages.filter((l) => l.parrain_id === bob.id)
+      assert.deepEqual(traces.map((l) => (l.donnees as { pointsParrain: number }).pointsParrain).sort(), [0, 50])
+      // Le journal du passage de chaque filleul dit la vérité : l'un annonce +50 pour le parrain, l'autre le plafond.
+      const passages = f.tables.journal.filter((l) => (l.donnees as { action?: string }).action === 'passage')
+      assert.equal(passages.length, 2)
+      const textes = passages.map((l) => (l.donnees as { details?: string }).details ?? '')
+      assert.equal(textes.filter((t) => t.includes('+50 points pour Bob (parrain)')).length, 1, JSON.stringify(textes))
+      assert.equal(textes.filter((t) => t.includes('parrain au plafond annuel, rien pour Bob')).length, 1, JSON.stringify(textes))
+    } finally {
+      await app.fermer()
+    }
+  })
+
   test('P0-S11 : démarrage Supabase refusé sans la migration 0003 ou 0004 (journal et traces programme obligatoires)', async () => {
     await assert.rejects(demarrer(fauxPostgrest({ sans0003: true })), /0003_cartiz/)
     await assert.rejects(demarrer(fauxPostgrest({ sans0004: true })), /0004_programme/)

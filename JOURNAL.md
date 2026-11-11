@@ -1078,3 +1078,45 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   différentes → un seul gagne l'adresse, octets cohérents sauf entrelacement extrême entre vérification et restauration.
   Non couverts par un test : le cas « plafond atteint pendant la reprise », « parrain supprimé pendant la reprise » et
   le double conflit.
+
+## 11/11/2026 — P0-S11 : 2e passe revue Codex (blobs logo versionnés, DELETE conditionnel, texte parrainage final)
+- **Contexte.** Le correctif de la 1re passe a été commité entre-temps par le coordinateur (`d48be12`, déjà poussé).
+  2e revue Codex du diff complet (`/tmp/codex-revue-p0-s11.txt`, 7 points). Incident d'outillage : `codex exec` restait
+  bloqué sans sortie quand le prompt est passé en argument et stdin laissé ouvert (« Reading additional input from
+  stdin... ») — relancé avec `< /dev/null`, réponse en 46 s. Leçon notée dans `AGENTS.md`.
+- **Point 2 [P1] — deux PUT logo restauraient une image qui ne correspond pas au gagnant (CORRIGÉ).** Le correctif de
+  la 1re passe ne demandait qu'un entrelacement extrême ; en fait deux PUT qui prennent le même instantané suffisent :
+  le perdant restaure l'ancien logo derrière l'adresse du gagnant. Correctif : chaque envoi écrit un blob immuable
+  `logo:<id>:<version>` en plus du pointeur ; le GET `?v=` sert le blob de CETTE version ; en cas de 409 le pointeur
+  est remis sur l'image que l'adresse désigne (ancienne si un PATCH a gagné, celle du PUT gagnant sinon, lue dans son
+  blob) ; le blob de l'envoi refusé est supprimé au mieux s'il n'est désigné par aucune adresse ; le blob remplacé est
+  nettoyé au mieux après un PUT accepté. Le GET sans version sert le pointeur, ou à défaut l'image désignée par la
+  fiche du commerce.
+- **Point 3 [P1] — DELETE logo pouvait effacer un PUT pourtant réussi (CORRIGÉ).** Le DELETE vidait le fichier après
+  l'UPDATE : un PUT arrivé entre-temps gagnait l'adresse puis voyait ses octets effacés. Correctif : l'adresse
+  remplacée est lue DANS la transaction ; le pointeur n'est vidé que s'il contient encore cette image, et le blob
+  correspondant n'est supprimé que si l'adresse courante ne le désigne plus.
+- **Point 5 [P2] — journal de parrainage potentiellement mensonger après reprise (CORRIGÉ).** Si le parrain atteignait
+  son plafond entre le calcul initial et la reprise, la trace était corrigée (0 point) mais le journal du passage
+  gardait « +50 points pour le parrain ». Correctif : `ecrire()` renvoie le texte FINAL ; les 3 appelants (visite,
+  caisse, rattrapage) l'utilisent pour le journal du passage et l'entrée « parrainage ».
+- **Points 1, 4, 6 (DOCUMENTÉS, non corrigés).** 1 — double conflit parrain dans la même requête : déjà résiduel
+  documenté, demande une reprise durable (hors périmètre). 4 — journal en panne après écriture métier (caisse
+  `dejaTraite` sans trace, visite historique rejouée = 2e tampon) : demande un journal rejouable / boîte d'envoi,
+  nouveau lot. 6 — PATCH réglages + avis partiels sous Supabase : même remède. Détail dans `server/README.md`
+  § Atomicité (« Ce qui reste NON atomique »).
+- **Tests** : avant **876/876**, après **879/879** (`npm test`, typecheck serveur inclus), `npx tsc -p .` OK. `+3` tests
+  (`tests/supabase.test.ts`) : deux PUT logo simultanés d'images différentes (barrière GET `meta` pour forcer les deux
+  instantanés) → [200, 409], adresse gagnante = octets gagnants (avec et sans `?v=`) ; PUT pendant un DELETE (effacement
+  retardé par un `fetch` enveloppé) → l'envoi gagnant survit, 200 + octets identiques ; plafond 1 parrainage, deux
+  filleuls simultanés → traces [0, 50], un journal de passage « +50 pour le parrain », l'autre « parrain au plafond
+  annuel, rien pour ». Contrôles négatifs : sans les blobs versionnés, les 2 tests logo échouent (10/10 et 3/3) ;
+  sans le texte final, le test plafond échoue (2 passages annoncent +50). Le test PUT/PUT avec la seule barrière PATCH
+  ne discriminait pas l'ancien code (l'ancien `ancien` du perdant était déjà l'image gagnante) — d'où la barrière GET
+  `meta`. Incident en cours de route : une édition a brièvement remplacé 3 lignes du test par du code serveur, réparée
+  aussitôt (test relu, suite verte) ; un revert de contrôle négatif oublié a été détecté par `grep` et restauré depuis
+  `/tmp/app.ts.fixed` avant la suite finale.
+- **Résiduels** (documentés dans `server/README.md` § Atomicité) : suppression d'un blob orphelin = vérification puis
+  écriture (un envoi des mêmes octets qui gagnerait exactement entre les deux laisserait une adresse sans blob,
+  réparable par un nouvel envoi) ; blobs remplacés conservés en `meta` (une ligne par ancien logo). Le pointeur seul
+  ne fait plus foi pour les lectures : le GET sans version se replie sur l'image désignée par la fiche.
