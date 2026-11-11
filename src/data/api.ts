@@ -1,6 +1,6 @@
 // Client HTTP de l'API /api/v1 (server/). Aucune règle métier ici : le serveur décide de tout
 // (tampons, récompense, tirage). `fetch` est injectable pour les tests (aucun vrai serveur dans `npm test`).
-import type { Avis, Client, Commerce, CommercePublic, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce } from '../types'
+import type { Avis, Client, Commerce, CommerceCaisse, CommercePublic, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce } from '../types'
 import type { StatutGain, StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
 import type { ClientAPurger } from '../lib/rgpd'
@@ -56,10 +56,18 @@ export interface EtatCommerce {
 /** Accès à la caisse : session équipe, code équipe (4 chiffres, repli) ou accès du gérant. */
 export type AccesCaisse = { code: string } | AccesEquipe | Acces
 
+/**
+ * Réponse de la caisse (P0-S14, vue minimale) : commerce réduit à ce que le comptoir affiche et calcule, auteur,
+ * et — seulement si une recherche `q` a été faite — la page de clients correspondants (`total` = tous les
+ * correspondants, pas seulement cette page). Sans recherche : `clients` est vide, jamais la liste complète.
+ */
 export interface ReponseCaisse {
   auteur: EntreeJournal['auteur']
-  commerce: Commerce
+  commerce: CommerceCaisse
   clients: Client[]
+  total: number
+  page: number
+  limite: number
 }
 
 export interface MessageCommercant extends MessageClient {
@@ -425,7 +433,16 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
       ((await requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/rattrapage/${enc(demandeId)}`, { acces, corps: { decision } })) as { client: Client }).client,
 
     // ---- Caisse (code équipe ou PIN) ----
-    caisse: (commerceId: string, acces: AccesCaisse) => requete('GET', `/commerces/${enc(commerceId)}/caisse`, { acces }) as Promise<ReponseCaisse>,
+    /** Ouverture de la caisse (commerce + auteur, aucun client sans recherche) ou recherche paginée côté serveur. */
+    caisse: (commerceId: string, acces: AccesCaisse, recherche?: { q: string; page?: number; limite?: number }) => {
+      const qs = recherche
+        ? `?q=${encodeURIComponent(recherche.q)}&page=${recherche.page ?? 1}&limite=${recherche.limite ?? 20}`
+        : ''
+      return requete('GET', `/commerces/${enc(commerceId)}/caisse${qs}`, { acces }) as Promise<ReponseCaisse>
+    },
+    /** Fiche d'un client à la demande (scan QR, sélection) : un seul client, jamais la liste. */
+    clientCaisse: async (commerceId: string, acces: AccesCaisse, clientId: string) =>
+      ((await requete('GET', `/commerces/${enc(commerceId)}/caisse/clients/${enc(clientId)}`, { acces })) as { client: Client }).client,
     actionCaisse: (
       commerceId: string,
       acces: AccesCaisse,
