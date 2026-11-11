@@ -92,6 +92,9 @@ justification et mesure avant/après, vit dans `CHANGELOG.md`.
   (`.webp` → `-vignette.webp`) épinglent la décision P1-M3 (vignettes
   réservées aux photos du PDF) — ce n'est pas un test faux, c'est une
   décision produit à trancher par l'utilisateur (proposée dans `RAPPORT.md`).
+- **Regard neuf — tour 12 (voir journal)** : après 11 tours, les leviers
+  mesurables sont épuisés — il ne reste que des décisions produit (DA,
+  vignettes P1-M3). Voir la section « Regard neuf — tour 12 ».
 
 ## Regard neuf — tour 5 (11/11/2026, tous les 5 tours)
 
@@ -124,6 +127,58 @@ Relecture critique des hypothèses, avant de choisir le changement du tour 5 :
    (logo 4,9 Ko, héros 95 Ko) ; il ne reste que les photos de plats
    (déjà WebP, vignettes 192 px) et `hero-plats.jpg` (bannière de la
    carte, 1024×683 — à mesurer si elle devient le LCP d'une page).
+
+## Regard neuf — tour 12 (11/11/2026, tous les 5 tours — dû à t10, rattrapé)
+
+Relecture critique après 11 tours (7 fusions, 3 annulations, 1 regard neuf) :
+1. **Bilan chiffré (t0 → t10, même protocole)** : JS initial 481 332 → 454 357 o
+   (−5,6 %) ; premier affichage `#/jouer` 2 261/2 197 → 1 874/1 888 ms
+   (cible < 2 s : **atteinte**) ; LCP `#/jouer` 2 248/2 148 → 1 812/1 868 ms ;
+   parcours scan → lot 6 664/7 343 → 6 553/6 574 ms (cible < 30 s : **atteinte**,
+   étapes scriptées) ; Lighthouse 77/81 → 78/78 (meilleure passe 86, t9) —
+   cible ≥ 95 : **non atteinte** ; LCP menu Asian Home 3 428/3 376 → 2 324/2 252 ms
+   (−1 080 ms) ; LCP carte Asian Home 3 464/3 308 → ~3 002 ms (direct) ;
+   photos paresseuses −267 Ko (−202 à −597 ms de téléchargement) ; DA 8,0/10
+   (cible ≥ 9 : **non atteinte**) ; tests 1163 → 1200/1200, E2E 3/3.
+2. **Le protocole mesure-t-il encore le bon levier ?** Oui pour les pages
+   client (les mesures ponctuelles Asian Home couvrent désormais les trois
+   pages : menu, carte, jouer) ; non pour le TBT (le breakdown Lighthouse
+   est simulé — le coût réel est ~800 ms de travail, 89,5 % idle — et les
+   scores varient de ±5 points d'une passe à l'autre sur cette VM : le
+   Lighthouse n'est plus un juge fiable à 2 passes, l'ABAB ou 3+ passes
+   sont requis, règle ajoutée au tour 5).
+3. **Que reste-t-il de mesurable et sûr ?** Rien : tous les visuels des pages
+   client sont des variantes légères et recadrées (logo 4,9 Ko, héros 51 Ko,
+   bannière 27 Ko, paresseuses ~83 Ko) ; le bundle est sous le seuil P2-Q2
+   (le découpage des pages est épinglé, celui des dépendances ne réduit pas
+   le travail initial — tour 8) ; le TBT est diffus (tour 8) ; le `seed.json`,
+   le beacon et le préchargement SW sont écartés (tour 3) ; les photos
+   `menu-loc-lac.jpg` / `menu-nouilles-crevettes.jpg` ne sont pas
+   téléchargées (aucune priorité) ; les photos de plats du PDF sont déjà
+   à la bonne taille (≤ 720 px, vignettes 192 px).
+4. **Que reste-t-il tout court ?** Deux décisions produit, pas des tours de
+   boucle : (a) **DA 8,0 → ≥ 9** — assombrir les écrans commerçant
+   (Caisse 7, Tableau de bord 8, Clients 8, Roulette 7, Réglages 7/10 ;
+   les écrans client sont à 9/10 depuis P1-D2). Le score DA est établi
+   par la même méthode par captures (SCORES.md § Cohérence DA) — il est
+   subjectif mais documenté par écran ; assombrir 5 écrans est un gros
+   changement visuel qui renverse le choix « lisibilité de travail côté
+   commerçant » (AUDIT §6.3) et risque de casser des tests qui épinglent
+   des fonds clairs côté commerçant. (b) **Vignettes P1-M3** (Mango Stick
+   61 Ko + Loc Lac 156 Ko affichés 64×64 dans la liste) — la règle
+   « vignettes réservées aux photos du PDF » est épinglée par les tests
+   (tour 11, annulé).
+5. **Conclusion du regard neuf** : la boucle a épuisé ses leviers
+   mesurables. Les deux items restants relèvent de l'utilisateur / du
+   coordinateur (proposés dans `RAPPORT.md`). Le tour 12 n'apporte donc
+   aucun changement — il est annulé, comme les tours 3, 8 et 11.
+   Tours sans gain consécutifs après t12 : **2** (t11, t12). La condition
+   d'arrêt formelle (3 tours consécutifs sans gain) n'est pas atteinte,
+   mais lancer un tour 13 sans levier identifié serait mécanique : la
+   boucle s'arrête ici sur le constat du regard neuf, et le `RAPPORT.md`
+   final consigne l'état, les deux décisions produit en attente et la
+   procédure de déploiement. (Si le coordinateur tranche l'une des deux
+   décisions, la boucle pourra reprendre à t13 sur ce levier.)
 
 ## Leviers examinés et ÉCARTÉS (ne pas les reproposer sans fait nouveau)
 
@@ -1046,6 +1101,33 @@ Gain estimé : ~53 Ko et ~550 ms de tuyau sur le défilement du menu.
 **Décision : ANNULÉ** — aucun changement tenté. Tours sans gain
 consécutifs : **1**. Branche supprimée sans fusion ; seul `BOUCLE.md`
 fusionné (doc).
+
+### Tour 12 — `autonome/boucle-t12-regard-neuf` (annulé — leviers épuisés, regard neuf)
+
+Sujet (regard neuf, dû à t10, rattrapé — § dédié ci-dessus) : après 11
+tours, relecture critique des hypothèses et des leviers restants. Bilan
+chiffré t0 → t10 : JS initial 481 332 → 454 357 o (−5,6 %) ; premier
+affichage 2 261/2 197 → 1 874/1 888 ms (cible < 2 s atteinte) ; LCP
+`#/jouer` 2 248/2 148 → 1 812/1 868 ms ; parcours 6 664/7 343 → 6 553/
+6 574 ms (cible < 30 s atteinte, étapes scriptées) ; Lighthouse 77/81 →
+78/78 (meilleure passe 86) — cible ≥ 95 non atteinte ; LCP menu
+3 428/3 376 → 2 324/2 252 ms (−1 080 ms) ; LCP carte ~3 002 ms (direct) ;
+photos paresseuses −267 Ko ; DA 8,0/10 (cible ≥ 9 non atteinte) ; tests
+1163 → 1200/1200, E2E 3/3. Leviers restants examinés : DA (assombrir les
+écrans commerçant — décision produit, score subjectif par captures,
+risque de casser des tests de fonds clairs) ; vignettes P1-M3 (tour 11,
+annulé — décision produit) ; TBT (diffus, tour 8) ; photos
+`menu-loc-lac.jpg` / `menu-nouilles-crevettes.jpg` (non téléchargées,
+aucune priorité) ; photos de plats du PDF (déjà à la bonne taille).
+Conclusion : aucun levier mesurable et sûr ne reste — la boucle s'arrête
+ici sur le constat du regard neuf (la condition formelle des 3 tours
+consécutifs sans gain n'est pas atteinte : 2 après t12 — lancer un tour
+13 sans levier identifié serait mécanique). Les deux décisions produit
+sont proposées dans `RAPPORT.md`.
+**Décision : ANNULÉ** — aucun changement tenté. Tours sans gain
+consécutifs : **2** (t11, t12). Branche supprimée sans fusion ; seul
+`BOUCLE.md` fusionné (doc). La boucle s'arrête ici ; le `RAPPORT.md`
+final suit.
 
 ### Tour 8 — `autonome/boucle-t8-tbt-longues-taches` (annulé — aucun levier au-dessus du bruit)
 
