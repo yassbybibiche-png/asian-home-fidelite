@@ -54,7 +54,7 @@ export function CommutateurLangue({ sombre = false }: { sombre?: boolean }) {
           aria-pressed={langue === l}
           aria-label={LIBELLES_LANGUE[l].long}
           onClick={() => changerLangue(l)}
-          className={`min-h-11 min-w-11 px-2 text-base font-bold underline-offset-4 aria-pressed:underline ${sombre ? 'text-white aria-pressed:text-or-300' : 'text-gray-700 aria-pressed:text-marque-700'}`}
+          className={`min-h-11 min-w-11 px-2 text-base font-bold underline-offset-4 aria-pressed:underline ${sombre ? 'text-white aria-pressed:text-magenta-300' : 'text-gray-700 aria-pressed:text-magenta-700'}`}
         >
           {LIBELLES_LANGUE[l].court}
         </button>

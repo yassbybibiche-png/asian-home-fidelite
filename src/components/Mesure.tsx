@@ -78,7 +78,7 @@ function Barres({ titre, points, valeur, format }: { titre: string; points: Poin
           const pct = max ? Math.max(v ? 4 : 0, Math.round((v / max) * 100)) : 0
           return (
             <div key={p.debut} className="group relative flex h-full min-w-0 flex-1 items-end" title={`${p.libelle} : ${format(v)}`}>
-              <div className="w-full rounded-t bg-marque-500 group-last:bg-marque-700" style={{ height: `${pct}%` }} />
+              <div className="w-full rounded-t bg-magenta-500 group-last:bg-magenta-700" style={{ height: `${pct}%` }} />
             </div>
           )
         })}
@@ -142,7 +142,7 @@ export function Mesure() {
                 key={x.valeur}
                 type="button"
                 aria-pressed={g === x.valeur}
-                className={`min-h-11 rounded-lg px-3 text-sm font-semibold ${g === x.valeur ? 'bg-marque-600 text-white' : 'text-gray-700'}`}
+                className={`min-h-11 rounded-lg px-3 text-sm font-semibold ${g === x.valeur ? 'bg-magenta-600 text-white' : 'text-gray-700'}`}
                 onClick={() => setG(x.valeur)}
               >
                 {x.libelle}

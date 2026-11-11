@@ -3,6 +3,7 @@ import { LONGUEUR_TEXTE_MAX, POLICE_ROUE, RAYON_LIBELLE, largeurEstimee, secteur
 import type { LotRoue } from '../lib/roulette'
 import { prefereMouvementReduit, REQUETE_MOUVEMENT_REDUIT, transitionRoue } from '../lib/animationRoue'
 import { useLangue } from './Langue'
+import { THEME } from '../theme.ts'
 
 /** Réglage « réduire les animations » du téléphone, suivi en direct. */
 export function useMouvementReduit(): boolean {
@@ -39,22 +40,22 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
       {/* Pointeur fixe en haut */}
       <div className="absolute top-0 left-1/2 z-10 -translate-x-1/2 -translate-y-2 drop-shadow-md" aria-hidden>
         <svg viewBox="0 0 32 40" className="h-10 w-8">
-          <path d="M16 39 L3 12 A14 14 0 1 1 29 12 Z" fill="#1f2937" stroke="#f2d48a" strokeWidth={2} />
-          <circle cx={16} cy={13} r={4.5} fill="#f2d48a" />
+          <path d="M16 39 L3 12 A14 14 0 1 1 29 12 Z" fill={THEME.encre} stroke={THEME.magenta400} strokeWidth={2} />
+          <circle cx={16} cy={13} r={4.5} fill={THEME.magenta400} />
         </svg>
       </div>
-      {/* Anneau laqué fixe avec ses perles dorées. */}
+      {/* Anneau magenta fixe avec ses perles magenta. */}
       <svg viewBox="-100 -100 200 200" className="h-full w-full rounded-full shadow-relief" aria-hidden>
         <defs>
           <radialGradient id="roue-anneau" cx="0" cy="0" r="100" gradientUnits="userSpaceOnUse">
-            <stop offset="0.86" stopColor="#7f1a1f" />
-            <stop offset="1" stopColor="#5e1317" />
+            <stop offset="0.86" stopColor={THEME.magenta700} />
+            <stop offset="1" stopColor={THEME.magenta900} />
           </radialGradient>
         </defs>
         <circle r={99} fill="url(#roue-anneau)" />
         {Array.from({ length: 16 }, (_, i) => {
           const [x, y] = point(i * 22.5, 93.5).split(' ')
-          return <circle key={i} cx={x} cy={y} r={2.2} fill={i % 2 ? '#f2d48a' : '#fff7e0'} />
+          return <circle key={i} cx={x} cy={y} r={2.2} fill={i % 2 ? THEME.magenta400 : THEME.blanc} />
         })}
       </svg>
       {/* Secteurs : seule cette couche tourne (transform seul, couche composée : 60 fps sans repeindre le SVG). */}
@@ -68,7 +69,7 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
                 etendue >= 359.99 ? (
                   <circle r={R} fill={s.couleur} />
                 ) : (
-                  <path d={`M0 0 L${point(s.debut, R)} A${R} ${R} 0 ${etendue > 180 ? 1 : 0} 1 ${point(s.fin, R)} Z`} fill={s.couleur} stroke="#d4a73c" strokeWidth={0.8} />
+                  <path d={`M0 0 L${point(s.debut, R)} A${R} ${R} 0 ${etendue > 180 ? 1 : 0} 1 ${point(s.fin, R)} Z`} fill={s.couleur} stroke={THEME.magenta400} strokeWidth={0.8} />
                 )
               // Garde-fou : un libellé large (majuscules…) est resserré plutôt que de déborder du secteur.
               const serre = s.affichage === 'libelle' && largeurEstimee(s.texteRoue) > LONGUEUR_TEXTE_MAX
@@ -92,20 +93,20 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
                 </g>
               )
             })}
-            <circle r={R} fill="none" stroke="#d4a73c" strokeWidth={1.6} />
+            <circle r={R} fill="none" stroke={THEME.magenta400} strokeWidth={1.6} />
           </g>
         </svg>
       </div>
-      {/* Moyeu doré fixe. */}
+      {/* Moyeu magenta fixe. */}
       <svg viewBox="-100 -100 200 200" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden>
         <defs>
           <radialGradient id="roue-moyeu" cx="-4" cy="-4" r="18" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="#fff7e0" />
-            <stop offset="1" stopColor="#d4a73c" />
+            <stop offset="0" stopColor={THEME.blanc} />
+            <stop offset="1" stopColor={THEME.magenta400} />
           </radialGradient>
         </defs>
-        <circle r={15} fill="url(#roue-moyeu)" stroke="#fff" strokeWidth={2} />
-        <circle r={5.5} fill="#b3262d" />
+        <circle r={15} fill="url(#roue-moyeu)" stroke={THEME.blanc} strokeWidth={2} />
+        <circle r={5.5} fill={THEME.magenta500} />
       </svg>
     </div>
   )
@@ -120,12 +121,12 @@ export function LegendeRoue({ lots }: { lots: LotRoue[] }) {
   const { t } = useLangue()
   return (
     <div className="mt-4 px-2">
-      <h2 className="text-center text-base font-semibold text-or-300">{t('À gagner')}</h2>
+      <h2 className="text-center text-base font-semibold text-magenta-300">{t('À gagner')}</h2>
       <ol className="mt-2 grid gap-2 text-base text-white" aria-label={t('Lots de la roue')}>
         {parts.map((s) => (
           <li key={s.numero} className="flex items-center gap-3" data-legende-lot>
             <span
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold ring-1 ring-or-400/60"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold ring-1 ring-magenta-400/60"
               style={{ backgroundColor: s.couleur, color: s.couleurTexte }}
               aria-hidden
             >

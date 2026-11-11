@@ -274,7 +274,7 @@ export default function App() {
       <header className="hero-sombre sticky top-0 z-20 border-b border-white/10 shadow-[0_1px_8px_-4px_rgb(0_0_0/0.5)] print:hidden">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2">
           <SelecteurCommerce />
-          <span className="titre-or hidden shrink-0 text-lg sm:block">{NOM_APP}</span>
+          <span className="titre-magenta hidden shrink-0 text-lg sm:block">{NOM_APP}</span>
           {mode === 'api' && (
             <button
               className="min-h-11 shrink-0 rounded-xl px-3 text-sm font-semibold text-white ring-1 ring-white/30 active:bg-white/10"
@@ -292,7 +292,7 @@ export default function App() {
               href={`#/${o.page}`}
               aria-current={onglet === o.page ? 'page' : undefined}
               className={`border-b-2 px-3 py-2.5 font-medium whitespace-nowrap transition-colors ${
-                onglet === o.page ? 'border-or-400 text-or-300' : 'border-transparent text-white/70 hover:text-white'
+                onglet === o.page ? 'border-magenta-400 text-magenta-300' : 'border-transparent text-white/70 hover:text-white'
               }`}
             >
               {o.libelle}
@@ -309,7 +309,7 @@ export default function App() {
         <div className="mx-auto max-w-5xl px-4 pt-3 print:hidden">
           <div className="flex items-center justify-between gap-3 rounded-xl bg-gray-800 px-4 py-3 text-sm text-white">
             <span>Ce commerce est désactivé : son QR code et sa carte de fidélité ne sont plus accessibles aux clients.</span>
-            <button className="min-h-11 shrink-0 px-1 font-semibold text-marque-200 underline" onClick={() => aller('admin')}>
+            <button className="min-h-11 shrink-0 px-1 font-semibold text-magenta-300 underline" onClick={() => aller('admin')}>
               Gérer
             </button>
           </div>
@@ -334,10 +334,10 @@ export default function App() {
             <a
               key={o.page}
               href={`#/${o.page}`}
-              className={`flex min-h-16 flex-col items-center justify-center gap-0.5 text-xs font-semibold ${actif ? 'text-marque-600' : 'text-gray-600'}`}
+              className={`flex min-h-16 flex-col items-center justify-center gap-0.5 text-xs font-semibold ${actif ? 'text-magenta-700' : 'text-gray-600'}`}
               aria-current={actif ? 'page' : undefined}
             >
-              <span className={`flex h-8 w-14 items-center justify-center rounded-full transition-colors ${actif ? 'bg-marque-50' : ''}`}>
+              <span className={`flex h-8 w-14 items-center justify-center rounded-full transition-colors ${actif ? 'bg-magenta-500/10' : ''}`}>
                 <Icone nom={o.page} />
               </span>
               {o.libelle}

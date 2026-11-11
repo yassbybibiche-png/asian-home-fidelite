@@ -117,7 +117,7 @@ export default function MenuCarte() {
       <section className="carte space-y-3">
         <h2 className="titre-carte">QR code du menu</h2>
         <div className="flex justify-center">
-          <div className="rounded-2xl bg-white p-2 ring-2 ring-marque-500">
+          <div className="rounded-2xl bg-white p-2 ring-2 ring-magenta-500">
             <QrCode texte={lien} className="h-40 w-40" titre="QR code du menu" />
           </div>
         </div>

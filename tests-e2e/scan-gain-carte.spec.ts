@@ -41,6 +41,13 @@ async function preparerCommerce(request: APIRequestContext) {
 test('scan → inscription → visite validée en caisse (code équipe) → tirage → gain → carte', async ({ page, browser, request, baseURL }) => {
   const commerce = await preparerCommerce(request)
 
+  // P0-D1 : le 404 jouer → carte (GET /api/v1/commerces/<id-client> à chaque « Voir ma carte »)
+  // ne doit plus se produire — aucune requête échouée sur tout le parcours.
+  const requetesEchouees: string[] = []
+  page.on('response', (r) => {
+    if (r.status() >= 400) requetesEchouees.push(`${r.status()} ${r.url()}`)
+  })
+
   // 1. Le client scanne le QR vitrine : page de jeu, contact seul.
   await page.goto(`/#/jouer/${commerce.id}`)
   await expect(page.getByRole('heading', { name: commerce.nom })).toBeVisible()
@@ -90,4 +97,5 @@ test('scan → inscription → visite validée en caisse (code équipe) → tira
   await page.getByRole('link', { name: 'Voir ma carte de fidélité' }).last().click()
   await expect(page).toHaveURL(/#\/carte\//)
   await expect(page.locator('[data-tampons]')).toHaveAttribute('aria-label', `Tampons : 1 sur ${commerce.seuilTampons}`)
+  expect(requetesEchouees).toEqual([])
 })

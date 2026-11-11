@@ -102,12 +102,12 @@ function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; 
         <div className="flex justify-center">
           <LogoCommerce commerce={commerce} taille="lg" />
         </div>
-        <h1 className="titre-or mt-3 text-2xl">{commerce.nom}</h1>
-        <p className="mt-1 font-semibold text-or-300">{t(accroche.modele, accroche.valeurs)}</p>
+        <h1 className="titre-magenta mt-3 text-2xl">{commerce.nom}</h1>
+        <p className="mt-1 font-semibold text-magenta-300">{t(accroche.modele, accroche.valeurs)}</p>
         {commerce.coordonnees && <p className="mt-1 text-sm text-white/70">{commerce.coordonnees}</p>}
       </header>
 
-      <div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-or-400/30">
+      <div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-magenta-400/30">
         <Roue lots={commerce.lots} rotation={rotation} />
         <LegendeRoue lots={commerce.lots} />
       </div>
@@ -149,7 +149,7 @@ export function MessageSansVisite({
       <ol className="space-y-2" aria-label={t('Pour débloquer la roue')}>
         {ETAPES_VALIDATION.map((etape, i) => (
           <li key={etape} className="flex items-start gap-3 rounded-xl bg-fond p-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-nuit-950 font-bold text-or-400" aria-hidden>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-nuit-950 font-bold text-magenta-400" aria-hidden>
               {i + 1}
             </span>
             <span className="pt-1 text-gray-800">{t(etape)}</span>
@@ -168,7 +168,7 @@ export function MessageSansVisite({
       ) : (
         <div className="hero-sombre flex items-center justify-center gap-3 rounded-xl px-4 py-3" role="status" aria-live="polite" aria-busy="true" data-attente="en-cours">
           <span className="attente-pulse" aria-hidden />
-          <span className="font-semibold text-or-300">{t(TEXTE_ATTENTE)}</span>
+          <span className="font-semibold text-magenta-300">{t(TEXTE_ATTENTE)}</span>
         </div>
       )}
       <p className="text-center text-sm text-gray-600">{t('1 visite validée = 1 participation par jour.')}</p>
@@ -412,15 +412,34 @@ function stockageSession(): Storage | null {
 }
 
 function JouerApi({ api }: { api: ClientApi }) {
-  const { param } = useRoute()
+  const { page, param } = useRoute()
   const [commerce, setCommerce] = useState<CommercePublic | null>(null)
   const [erreur, setErreur] = useState<'inconnu' | 'horsLigne' | null>(null)
+  // Revue Codex P0-D1, point 5 : identifiant de la demande en cours — une réponse arrivée
+  // après une navigation jouer/A → jouer/B ne doit pas écraser le commerce B, et l'ancien
+  // commerce ne reste pas affiché pendant le chargement du nouveau.
+  const demandeEnCours = useRef<string | null>(null)
 
   const charger = useCallback(() => {
+    // P0-D1 : la route peut déjà être #/carte/<id-client> quand ce composant se re-rend une
+    // dernière fois avant d'être démonté (les abonnements useRoute d'App et de JouerApi ne se
+    // mettent pas à jour dans le même rendu) : ne jamais appeler api.commerce avec
+    // l'identifiant client — c'était un 404 en console à chaque « Voir ma carte » après un gain.
+    if (page !== 'jouer') return
     if (!param) return setErreur('inconnu')
     setErreur(null)
-    api.commerce(param).then(setCommerce, (e) => setErreur(e instanceof ErreurApi && e.statut === 404 ? 'inconnu' : 'horsLigne'))
-  }, [api, param])
+    if (demandeEnCours.current !== param) setCommerce(null)
+    const demande = param
+    demandeEnCours.current = demande
+    api.commerce(demande).then(
+      (c) => {
+        if (demandeEnCours.current === demande) setCommerce(c)
+      },
+      (e) => {
+        if (demandeEnCours.current === demande) setErreur(e instanceof ErreurApi && e.statut === 404 ? 'inconnu' : 'horsLigne')
+      },
+    )
+  }, [api, page, param])
   useEffect(charger, [charger])
   const { t } = useLangue()
 
@@ -743,7 +762,7 @@ function Identification({
               type="button"
               aria-pressed={mode === m}
               onClick={() => choisirMode(m)}
-              className={`min-h-11 rounded-xl text-sm font-semibold ring-1 ${mode === m ? 'bg-nuit-950 text-or-300 ring-nuit-950' : 'bg-white text-gray-700 ring-gray-300'}`}
+              className={`min-h-11 rounded-xl text-sm font-semibold ring-1 ${mode === m ? 'bg-nuit-950 text-magenta-300 ring-nuit-950' : 'bg-white text-gray-700 ring-gray-300'}`}
             >
               {t(m === 'tel' ? '📱 Téléphone' : '✉️ E-mail')}
             </button>
@@ -857,7 +876,7 @@ function CodeGagnant({ code }: { code: string }) {
   return (
     <div className="mt-3 space-y-2" data-code-gagnant>
       <p className="text-sm text-gray-600">{t(TEXTE_CODE_A_MONTRER)}</p>
-      <p className="rounded-xl border-2 border-dashed border-or-500 bg-amber-50 py-4 font-mono text-4xl font-extrabold tracking-[0.3em] text-gray-900 select-all">
+      <p className="rounded-xl border-2 border-dashed border-magenta-500 bg-magenta-500/10 py-4 font-mono text-4xl font-extrabold tracking-[0.3em] text-gray-900 select-all">
         {code}
       </p>
       {/* Le code n'est accepté en caisse que le jour du tirage (P0-U3). */}
@@ -954,13 +973,13 @@ export function Resultat({ lot, prenom, code, lienCarte }: { lot: string; prenom
       </section>
     )
   return (
-    <section className="carte apparition bg-gradient-to-b from-amber-50 to-white text-center ring-2 ring-or-500" role="status" aria-live="polite" data-resultat="gain">
+    <section className="carte apparition bg-gradient-to-b from-magenta-500/10 to-white text-center ring-2 ring-magenta-500" role="status" aria-live="polite" data-resultat="gain">
       <Confettis />
       <p className="text-5xl" aria-hidden>
         🎉
       </p>
       <p className="mt-2 text-lg font-bold">{t('{bravo}, vous avez gagné :', { bravo: avecPrenom(t('Bravo'), prenom) })}</p>
-      <p className="mt-1 font-titre text-4xl leading-tight font-bold break-words text-marque-600">{lot}</p>
+      <p className="mt-1 font-titre text-4xl leading-tight font-bold break-words text-magenta-700">{lot}</p>
       {code ? (
         <CodeGagnant code={code} />
       ) : (

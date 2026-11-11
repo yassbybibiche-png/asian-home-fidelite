@@ -28,7 +28,7 @@ const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
 function Chiffre({ valeur, libelle, aide }: { valeur: string | number; libelle: string; aide: string }) {
   return (
     <div className="carte relative overflow-hidden">
-      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-marque-500 to-marque-300" aria-hidden />
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-magenta-500 to-magenta-300" aria-hidden />
       <div className="surtitre">{libelle}</div>
       <div className="mt-1 text-3xl font-extrabold tracking-tight text-gray-900 tabular-nums">{valeur}</div>
       <div className="mt-0.5 text-sm text-gray-600">{aide}</div>

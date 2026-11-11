@@ -108,7 +108,7 @@ describe('P0-U4 : écran d’attente (source)', () => {
   test('état d’attente animé et annoncé : role=status, aria-live, aria-busy, point pulsé', () => {
     assert.match(
       jouer,
-      /<div className="hero-sombre flex items-center justify-center gap-3 rounded-xl px-4 py-3" role="status" aria-live="polite" aria-busy="true" data-attente="en-cours">\n\s*<span className="attente-pulse" aria-hidden \/>\n\s*<span className="font-semibold text-or-300">\{t\(TEXTE_ATTENTE\)\}<\/span>/,
+      /<div className="hero-sombre flex items-center justify-center gap-3 rounded-xl px-4 py-3" role="status" aria-live="polite" aria-busy="true" data-attente="en-cours">\n\s*<span className="attente-pulse" aria-hidden \/>\n\s*<span className="font-semibold text-magenta-300">\{t\(TEXTE_ATTENTE\)\}<\/span>/,
     )
     assert.match(css, /@keyframes attente-halo/)
     assert.match(css, /@keyframes attente-point/)

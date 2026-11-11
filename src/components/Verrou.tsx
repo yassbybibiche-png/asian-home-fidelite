@@ -73,7 +73,7 @@ export function Verrou() {
   return (
     <div className="mx-auto max-w-md space-y-4 px-4 py-10">
       <div className="text-center">
-        <p className="font-titre text-lg font-bold text-marque-600">{NOM_APP}</p>
+        <p className="font-titre text-lg font-bold text-magenta-700">{NOM_APP}</p>
         <h1 className="mt-2 font-titre text-[1.75rem] font-bold tracking-tight">Espace commerçant</h1>
         <p className="mt-1 text-gray-600">Saisissez le PIN de votre commerce pour ouvrir votre tableau de bord.</p>
       </div>

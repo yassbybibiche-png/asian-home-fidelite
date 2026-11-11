@@ -116,17 +116,22 @@ export function CarteFidelite({
           className="h-24 w-full object-cover"
         />
       )}
-      {/* Recto : bandeau nocturne (noir + laque profonde, filet doré) façon carte physique. */}
+      {/* Recto : bandeau nocturne (noir + magenta profond, filet magenta) façon carte physique. */}
       <div
-        className={`relative overflow-hidden px-5 pt-5 pb-6 text-white ${styleBandeau ? '' : 'bg-gradient-to-br from-nuit-950 via-[#2a1216] to-marque-800 ring-1 ring-or-400/40 ring-inset'}`}
+        className={`relative overflow-hidden px-5 pt-5 pb-6 text-white ${styleBandeau ? '' : 'bg-gradient-to-br from-nuit-950 via-magenta-900 to-magenta-700 ring-1 ring-magenta-400/40 ring-inset'}`}
         style={styleBandeau}
       >
-        <div className="pointer-events-none absolute -top-16 -right-12 h-44 w-44 rounded-full border-[18px] border-or-400/20" aria-hidden />
+        <div className="pointer-events-none absolute -top-16 -right-12 h-44 w-44 rounded-full border-[18px] border-magenta-400/20" aria-hidden />
         <div className="relative flex items-center gap-3">
           <LogoCommerce commerce={commerce} taille="md" />
           <div className="min-w-0">
             <div className="truncate font-titre text-lg font-bold tracking-[0.08em] uppercase">{commerce.nom}</div>
-            <div className="text-sm text-or-300">{t('Carte de fidélité')}</div>
+            {/* Sous-titre en BLANC, pas en magenta clair : le fond du bandeau peut être la couleur
+              personnalisée du commerce (apparence.couleur, ex. le magenta bouton) — le magenta
+              clair dessus ne vaudrait que 1,66:1. Le blanc est garanti AA par problemesApparence
+              (≥ 4,5:1 sur la couleur) et assombrir() ne fait que foncer le dégradé
+              (revue Codex P0-D1, point 1). */}
+            <div className="text-sm text-white">{t('Carte de fidélité')}</div>
           </div>
         </div>
         <div className="relative mt-5 flex items-end justify-between gap-3">
@@ -169,9 +174,9 @@ export function CarteFidelite({
                 style={rang > 0 ? { animationDelay: `${rang * 150}ms` } : undefined}
                 className={`flex aspect-square w-full max-w-12 items-center justify-center rounded-full text-sm font-bold ${rang >= 0 && plein ? 'tampon-nouveau ' : ''}${
                   plein
-                    ? 'bg-marque-500 text-white shadow-[inset_0_-2px_0_rgb(0_0_0/0.15)]'
+                    ? 'bg-magenta-500 text-white shadow-[inset_0_-2px_0_rgb(0_0_0/0.15)]'
                     : dernier
-                      ? 'border-2 border-dashed border-or-500 bg-amber-50 text-amber-800'
+                      ? 'border-2 border-dashed border-magenta-500 bg-magenta-500/10 text-magenta-700'
                       : 'border-2 border-dashed border-gray-400 text-gray-600'
                 }`}
               >
@@ -190,21 +195,21 @@ export function CarteFidelite({
           aria-valuenow={tampons}
           aria-label={t('Progression vers la récompense')}
         >
-          <div className="h-full rounded-full bg-gradient-to-r from-marque-500 via-marque-600 to-or-400 transition-all duration-500" style={{ width: `${pct}%` }} />
+          <div className="h-full rounded-full bg-gradient-to-r from-magenta-500 via-magenta-600 to-magenta-400 transition-all duration-500" style={{ width: `${pct}%` }} />
         </div>
         <p className="mt-1.5 flex justify-between text-sm text-gray-600">
           <span>{debloquee ? t('Carte complète') : texteProgressionLangue(restants, commerce, langue, texteProgression)}</span>
-          <span className="font-semibold text-marque-600">{pct} %</span>
+          <span className="font-semibold text-magenta-700">{pct} %</span>
         </p>
         {nouveaux.length > 0 && (
-          <p className="apparition mt-2 text-center text-sm font-semibold text-marque-700" role="status">
+          <p className="apparition mt-2 text-center text-sm font-semibold text-magenta-700" role="status">
             ✨ +{nouveaux.length} tampon{nouveaux.length > 1 ? 's' : ''} depuis votre dernière ouverture de la carte
           </p>
         )}
 
         {debloquee ? (
-          <div className="apparition mt-4 rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100 p-4 text-amber-900 ring-2 ring-or-500" role="status">
-            <p className="surtitre text-amber-800">{t('Récompense en attente')}</p>
+          <div className="apparition mt-4 rounded-2xl bg-magenta-500/10 p-4 text-gray-900 ring-2 ring-magenta-500" role="status">
+            <p className="surtitre text-magenta-700">{t('Récompense en attente')}</p>
             <p className="mt-1 text-lg font-bold">🎉 {commerce.recompense}</p>
             <p className="mt-1 text-sm">{t('À demander au comptoir.')}</p>
           </div>
@@ -216,7 +221,7 @@ export function CarteFidelite({
 
         {/* Programme : niveau, prochain palier, défi, récompenses en attente, réserve, offre hebdo, parrainage. */}
         {niveau.nom !== 'Membre' && (
-          <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+          <p className="mt-4 rounded-xl bg-magenta-500/10 p-3 text-sm text-gray-900 ring-1 ring-magenta-500/40">
             <span className="font-bold">{niveau.nom === 'VIP' ? '👑 VIP — nos clients les plus fidèles' : `⭐ ${niveau.nom}`}</span>
             <span className="block text-sm">{niveau.avantages}</span>
           </p>
@@ -233,7 +238,7 @@ export function CarteFidelite({
               🎯 Défi : {defiProgression}/{defi.objectif} visites en {defi.jours} jours
             </p>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-200" role="progressbar" aria-valuemin={0} aria-valuemax={defi.objectif} aria-valuenow={defiProgression} aria-label="Progression du défi">
-              <div className="h-full rounded-full bg-marque-500" style={{ width: `${Math.round((defiProgression / defi.objectif) * 100)}%` }} />
+              <div className="h-full rounded-full bg-magenta-500" style={{ width: `${Math.round((defiProgression / defi.objectif) * 100)}%` }} />
             </div>
             <p className="mt-1 text-sm text-gray-700">
               {defi.objectif - defiProgression > 0 ? `Plus que ${defi.objectif - defiProgression} visite${defi.objectif - defiProgression > 1 ? 's' : ''} → ${defi.recompense}` : `${defi.recompense} gagné !`}
@@ -241,8 +246,8 @@ export function CarteFidelite({
           </div>
         )}
         {enAttente.length > 0 && (
-          <div className="mt-4 rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100 p-4 text-amber-900 ring-2 ring-or-500" role="status">
-            <p className="surtitre text-amber-800">{t('À retirer au comptoir')}</p>
+          <div className="mt-4 rounded-2xl bg-magenta-500/10 p-4 text-gray-900 ring-2 ring-magenta-500" role="status">
+            <p className="surtitre text-magenta-700">{t('À retirer au comptoir')}</p>
             <ul className="mt-1 space-y-1.5">
               {enAttente.map((r) => (
                 <li key={r.id} className="text-sm">
@@ -286,7 +291,7 @@ export function CarteFidelite({
           <div className="mt-4 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-900/5">
             <p className="text-sm font-semibold text-gray-900">👥 Parrainez un ami, vous gagnez chacun {parrainage.pointsFilleul} points</p>
             <p className="mt-1 text-sm text-gray-700">
-              Votre code : <span className="font-mono font-bold text-marque-700">{client.codeParrainage}</span> — votre ami le saisit à son inscription, vous gagnez vos points à sa 1re visite.
+              Votre code : <span className="font-mono font-bold text-magenta-700">{client.codeParrainage}</span> — votre ami le saisit à son inscription, vous gagnez vos points à sa 1re visite.
             </p>
             <button type="button" className="bouton-secondaire mt-2 w-full" onClick={() => void copierLien()}>
               {copie ? '✓ Lien copié !' : 'Copier mon lien de parrainage'}

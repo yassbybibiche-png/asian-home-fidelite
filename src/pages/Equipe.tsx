@@ -241,7 +241,7 @@ function ReaffichageCode({ membre, codeRecent, onConsomme }: { membre: MembreEqu
       </div>
     </form>
   ) : (
-    <button type="button" className="mt-2 min-h-11 text-sm font-semibold text-marque-700 underline" onClick={() => setOuvert(true)}>
+    <button type="button" className="mt-2 min-h-11 text-sm font-semibold text-magenta-700 underline" onClick={() => setOuvert(true)}>
       Réafficher le code une fois
     </button>
   )

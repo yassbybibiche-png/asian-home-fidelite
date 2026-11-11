@@ -43,7 +43,7 @@ function BoiteReception({ messages, commerce }: { messages: MessageClient[]; com
       <h2 className="titre-carte">
         {t('Messages')}{' '}
         {/* Pastille « nouveau » : étiquette, text-xs conservé (P2-Q1). */}
-        {nonLus > 0 && <span className="ml-1 rounded-full bg-marque-600 px-2 py-0.5 text-xs font-bold text-white">{nonLus} nouveau{nonLus > 1 ? 'x' : ''}</span>}
+        {nonLus > 0 && <span className="ml-1 rounded-full bg-magenta-600 px-2 py-0.5 text-xs font-bold text-white">{nonLus} nouveau{nonLus > 1 ? 'x' : ''}</span>}
       </h2>
       <ul className="space-y-3">
         {tries.slice(0, 10).map((m) => (

@@ -71,7 +71,7 @@ export default function Admin() {
           const n = comptes.get(c.id) ?? { clients: 0, avis: 0 }
           const affiche = c.id === commerceActif.id
           return (
-            <li key={c.id} className={`carte ${affiche ? 'ring-2 ring-marque-500' : ''}`}>
+            <li key={c.id} className={`carte ${affiche ? 'ring-2 ring-magenta-500' : ''}`}>
               <div className="flex items-start gap-3">
                 <LogoCommerce commerce={c} />
                 <div className="min-w-0 flex-1">

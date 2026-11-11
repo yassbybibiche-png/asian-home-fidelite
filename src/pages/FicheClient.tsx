@@ -423,7 +423,7 @@ export default function FicheClient() {
         <EnTete titre="Client introuvable" />
         <Vide>
           Ce client n’existe pas (ou la démo a été réinitialisée).{' '}
-          <a href="#/clients" className="font-semibold text-marque-600 underline">
+          <a href="#/clients" className="font-semibold text-magenta-700 underline">
             Retour à la liste
           </a>
         </Vide>
