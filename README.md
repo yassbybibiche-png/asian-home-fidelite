@@ -225,8 +225,8 @@ Badge « Démo » : en mode API, il n'apparaît **que** sur les commerces venant
 
 ## Tests
 
-`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` — **1217 tests
-(11/11/2026, 77 fichiers, suite verte, vérification des types du serveur `typecheck:server` incluse)**.
+`npm test` lance le lanceur de tests intégré à Node (`node --test`) sur `tests/*.test.ts` — **1225 tests
+(11/11/2026, 78 fichiers, suite verte, vérification des types du serveur `typecheck:server` incluse)**.
 `npx tsc -p .` (types du front) n'est pas dans `npm test` : à lancer à part. Le nombre exact
 évolue à chaque lot (voir `JOURNAL.md`) ; le détail par fichier est dans `tests/`.
 Pas de Vitest : Node exécute le TypeScript directement, ça évite une dépendance et ne touche pas au build.

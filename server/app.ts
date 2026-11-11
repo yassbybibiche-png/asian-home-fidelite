@@ -2015,13 +2015,29 @@ export async function creerServeur(o: OptionsServeur) {
   const avecMessages = (client: Client, commerce: Commerce, evenement: Evenement, t = maintenant()) =>
     genererMessages(client, commerce, evenement, t, nouvelIdMessage).client
 
-  /** Heure réelle d'une action faite hors ligne : acceptée si elle date de moins de 72 h (sinon : maintenant). */
+  /**
+   * Heure réelle d'une action de caisse (`faitLe` envoyé par la tablette, file hors ligne comprise).
+   * - absente (pas une chaîne) : maintenant — cas normal des appels sans date ;
+   * - datée de 72 h au plus dans le passé et 5 min au plus dans le futur : conservée telle quelle ;
+   * - illisible, trop ancienne ou dans le futur : refus 400 explicite (correction Codex, point 6). Avant, la date
+   *   était remplacée en silence par maintenant : l'action pouvait être comptée le mauvais jour, ou refusée à
+   *   cause d'une visite du jour, sans explication. Le refus 400 est un « refus définitif » affiché dans la file.
+   */
   function quandAction(v: unknown): Date {
     const t = maintenant()
     if (typeof v !== 'string') return t
     const d = new Date(v)
+    if (Number.isNaN(d.getTime())) {
+      throw err(400, 'Date de l’action illisible : elle n’a pas été enregistrée. Refaites le passage depuis la fiche du client.')
+    }
     const ecart = t.getTime() - d.getTime()
-    return Number.isNaN(d.getTime()) || ecart > 72 * 3600_000 || ecart < -5 * 60_000 ? t : d
+    if (ecart > 72 * 3600_000) {
+      throw err(400, 'Action trop ancienne (plus de 3 jours) pour être synchronisée telle quelle : elle n’a pas été enregistrée. Régularisez-la à la main, par exemple en refaisant le passage depuis la fiche du client.')
+    }
+    if (ecart < -5 * 60_000) {
+      throw err(400, 'Action datée dans le futur (vérifiez l’heure de la tablette) : elle n’a pas été enregistrée. Régularisez-la à la main, par exemple en refaisant le passage depuis la fiche du client.')
+    }
+    return d
   }
 
   function idAction(v: unknown): string | undefined {
@@ -2829,7 +2845,6 @@ export async function creerServeur(o: OptionsServeur) {
       const corps = await lireCorps(req)
       const clientId = texte(corps.clientId, 'clientId', 80, { requis: true })
       const actionId = idAction(corps.actionId)
-      const quand = quandAction(corps.faitLe)
       let centimes = 0
       if (sousId === 'passage' && corps.montantCentimes != null) {
         const v = corps.montantCentimes
@@ -2840,6 +2855,8 @@ export async function creerServeur(o: OptionsServeur) {
         const avant = await clientOu404(id, clientId)
         // Idempotence : une action déjà reçue (file hors ligne rejouée, double tap) ne compte jamais deux fois.
         if (actionDejaTraitee(avant, actionId)) return { client: avant, dejaTraite: true }
+        // Date contrôlée après l'idempotence : une action déjà comptée, rejouée tard, répond « déjà traitée », pas 400.
+        const quand = quandAction(corps.faitLe)
         let apres: Client
         let details: string
         let journalAction: EntreeJournal['action'] = sousId === 'attente' ? 'recompense' : sousId === 'reserve' ? 'reserve' : sousId
