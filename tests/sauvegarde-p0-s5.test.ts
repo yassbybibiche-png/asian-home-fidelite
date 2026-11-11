@@ -1,4 +1,4 @@
-// P0-S5 : sauvegarde complète (14 tables) et restauration testée sur un vrai Postgres local (PGlite), sans Supabase
+// P0-S5 : sauvegarde complète (15 tables) et restauration testée sur un vrai Postgres local (PGlite), sans Supabase
 // ni réseau. Le CLI de sauvegarde est lancé contre un faux PostgREST local (plafond de 1 000 lignes par réponse,
 // comme Supabase) ; le CLI de restauration recharge le fichier produit dans une PGlite en mémoire.
 import { test, describe, before, after } from 'node:test'
@@ -37,7 +37,7 @@ const CLIENT = { id: 'k1', commerceId: 'c1', prenom: 'Léa', telephone: '0612345
 const TIRAGE = { id: 't1', clientId: 'k1', commerceId: 'c1', date: '2026-11-09T10:05:00.000Z', lot: 'Nem offert', code: 'AB12', remis: null }
 const AVIS = { id: 'a1', commerceId: 'c1', note: 5, texte: 'Très bon « bœuf » 🍜', date: '2026-11-09T12:00:00.000Z' }
 
-/** Au moins une ligne dans chacune des 14 tables (colonnes obligatoires d'après les migrations). */
+/** Au moins une ligne dans chacune des 15 tables (colonnes obligatoires d'après les migrations). */
 async function remplir(db: PGlite) {
   const j = JSON.stringify
   await db.query(`insert into public.meta (cle, valeur) values ('initialise', '1'), ('secret_desinscription', 'xyz')`)
@@ -63,6 +63,7 @@ async function remplir(db: PGlite) {
   await db.query(`insert into public.envois (id, commerce_id, client_id, modele, canal, statut, jour, date, donnees) values
     ('v1', 'c1', 'k1', 'bienvenue', 'sms', 'envoye', '2026-11-09', '2026-11-09T10:01:00Z', $1)`, [j({ id: 'v1', commerceId: 'c1', modele: 'bienvenue' })])
   await db.query(`insert into public.evenements_jour (commerce_id, jour, type, n) values ('c1', '2026-11-09', 'scan', 7), ('c1', '2026-11-09', 'tirage', 1)`)
+  await db.query(`insert into public.compteurs_publics (cle, debut, n) values ('carte:k1', '2026-11-11T10:00:00Z', 15), ('lecture:203.0.113.7', '2026-11-11T10:00:00Z', 60)`)
 }
 
 async function compter(db: PGlite): Promise<Record<string, number>> {
@@ -87,19 +88,19 @@ describe('P0-S5 : export complet puis restauration sur Postgres (PGlite)', () =>
     await cible.close()
   })
 
-  test('les 14 tables sauvegardées = exactement les tables créées par les migrations, dans l’ordre demandé', async () => {
+  test('les 15 tables sauvegardées = exactement les tables créées par les migrations, dans l’ordre demandé', async () => {
     assert.deepEqual(TABLES_SAUVEGARDE.map((t) => t.nom), ['meta', 'commerces', 'clients', 'tirages', 'avis', 'equipe', 'journal',
-      'menus', 'parrainages', 'demandes_rattrapage', 'sessions_revoquees', 'tentatives_auth', 'envois', 'evenements_jour'])
+      'menus', 'parrainages', 'demandes_rattrapage', 'sessions_revoquees', 'tentatives_auth', 'envois', 'evenements_jour', 'compteurs_publics'])
     const { rows } = await source.query<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' order by 1`)
     assert.deepEqual(rows.map((r) => r.relname), TABLES_SAUVEGARDE.map((t) => t.nom).sort())
-    assert.deepEqual(migrationsARejouer(readdirSync(MIGRATIONS)).map((f) => f.slice(0, 4)), ['0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009'])
+    assert.deepEqual(migrationsARejouer(readdirSync(MIGRATIONS)).map((f) => f.slice(0, 4)), ['0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010'])
   })
 
-  test('format de l’export : en-tête, 14 tables, compteurs = lignes, toutes les colonnes (hash des PIN inclus)', () => {
+  test('format de l’export : en-tête, 15 tables, compteurs = lignes, toutes les colonnes (hash des PIN inclus)', () => {
     assert.equal(sauvegarde.format, 'asian-home-sauvegarde')
     assert.equal(sauvegarde.version, 1)
     assert.equal(sauvegarde.creeLe, '2026-11-11T03:00:00.000Z')
-    assert.equal(Object.keys(sauvegarde.tables).length, 14)
+    assert.equal(Object.keys(sauvegarde.tables).length, 15)
     for (const { nom } of TABLES_SAUVEGARDE) {
       assert.ok(sauvegarde.tables[nom].length >= 1, nom)
       assert.equal(sauvegarde.compteurs[nom], sauvegarde.tables[nom].length, nom)
@@ -171,6 +172,18 @@ describe('P0-S5 : jamais de sauvegarde ni de restauration incomplète', () => {
     }), /« clients » impossible : réseau coupé/)
   })
 
+  test('export : table `compteurs_publics` absente (migration 0010 non appliquée) → exportée vide, pas d’erreur', async () => {
+    // Revue Codex P0-S20 point 5 : la sauvegarde exigée AVANT la migration 0010 ne doit pas échouer justement
+    // parce que la table n'existe pas encore — les compteurs sont éphémères (une minute), aucune perte métier.
+    const s = await exporterSauvegarde(async (t) => {
+      if (t === 'compteurs_publics') throw new ErreurMigrationManquante('compteurs_publics', '0010_compteurs_publics.sql')
+      return []
+    })
+    assert.deepEqual(s.tables.compteurs_publics, [])
+    assert.equal(s.compteurs.compteurs_publics, 0)
+    assert.equal(Object.keys(s.tables).length, 15)
+  })
+
   test('restauration d’un export sans une table → erreur listant les tables manquantes, rien n’est écrit', async () => {
     const tables = Object.fromEntries(TABLES_SAUVEGARDE.map((t) => [t.nom, [] as Ligne[]]))
     delete tables.tirages
@@ -179,6 +192,25 @@ describe('P0-S5 : jamais de sauvegarde ni de restauration incomplète', () => {
     assert.deepEqual(validerSauvegarde(incomplete), { manquantes: ['tirages', 'avis'] })
     let ecritures = 0
     await assert.rejects(restaurerSauvegarde(incomplete, async () => ++ecritures), /table\(s\) manquante\(s\) : tirages, avis/)
+    assert.equal(ecritures, 0)
+  })
+
+  test('restauration d’un ancien export (14 tables, sans `compteurs_publics`) → acceptée, compteurs restaurés vides', async () => {
+    const tables = Object.fromEntries(TABLES_SAUVEGARDE.map((t) => [t.nom, [] as Ligne[]]))
+    delete tables.compteurs_publics
+    const ancien = { format: 'asian-home-sauvegarde', version: 1, creeLe: '2026-11-11T00:00:00Z', tables, compteurs: {} }
+    assert.deepEqual(validerSauvegarde(ancien), { manquantes: [] }, 'une table optionnelle absente n’est pas une erreur')
+    const ecrits = await restaurerSauvegarde(ancien, async () => 0)
+    assert.equal(ecrits.compteurs_publics, 0)
+  })
+
+  test('restauration d’un export avec `compteurs_publics` mal formé → refusé comme une table métier', async () => {
+    const tables = Object.fromEntries(TABLES_SAUVEGARDE.map((t) => [t.nom, [] as Ligne[]]))
+    ;(tables as Record<string, unknown>).compteurs_publics = { corrompu: true }
+    const corrompu = { format: 'asian-home-sauvegarde', version: 1, creeLe: '2026-11-11T00:00:00Z', tables, compteurs: {} }
+    assert.deepEqual(validerSauvegarde(corrompu), { manquantes: ['compteurs_publics'] }, 'seule l’absence est tolérée, pas la malformation')
+    let ecritures = 0
+    await assert.rejects(restaurerSauvegarde(corrompu, async () => ++ecritures), /table\(s\) manquante\(s\) : compteurs_publics/)
     assert.equal(ecritures, 0)
   })
 
@@ -406,6 +438,49 @@ describe('P0-S5 : CLI sauvegarde-base.mjs / restaurer-base.mjs', () => {
     } finally {
       absente = undefined
     }
+  })
+
+  test('table `compteurs_publics` absente côté Supabase → SAUVEGARDE OK, exportée vide (P0-S20)', async () => {
+    const dir = dossier()
+    absente = 'compteurs_publics'
+    try {
+      const s = await lancer('sauvegarde-base.mjs', ['--dir', dir], { ...envSupabase(), SAUVEGARDE_CLE_CHIFFREMENT: CLE })
+      assert.equal(s.code, 0, s.stderr)
+      assert.match(s.stdout, /SAUVEGARDE OK/)
+      assert.match(s.stdout, /compteurs_publics 0/)
+      sansSecret(s)
+      const fichiers = readdirSync(dir)
+      assert.equal(fichiers.length, 1)
+      const relu = JSON.parse(dechiffrerSauvegarde(gunzipSync(readFileSync(join(dir, fichiers[0]))).toString('utf8'), CLE)) as Sauvegarde
+      assert.deepEqual(relu.tables.compteurs_publics, [])
+      assert.equal(Object.keys(relu.tables).length, 15)
+    } finally {
+      absente = undefined
+    }
+  })
+
+  test('ancien export (14 tables, sans `compteurs_publics`) → restauration OK, avec et sans --verifier', async () => {
+    const dir = dossier()
+    const ancien: Sauvegarde = {
+      format: 'asian-home-sauvegarde',
+      version: 1,
+      creeLe: '2026-11-11T03:00:00.000Z',
+      tables: JSON.parse(JSON.stringify(tables)),
+      compteurs: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])),
+    }
+    delete ancien.tables.compteurs_publics
+    delete ancien.compteurs.compteurs_publics
+    const fichier = join(dir, 'asian-home-ancien.json.gz')
+    writeFileSync(fichier, gzipSync(chiffrerSauvegarde(JSON.stringify(ancien), CLE)))
+    for (const args of [[fichier, '--cible', 'pglite'], [fichier, '--cible', 'pglite', '--verifier']] as const) {
+      const r = await lancer('restaurer-base.mjs', [...args], { SAUVEGARDE_CLE_CHIFFREMENT: CLE })
+      assert.equal(r.code, 0, r.stderr)
+      assert.match(r.stdout, /RESTAURATION OK/)
+      sansSecret(r)
+    }
+    const r = await lancer('restaurer-base.mjs', [fichier, '--cible', 'pglite', '--verifier'], { SAUVEGARDE_CLE_CHIFFREMENT: CLE })
+    assert.match(r.stdout, /VÉRIFICATION OK — compteurs de la base = compteurs du fichier, pour les 15 tables\./)
+    assert.match(r.stdout, /compteurs_publics\s+0/)
   })
 
   test('plafond API inférieur à 1 000 → export refusé (compteur exact), aucun fichier (revue Codex P0-S5)', async () => {

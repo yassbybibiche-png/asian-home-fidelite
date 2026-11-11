@@ -412,6 +412,25 @@ Sans elle, tout marche, mais les échecs d'accès client sont comptés **en mém
 avertissement `[securite]` dans les journaux). Annulation : `0009_auth_client.down.sql` (retire les seuls compteurs
 de portée `client`, remet la contrainte d'origine, garde les versions d'accès).
 
+### Migration 0010 (compteurs publics persistants, P0-S20) — à appliquer en production
+
+**Avant toute migration : une sauvegarde.** `node --env-file=.env scripts/sauvegarde-base.mjs` (voir « Sauvegarde /
+export » et `docs/SAUVEGARDE.md`) — à lancer par l'opérateur, jamais par un lot automatique. **Ne pas appliquer sans
+cette sauvegarde : la procédure a été testée sur Postgres local (PGlite, `tests/migration-pglite.test.ts`), pas sur la
+base de production — aucune migration n'est appliquée par ce lot, ni en production, ni ailleurs.**
+Puis Supabase → **SQL Editor** → coller `supabase/migrations/0010_compteurs_publics.sql` → **Run** (rejouable). Elle
+crée la table `compteurs_publics` (`cle`, `debut`, `n` ; RLS activée, seul `service_role` y a droit ; la clé reprend
+l'identifiant déjà utilisé par l'anti-bruteforce — IP, contact, identifiant de carte — sans nom ni contenu client).
+Vérifier : `select count(*) from public.compteurs_publics;` → 0 ligne, sans erreur (et les logs Render ne montrent
+plus l'avertissement `[securite] compteurs publics comptés en mémoire seulement` au démarrage). Sans elle, tout
+marche, mais les compteurs des routes publiques sont **en mémoire seulement** (perdus au redémarrage ; avertissement
+`[securite]` dès le démarrage). La sauvegarde exigée avant la migration n'échoue pas pour autant : `compteurs_publics`
+est une table **optionnelle** de la sauvegarde (compteurs éphémères d'une minute) — exportée vide tant que la migration
+n'est pas appliquée, et un ancien export à 14 tables se restaure sans elle. Annulation :
+`0010_compteurs_publics.down.sql` (supprime la table : les compteurs en cours sont perdus — ce ne sont que des
+fenêtres d'une minute — sans effet sur les données métier). La sauvegarde couvre désormais **15 tables** (la 0010
+ajoute `compteurs_publics` aux 14 de P0-S5).
+
 ### Migration 0003 (modules caisse / points / équipe / messages / menu) — à appliquer en production
 
 La base Supabase en ligne ne se met pas à jour toute seule. Depuis P0-S11, **le serveur refuse de démarrer** en Supabase
@@ -558,8 +577,8 @@ compte sur deux compteurs, rangés dans la table `tentatives_auth` (migration 00
 - Table absente (0006 pas appliquée sous Supabase) ou base indisponible : comptage **en mémoire** (comme avant P0-S2, perdu
   au redémarrage), un avertissement dans les logs, jamais de 500.
 
-**Routes publiques** — compteurs en mémoire par fenêtre fixe d'une minute (perdus au redémarrage, sans gravité à cette
-échelle) ; au-delà : 429 + `Retry-After` (secondes). Seuils dans `LIMITES_PUBLIQUES` (`server/app.ts`) :
+**Routes publiques** — compteurs par fenêtre fixe d'une minute (P0-S20 : **persistants**, voir ci-dessous) ; au-delà :
+429 + `Retry-After` (secondes). Seuils dans `LIMITES_PUBLIQUES` (`server/app.ts`) :
 
 | Seuil | Valeur / min | Routes | Pourquoi cette valeur |
 |---|---|---|---|
@@ -577,6 +596,25 @@ Les routes authentifiées (gérant, caisse, admin) ne sont **pas** limitées : l
 tout rejouer d'un coup. L'IP est celle de `X-Forwarded-For` derrière Render (`TRUST_PROXY`) ; si Render ne réécrit pas
 cet en-tête, un attaquant peut la falsifier (non vérifié, audit F-06) : les compteurs par carte, par contact et par
 cible tiennent quand même.
+
+**Persistance des compteurs publics (P0-S20, migration 0010)** — la limitation reste appliquée **en mémoire** (aucune
+latence ajoutée à la requête) ; un compteur n'est écrit en base qu'à partir de la **moitié de son seuil**
+(`SEUIL_PERSISTANCE_COMPTEURS = 1/2`, `server/app.ts`), en arrière-plan, sans jamais bloquer la requête. En trafic
+normal : **zéro écriture** — une page qui se recharge toutes les 10 s fait 6 lectures/min pour un seuil de 30
+(`lectureParCarte`), 6 < 15. Une ligne = 73 à 92 octets de JSON (mesuré, clé + horodatage + nombre) ; un compteur chaud
+ou bloqué, lui, survit à un redémarrage ou un réveil Render (rechargé au démarrage, fenêtres passées ignorées). Les
+écritures par clé et par fenêtre sont **bornées** : le compteur sature à son seuil (une requête déjà bloquée ne
+ré-écrit pas — au plus `seuil − seuil/2 + 1` écritures par clé et par minute) et **sérialisées par clé** (une écriture
+ancienne ne peut pas écraser un blocage plus récent). Les lignes dont la fenêtre est passée sont supprimées à chaque
+écriture et au démarrage. La clé reprend l'identifiant déjà utilisé par l'anti-bruteforce (`tentatives_auth`, 0006) :
+IP, contact normalisé (téléphone ou e-mail en clair), identifiant de carte — sans nom, sans code gagnant, sans contenu
+client. **Limites honnêtes :** une seule instance (Render aujourd'hui) — à plusieurs instances, chaque instance
+garderait ses propres compteurs en mémoire et la base ne servirait qu'au redémarrage, pas à la limitation distribuée,
+et l'écriture d'une autre instance peut encore ramener un compteur en arrière. Table absente (0010 pas appliquée) ou
+base indisponible : comptage **en mémoire** (perdu au redémarrage), avec un avertissement `[securite]` **dès le
+démarrage**, jamais de 500. La persistance en base a été préférée à la documentation seule parce que le coût mesuré est
+négligeable en trafic normal (zéro écriture) et borné en attaque (voir la borne ci-dessus, la 429 arrêtant ensuite le
+compteur).
 
 ### Migration 0006 (anti-bruteforce persistant) — à appliquer en production
 
@@ -771,7 +809,7 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
   inactivité, on veut des **sauvegardes quotidiennes** (7 jours gardés — le gratuit n'en a **aucune**), ou l'usage approche
   500 Mo de base / 5 Go d'egress (page Usage du dashboard). Le Pro enlève la mise en pause, ajoute les sauvegardes,
   8 Go de disque, 250 Go d'egress, support e-mail, 10 $ de crédits de calcul inclus. **Dépense à valider par vous.**
-- Sans Pro, sauvegarde complète = **`npm run sauvegarde`** (P0-S5, les 14 tables via l'API, chiffrée) : voir
+- Sans Pro, sauvegarde complète = **`npm run sauvegarde`** (P0-S5, les 15 tables via l'API, chiffrée) : voir
   « Sauvegarde / export » et `docs/SAUVEGARDE.md`. En complément possible : `pg_dump` ou `supabase db dump` (CLI
   Supabase) avec le mot de passe de base de l'étape a.
 
@@ -790,7 +828,7 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
 
 - `GET /api/v1/commerces/:id/export.csv` (PIN) : liste des clients, à télécharger régulièrement (ouvrable dans Excel).
 - Supabase Free : **aucune sauvegarde automatique** côté Supabase. **Sauvegarde complète (P0-S5)** :
-  `node --env-file=.env scripts/sauvegarde-base.mjs` (ou `npm run sauvegarde`, variables déjà exportées) exporte les 14 tables (toutes lignes, toutes
+  `node --env-file=.env scripts/sauvegarde-base.mjs` (ou `npm run sauvegarde`, variables déjà exportées) exporte les 15 tables (toutes lignes, toutes
   colonnes) via PostgREST + clé service_role, en `sauvegardes/asian-home-<horodatage>.json.gz` (gitignoré), chiffré
   AES-256-GCM si `SAUVEGARDE_CLE_CHIFFREMENT` est définie, rétention 30 jours / 30 fichiers ; échec → `ERREUR SAUVEGARDE`,
   sortie 1, aucun fichier. Vérification : `npm run restaurer -- <fichier> --cible pglite --verifier` (base locale

@@ -69,6 +69,8 @@ const SCHEMA: Record<string, { pk: string; uniques: Unicite[]; fk?: [string, str
   },
   // 0008_mesure.sql — écrite seulement par la fonction `incrementer_evenement` (POST /rpc/…), clé (commerce_id, jour, type).
   evenements_jour: { pk: 'jour', uniques: [], fk: [['commerce_id', 'commerces']] },
+  // 0010_compteurs_publics.sql — clé du compteur (`lecture:<ip>`, `carte:<id>`…), fenêtre d'une minute, nombre.
+  compteurs_publics: { pk: 'cle', uniques: [] },
 }
 
 interface Requete {
@@ -79,8 +81,8 @@ interface Requete {
   corps: unknown
 }
 
-/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` à `sans0008` : idem pour 0004 à 0008. */
-function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, sans0006 = false, sans0007 = false, sans0008 = false } = {}) {
+/** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` à `sans0008` : idem pour 0004 à 0008. `sans0010` : idem pour 0010 (compteurs publics). */
+function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, sans0006 = false, sans0007 = false, sans0008 = false, sans0010 = false } = {}) {
   const absentes = new Set([
     ...(sans0003 ? ['equipe', 'journal', 'menus'] : []),
     ...(sans0004 ? ['parrainages', 'demandes_rattrapage'] : []),
@@ -88,6 +90,7 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
     ...(sans0006 ? ['tentatives_auth'] : []),
     ...(sans0007 ? ['envois'] : []),
     ...(sans0008 ? ['evenements_jour'] : []),
+    ...(sans0010 ? ['compteurs_publics'] : []),
   ])
   const tables: Record<string, Ligne[]> = Object.fromEntries(Object.keys(SCHEMA).map((t) => [t, []]))
   const requetes: Requete[] = []
@@ -1475,6 +1478,172 @@ describe('P0-S18 : pagination serveur Supabase (plafond PostgREST de 1 000 ligne
       assert.ok(texte.includes('Client 1049'), 'le dernier client est dans l’export')
     } finally {
       await app.fermer()
+    }
+  })
+})
+
+// ---------- Persistance des compteurs publics (P0-S20) ----------
+
+describe('P0-S20 : compteurs publics persistants (Supabase)', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-p0s20-'))
+  after(() => rmSync(dossier, { recursive: true, force: true }))
+  const maintenant = new Date(2026, 10, 9, 12, 0)
+  const iso = (d: Date) => d.toISOString()
+  const DEBUT = iso(maintenant)
+
+  /** Serveur HTTP sur le faux PostgREST `f`, horloge pilotée, seuil de lecture par carte = 3 (seuil de persistance : 2). */
+  async function demarrerSb(f: ReturnType<typeof fauxPostgrest>, horloge: { t: Date }, transport?: typeof fetch) {
+    const app = await creerServeur({
+      fichierDb: join(dossier, 'ne-doit-pas-exister.db'),
+      supabase: { url: URL_SB, cleServiceRole: CLE, fetch: transport ?? f.fetch },
+      adminPin: ADMIN,
+      pinInitial: '1234',
+      version: 'test',
+      maintenant: () => horloge.t,
+      limitesPubliques: { lectureParCarte: 3 },
+    })
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = {}) {
+      const r = await fetch(base + chemin, {
+        method: methode,
+        headers: { 'Content-Type': 'application/json', ...entetes },
+        body: corps === undefined ? undefined : JSON.stringify(corps),
+      })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    return { app, api }
+  }
+
+  test('stockage : upsert + lecture + purge des fenêtres passées, clé seule (identifiant, sans contenu client)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    assert.equal(await st.schemaCompteursPublics(), true)
+    assert.deepEqual(await st.compteursPublics(), [])
+    await st.enregistrerCompteurPublic({ cle: 'lecture:203.0.113.7', debut: DEBUT, n: 60 }, iso(new Date(maintenant.getTime() - 60_000)))
+    await st.enregistrerCompteurPublic({ cle: 'carte:cl-abc', debut: DEBUT, n: 15 }, iso(new Date(maintenant.getTime() - 60_000)))
+    assert.deepEqual(await st.compteursPublics(), [
+      { cle: 'carte:cl-abc', debut: DEBUT, n: 15 },
+      { cle: 'lecture:203.0.113.7', debut: DEBUT, n: 60 },
+    ], 'lecture triée par clé (ordre déterministe de la pagination)')
+    // Upsert : même clé, nouvelle fenêtre, nouveau nombre — une seule ligne.
+    await st.enregistrerCompteurPublic({ cle: 'carte:cl-abc', debut: iso(new Date(maintenant.getTime() + 60_000)), n: 1 }, iso(new Date(maintenant.getTime() - 60_000)))
+    assert.equal((await st.compteursPublics()).length, 2)
+    assert.equal(f.tables.compteurs_publics.find((l) => l.cle === 'carte:cl-abc')!.n, 1)
+    for (const l of f.tables.compteurs_publics) assert.deepEqual(Object.keys(l).sort(), ['cle', 'debut', 'n'], 'ni nom, ni code gagnant, ni contenu client — la clé seule (identifiant déjà utilisé par l’anti-bruteforce)')
+    // Purge : une écriture supprime les lignes dont la fenêtre est passée (début < purgerAvant).
+    await st.enregistrerCompteurPublic({ cle: 'lecture:203.0.113.8', debut: iso(new Date(maintenant.getTime() + 120_000)), n: 1 }, iso(new Date(maintenant.getTime() + 60_000)))
+    assert.deepEqual(
+      (await st.compteursPublics()).map((l) => l.cle).sort(),
+      ['carte:cl-abc', 'lecture:203.0.113.8'],
+      'la fenêtre de 12:00 est purgée, celles de 12:01 et 12:02 gardées',
+    )
+  })
+
+  test('stockage : lecture paginée au-delà du plafond PostgREST (1 000 lignes)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    // 1 001 lignes, insérées dans l'ordre inverse du tri : la lecture doit toutes les rendre, triées par clé.
+    for (let i = 1000; i >= 0; i--) {
+      f.tables.compteurs_publics.push({ cle: `carte:cl-${String(i).padStart(4, '0')}`, debut: DEBUT, n: 1 })
+    }
+    const lignes = await st.compteursPublics()
+    assert.equal(lignes.length, 1001, 'sans pagination, la 1 001e ligne serait perdue (plafond PostgREST)')
+    assert.deepEqual(lignes.map((l) => l.cle), lignes.map((l) => l.cle).sort(), 'tri déterministe par clé (pages stables)')
+    assert.equal(lignes.at(-1)!.cle, 'carte:cl-1000')
+  })
+
+  test('stockage sans la migration 0010 : lecture vide, écriture refusée, repli mémoire', async () => {
+    const f = fauxPostgrest({ sans0010: true })
+    const st = ouvrir(f)
+    assert.equal(await st.schemaCompteursPublics(), false)
+    assert.deepEqual(await st.compteursPublics(), [])
+    await assert.rejects(st.enregistrerCompteurPublic({ cle: 'lecture:1.2.3.4', debut: DEBUT, n: 1 }, DEBUT), (e: Error) => e instanceof ErreurMigrationManquante && /0010_compteurs_publics/.test(e.message))
+  })
+
+  test('HTTP : compteur chaud survit au redémarrage, blocage aussi ; sans migration, mémoire seulement', async () => {
+    const f = fauxPostgrest()
+    const horloge = { t: new Date(2026, 10, 9, 12, 0) }
+    let srv = await demarrerSb(f, horloge)
+    let clientId: string
+    try {
+      const c = (await srv.api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
+      clientId = c.id
+      assert.equal((await srv.api('GET', `/cartes/${clientId}`)).statut, 200)
+      assert.equal((await srv.api('GET', `/cartes/${clientId}`)).statut, 200)
+      // 2 lectures = moitié du seuil (3) → persisté ; on laisse l'écriture arriver avant le redémarrage.
+      await new Promise((r) => setTimeout(r, 50))
+      assert.deepEqual(f.tables.compteurs_publics.map((l) => [l.cle, l.n]), [[`carte:${clientId}`, 2]])
+    } finally {
+      await srv.app.fermer()
+    }
+    srv = await demarrerSb(f, horloge)
+    try {
+      assert.equal((await srv.api('GET', `/cartes/${clientId}`)).statut, 200, '3e lecture de la fenêtre : rechargée depuis la base')
+      assert.equal((await srv.api('GET', `/cartes/${clientId}`)).statut, 429, '4e lecture : toujours bloquée après redémarrage')
+      assert.equal((await srv.api('GET', `/cartes/${clientId}`)).statut, 429, 'blocage rechargé : immédiat après redémarrage')
+    } finally {
+      await srv.app.fermer()
+    }
+
+    // Sans la migration : le serveur démarre quand même, compte en mémoire, et perd tout au redémarrage.
+    // L'absence de la table est avertie DÈS le démarrage (revue Codex point 6), pas au premier compteur chaud.
+    const g = fauxPostgrest({ sans0010: true })
+    const alertes: string[] = []
+    const warnOrigine = console.warn
+    console.warn = (...a: unknown[]) => {
+      alertes.push(a.map(String).join(' '))
+    }
+    let srvG: Awaited<ReturnType<typeof demarrerSb>>
+    try {
+      srvG = await demarrerSb(g, horloge)
+    } finally {
+      console.warn = warnOrigine
+    }
+    assert.ok(
+      alertes.some((m) => /compteurs publics comptés en mémoire seulement/.test(m)),
+      `avertissement de démarrage attendu, reçu : ${JSON.stringify(alertes)}`,
+    )
+    try {
+      const c = (await srvG.api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
+      clientId = c.id
+      assert.equal((await srvG.api('GET', `/cartes/${clientId}`)).statut, 200)
+      assert.equal((await srvG.api('GET', `/cartes/${clientId}`)).statut, 200)
+    } finally {
+      await srvG.app.fermer()
+    }
+    srvG = await demarrerSb(g, horloge)
+    try {
+      for (let i = 0; i < 3; i++) assert.equal((await srvG.api('GET', `/cartes/${clientId}`)).statut, 200, 'compteur perdu au redémarrage : 3 lectures passent à nouveau')
+      assert.equal((await srvG.api('GET', `/cartes/${clientId}`)).statut, 429)
+    } finally {
+      await srvG.app.fermer()
+    }
+  })
+
+  test('HTTP : une écriture ancienne retardée ne peut pas annuler un blocage récent (sérialisation par clé)', async () => {
+    const f = fauxPostgrest()
+    const horloge = { t: new Date(2026, 10, 9, 12, 0) }
+    // Le 1er upsert (n = 2) est retardé de 150 ms, le 2e (n = 3) passe immédiatement : sans sérialisation par clé,
+    // l'ancienne écriture arriverait après et la base finirait à n = 2 (revue Codex point 4).
+    let retarderPremierUpsert = true
+    const transport: typeof fetch = async (url, init) => {
+      if (retarderPremierUpsert && String(url).includes('/rest/v1/compteurs_publics') && init?.method === 'POST') {
+        retarderPremierUpsert = false
+        await new Promise((r) => setTimeout(r, 150))
+      }
+      return f.fetch(url, init)
+    }
+    const srv = await demarrerSb(f, horloge, transport)
+    try {
+      const c = (await srv.api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
+      assert.equal((await srv.api('GET', `/cartes/${c.id}`)).statut, 200)
+      assert.equal((await srv.api('GET', `/cartes/${c.id}`)).statut, 200)
+      assert.equal((await srv.api('GET', `/cartes/${c.id}`)).statut, 200)
+      await new Promise((r) => setTimeout(r, 300))
+      assert.deepEqual(f.tables.compteurs_publics.map((l) => [l.cle, l.n]), [[`carte:${c.id}`, 3]], 'l’écriture n = 3, partie après, est bien la dernière appliquée')
+    } finally {
+      await srv.app.fermer()
     }
   })
 })

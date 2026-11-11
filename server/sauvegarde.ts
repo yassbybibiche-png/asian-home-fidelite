@@ -3,8 +3,12 @@
 // `scripts/sauvegarde-base.mjs`, PGlite dans `scripts/restaurer-base.mjs` et dans les tests.
 // Procédure complète, RPO / RTO et limites : docs/SAUVEGARDE.md.
 //
-// Règle d'or : JAMAIS de sauvegarde silencieusement incomplète. Une table absente (migration non appliquée) ou
-// illisible fait échouer l'export entier ; une sauvegarde à laquelle il manque une table est refusée à la restauration.
+// Règle d'or : JAMAIS de sauvegarde silencieusement incomplète. Une table MÉTIER absente (migration non appliquée)
+// ou illisible fait échouer l'export entier ; une sauvegarde à laquelle il manque une table métier est refusée à la
+// restauration. Seule exception : `compteurs_publics` (`optionnelle`), des compteurs éphémères d'une minute — absente,
+// elle est exportée vide, et un ancien export sans elle se restaure vide (aucune donnée métier n'est perdue).
+// Sans cette exception, la sauvegarde exigée AVANT la migration 0010 échouerait justement parce que la table
+// n'existe pas encore (revue Codex P0-S20 point 5).
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto'
 
 export interface TableSauvegarde {
@@ -13,9 +17,15 @@ export interface TableSauvegarde {
   cle: string[]
   /** Colonnes `generated always as identity` : réinsérées avec OVERRIDING SYSTEM VALUE, jamais mises à jour. */
   generees: string[]
+  /**
+   * Table éphémère (P0-S20) : absente à l'export → exportée vide ; absente d'un ancien export → restaurée vide.
+   * Réservé aux tables dont le contenu est régénérable et sans valeur métier (compteurs d'une minute) ; toute autre
+   * table absente fait échouer l'export et refuse la restauration.
+   */
+  optionnelle?: boolean
 }
 
-/** Les 14 tables de supabase/migrations 0001 à 0008, dans l'ordre des clés étrangères (parents d'abord). */
+/** Les 15 tables de supabase/migrations 0001 à 0010, dans l'ordre des clés étrangères (parents d'abord). */
 export const TABLES_SAUVEGARDE: readonly TableSauvegarde[] = [
   { nom: 'meta', cle: ['cle'], generees: [] },
   { nom: 'commerces', cle: ['id'], generees: ['ordre'] },
@@ -31,6 +41,7 @@ export const TABLES_SAUVEGARDE: readonly TableSauvegarde[] = [
   { nom: 'tentatives_auth', cle: ['cle'], generees: [] },
   { nom: 'envois', cle: ['id'], generees: [] },
   { nom: 'evenements_jour', cle: ['commerce_id', 'jour', 'type'], generees: [] },
+  { nom: 'compteurs_publics', cle: ['cle'], generees: [], optionnelle: true },
 ]
 
 /** Toutes les colonnes : `*` côté PostgREST, `select *` (via to_jsonb) côté Postgres / PGlite. */
@@ -59,7 +70,8 @@ function estTableAbsente(e: unknown): boolean {
 }
 
 /**
- * Lit les 14 tables. Une seule table absente ou illisible → erreur qui la nomme : aucune sauvegarde partielle.
+ * Lit les 15 tables. Une seule table MÉTIER absente ou illisible → erreur qui la nomme : aucune sauvegarde partielle.
+ * Une table `optionnelle` absente est exportée vide (compteurs éphémères : aucune perte).
  * `maintenant` : injectable pour les tests.
  */
 export async function exporterSauvegarde(
@@ -68,12 +80,18 @@ export async function exporterSauvegarde(
 ): Promise<Sauvegarde> {
   const tables: Record<string, Ligne[]> = {}
   const compteurs: Record<string, number> = {}
-  for (const { nom } of TABLES_SAUVEGARDE) {
+  for (const t of TABLES_SAUVEGARDE) {
+    const nom = t.nom
     let lignes: Ligne[]
     try {
       lignes = await lireTable(nom)
     } catch (e) {
       if (estTableAbsente(e)) {
+        if (t.optionnelle) {
+          tables[nom] = []
+          compteurs[nom] = 0
+          continue
+        }
         throw new Error(`table « ${nom} » absente (migration non appliquée ?) — sauvegarde refusée : elle serait incomplète.`)
       }
       throw new Error(`lecture de la table « ${nom} » impossible : ${e instanceof Error ? e.message : String(e)}`)
@@ -85,17 +103,24 @@ export async function exporterSauvegarde(
   return { format: FORMAT_SAUVEGARDE, version: VERSION_SAUVEGARDE, creeLe: maintenant().toISOString(), tables, compteurs }
 }
 
-/** Vérifie format / version (erreur) et liste les tables absentes ou mal formées (tableau absent ou non-tableau). */
+/** Vérifie format / version (erreur) et liste les tables absentes ou mal formées. Une table `optionnelle` absente
+ * n'est pas une erreur ; présente mais mal formée, elle est refusée comme les autres. */
 export function validerSauvegarde(donnees: unknown): { manquantes: string[] } {
   if (!donnees || typeof donnees !== 'object') throw new Error('fichier de sauvegarde illisible (pas un objet JSON).')
   const s = donnees as Partial<Sauvegarde>
   if (s.format !== FORMAT_SAUVEGARDE) throw new Error(`format de sauvegarde inconnu (attendu « ${FORMAT_SAUVEGARDE} »).`)
   if (s.version !== VERSION_SAUVEGARDE) throw new Error(`version de sauvegarde ${String(s.version)} non prise en charge (attendu ${VERSION_SAUVEGARDE}).`)
   const tables = s.tables && typeof s.tables === 'object' ? s.tables : {}
-  return { manquantes: TABLES_SAUVEGARDE.map((t) => t.nom).filter((nom) => !Array.isArray((tables as Record<string, unknown>)[nom])) }
+  const optionnelles = new Set(TABLES_SAUVEGARDE.filter((t) => t.optionnelle).map((t) => t.nom))
+  return {
+    manquantes: TABLES_SAUVEGARDE.map((t) => t.nom).filter((nom) => {
+      const v = (tables as Record<string, unknown>)[nom]
+      return !Array.isArray(v) && !(v === undefined && optionnelles.has(nom))
+    }),
+  }
 }
 
-/** Écrit table par table (ordre des clés étrangères). Refuse d'écrire quoi que ce soit si une table manque. */
+/** Écrit table par table (ordre des clés étrangères). Refuse d'écrire quoi que ce soit si une table MÉTIER manque ; une table `optionnelle` absente d'un ancien export est restaurée vide. */
 export async function restaurerSauvegarde(
   donnees: unknown,
   ecrireTable: (table: string, lignes: Ligne[]) => Promise<number>,
@@ -104,7 +129,10 @@ export async function restaurerSauvegarde(
   if (manquantes.length) throw new Error(`sauvegarde incomplète, restauration refusée — table(s) manquante(s) : ${manquantes.join(', ')}.`)
   const tables = (donnees as Sauvegarde).tables
   const compteurs: Record<string, number> = {}
-  for (const { nom } of TABLES_SAUVEGARDE) compteurs[nom] = tables[nom].length ? await ecrireTable(nom, tables[nom]) : 0
+  for (const { nom } of TABLES_SAUVEGARDE) {
+    const lignes = tables[nom] ?? []
+    compteurs[nom] = lignes.length ? await ecrireTable(nom, lignes) : 0
+  }
   return compteurs
 }
 

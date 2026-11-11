@@ -84,6 +84,16 @@ async function principal() {
   const { manquantes } = validerSauvegarde(sauvegarde)
   if (manquantes.length) throw new Error(`sauvegarde incomplète, restauration refusée — table(s) manquante(s) : ${manquantes.join(', ')}.`)
 
+  // Tables optionnelles (P0-S20) : un ancien export peut ne pas les avoir — normalisées à vide (et compteur à 0)
+  // avant les contrôles de compteurs et `--verifier`, qui lisent `sauvegarde.tables[nom].length` (sinon TypeError
+  // dans la transaction, revue Codex P0-S20).
+  for (const t of TABLES_SAUVEGARDE) {
+    if (!t.optionnelle) continue
+    sauvegarde.tables[t.nom] ??= []
+    sauvegarde.compteurs ??= {}
+    sauvegarde.compteurs[t.nom] ??= 0
+  }
+
   const { PGlite } = await import('@electric-sql/pglite')
   const db = o.fichierPglite ? new PGlite(resolve(o.fichierPglite)) : new PGlite()
   try {
@@ -129,7 +139,7 @@ async function principal() {
     console.log(`RESTAURATION OK (PGlite ${o.fichierPglite ? resolve(o.fichierPglite) : 'en mémoire'}) — sauvegarde du ${sauvegarde.creeLe} — ${total} lignes`)
     for (const { nom } of TABLES_SAUVEGARDE) console.log(`  ${nom.padEnd(20)} ${compteurs[nom]}`)
 
-    if (o.verifier) console.log('VÉRIFICATION OK — compteurs de la base = compteurs du fichier, pour les 14 tables.')
+    if (o.verifier) console.log('VÉRIFICATION OK — compteurs de la base = compteurs du fichier, pour les 15 tables.')
   } finally {
     await db.close()
   }
