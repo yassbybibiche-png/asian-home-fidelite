@@ -397,8 +397,9 @@ describe('Messages, menu, apparence (serveur)', () => {
     assert.equal(compterPlats(pub), 81)
     const lus = pub.categories.flatMap((c: CategorieMenu) => c.produits.map((p) => [p.nom, p.prix]))
     assert.deepEqual(lus, officiel.categories.flatMap((c) => c.produits.map((p) => [p.nom, p.prix])))
-    assert.equal(lus.filter(([, prix]: [string, number | null]) => prix === null).length, 3)
-    assert.deepEqual(lus.find(([nom]: [string]) => nom === '6 Maki Gold'), ['6 Maki Gold', 10000])
+    assert.equal(lus.filter(([, prix]: [string, number | null]) => prix === null).length, 5)
+    assert.deepEqual(lus.find(([nom]: [string]) => nom === '6 Maki Gold'), ['6 Maki Gold', null])
+    assert.deepEqual(lus.find(([nom]: [string]) => nom === 'Riz Thaï'), ['Riz Thaï', null])
     // Le même menu, réimporté depuis son export CSV, est accepté tel quel par le serveur.
     const csv = menuDepuisCsv(menuEnCsv(pub), AH, horloge)
     assert.equal((await srv.api('PUT', `/commerces/${AH}/menu`, { categories: csv.categories }, PIN)).statut, 200)

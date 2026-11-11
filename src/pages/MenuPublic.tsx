@@ -9,7 +9,7 @@ import { badgesPlat, boutonsMenu, categorieEffective, categorieMidi, estHeureMen
 import { LogoCommerce, PiedPublic } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
 import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
-import { estSignature, menuReelAsianHome } from '../data/menu-reel'
+import { estSignature, masquerPrixNonConfirmes, menuReelAsianHome } from '../data/menu-reel'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
 
@@ -72,12 +72,15 @@ export function MenuAffiche({
   setOuvert: (s: string | null) => void
 }) {
   // Menu enregistré vide chez Asian Home : on affiche la carte officielle du restaurant
-  // (relevée le 10/11/2026, avec ses prix ; les 3 plats hors carte restent « Prix sur place »).
+  // (relevée le 10/11/2026, avec ses prix ; 5 plats restent « Prix sur place » : les 3 hors carte
+  // + 2 prix imprimés non confirmés masqués, P1-M1).
   // Dès que le commerçant enregistre son propre menu, c'est le sien qui s'affiche.
   const menuEnregistre = menu.categories.some((c) => c.produits.length > 0)
   const asianHome = estAsianHome(commerce)
   const repliReel = !menuEnregistre && asianHome
-  const menuAffiche = useMemo(() => (repliReel ? menuReelAsianHome() : menu), [repliReel, menu])
+  // P1-M1 : les prix imprimés non confirmés sont masqués quel que soit le menu affiché
+  // (carte de repli ou menu enregistré avant le lot) — jamais 8,90 € / 100,00 € sans confirmation.
+  const menuAffiche = useMemo(() => masquerPrixNonConfirmes(repliReel ? menuReelAsianHome() : menu), [repliReel, menu])
   const bandeauPrix = useMemo(() => bandeauPrixManquants(menuAffiche), [menuAffiche])
   const categories = useMemo(
     () => filtrerMenu(menuAffiche.categories.filter((c) => c.produits.length), recherche),

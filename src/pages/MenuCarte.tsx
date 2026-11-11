@@ -134,7 +134,10 @@ export default function MenuCarte() {
           <h2 className="titre-carte">Carte officielle du restaurant</h2>
           <p className="text-sm text-gray-700">
             Charge les {COMPTE_PLATS_REELS} plats de la carte officielle d’Asian Home dans l’éditeur ci-dessous, avec les prix relevés le 10/11/2026 sur
-            la carte du restaurant. 2 prix sont à confirmer : Riz Thaï 8,90 € et 6 Maki Gold 100,00 €. Les 3 plats absents de la carte (Thaï-sty
+            la carte du restaurant. 2 prix imprimés ne sont pas confirmés et restent masqués (« Prix sur place ») dans le menu public tant que vous
+            ne les confirmez pas : Riz Thaï (8,90 € imprimés) et 6 Maki Gold (100,00 € imprimés — probable coquille pour 10,00 €). Saisissez le prix
+            confirmé dans l’éditeur ci-dessous pour l’afficher ; si le prix confirmé est exactement la valeur imprimée, prévenez l’équipe : par
+            sécurité, cette valeur reste masquée tant qu’elle n’est pas validée côté application. Les 3 plats absents de la carte (Thaï-sty
             Krusty, Bœuf Basilic, Boisson 33cl) sont conservés sans prix dans « Hors carte (prix à confirmer) ».
           </p>
           <button
