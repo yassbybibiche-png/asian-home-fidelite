@@ -6,6 +6,15 @@ Mesuré le **11/11/2026** sur le commit de `autonome/integration` qui contient P
 `tests/scores-p0-u0.test.ts` vérifie que les chiffres de bundle ci-dessous correspondent
 à un build frais à 5 % près.
 
+**Re-mesure P0-D1 (11/11/2026 ~07:16 UTC, 1 passe)** : thème noir+magenta + correctif
+404 en place — captures dans `node_modules/.cache/mesure-p0-d1/` (`jouer.png`, `gain.png`,
+`carte.png`, `caisse.png`, `menu.png`, `tableau-de-bord.png`, `clients.png`,
+`roulette.png`, `reglages.png`), résultats dans `resultats.json` du même dossier.
+Erreurs console : **0** (le 404 jouer → carte a disparu). Les temps de cette passe ne
+sont PAS retenus : `npm test` tournait en parallèle sur la même VM (1,5 CPU partagé),
+les temps sont donc gonflés (premier affichage `#/jouer` 6,06 s, LCP 6,03 s,
+validation caisse 14,9 s) et non comparables aux 5 passes P0-U0.
+
 ## Protocole
 
 - **Appareil simulé** : Pixel 7 (Playwright), `reducedMotion: reduce`, service workers bloqués.
@@ -45,18 +54,18 @@ Mesuré le **11/11/2026** sur le commit de `autonome/integration` qui contient P
   Pas de mesure sur téléphone réel — à remplacer par la mesure téléphone
   (protocole : même parcours sur le staging, chronomètre + comptage des taps à la main).
 
-## Bundle (build frais, mode par défaut, 11/11/2026)
+## Bundle (build frais, mode par défaut, 11/11/2026 — après P0-D1)
 
 Définition unique : **JS initial non gzipé** = script d'entrée de `index.html` +
 ses imports statiques (méthode `fichiersInitiaux` de
 `tests/performance-bundle-p2-q2.test.ts`, pas les `import()` dynamiques) ;
 **CSS** = la feuille de `dist/assets` ; **total** = JS initial + CSS.
 
-- JS initial non gzipé : 471651 o (460,6 Ko) — `index-DNYfuSRB.js` 349107 o +
-  `ui-C2H9q_Cz.js` 121945 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
-- CSS non gzipé : 64206 o (62,7 Ko) — `index-BJXa1XcJ.css`.
-- Total initial : 535857 o (523,3 Ko).
-- JS total (tous chunks) : 779766 o (761,5 Ko) ; 22 chunks ; plus gros chunk : 349107 o
+- JS initial non gzipé : 472428 o (461,4 Ko) — `index-CkC0YEsb.js` 349193 o +
+  `ui-D9uK5kXs.js` 122636 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
+- CSS non gzipé : 64672 o (63,2 Ko) — `index-DQdUu_ya.css`.
+- Total initial : 537100 o (524,5 Ko).
+- JS total (tous chunks) : 780638 o (762,3 Ko) ; 22 chunks ; plus gros chunk : 349193 o
   (limite test : 500 000 o — respectée).
 - Repères historiques : avant P2-Q2 601720 o ; après P2-Q2 450,2 Ko (JS initial).
   Le JS initial a repris ~10 Ko depuis (lots P0-S10 et suivants).
@@ -64,7 +73,7 @@ ses imports statiques (méthode `fichiersInitiaux` de
 
 ## Couverture de tests
 
-Suite verte : **950/950** (`npm test`, typechecks inclus).
+Suite verte : **968/968** (`npm test`, typechecks inclus — 950 avant P0-D1, +15 thème, +3 correctif 404).
 
 - Couverture globale : 97,84 % lignes / 91,43 % branches / 92,92 % fonctions
   (`node --test --experimental-test-coverage`, suite verte, 11/11/2026).
@@ -86,6 +95,12 @@ Suite verte : **950/950** (`npm test`, typechecks inclus).
   dans un lot ultérieur — pas dans ce lot de mesure.**
 - Aucune autre erreur console, aucune requête échouée, aucun `pageerror` sur les
   5 passes (pages client, caisse, back-office — collecteurs identiques sur les trois).
+
+**Re-mesure P0-D1 (11/11/2026 ~07:16 UTC, 1 passe, `node_modules/.cache/mesure-p0-d1/`) :
+0 erreur console, 0 requête échouée** — le correctif (`JouerApi` ne charge le commerce
+que si `page === 'jouer'`) fait disparaître le 404. Confirmé aussi par le test E2E
+`tests-e2e/scan-gain-carte.spec.ts` (aucune requête ≥ 400 sur le parcours complet ;
+sans le correctif, ce même test échoue — contrôle négatif vérifié).
 
 ## npm audit
 
@@ -171,6 +186,29 @@ Noté sur les captures Pixel 7 du 11/11/2026 (commerce de test, sans logo ni men
 clientes (noir + doré + rouge laque) mais le fond de page reste clair/ivoire et le
 magenta est absent partout.
 
+## Cohérence DA /10 par écran — après P0-D1 (re-mesure 11/11/2026 ~07:16 UTC, 1 passe)
+
+Noté sur les captures Pixel 7 de `node_modules/.cache/mesure-p0-d1/` (même commerce
+de test, sans logo ni menu — mêmes limites que la mesure initiale).
+
+| Écran | Note | Justification (une ligne) |
+| --- | --- | --- |
+| Jouer | 8/10 | Héros noir+magenta et roue entièrement magenta réussis ; corps de page encore clair, bloc initiales « M1 » sans logo, roue à 1 secteur = disque magenta uni. |
+| Carte | 8/10 | Bandeau noir→magenta, tampon posé et progression magenta, encart « À retirer au comptoir » rose pâle ; corps ivoire, encart palier rouge conservé. |
+| Caisse | 7/10 | Bouton primaire magenta bien visible, vert de validation conservé ; écran sinon clair, en-tête noir hors de la capture. |
+| Menu public | 7/10 | Héros noir+magenta réussi, lien magenta ; commerce de test sans menu (état vide mesuré, pas le vrai menu), fond clair. |
+| Tableau de bord | 8/10 | En-tête noir, liserés magenta sur chaque carte, navigation mobile magenta ; fond clair, serif/sans-serif mélangés. |
+| Clients | 8/10 | Bouton primaire, pilule sélectionnée, progression et navigation magenta ; fond clair. |
+| Roulette (back-office) | 7/10 | QR net, bouton primaire magenta, navigation magenta ; fond clair, formulaire inchangé. |
+| Réglages | 7/10 | Bouton « Enregistrer » magenta, logo magenta, aide « noire et magenta » à jour ; formulaire toujours gris/blanc. |
+
+**Moyenne : 7,5/10 (était 6,1/10).** Le magenta est désormais présent sur tous les
+écrans, le doré a disparu, les contrastes sont AA — mais la cible ≥ 9/10 n'est pas
+atteinte : les corps de page restent clairs/ivoire par choix (lisibilité de travail
+côté commerçant, AUDIT §6.3) et le commerce de test n'a ni logo ni vrai menu. Aller
+plus loin demanderait des corps sombres côté client et/ou le vrai contenu Asian Home —
+hors périmètre de P0-D1, à trancher en P1.
+
 ## Seuils de réussite (définis avant la refonte)
 
 | Parcours / métrique | Seuil | Mesure initiale |
@@ -179,9 +217,9 @@ magenta est absent partout.
 | Premier affichage `#/jouer` en Slow 4G | < 4 s | 4,02–4,24 s (seuil non atteint) |
 | LCP `#/jouer` | < 2,5 s | 4,06–4,18 s |
 | Lighthouse mobile `#/jouer` | ≥ 95 (critère d'arrêt de la boucle) | 81 (76 à la 1re passe) |
-| Erreurs console | 0 | 1 (404 ci-dessus) |
-| Bundle initial (JS + CSS, non gzipé) | pas de régression vs 535857 o | 535857 o |
-| Note DA moyenne | ≥ 9/10 | 6,1/10 |
+| Erreurs console | 0 | 0 (re-mesure P0-D1 : 0 erreur, 0 requête échouée — seuil atteint) |
+| Bundle initial (JS + CSS, non gzipé) | pas de régression vs 535857 o | 537100 o (+0,23 % — pas de régression) |
+| Note DA moyenne | ≥ 9/10 | 7,5/10 (était 6,1/10 — seuil non atteint, voir § DA après P0-D1) |
 
 Un tour de la boucle d'amélioration ne fusionne que s'il améliore au moins une
 de ces métriques sans régresser les autres (AUDIT.md §7, boucle continue).

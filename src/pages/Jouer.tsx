@@ -412,15 +412,20 @@ function stockageSession(): Storage | null {
 }
 
 function JouerApi({ api }: { api: ClientApi }) {
-  const { param } = useRoute()
+  const { page, param } = useRoute()
   const [commerce, setCommerce] = useState<CommercePublic | null>(null)
   const [erreur, setErreur] = useState<'inconnu' | 'horsLigne' | null>(null)
 
   const charger = useCallback(() => {
+    // P0-D1 : la route peut déjà être #/carte/<id-client> quand ce composant se re-rend une
+    // dernière fois avant d'être démonté (les abonnements useRoute d'App et de JouerApi ne se
+    // mettent pas à jour dans le même rendu) : ne jamais appeler api.commerce avec
+    // l'identifiant client — c'était un 404 en console à chaque « Voir ma carte » après un gain.
+    if (page !== 'jouer') return
     if (!param) return setErreur('inconnu')
     setErreur(null)
     api.commerce(param).then(setCommerce, (e) => setErreur(e instanceof ErreurApi && e.statut === 404 ? 'inconnu' : 'horsLigne'))
-  }, [api, param])
+  }, [api, page, param])
   useEffect(charger, [charger])
   const { t } = useLangue()
 
