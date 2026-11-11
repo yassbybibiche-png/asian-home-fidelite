@@ -601,6 +601,42 @@ tout rejouer d'un coup. L'IP est celle de `X-Forwarded-For` derrière Render (`T
 cet en-tête, un attaquant peut la falsifier (non vérifié, audit F-06) : les compteurs par carte, par contact et par
 cible tiennent quand même.
 
+**Journal des lectures sensibles (P2-S15)** — un échantillon des lectures `GET /cartes/:id` et
+`GET /commerces` (liste) est journalisé (stdout, `console.info`, préfixe `[lecture-sensible]`) pour détecter
+une énumération (F-12) :
+
+| Ligne | Quand |
+|---|---|
+| `[lecture-sensible] carte id=<empreinte> ip=… statut=…` | chaque lecture de carte échantillonnée (200, 401, 404, 429…) |
+| `[lecture-sensible] commerces ip=… statut=… nb=…` | chaque lecture de la liste des commerces échantillonnée |
+
+- **Échantillonnage (volume)** : `journalLectures: { taux }` dans `creerServeur` (défaut **0,1** : 1 lecture
+  sur 10) ; 0 = rien, 1 = tout (tests) ; un taux non fini (`NaN`) retombe sur le défaut. À 0,1, une rafale
+  de 100 sondages laisse ~10 lignes — assez pour la détecter, sans noyer les logs en trafic normal (une
+  carte ouverte se recharge toutes les 10 s : 6 lectures/min → < 1 ligne/min en moyenne par carte active).
+  **Plafond : 600 lignes/min** (option `plafond`) — au-delà, les lignes sont comptées puis résumées en une
+  seule ligne à la minute suivante (`plafond … lignes/min atteint : N ligne(s) supprimée(s)`) : l'attaque
+  reste visible par son volume. Pour enquêter sur une attaque en cours, monter le taux (redéploiement) ou
+  s'appuyer sur les lignes `[securite] BLOCAGE` (non échantillonnées ; les 429, elles, ne sont pas
+  journalisées systématiquement).
+- **Détection** : dans les logs Render, chercher beaucoup d'`id=` distincts depuis une même `ip=` sur une
+  courte période, et/ou une majorité de `statut=404` (sondage d'identifiants inexistants) — un client
+  légitime relit toujours la MÊME carte (même empreinte) et obtient 200. Exemple de rafale : 20
+  identifiants distincts, 20 × 404, même IP (test `tests/journal-lectures-p2-s15.test.ts`).
+- **Vie privée** : l'identifiant de carte n'est JAMAIS écrit en clair dans ces lignes — empreinte SHA-256
+  tronquée à 12 car. hex. (48 bits : assez pour compter les identifiants distincts). C'est une
+  **pseudonymisation, pas une anonymisation** : le hash sans sel permet de vérifier des identifiants
+  candidats (notamment les anciens identifiants prévisibles) — il ne révèle rien à qui ne connaît pas
+  l'identifiant, mais ne résiste pas à une recherche par dictionnaire (un HMAC avec secret dédié serait
+  l'étape suivante si cette résistance devenait requise). Les identifiants sont aussi masqués dans les
+  logs d'erreur internes (`console.error`, chemins `/cartes/…`, `/desinscription/…`, `/clients/…`). Seule
+  l'IP est en clair (nécessaire pour l'enquête, comme dans les lignes `[securite]`). Aucun prénom, contact,
+  code gagnant ni contenu client dans ces lignes.
+- **Limites honnêtes** : l'échantillonnage est aléatoire par lecture (`Math.random`) — une rafale de moins
+  de ~30 sondages peut ne laisser aucune ligne à 0,1 ; les lectures réussies d'un client légitime sont
+  échantillonnées comme les autres (pas de distinction succès/échec). Les journaux Render Free ont une
+  rétention limitée : en cas d'incident, exporter les logs vite.
+
 **Persistance des compteurs publics (P0-S20, migration 0010)** — la limitation reste appliquée **en mémoire** (aucune
 latence ajoutée à la requête) ; un compteur n'est écrit en base qu'à partir de la **moitié de son seuil**
 (`SEUIL_PERSISTANCE_COMPTEURS = 1/2`, `server/app.ts`), en arrière-plan, sans jamais bloquer la requête. En trafic
