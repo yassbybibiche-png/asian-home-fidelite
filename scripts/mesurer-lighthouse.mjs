@@ -9,7 +9,7 @@ import { spawn, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 
 const exec = promisify(execFile)
 const RACINE = resolve(import.meta.dirname, '..')
@@ -18,6 +18,9 @@ const PORT = Number(values.port ?? process.env.E2E_PORT ?? 4321)
 if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535) throw new Error(`--port invalide : ${values.port ?? process.env.E2E_PORT ?? 4321}`)
 const BASE = `http://127.0.0.1:${PORT}`
 const SORTIE = values.sortie ?? join(RACINE, 'node_modules', '.cache', 'mesure-p0-u0', 'lighthouse-jouer.json')
+// Garde anti-écrasement (boucle t5) : même piège que mesurer-scores.mjs — la sortie
+// par défaut est une archive, un lancement sans --sortie l'écraserait silencieusement.
+if (!values.sortie && existsSync(SORTIE)) throw new Error(`Sortie par défaut déjà présente (${SORTIE}) : passez --sortie <chemin> pour ne pas écraser l'archive.`)
 const CHROME = join(process.env.HOME ?? '', '.cache', 'ms-playwright', 'chromium-1254', 'chrome-linux64', 'chrome')
 
 async function portLibre() {

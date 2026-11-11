@@ -67,6 +67,12 @@ export const PHOTOS_PDF = {
   boBun: photoPdf('bo-bun'),
 } as const
 
+/** Variante légère du logo par défaut (192×192, WebP q80, 4,9 Ko) : écran de
+ * chargement (index.html, boucle t2) et logo du commerce dans l'app
+ * (LogoCommerce, boucle t5 — le PNG 600×600 est affiché 64×64).
+ * Hors de VISUELS : tests/visuels.test.ts exige > 10 000 o par entrée. */
+export const LOGO_DEFAUT_PETIT = '/visuels/logo-petit.webp'
+
 /** Identifiant stable du commerce Asian Home Paris (seed + production). */
 export const ID_ASIAN_HOME = 'c-asian-home-paris'
 
