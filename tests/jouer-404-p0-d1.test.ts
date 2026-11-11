@@ -5,6 +5,9 @@
 // dans le même rendu. Correctif : JouerApi ne charge le commerce que si la page est 'jouer'.
 // La preuve comportementale est le test E2E (tests-e2e/scan-gain-carte.spec.ts : aucune
 // requête échouée sur le parcours complet) ; ce fichier verrouille la garde dans le source.
+// Revue Codex P0-D1, point 5 : une réponse arrivée après jouer/A → jouer/B ne doit pas
+// écraser le commerce B (demandeEnCours), et l'ancien commerce ne reste pas affiché pendant
+// le chargement du nouveau.
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -25,10 +28,24 @@ describe('P0-D1 : plus de 404 jouer → carte', () => {
     const charger = corps.slice(0, corps.indexOf('useEffect(charger'))
     assert.match(charger, /if \(page !== 'jouer'\) return/)
     // La garde précède tout appel réseau : aucun api.commerce avant elle dans charger.
-    assert.ok(charger.indexOf("if (page !== 'jouer') return") < charger.indexOf('api.commerce(param)'))
+    assert.ok(charger.indexOf("if (page !== 'jouer') return") < charger.indexOf('api.commerce(demande)'))
   })
 
-  test('un seul appel api.commerce(param) dans Jouer.tsx, dans charger uniquement', () => {
-    assert.equal(jouer.split('api.commerce(param)').length - 1, 1)
+  test('un seul appel api.commerce(demande) dans Jouer.tsx, dans charger uniquement', () => {
+    assert.equal(jouer.split('api.commerce(').length - 1, 1)
+  })
+
+  test('réponse obsolète ignorée : demandeEnCours comparé avant setCommerce/setErreur', () => {
+    const corps = jouer.slice(jouer.indexOf('function JouerApi'))
+    const charger = corps.slice(0, corps.indexOf('useEffect(charger'))
+    assert.match(charger, /demandeEnCours\.current = demande/)
+    assert.match(charger, /if \(demandeEnCours\.current === demande\) setCommerce\(c\)/)
+    assert.match(charger, /if \(demandeEnCours\.current === demande\) setErreur\(/)
+  })
+
+  test('changement de commerce : l’ancien n’est plus affiché pendant le chargement du nouveau', () => {
+    const corps = jouer.slice(jouer.indexOf('function JouerApi'))
+    const charger = corps.slice(0, corps.indexOf('useEffect(charger'))
+    assert.match(charger, /if \(demandeEnCours\.current !== param\) setCommerce\(null\)/)
   })
 })

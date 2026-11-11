@@ -126,7 +126,12 @@ export function CarteFidelite({
           <LogoCommerce commerce={commerce} taille="md" />
           <div className="min-w-0">
             <div className="truncate font-titre text-lg font-bold tracking-[0.08em] uppercase">{commerce.nom}</div>
-            <div className="text-sm text-magenta-300">{t('Carte de fidélité')}</div>
+            {/* Sous-titre en BLANC, pas en magenta clair : le fond du bandeau peut être la couleur
+              personnalisée du commerce (apparence.couleur, ex. le magenta bouton) — le magenta
+              clair dessus ne vaudrait que 1,66:1. Le blanc est garanti AA par problemesApparence
+              (≥ 4,5:1 sur la couleur) et assombrir() ne fait que foncer le dégradé
+              (revue Codex P0-D1, point 1). */}
+            <div className="text-sm text-white">{t('Carte de fidélité')}</div>
           </div>
         </div>
         <div className="relative mt-5 flex items-end justify-between gap-3">

@@ -415,6 +415,10 @@ function JouerApi({ api }: { api: ClientApi }) {
   const { page, param } = useRoute()
   const [commerce, setCommerce] = useState<CommercePublic | null>(null)
   const [erreur, setErreur] = useState<'inconnu' | 'horsLigne' | null>(null)
+  // Revue Codex P0-D1, point 5 : identifiant de la demande en cours — une réponse arrivée
+  // après une navigation jouer/A → jouer/B ne doit pas écraser le commerce B, et l'ancien
+  // commerce ne reste pas affiché pendant le chargement du nouveau.
+  const demandeEnCours = useRef<string | null>(null)
 
   const charger = useCallback(() => {
     // P0-D1 : la route peut déjà être #/carte/<id-client> quand ce composant se re-rend une
@@ -424,7 +428,17 @@ function JouerApi({ api }: { api: ClientApi }) {
     if (page !== 'jouer') return
     if (!param) return setErreur('inconnu')
     setErreur(null)
-    api.commerce(param).then(setCommerce, (e) => setErreur(e instanceof ErreurApi && e.statut === 404 ? 'inconnu' : 'horsLigne'))
+    if (demandeEnCours.current !== param) setCommerce(null)
+    const demande = param
+    demandeEnCours.current = demande
+    api.commerce(demande).then(
+      (c) => {
+        if (demandeEnCours.current === demande) setCommerce(c)
+      },
+      (e) => {
+        if (demandeEnCours.current === demande) setErreur(e instanceof ErreurApi && e.statut === 404 ? 'inconnu' : 'horsLigne')
+      },
+    )
   }, [api, page, param])
   useEffect(charger, [charger])
   const { t } = useLangue()

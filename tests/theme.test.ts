@@ -7,7 +7,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { COULEURS_CONFETTIS, COULEURS_ROUE, THEME } from '../src/theme.ts'
-import { COULEUR_DEFAUT, FOND_DEFAUT, contraste, problemesApparence } from '../src/lib/apparence.ts'
+import { COULEUR_DEFAUT, FOND_DEFAUT, assombrir, contraste, problemesApparence } from '../src/lib/apparence.ts'
 import { COULEURS, couleurSecteur, couleurTexte } from '../src/lib/roue.ts'
 import { COULEURS_CONFETTIS as CONFETTIS_ANIMATION } from '../src/lib/animationRoue.ts'
 
@@ -130,6 +130,22 @@ describe('P0-D1 : source unique — aucun hex hors theme.ts', () => {
       assert.deepEqual(inconnus, [], f)
     }
   })
+
+  test('aucune valeur chromatique du thème sous forme rgb() hors theme.ts (revue Codex P0-D1, point 2)', () => {
+    // Les halos et ombres utilisent color-mix() sur les tokens @theme, jamais rgb() en dur.
+    // Neutres exclus : rgb(17 24 39) = gris-900 Tailwind des ombres, blanc/noir — hors thème.
+    const chromatiques = [
+      THEME.magenta300, THEME.magenta400, THEME.magenta500, THEME.magenta600, THEME.magenta700, THEME.magenta900,
+      THEME.laque50, THEME.laque100, THEME.laque200, THEME.laque300, THEME.laque500, THEME.laque600, THEME.laque700, THEME.laque800,
+      THEME.violetNuit,
+    ]
+    const formes = chromatiques.flatMap((hex) => {
+      const [r, g, b] = [1, 3, 5].map((i) => String(parseInt(hex.slice(i, i + 2), 16)))
+      return [`${r} ${g} ${b}`, `${r}, ${g}, ${b}`, `${r},${g},${b}`, `${r}_${g}_${b}`]
+    })
+    const fautifs = [...TSX, ...CSS_THEME].filter((f) => f !== 'src/theme.ts' && formes.some((forme) => lire(f).includes(forme)))
+    assert.deepEqual(fautifs, [])
+  })
 })
 
 describe('P0-D1 : magenta clair en texte seulement sur fond sombre', () => {
@@ -173,6 +189,41 @@ describe('P0-D1 : magenta clair en texte seulement sur fond sombre', () => {
       const s = lire(f)
       for (const m of s.matchAll(/titre-magenta/g)) {
         assert.match(s.slice(Math.max(0, m.index! - 600), m.index), /hero-sombre/, `${f} : .titre-magenta hors fond sombre`)
+      }
+    }
+  })
+})
+
+describe('P0-D1 (revue Codex, point 1) : bandeau personnalisé de la carte', () => {
+  test('jamais de magenta clair en texte sur la couleur du commerce : le sous-titre est blanc', () => {
+    const carte = lire('src/components/CarteFidelite.tsx')
+    assert.ok(!/text-magenta-(300|400)/.test(carte), 'magenta clair dans CarteFidelite — illisible sur une couleur personnalisée')
+    assert.match(carte, /className="text-sm text-white">\{t\('Carte de fidélité'\)\}/)
+    // Le bug : magenta doux sur la couleur par défaut #d1006f = 1,66:1, sur #a1005e = 2,44:1.
+    assert.equal(contraste('#ff4d6d', '#d1006f'), 1.66)
+    assert.equal(contraste('#ff4d6d', '#a1005e'), 2.44)
+  })
+
+  test('blanc sur le dégradé personnalisé : AA pour toute couleur validée par problemesApparence', () => {
+    // problemesApparence exige blanc ≥ 4,5:1 sur la couleur ; assombrir() ne fait que foncer le dégradé.
+    for (const c of ['#d1006f', '#c4007a', '#a1005e', '#111111', '#5e1317', '#3b2d8f', '#2a0a1e']) {
+      assert.deepEqual(problemesApparence({ couleur: c, fond: '#fbf8f3' }), [], c)
+      assert.ok(contraste('#ffffff', assombrir(c)) >= 4.5, `blanc sur assombrir(${c})`)
+      assert.ok(contraste('#ffffff', assombrir(c)) >= contraste('#ffffff', c), `assombrir(${c}) doit foncer`)
+    }
+  })
+})
+
+describe('P0-D1 (revue Codex, point 4) : amber = sémantique alerte/étoiles, jamais DA', () => {
+  test('seules les classes amber d’alerte et d’étoiles existent', () => {
+    const ALERTES = new Set(['bg-amber-50', 'bg-amber-100', 'text-amber-800', 'text-amber-900', 'ring-amber-200', 'ring-amber-400'])
+    const ETOILES = new Set(['text-amber-400', 'text-amber-500'])
+    const FICHIERS_ETOILES = new Set(['src/components/InvitationAvis.tsx', 'src/components/ui.tsx', 'src/pages/Avis.tsx'])
+    for (const f of [...TSX, ...CSS_THEME]) {
+      const s = lire(f)
+      for (const m of s.matchAll(/[a-z-]*amber-[a-z0-9-]+/g)) {
+        if (ALERTES.has(m[0])) continue
+        assert.ok(ETOILES.has(m[0]) && FICHIERS_ETOILES.has(f), `${f} : amber hors alerte/étoile — ${m[0]}`)
       }
     }
   })

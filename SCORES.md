@@ -54,18 +54,18 @@ validation caisse 14,9 s) et non comparables aux 5 passes P0-U0.
   Pas de mesure sur téléphone réel — à remplacer par la mesure téléphone
   (protocole : même parcours sur le staging, chronomètre + comptage des taps à la main).
 
-## Bundle (build frais, mode par défaut, 11/11/2026 — après P0-D1)
+## Bundle (build frais, mode par défaut, 11/11/2026 — après P0-D1 + correctifs revue Codex)
 
 Définition unique : **JS initial non gzipé** = script d'entrée de `index.html` +
 ses imports statiques (méthode `fichiersInitiaux` de
 `tests/performance-bundle-p2-q2.test.ts`, pas les `import()` dynamiques) ;
 **CSS** = la feuille de `dist/assets` ; **total** = JS initial + CSS.
 
-- JS initial non gzipé : 472428 o (461,4 Ko) — `index-CkC0YEsb.js` 349193 o +
+- JS initial non gzipé : 472531 o (461,5 Ko) — `index-CA_YMdhw.js` 349296 o +
   `ui-D9uK5kXs.js` 122636 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
-- CSS non gzipé : 64672 o (63,2 Ko) — `index-DQdUu_ya.css`.
-- Total initial : 537100 o (524,5 Ko).
-- JS total (tous chunks) : 780638 o (762,3 Ko) ; 22 chunks ; plus gros chunk : 349193 o
+- CSS non gzipé : 65273 o (63,8 Ko) — `index-hETMtPom.css`.
+- Total initial : 537804 o (525,2 Ko).
+- JS total (tous chunks) : 780741 o (762,4 Ko) ; 22 chunks ; plus gros chunk : 349296 o
   (limite test : 500 000 o — respectée).
 - Repères historiques : avant P2-Q2 601720 o ; après P2-Q2 450,2 Ko (JS initial).
   Le JS initial a repris ~10 Ko depuis (lots P0-S10 et suivants).
@@ -73,7 +73,7 @@ ses imports statiques (méthode `fichiersInitiaux` de
 
 ## Couverture de tests
 
-Suite verte : **968/968** (`npm test`, typechecks inclus — 950 avant P0-D1, +15 thème, +3 correctif 404).
+Suite verte : **974/974** (`npm test`, typechecks inclus — 950 avant P0-D1, +15 thème, +3 correctif 404, +6 correctifs revue Codex).
 
 - Couverture globale : 97,84 % lignes / 91,43 % branches / 92,92 % fonctions
   (`node --test --experimental-test-coverage`, suite verte, 11/11/2026).
@@ -101,6 +101,14 @@ Suite verte : **968/968** (`npm test`, typechecks inclus — 950 avant P0-D1, +1
 que si `page === 'jouer'`) fait disparaître le 404. Confirmé aussi par le test E2E
 `tests-e2e/scan-gain-carte.spec.ts` (aucune requête ≥ 400 sur le parcours complet ;
 sans le correctif, ce même test échoue — contrôle négatif vérifié).
+
+**Captures complémentaires (revue Codex P0-D1, point 6 — même dossier, script
+`captures-richesse.mjs`)** : commerce à 8 lots + vrai menu Asian Home (81 plats) +
+apparence personnalisée `#d1006f` — `roue-8-lots.png`, `gain-8-lots.png`,
+`carte-couleur-perso.png`, `menu-reel.png`, `menu-reel-complet.png` (0 erreur console,
+0 requête échouée). La roue à 8 secteurs alterne correctement les 6 couleurs du thème,
+libellés tous lisibles ; le bandeau personnalisé magenta affiche bien le sous-titre
+en blanc (correctif point 1) ; le vrai menu rend 81 plats avec prix magenta.
 
 ## npm audit
 
@@ -193,16 +201,16 @@ de test, sans logo ni menu — mêmes limites que la mesure initiale).
 
 | Écran | Note | Justification (une ligne) |
 | --- | --- | --- |
-| Jouer | 8/10 | Héros noir+magenta et roue entièrement magenta réussis ; corps de page encore clair, bloc initiales « M1 » sans logo, roue à 1 secteur = disque magenta uni. |
-| Carte | 8/10 | Bandeau noir→magenta, tampon posé et progression magenta, encart « À retirer au comptoir » rose pâle ; corps ivoire, encart palier rouge conservé. |
+| Jouer | 8/10 | Héros noir+magenta et roue entièrement magenta réussis ; roue à 8 secteurs validée (`roue-8-lots.png` : 6 couleurs alternées, libellés lisibles) ; corps de page encore clair, bloc initiales « M1 » sans logo. |
+| Carte | 8/10 | Bandeau noir→magenta, tampon posé et progression magenta, encart « À retirer au comptoir » rose pâle ; bandeau personnalisé `#d1006f` validé (`carte-couleur-perso.png` : sous-titre blanc lisible) ; corps ivoire, encart palier rouge conservé. |
 | Caisse | 7/10 | Bouton primaire magenta bien visible, vert de validation conservé ; écran sinon clair, en-tête noir hors de la capture. |
-| Menu public | 7/10 | Héros noir+magenta réussi, lien magenta ; commerce de test sans menu (état vide mesuré, pas le vrai menu), fond clair. |
+| Menu public | 8/10 | Héros noir+magenta réussi, pilule « Toutes » et prix magenta ; vrai menu validé (`menu-reel.png` : 81 plats, recherche, catégories) ; fond clair. |
 | Tableau de bord | 8/10 | En-tête noir, liserés magenta sur chaque carte, navigation mobile magenta ; fond clair, serif/sans-serif mélangés. |
 | Clients | 8/10 | Bouton primaire, pilule sélectionnée, progression et navigation magenta ; fond clair. |
 | Roulette (back-office) | 7/10 | QR net, bouton primaire magenta, navigation magenta ; fond clair, formulaire inchangé. |
 | Réglages | 7/10 | Bouton « Enregistrer » magenta, logo magenta, aide « noire et magenta » à jour ; formulaire toujours gris/blanc. |
 
-**Moyenne : 7,5/10 (était 6,1/10).** Le magenta est désormais présent sur tous les
+**Moyenne : 7,6/10 (était 6,1/10).** Le magenta est désormais présent sur tous les
 écrans, le doré a disparu, les contrastes sont AA — mais la cible ≥ 9/10 n'est pas
 atteinte : les corps de page restent clairs/ivoire par choix (lisibilité de travail
 côté commerçant, AUDIT §6.3) et le commerce de test n'a ni logo ni vrai menu. Aller
@@ -218,8 +226,8 @@ hors périmètre de P0-D1, à trancher en P1.
 | LCP `#/jouer` | < 2,5 s | 4,06–4,18 s |
 | Lighthouse mobile `#/jouer` | ≥ 95 (critère d'arrêt de la boucle) | 81 (76 à la 1re passe) |
 | Erreurs console | 0 | 0 (re-mesure P0-D1 : 0 erreur, 0 requête échouée — seuil atteint) |
-| Bundle initial (JS + CSS, non gzipé) | pas de régression vs 535857 o | 537100 o (+0,23 % — pas de régression) |
-| Note DA moyenne | ≥ 9/10 | 7,5/10 (était 6,1/10 — seuil non atteint, voir § DA après P0-D1) |
+| Bundle initial (JS + CSS, non gzipé) | pas de régression vs 535857 o | 537804 o (+0,36 % — pas de régression) |
+| Note DA moyenne | ≥ 9/10 | 7,6/10 (était 6,1/10 — seuil non atteint, voir § DA après P0-D1) |
 
 Un tour de la boucle d'amélioration ne fusionne que s'il améliore au moins une
 de ces métriques sans régresser les autres (AUDIT.md §7, boucle continue).

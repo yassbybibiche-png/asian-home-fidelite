@@ -4,6 +4,12 @@
 // `src/index.css` (`@theme`) n'en est que le miroir (même valeurs, vérifié par tests/theme.test.ts),
 // `src/chargement.css` et `public/hors-ligne.css` (écrans avant JS) en reprennent deux valeurs,
 // vérifiées elles aussi par le test. Changer de DA = changer ce fichier (+ le miroir), pas 30 fichiers.
+// Les valeurs du thème n'existent sous AUCUNE autre forme ailleurs : pas de rgb()/rgba() d'une
+// couleur du thème (les halos et ombres utilisent color-mix() sur les tokens @theme), sauf les
+// neutres d'ombre rgb(17 24 39) = gris-900 Tailwind et blanc/noir. Le miroir reste manuel mais le
+// test l'impose exact : toute dérive fait échouer la suite (revue Codex P0-D1, point 2 — la
+// génération du CSS depuis ce fichier a été écartée : les feuilles avant-JS ne peuvent pas
+// consommer de tokens TS au chargement, et le test rend la copie manuelle sûre).
 //
 // Règles de lisibilité (ratios WCAG recalculés par nos soins, P0-D1 — ne pas recopier les chiffres
 // de l'ancien commentaire CSS, dont le « 8,9:1 » pour l'or était faux, vrai calcul 7,81:1) :

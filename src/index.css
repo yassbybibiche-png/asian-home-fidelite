@@ -34,6 +34,9 @@
   --font-titre: ui-serif, 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
   --shadow-douce: 0 1px 2px rgb(17 24 39 / 0.04), 0 4px 16px -4px rgb(17 24 39 / 0.08);
   --shadow-relief: 0 2px 4px rgb(17 24 39 / 0.06), 0 12px 32px -8px rgb(17 24 39 / 0.18);
+  /* Ombre du bouton primaire : le magenta vient du token (color-mix), jamais en rgb() en dur
+     — la garde tests/theme.test.ts interdit toute valeur du thème sous forme rgb() hors theme.ts. */
+  --shadow-bouton: 0 1px 0 rgb(255 255 255 / 0.15) inset, 0 2px 6px -1px color-mix(in srgb, var(--color-magenta-700) 35%, transparent);
 }
 
 html {
@@ -114,7 +117,7 @@ h3 {
   }
   /* Boutons : primaire (laque), secondaire (contour), états nets — pression, focus, chargement, désactivé. */
   .bouton {
-    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-magenta-500 px-5 py-3 text-center text-base font-semibold text-white shadow-[0_1px_0_rgb(255_255_255/0.15)_inset,0_2px_6px_-1px_rgb(161_0_94/0.35)] transition hover:bg-magenta-600 active:scale-[0.98] active:bg-magenta-700 disabled:cursor-not-allowed disabled:bg-gray-500 disabled:shadow-none disabled:active:scale-100 aria-disabled:cursor-not-allowed;
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-magenta-500 px-5 py-3 text-center text-base font-semibold text-white shadow-bouton transition hover:bg-magenta-600 active:scale-[0.98] active:bg-magenta-700 disabled:cursor-not-allowed disabled:bg-gray-500 disabled:shadow-none disabled:active:scale-100 aria-disabled:cursor-not-allowed;
   }
   .bouton-secondaire {
     @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-5 py-3 text-center text-base font-semibold text-gray-800 shadow-[0_1px_2px_rgb(17_24_39/0.05)] transition hover:border-gray-400 hover:bg-gray-50 active:scale-[0.98] active:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-500 disabled:active:scale-100;
@@ -134,8 +137,8 @@ h3 {
   /* Registre nocturne : en-têtes et héros sombres (noir + magenta, halos magenta et violet). */
   .hero-sombre {
     background:
-      radial-gradient(120% 90% at 85% 0%, rgb(255 46 154 / 0.25), transparent 55%),
-      radial-gradient(120% 100% at 0% 0%, rgb(59 45 143 / 0.35), transparent 55%),
+      radial-gradient(120% 90% at 85% 0%, color-mix(in srgb, var(--color-magenta-400) 25%, transparent), transparent 55%),
+      radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--color-violet-nuit) 35%, transparent), transparent 55%),
       linear-gradient(160deg, #111111 0%, #1b1b22 60%, #2a0a1e 100%);
     color: #ffffff;
   }
