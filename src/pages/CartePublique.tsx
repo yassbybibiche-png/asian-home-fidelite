@@ -177,18 +177,24 @@ function Carte({
       {estAsianHome(commerce) && (
         <section className="carte space-y-3" aria-label="Le restaurant">
           <h2 className="titre-carte">{t('Le restaurant')}</h2>
-          <img
-            src={VISUELS.interieur}
-            alt="Salle d’Asian Home Paris : plafond d’ombrelles et tables dressées"
-            loading="lazy"
-            className="h-64 w-full rounded-2xl object-cover"
-          />
-          <img
-            src={VISUELS.interieurSalon}
-            alt="Coin salon d’Asian Home Paris : fauteuils velours bleu nuit et rideaux violets"
-            loading="lazy"
-            className="h-48 w-full rounded-2xl object-cover"
-          />
+          <picture className="block">
+            <source srcSet={VISUELS.interieurPetit} type="image/webp" />
+            <img
+              src={VISUELS.interieur}
+              alt="Salle d’Asian Home Paris : plafond d’ombrelles et tables dressées"
+              loading="lazy"
+              className="h-64 w-full rounded-2xl object-cover"
+            />
+          </picture>
+          <picture className="block">
+            <source srcSet={VISUELS.interieurSalonPetit} type="image/webp" />
+            <img
+              src={VISUELS.interieurSalon}
+              alt="Coin salon d’Asian Home Paris : fauteuils velours bleu nuit et rideaux violets"
+              loading="lazy"
+              className="h-48 w-full rounded-2xl object-cover"
+            />
+          </picture>
           <p className="text-sm text-gray-700">Restaurant asiatique halal, au Pré-Saint-Gervais.</p>
         </section>
       )}

@@ -234,7 +234,12 @@ export function MenuAffiche({
                 return (
                   <section key={c.id} id={`m-${c.id}`} data-categorie={c.id} className="scroll-mt-36 space-y-2">
                     <h2 className="font-titre text-xl font-bold">{c.nom}</h2>
-                    {photo && <img src={photo.src} alt={photo.alt} loading="lazy" className="h-32 w-full rounded-2xl object-cover" />}
+                    {photo && (
+                      <picture className="block">
+                        <source srcSet={photo.srcPetit} type="image/webp" />
+                        <img src={photo.src} alt={photo.alt} loading="lazy" className="h-32 w-full rounded-2xl object-cover" />
+                      </picture>
+                    )}
                     <ul className="space-y-2">
                       {c.produits.map((p) => {
                         const detail = ouvert === p.id

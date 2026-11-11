@@ -19,6 +19,42 @@ bundle 601,7 → 450,2 Ko (JS initial), dashboard enrichi + entonnoir, SEO/OG.
 
 ## Boucle d'amélioration continue
 
+### t10 — Photos paresseuses en WebP léger (11/11/2026, fusionné)
+
+6 photos d'ambiance / de catégories (`loading="lazy"`, sous le pli) servies
+en WebP recadré approximativement au ratio d'affichage via `<picture>`,
+le JPEG restant le repli : carte — `interieur.jpg` (675×900, 131 Ko) →
+`interieur-petit.webp` (675×443, 36 914 o), `interieur-salon.jpg` (320×240,
+22 Ko) → `interieur-salon-petit.webp` (320×157, 5 560 o) ; menu
+(`photoCategorie`, interface étendue avec `srcPetit`) — `sushis-ardoise.jpg`
+(614×408, 30 Ko) → 614×201, 11 090 o ; `cocktails.jpg` (640×1136, 69 Ko) →
+640×210, 12 334 o ; `menu-plat-riz.jpg` (424×408, 39 Ko) → 424×139,
+6 586 o ; `menu-mango-sticky-rice.jpg` (411×412, 61 Ko) → 411×134,
+12 054 o. Total ~350 Ko → ~83 Ko (**−267 Ko**). 6 entrées `VISUELS`
+ajoutées ; documenté dans `public/visuels/SOURCES.md` ; JPEG intacts
+partout. La garde de `tests/visuels.test.ts` passe de > 10 000 o à
+> 3 000 o (les deux petites variantes légitimes sont sous l'ancien seuil —
+  décodage intégral vérifié par Pillow, 6/6 OK).
+Mesures (ponctuelle, nouveau script versionné
+`scripts/mesurer-photos-paresseuses.mjs` — durées de téléchargement du
+journal, indépendantes) : interieur 1 136 → 574 ms (**−562 ms**), salon
+559 → 295 ms (**−264 ms**), sushis-ardoise 573 → 266 ms (**−307 ms**),
+cocktails 978 → 381 ms (**−597 ms**), menu-plat-riz 577 → 375 ms
+(**−202 ms**), menu-mango (catégorie) 897 → 369 ms (**−528 ms**) —
+moyennes, 2 passes avant (ABAB) et 4 passes après, `currentSrc` = les
+6 variantes WebP ; le JPEG `menu-mango-sticky-rice.jpg` (61 660 o) se
+télécharge TOUJOURS — c'est la photo du plat « Mango Stick » (vignette
+64×64), candidat t11. Mesures standard (2 passes) : premier affichage
+1 874/1 888 ms, LCP 1 812/1 868 ms, parcours 6 553/6 574 ms (plats) ;
+Lighthouse 78/78 (TBT 890/850 ms) contre 78/86 à t9 (plat). Bundle : JS
+initial 453 667 → 454 357 o (+690 o, +0,15 %), CSS inchangé, 24 chunks ;
+0 erreur console. Tests 1184 → 1200/1200 (+10
+`tests/boucle-t10-photos-paresseuses.test.ts`, +6 tests auto dans
+`tests/visuels.test.ts`), E2E 3/3. Revue Codex t10 (5 points) : fusion
+favorable sous réserve des corrections de preuve (décodage intégral,
+ratios approximatifs, durées indépendantes + ABAB) ; Mango Stick = meilleur
+candidat t11. Compteur de tours sans gain : **0**.
+
 ### t9 — Héros du menu recadré à la bande visible de la carte (11/11/2026, fusionné)
 
 Même fichier `public/visuels/table-sushis-petit.webp`, recadré : 720×1279,

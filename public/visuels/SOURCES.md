@@ -12,8 +12,11 @@ Les fichiers sont servis localement par l'app (pas de hotlink).
 | `table-sushis.jpg` (788×1400 sur disque — original Instagram 2268×4032) | Table dressée : bao buns, plateau de sushis, cocktails, gobelet « ASIAN HOME » | Instagram @asianhomeparis — affiche du reel C0mvZW_iQ24 |
 | `table-sushis-petit.webp` (720×590, 51 402 o) | Même table dressée, recadrée au ratio de la carte (affichée ~390×320) — dérivé de `table-sushis.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucles t4 (720×1279) puis t9 (720×590, le menu montre approximativement le centre 720×413 de cette bande à ~390 px, la carte approximativement la bande entière) | Dérivé de `table-sushis.jpg` ci-dessus, pas une nouvelle source |
 | `cocktails.jpg` (640×1136) | Cocktails signature Koh Samui / Tokyo / Piña Colada (texte de la publication inclus dans l'image) | Instagram @asianhomeparis — affiche du reel DY2lhwmIIN1 |
+| `cocktails-petit.webp` (640×210, 12 334 o) | Mêmes cocktails, recadrés approximativement au ratio de la photo de catégorie (h-32, ~390 px de large) — dérivé de `cocktails.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `cocktails.jpg` ci-dessus, pas une nouvelle source |
 | `interieur.jpg` (675×900, converti depuis WebP) | Salle du restaurant : plafond d'ombrelles, tables dressées, sans personne | Galerie du restaurant sur desicorner.fr (page Asian Home Paris) |
+| `interieur-petit.webp` (675×443, 36 914 o) | Même salle, recadrée approximativement au ratio d'affichage (h-64, ~390 px de large) — dérivé de `interieur.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `interieur.jpg` ci-dessus, pas une nouvelle source |
 | `sushis-ardoise.jpg` (614×408) | Rouleau de sushis sur ardoise, filigrane « ASIAN HOME » | Galerie du restaurant sur lacarte.menu (Asian Home Paris) |
+| `sushis-ardoise-petit.webp` (614×201, 11 090 o) | Même rouleau, recadré approximativement au ratio de la photo de catégorie (h-32, ~390 px de large) — dérivé de `sushis-ardoise.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `sushis-ardoise.jpg` ci-dessus, pas une nouvelle source |
 
 ## Écartés (et pourquoi)
 - `ig-plat-decouverte.jpg` (post Instagram DCxJgxusyvd) : montre une personne identifiable dans la salle — non utilisé.
@@ -41,8 +44,11 @@ photo d'un autre restaurant, aucune personne identifiable.
 | `menu-loc-lac.jpg` (1109×720) | Loc Lac : bœuf caramélisé, riz rouge, œuf au plat, salade, rosace de tomate | Galerie lacarte.menu, photo 122145160 |
 | `menu-nouilles-crevettes.jpg` (1140×720) | Nouilles sautées aux crevettes, bol bleu, tomate en rosace, baguettes | Galerie lacarte.menu, photo 122145184 |
 | `menu-mango-sticky-rice.jpg` (411×412) | Mango sticky rice : mangue et riz gluant coco | Galerie lacarte.menu, photo 95703556 |
+| `menu-mango-sticky-rice-petit.webp` (411×134, 12 054 o) | Même dessert, recadré approximativement au ratio de la photo de catégorie (h-32, ~390 px de large) — dérivé de `menu-mango-sticky-rice.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `menu-mango-sticky-rice.jpg` ci-dessus, pas une nouvelle source |
 | `menu-plat-riz.jpg` (424×408) | Plat thaï non identifié précisément : bol de riz + bol de soupe en grès, rose de gingembre — photo d'ambiance, non rattachée à un plat précis | Galerie lacarte.menu, photo 36412305 |
+| `menu-plat-riz-petit.webp` (424×139, 6 586 o) | Même plat, recadré approximativement au ratio de la photo de catégorie (h-32, ~390 px de large) — dérivé de `menu-plat-riz.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `menu-plat-riz.jpg` ci-dessus, pas une nouvelle source |
 | `interieur-salon.jpg` (320×240) | Coin salon : fauteuils velours bleu nuit, rideaux violets, tableau oiseau tropical, sans personne | Galerie lacarte.menu, photo 58544655 (image du restaurant) |
+| `interieur-salon-petit.webp` (320×157, 5 560 o) | Même salon, recadré approximativement au ratio d'affichage (h-48, ~390 px de large) — dérivé de `interieur-salon.jpg` par recadrage centré + redimensionnement (Pillow, WebP q75), boucle t10 | Dérivé de `interieur-salon.jpg` ci-dessus, pas une nouvelle source |
 
 Notes :
 - `menu-loc-lac.jpg` (207 Ko) et `menu-nouilles-crevettes.jpg` (303 Ko)
