@@ -81,6 +81,17 @@ justification et mesure avant/après, vit dans `CHANGELOG.md`.
   au-dessus du bruit : le découpage des dépendances partagées ne réduit pas
   le travail initial (Codex t7, point 5) ; la sortie de Caisse/CartePublique
   du bundle initial reste écartée (P2-Q2).
+- **Vignette WebP pour la photo du plat « Mango Stick » (tour 11, ANNULÉ —
+  voir journal)** : la photo du plat (`menu-mango-sticky-rice.jpg`, 61 Ko,
+  affichée 64×64 en vignette dans la liste) coûte 645–718 ms sur le
+  défilement du menu ; une vignette carrée 192×192 (8 034 o, Pillow,
+  recadrage centré, q75 — générée et vérifiée, non commitée) la remplacerait
+  dans la liste, la photo complète restant pour le détail. Écarté : les
+  tests `photos-menu.test.ts:102` (« Loc Lac et Mango Stick gardent leur
+  photo existante, sans vignette ») et la règle de nommage des vignettes
+  (`.webp` → `-vignette.webp`) épinglent la décision P1-M3 (vignettes
+  réservées aux photos du PDF) — ce n'est pas un test faux, c'est une
+  décision produit à trancher par l'utilisateur (proposée dans `RAPPORT.md`).
 
 ## Regard neuf — tour 5 (11/11/2026, tous les 5 tours)
 
@@ -1001,6 +1012,40 @@ déplaçant le bloc au bon endroit par script (ancre : fin de la section t9).
 **Décision : FUSIONNÉ** (gains de téléchargement −202 à −597 ms sur les 6
 photos, 2/2 passes avant et 4/4 après ; standard et Lighthouse plats ;
 bundle +0,15 % ; 0 erreur). Tours sans gain consécutifs : **0**.
+
+### Tour 11 — `autonome/boucle-t11-vignette-mango` (annulé — décision produit, tests épinglés non faux)
+
+Sujet (candidat noté par la revue Codex t10, point 4) : la photo du plat
+« Mango Stick » (`menu-mango-sticky-rice.jpg`, 61 360 o) est affichée en
+vignette 64×64 dans la liste du menu (`MenuPublic.tsx:256-257`,
+`p.photoVignette ?? p.photo`) — la mesure ponctuelle du tour 10 montre
+qu'elle se télécharge en 645–718 ms sur le défilement du menu (4 passes),
+en plus de sa variante de catégorie (12 054 o). La vignette carrée
+192×192 (WebP q75, 8 034 o, Pillow, recadrage centré — comme les
+vignettes PDF ≤ 192 px) a été générée et vérifiée (décodage intégral OK),
+mais NON commitée : le tour est annulé avant tout changement.
+Pourquoi : deux tests épinglent la règle P1-M3 — `tests/photos-menu.test.ts:102`
+(« Loc Lac et Mango Stick gardent leur photo existante, sans vignette » :
+`de('Mango Stick').photoVignette === undefined`) et la règle de nommage
+(« aucune vignette sans photo, et une vignette n'est jamais celle d'un
+autre plat » : `p.photoVignette === p.photo.replace(/\.webp$/, '-vignette.webp')`
+— la règle suppose des photos `.webp`, la photo du Mango Stick est un
+`.jpg`). Ces tests ne sont pas faux : ils consignent une décision
+délibérée (vignettes réservées aux photos extraites du PDF, P1-M3).
+Les étendre aux photos de galerie serait un changement de règle, pas une
+correction — il relève d'une décision utilisateur/coordinateur, pas de la
+boucle (même motif que la coquille statique du tour 3, renvoyée au
+`RAPPORT.md`). La variante de contournement (dériver la vignette dans le
+composant sans toucher aux données) a été écartée : elle contournerait
+la règle sans la changer, et exposerait un risque 404 sans filet.
+Mesure (tour 10, script `mesurer-photos-paresseuses.mjs`, 4 passes) :
+la photo du plat se télécharge en 645–718 ms (moyenne ~659 ms) sur le
+défilement du menu ; la vignette (8 034 o) la remplacerait dans la liste,
+la photo complète restant pour le détail (`MenuPublic.tsx:282`, `p.photo`).
+Gain estimé : ~53 Ko et ~550 ms de tuyau sur le défilement du menu.
+**Décision : ANNULÉ** — aucun changement tenté. Tours sans gain
+consécutifs : **1**. Branche supprimée sans fusion ; seul `BOUCLE.md`
+fusionné (doc).
 
 ### Tour 8 — `autonome/boucle-t8-tbt-longues-taches` (annulé — aucun levier au-dessus du bruit)
 
