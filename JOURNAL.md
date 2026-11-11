@@ -1,5 +1,105 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P2-Q4 « Domaine + SEO » (AUDIT.md §7 ; lot déjà en partie livré : prérendu à faire, domaine non acheté)
+- **État initial trouvé** : P2-Q4 déjà en grande partie livré dans `autonome/integration`
+  (commits `4f9e942`/`6ec5744`/`2f37e77` : JSON-LD Restaurant, robots/sitemap, `docs/DOMAINE.md`,
+  `docs/SEO.md`). Trous restants : prérendu des pages publiques non fait (`docs/SEO.md` : « proposé
+  sans être fait ») et domaine `.fr` non acheté (rien acheté — **non acheté ici**, action utilisateur
+  restante, voir « Non vérifié »).
+- **Prérendu du menu** (nouveau `server/prerendu.ts`, route dans `server/app.ts`) : `GET/HEAD
+  /menu/<commerceId>` rend le menu en HTML statique (titre, description, canonical, Open Graph,
+  JSON-LD `Menu` avec `MenuSection`/`MenuItem`, offres seulement si prix non nul, `suitableForDiet:
+  HalalDiet` seulement pour Asian Home) ; même règle d'affichage que `#/menu` (menu enregistré s'il
+  contient un plat, sinon carte réelle d'Asian Home en repli, sinon page honnête sans plat inventé ;
+  prix non confirmés — Riz Thaï 8,90 €, Maki Gold 100,00 € — masqués partout, y compris dans le
+  JSON-LD) ; tout texte commerçant échappé (corps et JSON-LD, `<` → `\u003c`) ; aucune photo
+  (base64 trop lourde) ; aucun style en ligne (CSP `style-src 'self'`). Rendu à la demande, cache
+  serveur 5 min par commerce (64 entrées max, déclaré dans `creerServeur` pour isoler les tests),
+  `Cache-Control: public, max-age=300`, ETag faible (sha256, 16 car., 304 si repris), limite par IP
+  `lecture` (120/min) comme les autres lectures publiques, HEAD = mêmes en-têtes sans corps.
+  Commerce inconnu ou `/menu` sans id → **404** (pas de soft 404) ; commerce en pause → page
+  « indisponible » (200, noindex). `#/jouer` volontairement non prérendu (visite validée requise).
+- **Sitemap / JSON-LD** : `public/sitemap.xml` = `/` et `/menu/c-asian-home-paris` (plus de `#/menu`
+  ni `#/jouer`, Google ignore tout ce qui suit « # ») ; `index.html` : `hasMenu` =
+  `https://asian-home-fidelite.onrender.com/menu/c-asian-home-paris`. `docs/SEO.md` réécrit
+  (section « Prérendu du menu — FAIT ») ; `docs/DOMAINE.md` étape 5 mise à jour (sitemap/`hasMenu` +
+  QR `/r/` à réimprimer après bascule) + note que la partie technique est livrée, restent achat +
+  DNS + variables Render.
+- **Tests : 1092 → 1105 sur la branche (+13, `tests/prerendu-p2-q4.test.ts`, 13 tests)** : logique
+  pure, échappement hostile `</script><script>alert(1)</script>`, prix masqués, halal, menu vide,
+  serveur 200/304/HEAD/404/pause/menu enregistré, sitemap + `hasMenu`. `tests/seo-p2-q4.test.ts`
+  mis à jour délibérément (locs sitemap, `hasMenu`, type seed étendu avec `id`). `dist/` non suivi
+  par git : rien à commiter dedans. Commit `d6ef303`, fusion `--no-ff` `097918f` (conflit dans
+  `server/app.ts` avec le lot Q3 — les deux handlers ajoutés après `/d/` — résolu en gardant `/r/`
+  puis `/menu`, marqueurs supprimés, `npx tsc -p tsconfig.server.json` OK).
+- **Revue Codex (obtenue après coup sur le diff combiné Q3+Q4, 4 points, `/tmp/codex-revue-p2-q3q4.txt`)** :
+  d'abord indisponible (2 tentatives le 11/11 ~12h12 et ~12h20 UTC : limite d'usage du compte
+  ChatGPT/Codex, « try again at 12:21 PM » sans effet — heure de la dernière action 12:23:50 UTC) ;
+  revue interne rigoureuse faite à la place, puis Codex a fonctionné au 3e essai. Points 1 et 4
+  (ce lot) corrigés dans `474bc61` : 1. [Important] le service worker mettait TOUTE navigation HTML
+  en cache sous « / » — après une visite de `/menu/<id>`, la caisse hors ligne affichait le menu
+  statique au lieu de l'app (reproduit en simulation par Codex) → `public/sw.js` : la SPA reste
+  sous « / », le menu est gardé sous sa propre adresse (repli hors ligne : adresse exacte, puis
+  « / ») + test de simulation SW. 4. [Remarque] `/menu/inconnu/`, `/menu/` et `/menu/a/b`
+  retombaient sur la SPA en 200 → slash final accepté, autres formes : 404 (+ test). Point 3
+  (Remarque, 2e onglet héritant du `sessionStorage`) : comportement préexistant, hors lots,
+  **non corrigé** — correctif proposé non spécifié et risqué. Contrôles Codex sans anomalie :
+  coexistence des deux handlers, échappement corps + JSON-LD, prix masqués absents des offres,
+  typechecks client/serveur validés, bundle initial 481 184 o < 481 376 o (192 o de marge).
+- **Non vérifié :** domaine `.fr` non acheté (recommandation `.fr` OVH ~5,99 € TTC 1re année puis
+  ~9,35 € TTC/an, à revérifier) : restent achat + DNS + certificat Render + variables
+  (`CORS_ORIGIN`, `PUBLIC_URL`, `GOOGLE_REDIRECT_URI` si renseignée) + **QR réimprimés** après
+  bascule + Search Console ; aucune vérification en production ni staging (déploiement interdit) ;
+  pas de rendu sur téléphone réel ; pas de re-mesure Lighthouse/SCORES.md pour ce lot.
+
+## 11/11/2026 — P2-Q3 « Mesure / A/B » (AUDIT.md §7 ; lot déjà en partie livré : scan QR + test A/B n°2 à outiller)
+- **État initial trouvé** : P2-Q3 déjà en grande partie livré dans `autonome/integration`
+  (commits `6276425`/`9d33be6`/`fb29dc9` : compteurs anonymes migration 0008, entonnoir, test A/B
+  n°1 accroche). Trous restants : scan QR compté seulement si la page se charge (`signalerScan` JS
+  dans Jouer.tsx, une fois par onglet) ; test A/B n°2 (offre de la semaine) = protocole manuel non
+  outillé dans `docs/TESTS-AB.md`.
+- **Scan QR compté même si la page ne se charge pas** (`server/app.ts`, `src/router.ts`,
+  `src/pages/Jouer.tsx`, `src/pages/QrVitrine.tsx`, `src/pages/Roulette.tsx`) : `GET /r/<commerceId>`
+  compte le scan (compteur anonyme migration 0008) puis 302 vers `/?via=qr#/jouer/<id>`,
+  `Cache-Control: no-store`. Limite par IP `evenementParIp` (30/min) : dépassée, on redirige quand
+  même sans compter ; HEAD non compté ; commerce inconnu ou en pause → redirection sans compteur ;
+  base en panne → redirection sans compter. Aucun chemin ne renvoie d'erreur au client. `urlQrJeu()`
+  = `${origin}/r/<id>` (QR vitrine et Roulette) ; lien de parrainage dans `CarteFidelite.tsx`
+  inchangé (direct `#/jouer?parrain=`). La page ne re-signale pas le scan après `?via=qr` (pas de
+  double comptage) et retire la requête de l'adresse. `public/robots.txt` : `Disallow: /r/` (un
+  robot ne doit pas compter comme un scan). Libellé entonnoir : « Scans du QR (page chargée ou
+  non) ».
+- **Test A/B n°2 outillé** (nouveau `src/lib/mesure-offre.ts`, section dans
+  `src/components/Mesure.tsx`) : `comparerOffreSemaine`, `visitesParJourSemaine`, `JOURS_OFFRE = 28`,
+  jours courts lundi en premier, `DUREE_OFFRE_SEMAINES = 4`. Deux fenêtres de 28 jours ; chevauchement
+  ou date invalide → `null` ; variation nette via `variation()`. Module **séparé** de `mesure.ts`
+  exprès (voir bundle ci-dessous). `docs/TESTS-AB.md` mis à jour (définition du scan, comparaison
+  outillée, repli CSV conservé).
+- **Bundle (incident réglé sans toucher aux tests)** : mes premiers ajouts ont fait passer le JS
+  initial de 480 934 o à 481 719 o, au-dessus du seuil P2-Q2 (481 376 o = 80 % de 601 720 o) — 1 test
+  en échec. Cause : les helpers test-2 vivaient dans `mesure.ts`, importé par la page de jeu (bundle
+  initial). Correctif : déplacement dans `mesure-offre.ts` (chargé seulement par le tableau de bord
+  différé) + effet Jouer raccourci (comparaison exacte `'?via=qr'`). **JS initial final : 481 184 o**
+  (base 480 934, +250), sous le seuil. Mesuré avec `/tmp/mesure-bundle.mjs` et un worktree
+  `/tmp/fideliz-base` à `e04eb61` (temporaires, supprimables).
+- **Tests : 1092 → 1103 (+11)** : nouveau `tests/scan-qr-p2-q3.test.ts` (302 + compteur,
+  inconnu/pause, HEAD, limite IP, `urlQrJeu`, robots) ; `tests/mesure-p2-q3.test.ts` étendu (test 2,
+  test doc, regex de l'effet Jouer mise à jour). Commit `b3d1bbe`, fusion `--no-ff` `5fc646f`.
+- **Revue Codex (obtenue après coup sur le diff combiné Q3+Q4, voir entrée P2-Q4 ci-dessus)** :
+  d'abord indisponible (limite d'usage, 2 tentatives), revue interne rigoureuse faite à la place
+  (double comptage / scan manqué dans tous les parcours — QR `/r/`, ouverture directe, parrainage,
+  2e onglet, retour arrière — limite IP jamais bloquante, validation de l'id `[\w-]{1,80}`,
+  comparaison des périodes, bundle, couverture EN ; aucun point fondé trouvé), puis Codex a
+  fonctionné au 3e essai. Point 2 [Important] corrigé dans `474bc61` : un rechargement après un
+  scan QR recomptait le scan (le serveur 1 + la page 1, l'effet retirait `?via=qr` sans poser le
+  marqueur de session) → nouveau `marquerScanSignale()` (jeuApi.ts, posé avant le `replaceState`)
+  + garde mémoire dans `signalerScan()` quand `sessionStorage` est indisponible (+ tests).
+  Contrôles Codex sans anomalie : redirection `/r/` maintenue après dépassement IP, fenêtres
+  inclusives de 28 jours, rejet des chevauchements, lundi à l'indice 0.
+- **Non vérifié :** aucune vérification en production ni staging ; pas de rendu sur téléphone réel ;
+  pas de re-mesure Lighthouse/SCORES.md pour ce lot ; `/r/` inexistant en dev Vite (documenté dans
+  `urlQrJeu` + QrVitrine — le QR s'imprime depuis l'adresse publique définitive).
+
 ## 11/11/2026 — P2-Q2 « Performance » (AUDIT.md §7 ; compression + mesures)
 - **Compression gzip/brotli côté serveur** (`server/app.ts`, `envoyerCorps`/`preparerCorps`,
   `tests/compression-p2-q2.test.ts`, 7 tests) : brotli préféré (qualité 5) puis gzip (niveau 6)
