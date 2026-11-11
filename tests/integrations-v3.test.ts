@@ -294,7 +294,8 @@ describe('SMS / e-mail : branchements préparés, aucun envoi', () => {
       const corps = new URLSearchParams(String(t.init.body))
       assert.equal(corps.get('To'), '+33655555555')
       assert.equal(corps.get('From'), '+33700000000')
-      assert.match(corps.get('Body')!, /^Asian Home Paris : Lina, vous nous manquez.*STOP : répondez STOP$/)
+      assert.match(corps.get('Body')!, /^Asian Home Paris : Lina, vous nous manquez.*STOP : http:\/\/127\.0\.0\.1:\d+\/d\/[^/]+\/[A-Za-z0-9_-]{32}$/)
+      assert.doesNotMatch(corps.get('Body')!, /répondez STOP/i)
 
       const e = await api('POST', `/commerces/${AH}/clients/${mail.id}/relance`, { canal: 'email', message: 'Revenez nous voir !' }, PIN)
       assert.equal(e.statut, 200)

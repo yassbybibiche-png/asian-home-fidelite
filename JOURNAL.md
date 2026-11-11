@@ -1,5 +1,42 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P1-B9 « Désinscription SMS utilisable » (AUDIT.md §7, revue Codex point 7 — BLOQUANT avant toute activation SMS)
+- **Contexte :** chaque SMS de relance se terminait par `STOP : répondez STOP`, alors que l'expéditeur alphanumérique
+  Brevo (`ASIANHOME`) ne reçoit aucune réponse — texte trompeur, aucun mécanisme de désinscription utilisable par SMS.
+  La route de désinscription HMAC existait déjà (POST `/api/v1/desinscription/<client>/<jeton>`, retrait au clic depuis
+  `#/desinscription/…`, idempotente, limitée par IP) : elle est réutilisée telle quelle, sans modification du jeton.
+- **Mécanisme (lien, pas de réponse) :** `smsRelance()` prend désormais le lien de désinscription en 5e paramètre et se
+  termine par `STOP : <lien>` (`mentionDesinscriptionSms()`, `src/lib/relances.ts`) — le mot STOP est conservé (mention
+  légale des SMS marketing) mais ne promet plus de réponse. Lien court `GET /d/<client>/<jeton>` → 302 vers
+  `/#/desinscription/<client>/<jeton>` (`server/app.ts`, à côté du `/c/` existant ; jeton non vérifié à la redirection,
+  c'est la page qui appelle l'API après clic — même forme que `/c/`). Le serveur (`relancer()`) calcule le jeton une fois
+  et le sert aux deux canaux : SMS (lien court `/d/…`) et e-mail (lien long + `List-Unsubscribe`, inchangés).
+  `MENTION_STOP_SMS` supprimée (remplacée par `mentionDesinscriptionSms()` + `lienCourtDesinscription()`).
+- **Textes corrigés au même endroit (même promesse trompeuse) :** page Désinscription (lien invalide : plus de
+  « ou répondre STOP à un SMS »), `Messages.tsx` (écran commerçant), `MENTIONS_RGPD` (`integrations.ts`) et politique de
+  confidentialité (`rgpd.ts`) — tous disent désormais « lien de désinscription dans chaque SMS et chaque e-mail ».
+  Message 501 de `stop-sms` (Brevo) et commentaires `brevo.ts` mis à jour ; doc `docs/BREVO.md` (§1, §6),
+  `server/README.md` (§ relances) et `README.md` (§ RGPD) alignés. Origine stockée `lien-email` conservée pour les
+  retraits par lien (la route ne distingue pas SMS/e-mail, le jeton est le même) — dit ici, pas de nouvelle origine.
+- **Coût (conséquence assumée, documentée) :** le lien allonge le SMS — la plupart des relances SMS font désormais
+  **2 segments (2 SMS facturés)** au lieu d'1 ; alphabet GSM 7 bits conservé (jeton base64url : seuls `-` et `_`, tous
+  deux GSM). Repli sans lien (appel direct de `smsRelance()` sans passer par le serveur) : « STOP : désinscription
+  auprès du commerce » — honnête, jamais « répondez STOP ».
+- **Tests : 1044 → 1046 (+2, `tests/relances-p1-b3.test.ts`)**, suite verte, typechecks inclus dans `npm test`.
+  Nouveaux : redirection `/d/` (302, formats invalides → 404) ; SMS sans lien → repli honnête. Bout en bout (Brevo,
+  prestataire simulé) : contenu SMS exact avec lien court, redirection `/d/` du jeton réel, POST désinscription → 200,
+  consentement `false`, relance suivante → 409. **5 assertions existantes adaptées (changement de spec — le lot
+  remplace le texte qu'elles épinglaient) :** `relances-p1-b3.test.ts` (SMS purs : 1 segment → ≤ 2 ; message libre ;
+  corps Twilio et Brevo), `integrations-v3.test.ts:297` (corps SMS), `relances-ui-p1-b3.test.ts` (mention RGPD).
+  Aucun autre test modifié ; aucune fonction existante supprimée.
+- **Revue Codex (1 point, mineur, `/tmp/p1-b9-revue-codex.md`) :** le test « de bout en bout » n'ouvrait pas le lien
+  réel ni ne comparait explicitement les jetons SMS/e-mail. **Traité en partie :** redirection `/d/` du jeton réel
+  vérifiée dans le test (302 + Location exacte) ; le retrait au clic (pas à l'ouverture) est déjà couvert côté page
+  (`relances-ui-p1-b3`, pas de `useEffect`, retrait sur `onClick`) ; l'égalité des jetons SMS/e-mail tient par
+  construction (une seule fonction `jetonDesinscription()`, les deux branches vérifiées indépendamment contre la même
+  route POST) — pas de parcours navigateur ajouté (le repo n'a pas de harnais de rendu pour cette page). Aucun défaut
+  bloquant ou majeur ; HMAC inchangé, redirection interne filtrée, GSM conservé, aucun secret ni envoi réel.
+
 ## 11/11/2026 — P1-C7 « Écrans commerçant (finitions) » (AUDIT.md §7)
 - **Contexte :** l'AUDIT listait pour P1-C7 : 8 `window.confirm()`, aide « encore X tampons »,
   bouton « Saisir le prénom » si caméra refusée, découpe Réglages, pagination Clients.

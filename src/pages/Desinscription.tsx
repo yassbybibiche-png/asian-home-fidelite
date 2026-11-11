@@ -5,7 +5,8 @@ import { ErreurApi } from '../data/api'
 import { MessagePublic } from './Jouer'
 
 /**
- * Page publique #/desinscription/<clientId>/<jeton> : lien en pied de chaque e-mail de relance (P1-B3).
+ * Page publique #/desinscription/<clientId>/<jeton> : lien en pied de chaque e-mail de relance (P1-B3) et en fin de
+ * chaque SMS de relance (P1-B9, lien court /d/… — « répondez STOP » est impossible avec l'expéditeur Brevo).
  * Le consentement n'est retiré qu'au clic (un lien ouvert par un antivirus ou un aperçu de messagerie ne désinscrit pas).
  */
 export default function Desinscription() {
@@ -18,7 +19,7 @@ export default function Desinscription() {
   if (!clientId || !jeton || etat === 'invalide') {
     return (
       <MessagePublic titre="Lien invalide">
-        Ce lien de désinscription n’est pas valide. Vous pouvez aussi demander au commerce de retirer votre consentement, ou répondre STOP à un SMS.
+        Ce lien de désinscription n’est pas valide. Vous pouvez aussi demander au commerce de retirer votre consentement.
       </MessagePublic>
     )
   }

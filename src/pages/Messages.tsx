@@ -83,7 +83,7 @@ function RelancesSmsEmail() {
         ))}
       </ul>
       <p className="text-sm text-gray-600">
-        {MENTION_ENVOI}. Le client se désinscrit par le lien de l’e-mail, en répondant STOP au SMS quand il vient d’un numéro, ou auprès du commerçant ; vous pouvez aussi retirer son consentement sur sa fiche.
+        {MENTION_ENVOI}. Le client se désinscrit par le lien de désinscription de chaque SMS ou e-mail, ou auprès du commerçant ; vous pouvez aussi retirer son consentement sur sa fiche.
       </p>
       <fieldset className="space-y-2 border-t border-gray-100 pt-3">
         <legend className="etiquette">Relances automatiques (à l’ouverture du tableau de bord, une fois par jour)</legend>

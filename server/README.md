@@ -998,16 +998,19 @@ explicite — voir `docs/BREVO.md` §5).
   (`consentementRelance`, `consentementRelanceLe`, `consentementRelanceOrigine` : `inscription`, `commercant`, `stop-sms`,
   `lien-email`) — preuve datée, sans migration. Tout changement est journalisé (action `consentement`).
 - **Modèles** (`src/lib/relances.ts`, fonctions pures) : bienvenue, récompense proche (8-9 tampons sur 10, ou carte pleine),
-  inactif 30 jours, anniversaire. SMS en alphabet GSM ≤ 160 caractères (1 SMS facturé), nom du commerce, lien court `/c/<id>`,
-  mention « STOP ». E-mail : objet + corps vouvoyés, lien vers la carte, lien de désinscription en pied.
+  inactif 30 jours, anniversaire. SMS en alphabet GSM, nom du commerce, lien court `/c/<id>`, mention
+  « STOP : <lien court de désinscription `/d/<id>/<jeton>`> » (P1-B9 — « répondez STOP » est impossible avec
+  l'expéditeur alphanumérique Brevo ; la plupart des SMS font 2 segments, facturés 2 SMS). E-mail : objet + corps
+  vouvoyés, lien vers la carte, lien de désinscription en pied.
 - **STOP (SMS)** : webhook `POST /api/v1/commerces/<id>/stop-sms`, signé par Twilio — **seulement quand les SMS
   partent via Twilio**. **Choix** : désinscription traitée par l'app (pas seulement par la liste d'opposition native
   de Twilio) pour que le consentement de la fiche reflète le STOP. Selon le pays et le type d'expéditeur, Twilio peut
   aussi gérer ses propres mots-clés STOP (à vérifier à l'activation). **SMS via Brevo : pas de réponse STOP possible**
   (expéditeur alphanumérique `ASIANHOME`, pas de numéro destinataire) ; Brevo gère sa propre liste noire quand une
-  réponse est possible, et la route `stop-sms` répond 501 — le consentement se retire alors depuis la fiche client,
-  le lien de désinscription des e-mails, ou auprès du commerçant (voir `docs/BREVO.md` §6).
-- **Désinscription (e-mail)** : **Choix** : lien de l'app (`#/desinscription/<clientId>/<jeton HMAC>`, retrait au clic,
+  réponse est possible, et la route `stop-sms` répond 501 — le consentement se retire alors par le lien de
+  désinscription porté par chaque SMS (P1-B9, `STOP : <lien court /d/…>` → page `#/desinscription`, même jeton HMAC
+  que les e-mails), depuis la fiche client, ou auprès du commerçant (voir `docs/BREVO.md` §6).
+- **Désinscription (e-mail et SMS)** : **Choix** : lien de l'app (`#/desinscription/<clientId>/<jeton HMAC>`, retrait au clic,
   pas à l'ouverture — un antivirus qui suit les liens ne désinscrit personne) + en-têtes `List-Unsubscribe` /
   `List-Unsubscribe-Post` (bouton « Se désabonner » de Gmail…). Brevo n'ajoute pas de lien de désinscription aux e-mails
   transactionnels (`v3/smtp/email`), d'où la route de l'app.

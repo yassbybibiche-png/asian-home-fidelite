@@ -36,11 +36,13 @@ plus tard, hors développement, avec l'accord explicite de l'utilisateur (§5, p
 - **Route SMS utilisée** : `/v3/transactionalSMS/send` (route actuelle de la doc Brevo, lue le
   10/11/2026 — [référence API](https://developers.brevo.com/reference/send-async-transactional-sms)) ;
   l'ancienne route `/v3/transactionalSMS/sms` est dépréciée.
-- **Mention STOP** : chaque SMS de relance se termine par « STOP : répondez STOP » (mention
-  obligatoire en France pour un SMS marketing). Brevo **bascule automatiquement** un SMS
+- **Mention STOP** : chaque SMS de relance se termine par « STOP : <lien court de désinscription `/d/<id>/<jeton>`> »
+  (P1-B9 — le mot STOP est conservé, mention obligatoire en France pour un SMS marketing, mais il ne promet plus de
+  réponse : le lien, qui ouvre la page `#/desinscription` (retrait au clic), est le seul mécanisme utilisable avec
+  l'expéditeur alphanumérique Brevo). Brevo **bascule automatiquement** un SMS
   transactionnel en `marketing` quand son contenu porte un code STOP (doc Brevo) : les relances
-  sont donc traitées comme du marketing côté Brevo, ce qui est leur vraie nature. SMS ≤ 160
-  caractères, alphabet GSM : 1 SMS facturé par relance (vérifié par les tests).
+  sont donc traitées comme du marketing côté Brevo, ce qui est leur vraie nature. SMS en alphabet GSM, la plupart
+  font 2 segments : 2 SMS facturés par relance (vérifié par les tests).
 - **Priorité** : si `BREVO_SMS_SENDER` est posé → SMS via Brevo ; sinon, si Twilio est configuré →
   SMS via Twilio ; sinon → 501. L'e-mail passe toujours par Brevo.
 - **Mode test (`BREVO_MODE_TEST=1`, voir §5)** : tant que cette variable vaut `1`, **aucun SMS /
@@ -203,10 +205,11 @@ Prérequis : variables de l'étape E posées, **dont `BREVO_MODE_TEST=1`**.
   le client ne peut pas répondre au SMS (il n'y a pas de numéro destinataire). Brevo met en
   liste noire les contacts qui répondent STOP **quand une réponse est possible** (expéditeur
   numérique), mais ce n'est pas le cas ici. Conséquence : **le consentement de l'app est la
-  seule source de vérité** — un client qui veut arrêter les SMS le dit au commerçant (qui retire
-  le consentement sur la fiche), clique le lien de désinscription d'un e-mail, ou demande la
-  suppression de sa carte. La route `POST /commerces/:id/stop-sms` répond **501** quand les SMS
-  partent via Brevo (elle reste réservée au webhook Twilio, avec signature).
+  seule source de vérité** — un client qui veut arrêter les SMS clique le lien de désinscription
+  porté par chaque SMS (`STOP : <lien court /d/…>`, P1-B9, même jeton HMAC que les e-mails), le dit
+  au commerçant (qui retire le consentement sur la fiche), clique le lien de désinscription d'un
+  e-mail, ou demande la suppression de sa carte. La route `POST /commerces/:id/stop-sms` répond
+  **501** quand les SMS partent via Brevo (elle reste réservée au webhook Twilio, avec signature).
 - **La mention STOP reste dans le texte** (obligation française pour un SMS marketing) et fait
   basculer le message en `marketing` côté Brevo (voir §1).
 - **E-mail** : désinscription par le lien de l'app (retrait au clic, pas à l'ouverture — un
