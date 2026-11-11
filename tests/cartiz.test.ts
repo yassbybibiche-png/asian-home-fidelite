@@ -375,6 +375,9 @@ describe('Messages, menu, apparence (serveur)', () => {
     assert.equal((await srv.api('PUT', `/commerces/${AH}/menu`, menu, PIN)).statut, 200)
     const pub = await srv.api('GET', `/commerces/${AH}/menu`)
     assert.equal(pub.contenu.menu.categories[0].produits[0].nom, 'Har gow')
+    // P1-M2 : les allergènes saisis côté commerçant sont relus tels quels en public
+    // (ordre normalisé selon ALLERGENES par validerMenu).
+    assert.deepEqual(pub.contenu.menu.categories[0].produits[0].allergenes, ['Gluten', 'Crustacés'])
     const c: Client = (await srv.api('POST', `/commerces/${AH}/clients`, { prenom: 'Léo', contact: '0677777777' })).contenu.client
     assert.equal((await srv.api('GET', `/cartes/${c.id}`)).contenu.menuDisponible, true)
   })

@@ -89,9 +89,14 @@ describe('Validation et CSV : les allergènes saisis par le commerçant sont con
 describe('Affichage et saisie (source)', () => {
   test('#/menu : la fiche dépliée de chaque plat affiche toujours la ligne allergènes (liste ou mention)', () => {
     const tsx = source('src/pages/MenuPublic.tsx')
-    assert.match(tsx, /t\(libelleAllergenes\(p\)\)/)
-    // L'ancienne forme conditionnelle (ligne absente quand la liste est vide) a disparu.
+    // Liste renseignée : préfixe traduit séparément ; vide : mention explicite traduite.
+    assert.match(tsx, /\{t\('Allergènes :'\)\} \{p\.allergenes\.join\(', '\)\}/)
+    assert.match(tsx, /\{t\(LIBELLE_ALLERGENES_ABSENTS\)\}/)
+    // L'ancienne forme conditionnelle (ligne absente quand la liste est vide) a disparu,
+    // comme la forme t(libelleAllergenes(p)) qui faisait retomber le préfixe en français en anglais.
     assert.ok(!tsx.includes("{p.allergenes.length > 0 && <p"), 'ligne allergènes conditionnelle encore présente')
+    assert.ok(!tsx.includes('t(libelleAllergenes(p))'), 'libellé complet non traduisible encore présent')
+    assert.equal(traduire('Allergènes :', 'en'), 'Allergens:')
     // Le pied de page général reste affiché.
     assert.match(tsx, /Allergènes : demandez conseil à l’équipe en cas de doute\./)
   })
