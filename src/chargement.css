@@ -2,6 +2,12 @@
  * Écran de chargement initial (P0-U1), affiché par index.html avant que le JS ne charge.
  * CSS pur, sans JS : React remplace le contenu de #root au montage. Feuille liée, pas de bloc de style inline (CSP style-src 'self').
  * DA nocturne : noir #111111, magenta #ff2e9a (P0-D1).
+ * Réveil Render (P0-U6) : le service gratuit s'endort après 15 min sans trafic et met environ 1 minute à se
+ * réveiller (doc Render officielle, render.com/docs/free, lue le 11/11/2026). La barre ci-dessous n'est PAS
+ * une mesure réelle : sans JS, on ne peut pas savoir où en est le réveil — elle figure une progression
+ * typique de 60 s (le temps documenté), et le texte dit honnêtement ce qui se passe au lieu de promettre
+ * « quelques secondes ». Quand le serveur est déjà éveillé, le JS charge en quelques secondes et React
+ * remplace cet écran avant même que le message n'apparaisse (délai 6 s).
  */
 .chargement-initial {
   min-height: 100vh;
@@ -43,6 +49,39 @@
   animation: chargement-apparition 0.4s ease-out 6s forwards;
 }
 
+/* Progression figurée du réveil (P0-U6) : la barre se remplit en 60 s, durée documentée du réveil Render
+   gratuit — ce n'est pas une mesure, le texte l'annonce comme « environ 1 minute ».
+   Un seul élément (pas de div imbriquée) : le remplissage est un fond dont la taille est animée. */
+.chargement-initial__progression {
+  width: min(16rem, 80vw);
+  height: 0.375rem;
+  border-radius: 999px;
+  background-color: rgb(255 255 255 / 0.15);
+  background-image: linear-gradient(#ff2e9a, #ff2e9a);
+  background-repeat: no-repeat;
+  background-size: 0% 100%;
+  animation: chargement-progression 60s linear forwards;
+}
+
+/* Si le réveil dépasse 2 minutes, ce n'est plus un réveil normal : proposer de recharger (P0-U6). */
+.chargement-initial__long {
+  margin: 0;
+  max-width: 20rem;
+  font-size: 0.9rem;
+  color: rgb(255 255 255 / 0.75);
+  opacity: 0;
+  animation: chargement-apparition 0.4s ease-out 120s forwards;
+}
+
+@keyframes chargement-progression {
+  from {
+    background-size: 0% 100%;
+  }
+  to {
+    background-size: 100% 100%;
+  }
+}
+
 @keyframes chargement-pulse {
   0%,
   100% {
@@ -62,5 +101,9 @@
 @media (prefers-reduced-motion: reduce) {
   .chargement-initial__logo {
     animation: none;
+  }
+  /* Mouvement réduit (P0-U6) : pas de barre animée — le texte suffit. */
+  .chargement-initial__progression {
+    display: none;
   }
 }

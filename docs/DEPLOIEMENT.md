@@ -298,7 +298,8 @@ puis sauvegarde de conservation, (2) redéployer l'ancien code (§ 3), (3) ne to
 - Le retour arrière ne couvre que le code : schéma, données et configuration demandent les procédures des
   § 4–5, pas une commande.
 - Render Free dort après 15 min : le premier appel après une veille attend ~1 min (staging comme production).
-  Ce n'est pas une panne — ne pas relancer un déploiement pour ça.
+  Ce n'est pas une panne — ne pas relancer un déploiement pour ça. Voir § 7 (P0-U6) : l'écran d'attente
+  l'explique désormais au client.
 - Une seule instance par service : pas de bascule sans coupure, pas de déploiement « bleu/vert ».
 - Supabase gratuit : pas de restauration à un instant donné (PITR) — la sauvegarde, c'est
   `scripts/sauvegarde-base.mjs` (docs/SAUVEGARDE.md), à lancer **avant** chaque migration et chaque retour
@@ -309,3 +310,75 @@ puis sauvegarde de conservation, (2) redéployer l'ancien code (§ 3), (3) ne to
   en simulation (jamais d'appel réel), la compatibilité des migrations est vérifiée par les tests — mais
   **rien de tout cela ne prouve que le service de staging existe** : la preuve, c'est le `GET /api/v1/sante`
   du § 2, étape 4.
+
+## 7. Réveil Render — décision P0-U6 (11/11/2026)
+
+### 7.1 Le problème, dit explicitement
+
+Le service gratuit s'endort après 15 min sans trafic et met **environ 1 minute** à se réveiller
+(doc Render officielle, `render.com/docs/free`, lue le 11/11/2026 : « This process takes about one
+minute »). **Le parcours < 30 s à froid reste donc impossible** : le premier client du jour attend
+~60 s avant même que l'application ne charge. L'écran livré ici ne rend PAS le parcours < 30 s à
+froid — il l'explique honnêtement. C'est une décision explicite, pas un correctif technique manqué :
+le seul correctif certain est le plan payant (§ 7.3).
+
+### 7.2 Ce qui est livré : écran d'attente honnête
+
+- `index.html` : après 6 s sans JS, le message « Connexion lente : merci de patienter quelques
+  secondes » est remplacé par « Toujours rien après quelques secondes ? Le serveur se réveille —
+  environ 1 minute la première fois, merci de patienter. » Une barre de progression figurée
+  (`src/chargement.css`, 60 s) accompagne le message ; après 2 minutes, un second message propose
+  de recharger la page (au-delà, ce n'est plus un réveil normal).
+- **Honnêteté de la barre** : sans JS, on ne peut pas mesurer le réveil — la barre figure une
+  progression typique de 60 s (la durée documentée par Render), elle ne mesure rien. Le texte ne
+  promet plus « quelques secondes ». Quand le serveur est déjà éveillé, le JS charge en quelques
+  secondes et React remplace l'écran avant l'apparition du message (délai 6 s).
+- Mouvement réduit (`prefers-reduced-motion`) : la barre animée est masquée, le texte reste.
+
+### 7.3 L'option payante (isolée, non achetée)
+
+- **Prix vérifié le 11/11/2026 : plan Starter, 7 $/mois** (512 Mo, 0,5 CPU, service toujours
+  allumé, sans veille). Provenance : page `render.com/pricing` consultée le 11/11/2026 (page à
+  rendu JS — le tableau des tarifs n'était pas lisible en lecture texte), corroborée par plusieurs
+  sources tierces concordantes le même jour et par la vérification déjà consignée dans ce document
+  (§ 1, « passer un service en Starter (7 $/mois) », 11/11/2026). Le comportement de veille
+  (15 min, ~1 min de réveil, 750 h gratuites) vient lui de la doc officielle `render.com/docs/free`,
+  lue en texte intégral le 11/11/2026.
+- **Comment l'activer (le jour où la décision est prise)** : dashboard Render → service
+  `asian-home-fidelite` → changer le plan Free en Starter (moyen de paiement requis) — ou changer
+  `plan: free` en `plan: starter` dans `render.yaml` (commentaire P0-U6 au-dessus du service de
+  production, sans effet tant que le plan n'est pas changé). Coût : 7 $/mois pour la production
+  seule ; le staging reste en Free (il dort entre les tests, c'est voulu). **Rien n'a été acheté
+  et aucun plan n'a été changé dans ce lot.**
+- Effet attendu : fin de la veille sur la production → parcours à froid = parcours à chaud
+  (~9–10 s scriptés, SCORES.md). À vérifier alors par une mesure à froid réelle sur le staging
+  d'abord (le délai à froid n'a jamais été mesuré, voir § 7.5).
+
+### 7.4 Le keep-alive est écarté — pourquoi
+
+Un ping régulier (toutes les < 15 min) pour empêcher la veille n'est pas retenu :
+
+1. **Il consomme le quota partagé.** Render accorde 750 h gratuites par mois et par espace de
+   travail, tous services gratuits réunis ; un service éveillé ne consomme pas d'heures en veille,
+   mais un service maintenu éveillé en consomme en continu (~744 h/mois). Production + staging
+   maintenus éveillés = ~1 488 h/mois, soit près du double du quota : Render **suspendrait tous
+   les services Free de l'espace jusqu'au mois suivant, production comprise** (doc officielle,
+   § 1). Même la production seule (~744 h) ne laisserait presque rien pour le staging.
+2. **Il n'est pas garanti.** Render peut redémarrer un service Free à tout moment (doc officielle)
+   — un redémarrage = un réveil de ~1 min quand même, ping ou pas. Le keep-alive achète une
+   probabilité, pas une disponibilité.
+3. **Il ne résout pas la cause.** La veille est le prix du plan gratuit ; la seule suppression
+   certaine de la veille est le plan payant (§ 7.3).
+
+### 7.5 Mesure à froid — ce qui n'a pas pu être mesuré
+
+- **Aucune mesure à froid réelle dans ce lot.** Pas de navigateur sur cette VM pour charger la page
+  d'un service endormi, et la production n'a pas été touchée (ni réveil forcé, ni mesure). La durée
+  « environ 1 minute » est la durée documentée par Render (§ 7.1), pas une mesure locale ; la
+  durée de la barre CSS (60 s) en découle, et un test vérifie cette durée
+  (`tests/reveil-render-p0-u6.test.ts`).
+- **Mesure simulée locale, non retenue comme preuve** : un démarrage local du serveur ne simule
+  pas le réveil Render (pas de veille, pas de cold start d'instance) — il n'a donc pas été
+  présenté comme une mesure avant/après. La mesure à froid réelle reste à faire : laisser le
+  staging s'endormir (> 15 min sans trafic), puis chronométrer le premier chargement sur
+  téléphone — protocole à consigner dans SCORES.md quand il sera exécuté.
