@@ -301,6 +301,34 @@ Séquence réelle : preuve documentée ici, puis revue Codex du tour
 (validation demandée sur ce point précis), puis fusion seulement si la
 revue valide.
 
+### Test épinglé par le tour 9 — preuve et validation Codex requise
+
+Le remplacement de la variante `table-sushis-petit.webp` (720×1279,
+95 494 o) par sa version recadrée à la bande visible de la carte (720×590,
+51 402 o) casse `tests/boucle-t4-hero.test.ts` (« WebP valide 720 px de
+large » : `hauteur 1279 attendue, lue : 590` ; taille 51 402 o < 120 000 o,
+passe ; 51 402 o < 195 989 o / 1,5, passe).
+Preuve que le test n'est pas faux dans son exigence, mais que son assertion
+de dimensions épingle l'ancien actif :
+- l'exigence (« la variante est un WebP valide, aux dimensions attendues,
+  nettement plus léger que le JPEG ») est intacte : le fichier est le même
+  (`table-sushis-petit.webp`), le même rôle (héros du menu + de la carte),
+  la même source (`table-sushis.jpg`) ; seul son recadrage change,
+  délibérément (boucle t9, même motif que le tour 7 pour la bannière) ;
+- le rendu est très proche sur les deux pages : le menu montre le centre
+  720×413 de la nouvelle bande (identique à ce qu'il montrait de l'ancienne),
+  la carte la montre entière (identique à ce qu'elle montrait) — vérifié
+  visuellement sur planche de comparaison des bandes avant le changement ;
+- la correction (dimensions 720×590, plafond < 60 Ko au lieu de < 120 Ko,
+  « ~2× » → « ~4× plus léger ») RESSERRE le test au lieu de l'assouplir :
+  la borne de poids est divisée par deux, et les dimensions épinglées sont
+  celles du nouvel actif délibéré — aucune assertion n'est retirée, aucune
+  exigence affaiblie (le contrôle relatif « au moins 1,5× plus léger que le
+  JPEG » est conservé tel quel).
+Séquence réelle : preuve documentée ici, puis revue Codex du tour
+(validation demandée sur ce point précis), puis fusion seulement si la
+revue valide.
+
 ## Baseline t0 (11/11/2026 ~14:35 UTC, HEAD `7395522`, `autonome/integration`)
 
 Mesure de référence avant le tour 1 (même protocole que P2-Q2, 2 passes) —
@@ -745,6 +773,79 @@ réduire le travail initial ne garantit aucun gain).
 séparation nette sur les deux métriques de transition ; standard et
 Lighthouse plats ; bundle inchangé ; 0 erreur). Tours sans gain
 consécutifs : **0**.
+
+### Tour 9 — `autonome/boucle-t9-heros-recadre` (fusionné)
+
+Sujet (même motif que le tour 7, pour le héros) : la variante 720×1279 du
+héros est affichée 390×224 (menu) et 390×320 (carte) en `object-cover` —
+l'`object-cover` recadrait déjà au centre, donc seule la bande visible
+sert. Changement : même fichier `public/visuels/table-sushis-petit.webp`,
+recadré à la bande visible de la carte — 720×1279, 95 494 o → **720×590,
+51 402 o** (recadrage centré, Pillow, WebP q75, −46 %). Aucun changement
+de code (le `<picture>` du tour 4 sert le même fichier) ; seuls changent
+l'actif, son commentaire dans `src/lib/visuels.ts`, sa ligne dans
+`public/visuels/SOURCES.md`, et le test `tests/boucle-t4-hero.test.ts`
+(dimensions 720×1279 → 720×590, plafond < 120 Ko → < 60 Ko,
+« ~2× » → « ~4× plus léger »).
+Vérification visuelle avant le changement (planche de comparaison des
+bandes, lue) : bande menu 720×413 (verre cocktail champignon, ardoise de
+sushis, bao buns) et bande carte 720×590 (ajoute la coupe cocktail et le
+gobelet ASIAN HOME) — le menu montre approximativement le centre 720×413
+de la nouvelle bande à ~390 px, la carte approximativement la bande
+entière ; les bandes varient avec la largeur (max-w-md, px-4, hauteurs
+fixes — sur écran étroit, l'ancienne image pouvait montrer davantage de
+contenu vertical) ; le rendu est très proche, pas strictement identique.
+Mesure ponctuelle (`scripts/mesurer-menu-asian-home.mjs`) :
+**LCP `#/menu` 2 540 / 2 492 ms → 2 324 / 2 252 ms (moyenne 2 516 →
+2 288 ms, −228 ms, 2 passes sur 2)** — le héros WebP finit à 2 296 /
+2 226 ms (était 2 510 / 2 454 ms), 51 702 o transférés (51 402 o sur
+disque : `transferSize` ajoute forfaitairement 300 o au corps encodé —
+précision Codex t9, point 3) ; les 44 092 o économisés valent ~220 ms à
+1,6 Mbit/s : le gain observé est plausible, encore indicatif (2 passes).
+LCP `#/jouer` (en même temps) : 1 684 / 1 704 ms → 1 648 / 1 672 ms
+(plat, attendu). Mesures standard (2 passes) : premier affichage `#/jouer`
+1 894 / 1 882 ms ; LCP 1 872 / 1 832 ms ; parcours 6 853 / 6 696 ms ;
+ouverture carte 607 / 619 ms ; menu direct 1 703 / 1 717 ms ; 0 erreur
+console, 0 requête échouée. Lighthouse t9 : 78 / 86 (TBT 780 / 490 ms,
+LCP 2,6 / 2,2 s) contre 80/81 à t7 — plat, dans le bruit (le 86 est la
+meilleure passe observée depuis t0, TBT 490 ms). Bundle : IDENTIQUE à t6
+(JS initial 453 667 o, total 524 433 o, 24 chunks, mêmes noms de chunks —
+build frais vérifié).
+Tests : suite complète **1184/1184** (inchangés — le tour ne crée ni ne
+retire de test, il met à jour les dimensions épinglées par le test t4) ;
+E2E 3/3.
+Revue Codex t9 (5 points) : 1. modification du test **approuvée** —
+l'assertion 1279 décrivait l'ancien actif, pas une exigence fonctionnelle ;
+le plafond est renforcé — **correction rédactionnelle appliquée** : le
+commentaire disait « servi en premier via menu » (phrase coupée par
+l'édition) — rétabli « via `<picture>` sur le menu » ; 2. recadrage à
+720×590 fondé à la largeur de référence, formulation trop absolue —
+**corrigé** : « bande entière / identique » → « approximativement, à cette
+largeur » dans `visuels.ts`, SOURCES.md et le test (le choix 720×413
+obligerait la carte à agrandir davantage et couper les côtés) ; 3. gain
+cohérent, encore indicatif — **noté** : +300 o de `transferSize` normaux
+(forfaitaires, pas des en-têtes mesurés) ; 4. conserver l'URL acceptable —
+**noté** : le SW sert le cache puis actualise ; la fraîcheur HTTP d'1 h ne
+borne pas la persistance dans le cache SW (notamment hors ligne) — ce
+délai ne compromet que l'arrivée du gain de poids ; aucun versionnement
+nécessaire pour ce tour ; 5. fusion favorable — ensuite : DA si les
+irritants sont identifiés, TBT si une tâche précise devient attribuable ;
+les photos paresseuses sont un levier secondaire de transfert au
+défilement (`loading="lazy"` ne garantit toutefois pas qu'elles attendent
+ce défilement) ; aucun motif pour relancer une optimisation diffuse du
+tour 8.
+Incident de documentation en cours de tour : un edit de SCORES.md avec
+un `old_text` ambigu (« 0 erreur console, 0 requête échouée. ») a remplacé
+la PREMIÈRE occurrence (paragraphe P2-Q2, ligne 48) au lieu de celle du
+tour 7 — la sous-section t9 s'est retrouvée insérée au milieu du
+paragraphe P2-Q2. Corrigé en retirant le bloc mal placé et en le
+réinsérant au bon endroit (ancre unique : « une URL versionnée serait
+nécessaire pour une adoption immédiate »). Leçon (à ajouter à la
+discipline d'édition) : ne jamais utiliser un `old_text` qui apparaît
+plusieurs fois — toujours un contexte unique d'au moins 2 lignes.
+**Décision : FUSIONNÉ** (gain LCP menu −228 ms moyen, 2/2 passes ; `#/jouer`
+plat comme attendu ; standard et Lighthouse plats ; bundle inchangé ;
+0 erreur). Tours sans gain consécutifs : **0**.
 
 ### Tour 8 — `autonome/boucle-t8-tbt-longues-taches` (annulé — aucun levier au-dessus du bruit)
 

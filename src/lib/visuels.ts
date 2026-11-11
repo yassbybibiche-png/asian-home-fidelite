@@ -26,8 +26,12 @@ export const VISUELS = {
   heroPlatsPetit: '/visuels/hero-plats-petit.webp',
   /** Table dressée : bao buns, plateau de sushis, cocktails. */
   tableSushis: '/visuels/table-sushis.jpg',
-  /** Même table dressée, 720 px de large (WebP q75, ~95 Ko) pour l'en-tête du menu et de la carte —
-      le JPEG 788×1400 (196 Ko) reste le repli (boucle t4 : il est l'élément LCP du vrai menu). */
+  /** Même table dressée, recadrée au ratio de la carte (720×590, WebP q75, ~51 Ko)
+      pour l'en-tête du menu et de la carte — le JPEG 788×1400 (196 Ko) reste le repli
+      (boucle t4 : variante 720×1279 ; boucle t9 : recadrage centré à la bande visible
+      de la carte 720×590 — le menu montre approximativement le centre 720×413 de cette
+      bande à la largeur de référence ~390 px, la carte approximativement la bande
+      entière ; le rendu est très proche sur les deux pages). */
   tableSushisPetit: '/visuels/table-sushis-petit.webp',
   /** Cocktails signature Kohsamui / Tokyo / Piña Colada. */
   cocktails: '/visuels/cocktails.jpg',
