@@ -1905,20 +1905,31 @@ export async function creerServeur(o: OptionsServeur) {
     }
 
     const d = { client, commerce }
-    // Le jeton de désinscription sert aux deux canaux : e-mail (lien long + List-Unsubscribe) et SMS (lien court
-    // /d/… — P1-B9 : « répondez STOP » est impossible avec l'expéditeur alphanumérique Brevo).
-    const jeton = await jetonDesinscription(commerce.id, client.id)
     let message: Message
-    if (canal === 'sms') {
-      message = { destinataire, texte: smsRelance(demande.modele, d, lienCourtCarte(site, client.id), demande.libre, lienCourtDesinscription(site, client.id, jeton)) }
-    } else {
-      const e = emailRelance(demande.modele, d, { carte: lienCarte(site, client.id), desinscription: `${site}/#/desinscription/${client.id}/${jeton}` }, demande.libre)
-      message = {
-        destinataire,
-        sujet: e.sujet,
-        texte: e.texte,
-        entetes: { 'List-Unsubscribe': `<${site}/api/v1/desinscription/${client.id}/${jeton}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+    try {
+      // Le jeton de désinscription sert aux deux canaux : e-mail (lien long + List-Unsubscribe) et SMS (lien court
+      // /d/… — P1-B9 : « répondez STOP » est impossible avec l'expéditeur alphanumérique Brevo).
+      const jeton = await jetonDesinscription(commerce.id, client.id)
+      if (canal === 'sms') {
+        message = { destinataire, texte: smsRelance(demande.modele, d, lienCourtCarte(site, client.id), demande.libre, lienCourtDesinscription(site, client.id, jeton)) }
+      } else {
+        const e = emailRelance(demande.modele, d, { carte: lienCarte(site, client.id), desinscription: `${site}/#/desinscription/${client.id}/${jeton}` }, demande.libre)
+        message = {
+          destinataire,
+          sujet: e.sujet,
+          texte: e.texte,
+          entetes: { 'List-Unsubscribe': `<${site}/api/v1/desinscription/${client.id}/${jeton}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+        }
       }
+    } catch (e) {
+      // Panne AVANT l'appel au prestataire : rien n'est parti, la ligne réservée passe en « erreur » (best effort) au
+      // lieu de rester « en_cours » — sinon elle bloquerait la reprise de la tournée automatique (point Codex 9).
+      try {
+        await st.majEnvoi({ ...envoi, statut: 'erreur', raison: 'Relance non préparée : rien n’a été envoyé.' })
+      } catch {
+        // La ligne reste « en_cours » : prudent (pas de reprise pour ce client aujourd'hui), jamais de doublon.
+      }
+      throw e
     }
     let fin: Tentative
     try {
@@ -1946,18 +1957,32 @@ export async function creerServeur(o: OptionsServeur) {
   // Relances automatiques (réglage `relancesAuto` du commerce) : une tournée par commerce et par jour, lancée à
   // l'ouverture du tableau de bord (GET /etat), en arrière-plan. Pas à l'ouverture de la carte par le client : il est
   // justement là (« vous nous manquez » n'aurait aucun sens), et l'anniversaire y est déjà fêté dans sa boîte de réception.
+  //
+  // Point Codex 9 : `tournees` (commerce → jour) ne veut dire que « tournée MENÉE À BIEN ce jour-là » ; il n'est écrit
+  // qu'en fin de boucle sans exception. Une tournée interrompue (lecture des clients, écriture d'un envoi…) ou sans
+  // rien de branché / sans migration 0007 ne marque pas le jour : la prochaine ouverture du tableau de bord la relance.
+  // L'anti-concurrence est `tourneesActives` (une seule tournée à la fois par commerce), pas la marque du jour.
+  // Une reprise ne renvoie jamais un message déjà parti : pour chaque client, `relanceAutoDue` relit ses envois en base
+  // et ignore le modèle s'il y a déjà une ligne `envoye` ou `en_cours` (même absence / même année), et l'index unique
+  // partiel (commerce, client, modèle, jour) sur ces deux statuts refuse en dernier recours une 2e réservation le même
+  // jour (ErreurConflit → « refuse », sans appel au prestataire). C'est déjà ce qui protégeait d'un redémarrage du
+  // serveur (cette Map est en mémoire). Les échecs du prestataire (statut `erreur`) ne sont pas une panne de tournée :
+  // le message a pu partir malgré l'erreur (délai dépassé…), on ne le retente pas automatiquement.
   const tournees = new Map<string, string>()
+  const tourneesActives = new Set<string>()
   const tourneesEnCours = new Set<Promise<void>>()
   function lancerRelancesAuto(commerce: Commerce, site: string) {
     const regles = commerce.relancesAuto
     if (!regles?.inactif && !regles?.anniversaire) return
     const t = maintenant()
     const jour = jourParis(t)
-    if (tournees.get(commerce.id) === jour) return
-    tournees.set(commerce.id, jour)
+    if (tournees.get(commerce.id) === jour || tourneesActives.has(commerce.id)) return
+    tourneesActives.add(commerce.id)
     const p = (async () => {
       const branche = notifications.statut()
-      // Rien de branché, ou migration 0007 absente : pas de tournée (et pas de 501 en série dans le journal).
+      // Rien de branché, ou migration 0007 absente : pas de tournée (et pas de 501 en série dans le journal). Le jour
+      // n'est pas marqué : si tout est branché plus tard dans la journée, la tournée part. Ce test ne coûte presque
+      // rien à chaque ouverture (statut en mémoire, `schemaRelances` mis en cache 60 s).
       if ((!branche.sms && !branche.email) || !(await schemaRelances())) return
       for (const client of await st.clients(commerce.id)) {
         const canal = canalDuClient(client)
@@ -1967,9 +1992,13 @@ export async function creerServeur(o: OptionsServeur) {
         const modele = (['anniversaire', 'inactif'] as const).find((x) => regles[x] && relanceAutoDue(x, client, deja, t))
         if (modele) await relancer(commerce, client, { modele, declencheur: 'auto', auteur: 'Automatique' }, site)
       }
+      tournees.set(commerce.id, jour)
     })()
-      .catch((e) => console.warn(`[relances] tournée automatique interrompue : ${e instanceof Error ? e.message : e}`))
-      .finally(() => tourneesEnCours.delete(p))
+      .catch((e) => console.warn(`[relances] tournée automatique interrompue (reprise à la prochaine ouverture) : ${e instanceof Error ? e.message : e}`))
+      .finally(() => {
+        tourneesActives.delete(commerce.id)
+        tourneesEnCours.delete(p)
+      })
     tourneesEnCours.add(p)
   }
 
