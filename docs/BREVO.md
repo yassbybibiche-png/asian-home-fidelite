@@ -9,6 +9,19 @@ Brevo SMS n'est pas configuré (il n'est plus le prestataire par défaut).
 n'a été créée, aucun envoi réel n'a jamais eu lieu** — en production, tant que les variables ci-dessous
 ne sont pas posées, la route relance répond 501 et rien ne part.
 
+**État au 11/11/2026 (lot P1-B7) :**
+- **Validation simulée vérifiée de bout en bout** (`tests/brevo-production-p1-b7.test.ts`, sans clé ni
+  réseau) : les 5 variables lues depuis l'environnement ; `/sante` combiné `sms: true, email: true,
+  smsPrestataire: 'Brevo', modeTest: true` ; relance bienvenue e-mail (sandbox Brevo, en-tête
+  `X-Sib-Sandbox: drop`, journal statut `test`) puis SMS (simulé, zéro appel réseau, journal `test`).
+- **Compte Brevo en cours de création côté agent parent** (demande de l'utilisateur : « Crée un compte
+  brevo directement » — création annoncée par l'agent parent, **non vérifiée ici**) — **clés attendues** : tant qu'elles ne sont pas posées dans Render, le critère
+  `/sante` en production (`sms: true, email: true, smsPrestataire: 'Brevo'`) reste **« attend les clés »**,
+  et la recette réelle (§5 B) reste **« attend les clés + l'accord explicite de l'utilisateur »**.
+- **Tarif SMS :** la page Brevo affichait le 11/11 un tarif **à partir de 0,073 €/SMS** (signalé par
+  l'agent parent, **à confirmer** au moment de l'achat, contre ~0,045 €/SMS estimé le 10/11) — vérifier
+  le montant exact dans le compte avant d'acheter des crédits (§2).
+
 **Consigne du 10/11/2026 ~22h14 (mode autonome) : AUCUN envoi réel de SMS, d'e-mail ou de réponse
 Google, et aucun paiement réel, pendant le développement — mode test uniquement.** La vérification du
 branchement se fait donc sans rien livrer (voir §5) : e-mail en **sandbox Brevo** (`X-Sib-Sandbox:
@@ -181,6 +194,16 @@ Prérequis : variables de l'étape E posées, **dont `BREVO_MODE_TEST=1`**.
 
 **Ne pas faire pendant le développement.** Quand l'utilisateur donne son accord explicite :
 
+**Pré-requis (à cocher avant de retirer le mode test) :**
+- [ ] Compte Brevo créé, clé API `BREVO_API_KEY` posée dans Render (étape B).
+- [ ] Expéditeur e-mail validé chez Brevo, `BREVO_SENDER_EMAIL` posée (étape C).
+- [ ] Expéditeur SMS `ASIANHOME` posé (`BREVO_SMS_SENDER`) et **crédits SMS achetés** (sans crédits,
+  Brevo refuse l'envoi — 502, journal « erreur »). Tarif à confirmer dans le compte (§2 : ~0,045 €/SMS
+  estimé le 10/11, à partir de 0,073 €/SMS affiché le 11/11).
+- [ ] Destinataires définis et consentants : e-mail `yassbybibiche@gmail.com` (l'utilisateur), puis
+  1 SMS vers **son propre numéro** (celui vérifié chez Brevo) — **aucun vrai client** ne reçoit quoi
+  que ce soit pendant cette recette.
+
 1. Retirer `BREVO_MODE_TEST` des variables Render (redéploiement), vérifier `/sante` :
    `integrations.modeTest` absent, `sms: true, email: true`.
 2. Créer un client test « Yassine Test » avec l'e-mail `yassbybibiche@gmail.com`, **cocher** la case
@@ -191,12 +214,15 @@ Prérequis : variables de l'étape E posées, **dont `BREVO_MODE_TEST=1`**.
    de désinscription en pied) ; journal des envois (**Messages** → « Journal des envois ») :
    ligne « bienvenue / e-mail / Envoyé ».
 5. Rejouer la même relance le même jour → **409** (« déjà été envoyée à ce client aujourd’hui »).
-6. SMS : même client test avec son propre numéro, canal **sms** → SMS reçu signé `ASIANHOME`,
-   avec le lien court `/c/<id>` et la mention STOP ; journal : ligne « bienvenue / sms / Envoyé ».
+6. SMS : **un deuxième client test** (« Yassine Test SMS ») avec son propre numéro, canal **sms**,
+   modèle **bienvenue** → SMS reçu signé `ASIANHOME`, avec le lien court `/c/<id>` et la mention STOP ;
+   journal : ligne « bienvenue / sms / Envoyé ». **Ne pas réutiliser le client de l'étape 2 le même jour :**
+   l'anti-doublon (1 relance par modèle, par client et par jour) ne distingue pas le canal — un SMS
+   « bienvenue » au même client le même jour que l'e-mail répondrait 409, comme à l'étape 5.
 7. Cliquer le lien de désinscription de l'e-mail → page de désinscription → bouton
    « Me désinscrire » → le consentement du client test passe à `false` (fiche client) et toute
    relance suivante répond 409.
-8. **Supprimer le client test** ensuite (fiche client → « Supprimer ce client ») pour ne laisser
+8. **Supprimer les deux clients test** ensuite (fiche client → « Supprimer ce client ») pour ne laisser
    aucune donnée de test en production.
 
 ## 6. STOP et désinscription — limites connues (lire avant d'activer)

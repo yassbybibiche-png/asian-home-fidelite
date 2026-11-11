@@ -1,5 +1,34 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P1-B7 « Brevo en production » (AUDIT.md §7, revue Codex point 8)
+- **Ce lot ne crée ni compte Brevo, ni clé, ni envoi réel.** Le code Brevo existait déjà (commit `4862968`) ;
+  le lot vérifie la validation **simulée** de bout en bout et documente la recette réelle autorisée.
+- **Validation simulée vérifiée** (`tests/brevo-production-p1-b7.test.ts`, 5 tests, sans clé ni réseau) :
+  les 5 variables Render lues depuis l'environnement (`configDepuisEnv` : clé, expéditeurs, drapeaux
+  `bacASable` / `modeTest`) ; serveur branché avec cette même configuration ; `/sante` combiné
+  `{ sms: true, email: true, smsPrestataire: 'Brevo', modeTest: true }` ; relance bienvenue e-mail
+  (sandbox Brevo, `X-Sib-Sandbox: drop`, journal statut `test`) puis SMS (simulé, zéro appel réseau,
+  journal `test`) ; la simulation répétée repasse (le statut `test` n'occupe pas le créneau anti-doublon).
+- **docs/BREVO.md** : état au 11/11/2026 (compte en cours de création côté agent parent — création annoncée
+  par l'agent parent, non vérifiée ici ; **clés attendues**) ; pré-requis à cocher avant la recette réelle
+  (§5 B : clé, expéditeur e-mail validé, crédits SMS achetés, destinataires définis) ; tarif SMS : page
+  Brevo affichant à partir de 0,073 €/SMS le 11/11 (signalé par l'agent parent, **à confirmer** au moment
+  de l'achat, contre ~0,045 € estimé le 10/11).
+- **Revue Codex (6 points, `/tmp/p1-b7-revue-codex.md`) — 4 fondés, corrigés :** 1. [Mineur] valeurs de
+  `configDepuisEnv` non assertées, serveur de test configuré à la main → valeurs assertées + serveur
+  branché via `configDepuisEnv(ENV_COMPLET)`. 3. [Remarque] répétition de simulation absente du scénario
+  → répétition SMS ajoutée (200, journal `test`). 4. [Mineur] **procédure §5 B fausse** : après un e-mail
+  « bienvenue » réel, un SMS « bienvenue » au même client le même jour répond 409 — l'index unique
+  `envois_un_par_jour (commerce, client, modèle, jour)` ignore le canal (vérifié : migration 0007) →
+  recette SMS déplacée sur un **deuxième client test**, avec l'explication dans la doc. 5. [Remarque]
+  « compte en cours de création » → précisé « création annoncée par l'agent parent, non vérifiée ici ».
+  Points 2 et 6 (remarques : assertions fondées, aucun risque d'envoi réel) : rien à corriger.
+- **Tests : 1051 → 1056 (+5)**, suite verte, `npx tsc -p .` propre, typecheck serveur inclus dans
+  `npm test`. Aucun test existant modifié, aucun secret, aucun envoi réel.
+- **Non vérifié (attend les clés + l'accord explicite de l'utilisateur) :** `/sante` en production
+  (`sms: true, email: true, smsPrestataire: 'Brevo'`) ; recette réelle §5 B (1 e-mail vers
+  yassbybibiche@gmail.com, puis 1 SMS vers le numéro de l'utilisateur, sur deux clients test distincts).
+
 ## 11/11/2026 — P1-P1 « Egress / polling » (AUDIT.md §7, F-16)
 - **Décision (intervalle allongé, pas de différentiel) :** le rechargement périodique du store passe de 10 s à 30 s
   (`INTERVALLE_RECHARGEMENT_MS`, `src/store.tsx`) ; rechargement sur action, au retour au premier plan et au retour du
