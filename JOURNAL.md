@@ -1120,3 +1120,60 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   écriture (un envoi des mêmes octets qui gagnerait exactement entre les deux laisserait une adresse sans blob,
   réparable par un nouvel envoi) ; blobs remplacés conservés en `meta` (une ligne par ancien logo). Le pointeur seul
   ne fait plus foi pour les lectures : le GET sans version se replie sur l'image désignée par la fiche.
+
+## 11/11/2026 — P0-S14 : Vue caisse minimale (AUDIT.md §7, F-13)
+- **Contexte.** `GET /caisse` renvoyait le commerce brut + tous les clients (tél/e-mail) + journal à n'importe quel
+  membre de l'équipe. Désormais : sans `?q=`, aucun client ; avec `?q=`, seuls les clients correspondants, paginés
+  côté serveur ; fiche client à la demande (scan QR / sélection) ; commerce réduit à ce que le comptoir affiche et
+  calcule ; plus de journal servi en caisse.
+- **Serveur (`server/app.ts`).** `GET /commerces/:id/caisse?q=&page=&limite=` (limite 1–50, défaut 20 ; `q` ≤ 80 car.,
+  400 sinon) → `{ auteur, commerce, clients, total, page, limite }` ; recherche par prénom (sans accents), téléphone
+  (+33/0033/06, tous formats) ou e-mail via `correspondRecherche` (même règle que le front). `GET
+  /commerces/:id/caisse/clients/:clientId` → `{ client }`, 404 si inconnu. `commerceCaisse` (type `CommerceCaisse`,
+  `src/types.ts`) : id, nom, logo, seuilTampons, recompense, catalogue, eurosParPoint, programme — jamais les lots
+  (probabilités) ni les réglages internes (réponses auto, messages auto, relances, tests A/B, conservation, dates,
+  liens). La recherche filtre côté serveur sur tous les clients du commerce (lecture paginée complète, P0-S18) : ce
+  qui est minimisé, c'est ce qui quitte le serveur vers la tablette, pas le travail du serveur. `GET …/etat`
+  (gérant) est inchangé : liste complète + journal.
+- **Front (`src/pages/Caisse.tsx`, `src/data/api.ts`).** `api.caisse(commerceId, acces, { q, page, limite })`,
+  `api.clientCaisse(commerceId, acces, clientId)`. Recherche différée 300 ms, ≥ 2 caractères, 8 par page, « Voir
+  plus » ; scan QR = fiche à la demande ; fiche du client sélectionné rafraîchie à chaque synchro (15 s). Cache
+  local : seulement les clients déjà vus sur cet appareil (recherche, scan, actions) — jamais la liste ; hors ligne,
+  la recherche se replie sur ces clients connus (message explicite) et le scan d'un client jamais vu reste impossible.
+- **Tests** : avant **879/879**, après **887/887** (`npm test`, typecheck serveur inclus), `npx tsc -p .` et
+  `npm run build` OK. `+8` tests (`tests/caisse-p0-s14.test.ts`) : ouverture sans recherche (aucun client, commerce
+  minimal, pas de journal), recherche par prénom (seul le client cherché), accents / +33 / e-mail, pagination
+  (12 correspondants, pages de 5 sans recouvrement ni perte), fiche à la demande (401/404), paramètres invalides
+  (400), parcours recherche → fiche → passage ; messages privés (voir revue Codex point 1). Adaptations au nouveau
+  contrat (pas d'affaiblissement) dans `tests/cartiz.test.ts` : lecture du solde via la fiche, recherche `?q=Lina`,
+  assertion « sans recherche, aucun client ».
+- **Revue Codex** du diff (`/tmp/codex-revue-p0-s14.txt`, 7 points, tous corrigés, aucun ignoré) :
+  1. [P1] `clientCaisse` exposait `messagesPrives` — `clientCaisseEquipe` (recherche, fiche, réponses d'actions) ;
+     `clientCaisse` inchangé pour le gérant (GET …/etat, page Avis) — test : message privé absent en caisse, présent
+     dans …/etat. La suggestion « liste blanche des champs » n'est pas reprise telle quelle : le comptoir a besoin de
+     presque toute la carte (visites, récompenses en attente, rattrapages, réserve) et les champs restants
+     (anniversaire, plat préféré, historique d'échanges) appartiennent à la carte servie ; seule la fuite nommée
+     (messages privés) est retirée.
+  2. [P1] ancien cache v1 (liste complète) survivait — clé cache v2 + suppression de la v1 au démarrage.
+  3. [P1] retrait d'une fiche sur 404 inopérant (fusion) — `persisterCache` (écriture sans fusion) pour les retraits.
+  4. [P1] scan réutilisant une fiche périmée — `ficheClient` interroge le serveur d'abord en ligne, cache seulement
+     hors ligne, 404 → retrait des clients connus.
+  5. [P2] effacer la recherche n'invalidait pas la requête en cours — compteur incrémenté en tête d'effet.
+  6. [P2] « Voir plus » mélangeait deux recherches — garde de génération + verrou pendant le chargement.
+  7. [P2] erreurs du scan / « Voir plus » non traitées, recherche masquant les erreurs — `.catch` + annonce,
+     try/catch, `erreurRecherche` affichée distinctement de « Aucun client trouvé ».
+  Incident : `codex exec` refusait de démarrer hors du repo (« Not inside a trusted directory ») — lancé avec
+  `workdir` = repo. Codex n'a pas pu écrire son rapport (sandbox lecture seule) : texte complet dans
+  `/tmp/codex-revue-p0-s14.txt` (retranscrit depuis sa sortie).
+- **Incident de suite (flaky, hors lot).** La 2e suite complète après correctifs : 886/887, 1 échec
+  `securite-s4` « définie et valide → démarre sans avertissement CORS » (timeout 23 s au démarrage du serveur en
+  sous-processus, « ni démarré ni arrêté »). `server/index.ts` et CORS ne sont pas touchés par ce lot ; le test
+  passe seul en 2,3 s (24/24) et passait dans la 1re suite complète (886/886) — surcharge de la VM pendant la suite.
+  Suite relancée pour un vert propre avant commit.
+- **Résiduels.** La route historique `POST /clients/:id/visite` (gérant OU équipe, `clientCaisse`) sert encore
+  `messagesPrives` à un membre — hors périmètre S14 (route partagée, la fiche gérant en dépend via …/etat) ; à
+  traiter si la vue équipe/gérant est un jour séparée sur cette route. Le cache local garde les fiches vues
+  indéfiniment (par appareil, équipe seulement) ; aucune purge automatique. La recherche filtre en mémoire côté
+  serveur (pas de filtre PostgREST sur le JSONB) : acceptable pour un commerce, à revoir si la base grossit
+  beaucoup. Les correctifs front (points 2–7) ne sont pas couverts par un test automatisé (pas de navigateur sur la
+  VM) : relus + typecheckés, à vérifier sur tablette réelle au premier usage.

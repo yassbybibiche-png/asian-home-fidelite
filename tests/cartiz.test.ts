@@ -233,10 +233,11 @@ describe('Équipe, caisse, points, audit (serveur)', () => {
 
   test('caisse : code équipe exigé (mauvais code 401), le code identifie le membre', async () => {
     assert.equal((await srv.api('GET', `/commerces/${AH}/caisse`, undefined, { 'X-Equipe-Code': '0000' })).statut, 401)
-    const r = await srv.api('GET', `/commerces/${AH}/caisse`, undefined, CODE)
+    const r = await srv.api('GET', `/commerces/${AH}/caisse?q=Lina`, undefined, CODE)
     assert.equal(r.statut, 200)
     assert.deepEqual(r.contenu.auteur, { type: 'membre', id: membreId, nom: 'Mai' })
     assert.ok(r.contenu.clients.some((c: Client) => c.id === lina.id))
+    assert.equal((await srv.api('GET', `/commerces/${AH}/caisse`, undefined, CODE)).contenu.clients.length, 0, 'P0-S14 : sans recherche, aucun client')
   })
 
   test('passage avec montant → 1 tampon + points ; 2e passage le même jour refusé ; réglage 1 point / 2 €', async () => {
@@ -275,7 +276,7 @@ describe('Équipe, caisse, points, audit (serveur)', () => {
     const trop = await srv.api('POST', `/commerces/${AH}/caisse/echange`, { clientId: lina.id, recompenseId: 'rp-menu', actionId: 'act-echange-0' }, CODE)
     assert.equal(trop.statut, 409)
     assert.match(trop.contenu.erreur, /Solde insuffisant/)
-    const avant = (await srv.api('GET', `/commerces/${AH}/caisse`, undefined, CODE)).contenu.clients.find((c: Client) => c.id === lina.id).points
+    const avant = (await srv.api('GET', `/commerces/${AH}/caisse/clients/${lina.id}`, undefined, CODE)).contenu.client.points
     const ok = await srv.api('POST', `/commerces/${AH}/caisse/echange`, { clientId: lina.id, recompenseId: 'rp-nems', actionId: 'act-echange-1' }, CODE)
     assert.equal(ok.statut, 200)
     const e = ok.contenu.client.echangesPoints.at(-1)

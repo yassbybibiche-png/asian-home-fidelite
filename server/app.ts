@@ -5,7 +5,7 @@ import { createHash, createHmac, randomBytes, randomInt, randomUUID, scrypt, tim
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, CommerceCaisse, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
@@ -17,6 +17,7 @@ import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePriv
 import { clientsEnCsv } from '../src/lib/csv.ts'
 import { actionDejaTraitee, avecAction, echangerPoints, formaterPrix, soldePoints } from '../src/lib/points.ts'
 import { analyserAnniversaire, clientsCibles, deposerMessage, genererMessages, marquerLus, TYPES_MESSAGES, type Cible, type Evenement } from '../src/lib/messages.ts'
+import { correspondRecherche } from '../src/lib/recherche.ts'
 import {
   appliquerInscription,
   appliquerRattrapageValide,
@@ -485,6 +486,20 @@ function pinNeuf(v: unknown): string {
   return v
 }
 
+/**
+ * Pagination d'une recherche (`?q=&page=&limite=`) : bornes strictes, 400 sinon. `q` vide = aucune recherche
+ * (la route répond alors sans aucun client : on ne liste jamais les clients en vrac).
+ */
+function pageRecherche(params: URLSearchParams): { q: string; page: number; limite: number } {
+  const q = (params.get('q') ?? '').trim()
+  if (q.length > 80) throw err(400, '« q » : recherche de 80 caractères maximum.')
+  const page = Number(params.get('page') ?? 1)
+  const limite = Number(params.get('limite') ?? 20)
+  if (!Number.isInteger(page) || page < 1) throw err(400, '« page » : numéro de page à partir de 1.')
+  if (!Number.isInteger(limite) || limite < 1 || limite > 50) throw err(400, '« limite » : entre 1 et 50 résultats par page.')
+  return { q, page, limite }
+}
+
 function lien(v: unknown): string {
   const s = texte(v, 'lienGoogle', 500)
   if (s && !/^https?:\/\/\S+$/i.test(s)) throw err(400, '« lienGoogle » doit être une adresse web (https://…).')
@@ -681,6 +696,33 @@ function cartePublique(c: Client) {
 function clientCaisse(c: Client) {
   const { messages: _m, clesMessages: _k, actionsTraitees: _a, ...reste } = c
   return reste
+}
+
+/**
+ * Client vu par un membre de l'équipe en caisse (revue Codex P0-S14, point 1) : comme `clientCaisse`, sans les
+ * messages privés au restaurant — réservés au gérant (page Avis, via GET …/etat qui garde `clientCaisse`).
+ */
+function clientCaisseEquipe(c: Client) {
+  const { messagesPrives: _p, ...reste } = clientCaisse(c)
+  return reste
+}
+
+/**
+ * Commerce vu en caisse (P0-S14) : seulement ce que le comptoir affiche et calcule — nom, logo, seuil, récompense,
+ * catalogue, taux de points, programme des niveaux. Jamais les lots (probabilités), ni les réglages internes
+ * (réponses auto, messages auto, relances, tests A/B, conservation, dates, liens de commande, lien Google).
+ */
+function commerceCaisse(c: Commerce): CommerceCaisse {
+  return {
+    id: c.id,
+    nom: c.nom,
+    ...(c.logo !== undefined ? { logo: c.logo } : {}),
+    seuilTampons: c.seuilTampons,
+    recompense: c.recompense,
+    ...(c.catalogue !== undefined ? { catalogue: c.catalogue } : {}),
+    ...(c.eurosParPoint !== undefined ? { eurosParPoint: c.eurosParPoint } : {}),
+    ...(c.programme !== undefined ? { programme: c.programme } : {}),
+  }
 }
 
 /** Gain vu en caisse (P0-U3) : de quoi reconnaître le client (prénom seul, jamais son contact) et l'état du code. */
@@ -2430,7 +2472,23 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'caisse' && !sousId && m === 'GET') {
       const { auteur } = await exigerAuteur(req, id)
       exigerActif(commerce)
-      return { json: { auteur, commerce, clients: (await st.clients(id)).map(clientCaisse) } }
+      // P0-S14 — vue caisse minimale : plus jamais la liste des clients ni le journal. Sans `q`, aucun client ;
+      // avec `?q=`, seuls les clients correspondants, paginés côté serveur. La fiche complète d'un client s'obtient
+      // à la demande (GET …/caisse/clients/:id : scan QR ou sélection). La recherche filtre côté serveur sur tous
+      // les clients du commerce (lecture paginée complète, P0-S18) : ce qui est minimisé, c'est ce qui quitte le
+      // serveur vers la tablette de l'équipe, pas le travail du serveur.
+      const { q, page, limite } = pageRecherche(new URL(req.url ?? '/', 'http://localhost').searchParams)
+      const trouves = q ? (await st.clients(id)).filter((c) => correspondRecherche(c, q)) : []
+      const total = trouves.length
+      const clients = trouves.slice((page - 1) * limite, page * limite).map(clientCaisseEquipe)
+      return { json: { auteur, commerce: commerceCaisse(commerce), clients, total, page, limite } }
+    }
+
+    // Fiche client à la demande (P0-S14) : scan QR ou sélection dans les résultats de recherche. 404 si inconnu.
+    if (sous === 'caisse' && sousId === 'clients' && action && !extra && m === 'GET') {
+      await exigerAuteur(req, id)
+      exigerActif(commerce)
+      return { json: { client: clientCaisseEquipe(await clientOu404(id, action)) } }
     }
 
     if (sous === 'caisse' && (sousId === 'passage' || sousId === 'recompense' || sousId === 'echange' || sousId === 'attente' || sousId === 'reserve') && !action && m === 'POST') {
@@ -2516,7 +2574,7 @@ export async function creerServeur(o: OptionsServeur) {
         await journaliser(id, auteur, journalAction, details, apres, quand)
         return { client: apres, dejaTraite: false }
       })
-      return { json: { client: clientCaisse(resultat.client), dejaTraite: resultat.dejaTraite } }
+      return { json: { client: clientCaisseEquipe(resultat.client), dejaTraite: resultat.dejaTraite } }
     }
 
     // ---------- Code gagnant de la roue (P0-U3) : vérifié puis marqué « remis » en caisse ----------
