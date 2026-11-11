@@ -1694,3 +1694,79 @@ P0-U0), DA 6,1 → **7,6/10** (cible ≥ 9 non atteinte — voir « Point ouvert
   par Render, pas une mesure locale. Mesure simulée locale non retenue (un démarrage local ne
   simule pas le réveil Render). Protocole de mesure à froid sur le staging : docs/DEPLOIEMENT.md
   § 7.5 (observer séparément la page Render puis l'écran applicatif).
+
+## 11/11/2026 — P1-D2 « Corps sombres côté client » (AUDIT.md §6.2/§6.3, suite de P0-D1)
+- **Périmètre (coordinateur, ne pas rouvrir).** Corps sombres (fond `#111111`, cartes `#1B1B22`)
+  sur les pages client **#/jouer, #/carte, #/menu** uniquement — #/roulette est une page
+  commerçant (configuration de la roue, onglets back-office), pas une page client ; #/caisse reste
+  claire (comptoir), #/desinscription et #/confidentialite restent claires (lecture longue).
+  Bascule centralisée dans `src/App.tsx` (branche publique, squelettes et erreurs inclus) ;
+  règles `.page-client` en fin de `src/index.css`, correspondances centralisées dans
+  `src/theme.ts` (`PAGE_CLIENT_SOMBRE`) — 0 hex hors thème.
+- **Livré.** `src/theme.ts` : table des correspondances + ratios documentés ; `src/index.css` :
+  bloc `.page-client` (fond nuit-950, cartes nuit-900, champs surface2, textes gris-200/300/400,
+  magenta-400 en accent, alertes sémantiques non converties) ; `src/components/CarteFidelite.tsx` :
+  `data-surface-claire` sur la section — la carte reste un objet clair (fond configurable par
+  commerce, défaut ivoire ; le noir n'est pas un fond de carte valide, cf. `src/lib/apparence.ts`).
+  Note d'étoiles en **blanc** (pas de token ambre dans `index.css` : la garde P0-D1 réserve
+  l'ambre aux alertes et aux étoiles, et les étoiles gardent leur couleur ambre).
+- **Écart à la spec tampon de l'AUDIT §6.3, conservé depuis P0-D1.** Cercle `#ff2e9a` + coche
+  blanche = 3,44:1, sous le seuil AA du texte courant (4,5:1) ; la coche est un indicateur
+  graphique (seuil non-texte 3:1), mais le tampon est traité comme texte par prudence : le
+  tampon posé garde blanc sur magenta bouton `#d1006f` (5,33:1). Limite connue : magenta clair
+  `#ff2e9a` en texte = 4,37:1 sur surface2 `#26262e` — jamais utilisé sur les champs. Contrastes
+  recalculés avec `contraste()` du repo (blanc/noir 18,88 ; gris-200/noir 15,25 ; gris-400/surface
+  6,74 ; magenta-400/surface 4,98 ; erreur red-300 9,95 ; ok green-300 13,45 ; placeholder blanc
+  65 % sur surface2 7,18).
+- **Deux régressions trouvées par les captures de la 1re passe, corrigées avant la 2e.**
+  1. Le corps de la carte de fidélité devenait sombre avec des textes restaurés en gris foncé
+     (illisible) : `[data-surface-claire] .bg-white` ne cible que les descendants — la section
+     porte `bg-white` ET l'attribut, il faut la règle accolée
+     `[data-surface-claire].bg-white` (test ajouté).
+  2. La carte de gain gardait son dégradé clair (magenta pâle → blanc) avec des textes passés
+     en blanc : le seul dégradé clair côté client devient sombre en CSS
+     (`[data-resultat='gain']`, teinte magenta en haut, nuit en bas — test ajouté).
+  Vérifié visuellement sur la 2e passe : carte blanche lisible sur page sombre, gain sombre
+  lisible, menu réel 81 plats en fiches sombres, carte couleur perso ivoire + bandeau `#d1006f`
+  inchangée, écrans commerçant inchangés (caisse, tableau de bord, clients, roulette, réglages).
+- **Revue Codex** (`/tmp/codex-revue-p1-d2.txt`, diff `/tmp/codex-p1-d2.diff`) : **7 points,
+  tous CORRIGÉS** —
+  1. [Fondé] Bouton secondaire de parrainage dans l'îlot clair (texte blanc sur carte blanche,
+     invisible) → restauration `.bouton-secondaire` (+ survol) dans `[data-surface-claire]`.
+  2. [Fondé] Lien « Réessayer maintenant » magenta clair dans l'alerte ambre (3,31:1 sur
+     ambre-50) → magenta foncé dans les alertes claires (7,56/7,49/7,17:1).
+  3. [Fondé] Vue d'erreur de chargement hors `.page-client` (elle remplaçait le conteneur) →
+     bascule déplacée sur `<main>`, autour de la frontière d'erreur (markup `<Suspense>` exigé
+     par le test performance-bundle inchangé).
+  4. [Fondé] Bordure rouge `aria-invalid` du champ écrasée par la bordure sombre → règles
+     explicites `[aria-invalid='true']` + focus (rouge clair, 5,43:1 sur surface2, anneau rouge).
+  5. [Fondé] SCORES.md concluait « pas de régression » pour un bundle à +1,28 % vs le seuil
+     535857 o → libellé corrigé : seuil strict dépassé, écart = le CSS des règles P1-D2
+     elles-mêmes, accepté et documenté.
+  6. [Remarque] « Aucune régression de temps » sur une seule passe → « temps proches,
+     comparaison non concluante ».
+  7. [Remarque] Bas du dégradé de gain = nuit-900, donc blanc 17,12:1 et non 18,88:1
+     (nuit-950) → commentaire et test corrigés ; précision WCAG sur la coche du tampon
+     (indicateur graphique, seuil 3:1 — le choix conservateur est maintenu).
+  Les 3 correctifs CSS de la revue (points 1, 2, 4) sont vérifiés par règles + contrastes
+  testés, pas par capture (parrainage non actif sur les commerces de mesure, alerte
+  hors-ligne et champ invalide non déclenchés par le script de mesure).
+- **SCORES.md.** DA : écrans client 9/10 (jouer, carte, menu public), moyenne **8,0/10**
+  (était 7,6/10) — la cible ≥ 9/10 n'est pas atteinte : les écrans commerçant (7–8/10)
+  restent clairs par choix du lot ; un lot commerçant serait nécessaire. Bundle (build frais) :
+  JS initial 472715 o (+184 o), CSS 70023 o (+4 750 o, +7,3 % — règles `.page-client`),
+  total initial 542738 o, JS total 780925 o, 22 chunks, plus gros 349423 o. Temps (2e passe,
+  1 passe, Slow 4G) : premier affichage `#/jouer` 4251 ms, LCP 4224 ms ; parcours scan → lot
+  8572 ms d'étapes (taps identiques) ; temps proches de P0-D1 (1 passe, comparaison non
+  concluante) ; 0 erreur console, 0 requête échouée. Le bundle initial dépasse le seuil strict
+  « pas de régression vs 535857 o » de 1,28 % (CSS des règles P1-D2, JS initial +0,04 %) —
+  écart accepté et documenté dans SCORES.md.
+- **Tests : 988 → 1006 (+18, `tests/corps-sombres-p1-d2.test.ts` — 16 initiaux + 2 correctifs
+  revue Codex), suite verte,
+  `npx tsc -p .` propre, typecheck serveur inclus dans `npm test`.** Aucun test existant
+  modifié. Incident en cours de route : mes commentaires contenaient des hex (`App.tsx`) et
+  des `amber-NNN` nus (`theme.ts`, `index.css`) — la garde `theme.test.ts` scanne aussi les
+  commentaires ; réécrits en toutes lettres (« ambre »), sans contourner la règle.
+- **Non vérifié.** Pas de mesure sur téléphone réel (captures Pixel 7 simulé seulement) ;
+  pas de mesure à froid Render (lot P0-U6) ; `npm audit` non mesurable sur cette VM
+  (403 `policy_denied` sur le registry).

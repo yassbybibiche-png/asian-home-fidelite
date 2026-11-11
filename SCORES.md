@@ -15,6 +15,14 @@ sont PAS retenus : `npm test` tournait en parallèle sur la même VM (1,5 CPU pa
 les temps sont donc gonflés (premier affichage `#/jouer` 6,06 s, LCP 6,03 s,
 validation caisse 14,9 s) et non comparables aux 5 passes P0-U0.
 
+**Re-mesure P1-D2 (11/11/2026 ~08:00 UTC, 1 passe)** : corps sombres côté client —
+captures dans `node_modules/.cache/mesure-p1-d2/` (mêmes 9 écrans + captures
+richesse `roue-8-lots.png`, `gain-8-lots.png`, `carte-couleur-perso.png`,
+`menu-reel.png`, `menu-reel-complet.png`), résultats dans `resultats.json` du même
+dossier. Erreurs console : **0**, 0 requête échouée. Une 1re passe (~07:59 UTC) a
+révélé 2 régressions de contraste par les captures (corps de carte sombre, carte de
+gain claire) — corrigées avant cette 2e passe (voir § DA après P1-D2).
+
 ## Protocole
 
 - **Appareil simulé** : Pixel 7 (Playwright), `reducedMotion: reduce`, service workers bloqués.
@@ -54,26 +62,29 @@ validation caisse 14,9 s) et non comparables aux 5 passes P0-U0.
   Pas de mesure sur téléphone réel — à remplacer par la mesure téléphone
   (protocole : même parcours sur le staging, chronomètre + comptage des taps à la main).
 
-## Bundle (build frais, mode par défaut, 11/11/2026 — après P0-D1 + correctifs revue Codex)
+## Bundle (build frais, mode par défaut, 11/11/2026 — après P1-D2)
 
 Définition unique : **JS initial non gzipé** = script d'entrée de `index.html` +
 ses imports statiques (méthode `fichiersInitiaux` de
 `tests/performance-bundle-p2-q2.test.ts`, pas les `import()` dynamiques) ;
 **CSS** = la feuille de `dist/assets` ; **total** = JS initial + CSS.
 
-- JS initial non gzipé : 472531 o (461,5 Ko) — `index-CA_YMdhw.js` 349296 o +
-  `ui-D9uK5kXs.js` 122636 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
-- CSS non gzipé : 65273 o (63,8 Ko) — `index-hETMtPom.css`.
-- Total initial : 537804 o (525,2 Ko).
-- JS total (tous chunks) : 780741 o (762,4 Ko) ; 22 chunks ; plus gros chunk : 349296 o
+- JS initial non gzipé : 472715 o (461,6 Ko) — `index-BypZqGmo.js` 349423 o +
+  `ui-oc7O8buj.js` 122693 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
+- CSS non gzipé : 70023 o (68,4 Ko) — `index-BYKLO0nG.css`.
+- Total initial : 542738 o (530,0 Ko).
+- JS total (tous chunks) : 780925 o (762,6 Ko) ; 22 chunks ; plus gros chunk : 349423 o
   (limite test : 500 000 o — respectée).
 - Repères historiques : avant P2-Q2 601720 o ; après P2-Q2 450,2 Ko (JS initial).
-  Le JS initial a repris ~10 Ko depuis (lots P0-S10 et suivants).
+  Le JS initial a repris ~10 Ko depuis (lots P0-S10 et suivants). Après P0-D1 :
+  JS initial 472531 o, CSS 65273 o, total 537804 o — le CSS gagne 4750 o avec les
+  règles `.page-client` de P1-D2 (+7,3 %), le JS initial +184 o (+0,04 %).
 - Avertissements de build : 0 (aucun « chunk > 500 kB », aucune erreur).
 
 ## Couverture de tests
 
-Suite verte : **974/974** (`npm test`, typechecks inclus — 950 avant P0-D1, +15 thème, +3 correctif 404, +6 correctifs revue Codex).
+Suite verte : **1006/1006** (`npm test`, typechecks inclus — 988 avant P1-D2, +18 corps
+sombres côté client, dont 2 correctifs revue Codex).
 
 - Couverture globale : 97,84 % lignes / 91,43 % branches / 92,92 % fonctions
   (`node --test --experimental-test-coverage`, suite verte, 11/11/2026).
@@ -109,6 +120,21 @@ apparence personnalisée `#d1006f` — `roue-8-lots.png`, `gain-8-lots.png`,
 0 requête échouée). La roue à 8 secteurs alterne correctement les 6 couleurs du thème,
 libellés tous lisibles ; le bandeau personnalisé magenta affiche bien le sous-titre
 en blanc (correctif point 1) ; le vrai menu rend 81 plats avec prix magenta.
+
+**Re-mesure P1-D2 (11/11/2026 ~08:00 UTC, 1 passe, `node_modules/.cache/mesure-p1-d2/`,
+2e passe après correctifs) : 0 erreur console, 0 requête échouée.** Temps de cette
+passe : premier affichage `#/jouer` 4251 ms (LCP 4224 ms, élément `p.titre-carte`),
+navigation 152 / 3673 / 3675 ms ; parcours scan → lot : inscription 1039 ms,
+validation caisse 6711 ms, vérification 302 ms, tirage 520 ms (total étapes 8572 ms,
+taps identiques : client 4 clics + 1 saisie, caisse 3 clics + 2 saisies) ; ouverture
+de la carte 791 ms ; premier affichage `#/menu` 987 ms par hash, 1799 ms en
+chargement direct (LCP 1796 ms). Temps proches des passes 4–5 (premier affichage
+4020–4238 ms, LCP 4056–4176 ms ; 2e passe P1-D2 : 4251 ms et 4224 ms, légèrement
+au-dessus) — comparaison non concluante sur une seule passe, aucun écart significatif
+observé. Captures richesse (même dossier, script
+copié de P0-D1) : 0 erreur console, 0 requête échouée ; roue à 8 secteurs lisible
+sur fond sombre, vrai menu 81 plats en fiches sombres, carte couleur perso ivoire
+(`#fbf8f3`) avec bandeau `#d1006f` inchangée.
 
 ## npm audit
 
@@ -217,6 +243,40 @@ côté commerçant, AUDIT §6.3) et le commerce de test n'a ni logo ni vrai menu
 plus loin demanderait des corps sombres côté client et/ou le vrai contenu Asian Home —
 hors périmètre de P0-D1, à trancher en P1.
 
+## Cohérence DA /10 par écran — après P1-D2 (re-mesure 11/11/2026 ~08:00 UTC, 1 passe)
+
+Noté sur les captures Pixel 7 de `node_modules/.cache/mesure-p1-d2/` (même commerce
+de test, sans logo ; vrai menu et carte couleur perso en captures richesse).
+
+| Écran | Note | Justification (une ligne) |
+| --- | --- | --- |
+| Jouer | 9/10 | Corps sombre cohérent, roue 8 secteurs lisible (`roue-8-lots.png`), champ sombre et carte de gain sombre ; bloc initiales « M1 » sans logo. |
+| Carte | 9/10 | Page sombre, carte objet clair ivoire/blanc posée dessus, tampons et progression lisibles ; carte couleur perso validée (`carte-couleur-perso.png` : fond ivoire, bandeau `#d1006f`). |
+| Caisse | 7/10 | Inchangée (comptoir clair, hors périmètre P1-D2) ; bouton primaire magenta, vert de validation conservé. |
+| Menu public | 9/10 | Fiches plats sombres, prix magenta, recherche sombre ; îlot d'alerte ambre conservé ; vrai menu validé (`menu-reel.png` : 81 plats). |
+| Tableau de bord | 8/10 | Inchangé ; en-tête noir, liserés magenta, navigation mobile magenta. |
+| Clients | 8/10 | Inchangé ; bouton primaire, pilule sélectionnée, progression et navigation magenta. |
+| Roulette (back-office) | 7/10 | Inchangée ; QR net, bouton primaire magenta, navigation magenta. |
+| Réglages | 7/10 | Inchangé ; bouton « Enregistrer » magenta, logo magenta, formulaire gris/blanc. |
+
+**Moyenne : 8,0/10 (était 7,6/10).** Les trois écrans client sont à 9/10 ; la cible
+globale ≥ 9/10 n'est pas atteinte parce que les écrans commerçant (7–8/10) restent
+clairs par choix du lot (lisibilité de travail) — un lot commerçant serait nécessaire
+pour aller plus loin. Deux régressions de contraste ont été trouvées par les captures
+de la 1re passe et corrigées avant la 2e : le corps de la carte de fidélité devenait
+sombre avec des textes restaurés en gris foncé (la règle descendant
+`[data-surface-claire] .bg-white` ne couvrait pas la section elle-même — règle
+accolée ajoutée), et la carte de gain gardait son dégradé clair avec des textes
+passés en blanc (dégradé sombre ajouté en CSS). La revue Codex a trouvé 3 autres
+cas limites, corrigés sans nouvelle capture (règles + contrastes testés) : bouton
+secondaire de parrainage dans l'îlot clair, lien magenta clair dans les alertes
+claires (3,31:1 sur ambre-50 → magenta foncé), bordure rouge du champ invalide
+écrasée par la bordure sombre. Temps proches de P0-D1 (1 passe, comparaison non
+concluante) ; 0 erreur console, 0 requête échouée. Le bundle initial dépasse le
+seuil strict « pas de régression vs 535857 o » de 1,28 % : l'écart est le CSS des
+règles P1-D2 elles-mêmes (+4 750 o ; JS initial +0,04 %) — accepté et documenté,
+pas nié.
+
 ## Seuils de réussite (définis avant la refonte)
 
 | Parcours / métrique | Seuil | Mesure initiale |
@@ -226,8 +286,8 @@ hors périmètre de P0-D1, à trancher en P1.
 | LCP `#/jouer` | < 2,5 s | 4,06–4,18 s |
 | Lighthouse mobile `#/jouer` | ≥ 95 (critère d'arrêt de la boucle) | 81 (76 à la 1re passe) |
 | Erreurs console | 0 | 0 (re-mesure P0-D1 : 0 erreur, 0 requête échouée — seuil atteint) |
-| Bundle initial (JS + CSS, non gzipé) | pas de régression vs 535857 o | 537804 o (+0,36 % — pas de régression) |
-| Note DA moyenne | ≥ 9/10 | 7,6/10 (était 6,1/10 — seuil non atteint, voir § DA après P0-D1) |
+| Bundle initial (JS + CSS, non gzipé) | pas de régression vs 535857 o | 542738 o (+1,28 % vs 535857 o — seuil strict dépassé : +4 750 o de CSS, ce sont les règles P1-D2 elles-mêmes ; JS initial +184 o (+0,04 %) ; écart accepté et documenté, voir § DA après P1-D2) |
+| Note DA moyenne | ≥ 9/10 | 8,0/10 (était 7,6/10 — écrans client 9/10, écrans commerçant 7–8/10 inchangés, voir § DA après P1-D2) |
 
 Un tour de la boucle d'amélioration ne fusionne que s'il améliore au moins une
 de ces métriques sans régresser les autres (AUDIT.md §7, boucle continue).
