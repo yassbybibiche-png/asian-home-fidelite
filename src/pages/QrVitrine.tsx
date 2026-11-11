@@ -1,12 +1,12 @@
 import { useStore } from '../store'
-import { urlAbsolue } from '../router'
+import { urlQrJeu } from '../router'
 import { LogoCommerce, QrCode } from '../components/ui'
 import { NOM_APP } from '../data/defaults'
 
 /** QR grand format, affichable en caisse ou imprimable (étiquettes de table, adhésif vitrine). */
 export default function QrVitrine() {
   const { commerce, mode } = useStore()
-  const url = urlAbsolue('jouer', commerce.id)
+  const url = urlQrJeu(commerce.id)
 
   return (
     <div className="space-y-4">
@@ -38,7 +38,7 @@ export default function QrVitrine() {
         <p className="text-center text-sm text-gray-600">
           {mode === 'local'
             ? 'Démo : le QR pointe vers l’adresse actuelle de l’app. Hébergée en ligne, la même page servira telle quelle.'
-            : 'Le QR pointe vers l’adresse actuelle de l’app : imprimez-le depuis l’adresse publique définitive (pas depuis localhost).'}
+            : 'Le QR pointe vers l’adresse actuelle de l’app : imprimez-le depuis l’adresse publique définitive (pas depuis localhost). Chaque scan est compté, même si la page ne se charge pas.'}
         </p>
       </div>
     </div>

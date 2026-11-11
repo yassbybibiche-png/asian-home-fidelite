@@ -1,8 +1,11 @@
 # Asian Home Fidélité (P2-Q4) — voir docs/SEO.md.
 # Pages publiques : l'app (/) et ses routes #/menu, #/jouer, #/carte (fragment, invisible des robots).
 # L'API (données des clients, de la caisse, du commerçant) n'a rien à faire dans un moteur de recherche.
+# /r/ (redirection courte du QR vitrine, P2-Q3) n'est pas une page : les robots ne doivent pas la suivre
+# (un passage de robot compterait comme un scan).
 User-agent: *
 Allow: /
 Disallow: /api/
+Disallow: /r/
 
 Sitemap: https://asian-home-fidelite.onrender.com/sitemap.xml

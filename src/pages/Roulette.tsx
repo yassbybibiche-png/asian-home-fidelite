@@ -1,5 +1,5 @@
 import { useDonneesCommerce } from '../store'
-import { urlAbsolue } from '../router'
+import { urlQrJeu } from '../router'
 import { dateRelative } from '../lib/format'
 import { lotsJouables, totalProbabilites } from '../lib/roulette'
 import { BoutonCopier, EnTete, QrCode, Vide } from '../components/ui'
@@ -8,7 +8,7 @@ export default function Roulette() {
   const { commerce, tirages, clients } = useDonneesCommerce()
   const prenom = (id: string) => clients.find((c) => c.id === id)?.prenom ?? 'Client'
   const total = totalProbabilites(commerce.lots)
-  const url = urlAbsolue('jouer', commerce.id)
+  const url = urlQrJeu(commerce.id)
 
   return (
     <div className="space-y-5">

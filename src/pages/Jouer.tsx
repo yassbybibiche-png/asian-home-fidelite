@@ -478,7 +478,13 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
   const { t } = useLangue()
   const visiteValidee = useVisiteValidee(jeu?.statut)
   // Mesure anonyme (P2-Q3) : page de jeu ouverte, une fois par onglet ; seul le type part, jamais la carte.
-  useEffect(() => void signalerScan(api, commerce.id, stockageSession()), [api, commerce.id])
+  // Arrivée par la redirection courte du QR (`/r/` : la seule requête émise est `?via=qr`) : le scan est déjà
+  // compté par le serveur, on ne le recompte pas. La requête est retirée de l'adresse : une ouverture directe
+  // de #/jouer plus tard dans le même onglet est alors comptée normalement.
+  useEffect(() => {
+    if (window.location.search === '?via=qr') window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`)
+    else void signalerScan(api, commerce.id, stockageSession())
+  }, [api, commerce.id])
 
   // État du jeu du jour, vu par le serveur (visite validée ? déjà joué ?). Renvoie le statut, ou null en cas d'échec.
   const majStatut = useCallback(
