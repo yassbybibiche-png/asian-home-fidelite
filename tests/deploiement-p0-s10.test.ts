@@ -8,10 +8,11 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { join } from 'node:path'
 import {
-  construireAppel, construireEntetes, commandeCurl, commitExisteLocalement, decrireCommit,
-  validerCommit, validerService, validerServiceId, ErreurUsage,
+  baseApi, construireAppel, construireEntetes, commandeCurl, commitExisteLocalement, decrireCommit,
+  validerCommit, validerService, validerServiceId, verifierCible, verifierNomService, ErreurUsage,
 } from '../scripts/rollback-render.mjs'
 
 const RACINE = join(import.meta.dirname, '..')
@@ -117,6 +118,83 @@ describe('P0-S10 : scripts/rollback-render.mjs — commande de retour arrière',
     }
   })
 
+  test('garde-fou cible (revue Codex, point 1) : le nom Render doit correspondre au libellé --service', () => {
+    assert.equal(verifierNomService('staging', 'asian-home-fidelite-staging'), true)
+    assert.equal(verifierNomService('production', 'asian-home-fidelite'), true)
+    // Un identifiant de production avec le libellé staging : refusé (c'est le cas dangereux).
+    assert.throws(() => verifierNomService('staging', 'asian-home-fidelite'), /cible incohérente/)
+    assert.throws(() => verifierNomService('production', 'asian-home-fidelite-staging'), /cible incohérente/)
+    assert.throws(() => verifierNomService('staging', undefined), /cible incohérente/)
+    assert.equal(baseApi({}), 'https://api.render.com/v1')
+    assert.equal(baseApi({ RENDER_API_BASE: 'http://127.0.0.1:9999/' }), 'http://127.0.0.1:9999')
+  })
+
+  test('garde-fou cible : verifierCible relit le service chez Render et refuse la discordance', async () => {
+    const faux = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ service: { id: SERVICE_ID, name: 'asian-home-fidelite' } }))
+    })
+    await new Promise<void>((ok) => faux.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(faux.address() as { port: number }).port}`
+    try {
+      await assert.rejects(verifierCible({ service: 'staging', serviceId: SERVICE_ID, entetes: { Authorization: 'Bearer x' }, base }), /cible incohérente/)
+    } finally {
+      // fetch garde la connexion en keep-alive : la fermer, sinon close() attend indéfiniment.
+      faux.closeAllConnections()
+      await new Promise<void>((ok) => faux.close(() => ok()))
+    }
+  })
+
+  test('CLI --executer contre un faux Render : nom concordant → POST envoyé ; nom discordant → refusé, aucun POST', async () => {
+    // spawn ASYNCHRONE (pas spawnSync) : le faux serveur tourne dans ce processus, et spawnSync bloquerait
+    // la boucle d'événements — le serveur ne pourrait jamais répondre au CLI (interblocage).
+    const { spawn } = await import('node:child_process')
+    const lancerCli = (args: string[], env: NodeJS.ProcessEnv) => new Promise<{ status: number | null; stdout: string; stderr: string }>((ok) => {
+      const p = spawn('node', ['scripts/rollback-render.mjs', ...args], { cwd: RACINE, env })
+      let stdout = ''
+      let stderr = ''
+      p.stdout.on('data', (c: Buffer) => (stdout += c))
+      p.stderr.on('data', (c: Buffer) => (stderr += c))
+      p.on('close', (status) => ok({ status, stdout, stderr }))
+    })
+    const appels: { methode: string; url: string; corps: string }[] = []
+    let nomService = 'asian-home-fidelite-staging'
+    const faux = createServer((req, res) => {
+      let corps = ''
+      req.on('data', (c: Buffer) => (corps += c))
+      req.on('end', () => {
+        appels.push({ methode: req.method!, url: req.url!, corps })
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        if (req.method === 'GET') res.end(JSON.stringify({ service: { id: SERVICE_ID, name: nomService } }))
+        else res.end(JSON.stringify({ deploy: { id: 'dep-test123' } }))
+      })
+    })
+    await new Promise<void>((ok) => faux.listen(0, '127.0.0.1', ok))
+    // Base avec /v1 comme la vraie API Render (le script ajoute /services/… derrière).
+    const base = `http://127.0.0.1:${(faux.address() as { port: number }).port}/v1`
+    const env = { ...process.env, RENDER_API_KEY: 'fausse-cle-pour-test', RENDER_API_BASE: base }
+    try {
+      // Nom concordant : GET de vérification puis POST de déploiement, code 0.
+      const ok = await lancerCli(['--service', 'staging', '--service-id', SERVICE_ID, '--commit', COMMIT, '--executer'], env)
+      assert.equal(ok.status, 0, ok.stderr)
+      assert.match(ok.stdout, /Cible vérifiée chez Render : « asian-home-fidelite-staging »/)
+      assert.match(ok.stdout, /Déploiement déclenché : deploy dep-test123/)
+      assert.deepEqual(appels.map((a) => `${a.methode} ${a.url}`), [`GET /v1/services/${SERVICE_ID}`, `POST /v1/services/${SERVICE_ID}/deploys`])
+      assert.deepEqual(JSON.parse(appels[1].corps), { commitId: COMMIT })
+
+      // Nom discordant (identifiant de production, libellé staging) : refusé AVANT tout POST.
+      appels.length = 0
+      nomService = 'asian-home-fidelite'
+      const refuse = await lancerCli(['--service', 'staging', '--service-id', SERVICE_ID, '--commit', COMMIT, '--executer'], env)
+      assert.equal(refuse.status, 2, refuse.stdout)
+      assert.match(refuse.stderr, /cible incohérente/)
+      assert.deepEqual(appels.map((a) => `${a.methode} ${a.url}`), [`GET /v1/services/${SERVICE_ID}`])
+    } finally {
+      faux.closeAllConnections()
+      await new Promise<void>((ok) => faux.close(() => ok()))
+    }
+  })
+
   test('CLI : --executer sans RENDER_API_KEY est refusé AVANT tout appel réseau (code 2)', () => {
     const r = spawnSync('node', ['scripts/rollback-render.mjs', '--service', 'staging', '--service-id', SERVICE_ID, '--commit', COMMIT, '--executer'], {
       cwd: RACINE, encoding: 'utf8', env: { ...process.env, RENDER_API_KEY: '' },
@@ -210,5 +288,16 @@ describe('P0-S10 : compatibilité des migrations (ancien code ↔ nouveau schém
     }
     // Le retour arrière ne restaure ni schéma, ni données, ni configuration (revue Codex, point 12) : dit explicitement.
     assert.match(doc, /ne restaure ni le schéma, ni les données, ni la configuration/)
+    // Corrections de la revue Codex du lot (11/11/2026) : gel avant sauvegarde, sauvegarde de conservation
+    // distinguée de la sauvegarde saine, 0009 via /sante/acces-client (pas /sante.migrations), limite des
+    // 2 déploiements pour le rollback dashboard, quota Free = suspension de TOUS les services.
+    assert.match(doc, /Suspend\s+Service/)
+    assert.match(doc, /sauvegarde de conservation/)
+    assert.match(doc, /sauvegarde saine/)
+    assert.match(doc, /sante\/acces-client/)
+    assert.match(doc, /deux déploiements.*les plus récents/)
+    assert.match(doc, /suspend TOUS les services Free/)
+    assert.match(doc, /double envoi/)
+    assert.match(doc, /Portée de ces garanties/)
   })
 })

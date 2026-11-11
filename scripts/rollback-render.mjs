@@ -20,6 +20,13 @@ const API = 'https://api.render.com/v1'
 export const MOTIF_SERVICE_ID = /^srv-[A-Za-z0-9_-]+$/
 export const MOTIF_COMMIT = /^[0-9a-f]{40}$/
 export const SERVICES = ['staging', 'production']
+/** Nom Render attendu pour chaque libellé : le garde-fou du point 1 (revue Codex P0-S10). */
+export const NOM_ATTENDU = { staging: 'asian-home-fidelite-staging', production: 'asian-home-fidelite' }
+
+/** Base de l'API Render — `RENDER_API_BASE` ne sert qu'aux tests (faux serveur local) ; en usage réel, l'API Render. */
+export function baseApi(env) {
+  return (env.RENDER_API_BASE ?? API).replace(/\/$/, '')
+}
 
 /** Erreur d'usage : message clair, sans secret. */
 export class ErreurUsage extends Error {}
@@ -72,14 +79,41 @@ export function decrireCommit(commit) {
  * POST /v1/services/{serviceId}/deploys, corps { commitId }). La clé n'apparaît que dans l'en-tête Authorization
  * (construit au moment de l'envoi), jamais dans l'URL ni dans les messages.
  */
-export function construireAppel({ serviceId, commitId }) {
+export function construireAppel({ serviceId, commitId, base = API }) {
   validerServiceId(serviceId)
   validerCommit(commitId)
   return {
-    url: `${API}/services/${serviceId}/deploys`,
+    url: `${base}/services/${serviceId}/deploys`,
     methode: 'POST',
     corps: JSON.stringify({ commitId }),
   }
+}
+
+/**
+ * Garde-fou (revue Codex P0-S10, point 1) : le libellé `--service` ne protège rien à lui seul — c'est le
+ * `--service-id` qui désigne la cible. Avant tout POST, on relit donc le service chez Render (GET
+ * /v1/services/{id}) et on refuse si son nom ne correspond pas au libellé demandé : un identifiant de
+ * production accompagné de `--service staging` ne déploie jamais en production.
+ */
+export function verifierNomService(service, nom) {
+  const attendu = NOM_ATTENDU[service]
+  if (nom !== attendu) {
+    throw new ErreurUsage(`cible incohérente : --service ${service} attend le service Render « ${attendu} », mais ${nom ? `l’identifiant donné désigne « ${nom} »` : 'le nom du service est illisible'} — vérifiez --service-id (dashboard Render → service → Settings)`)
+  }
+  return true
+}
+
+/** Lit le nom du service chez Render (GET /v1/services/{id}) et applique le garde-fou ci-dessus. */
+export async function verifierCible({ service, serviceId, entetes, base = API }) {
+  const reponse = await fetch(`${base}/services/${serviceId}`, { headers: entetes })
+  const texte = await reponse.text()
+  if (!reponse.ok) throw new Error(`lecture du service Render impossible (HTTP ${reponse.status}) : ${texte.slice(0, 200)}`)
+  let nom
+  try {
+    nom = JSON.parse(texte).service?.name
+  } catch { /* nom illisible : verifierNomService refuse, on ne déploie jamais à l'aveugle */ }
+  verifierNomService(service, nom)
+  return nom
 }
 
 /** En-têtes de l'appel, clé lue dans RENDER_API_KEY (jamais affichée, même tronquée). */
@@ -99,7 +133,8 @@ Usage : node scripts/rollback-render.mjs --service <staging|production> --servic
         RENDER_API_KEY=... node scripts/rollback-render.mjs --service production --service-id srv-... --commit <sha-40> --executer
 
 Sans --executer : SIMULATION — rien n'est envoyé, la commande curl exacte est affichée.
-Avec --executer : l'appel est envoyé à l'API Render (clé lue dans RENDER_API_KEY, jamais affichée).
+Avec --executer : le service est d'abord relu chez Render (son nom doit correspondre à --service, sinon
+refus), puis l'appel est envoyé à l'API Render (clé lue dans RENDER_API_KEY, jamais affichée).
 
 Le commit doit exister dans le dépôt local. Redéployer un commit ne restaure ni le schéma, ni les données,
 ni la configuration : avant un retour arrière après écritures partielles, voir docs/DEPLOIEMENT.md § 4.
@@ -148,14 +183,17 @@ async function main(argv, env) {
     const description = decrireCommit(commit)
     console.log(`Retour arrière ${service} (${serviceId}) → commit ${description}`)
     // Simulation : on construit l'appel (URL + corps) sans clé et sans rien envoyer.
-    const appel = construireAppel({ serviceId, commitId: commit })
+    const appel = construireAppel({ serviceId, commitId: commit, base: baseApi(env) })
     if (!args.executer) {
       console.log('SIMULATION — rien n’a été envoyé. Commande exacte à exécuter (ou relancer avec --executer) :')
       console.log(commandeCurl(appel))
-      console.log('Ensuite : attendre « Live », puis vérifier docs/DEPLOIEMENT.md § 3.4 (GET /api/v1/sante + parcours de base).')
+      console.log('Ensuite : attendre « Live », puis vérifier docs/DEPLOIEMENT.md § 3.5 (GET /api/v1/sante + parcours de base).')
       return 0
     }
     const entetes = construireEntetes(env.RENDER_API_KEY ?? '')
+    // Garde-fou : on vérifie d'abord que l'identifiant désigne bien le service demandé, puis seulement on déploie.
+    const nom = await verifierCible({ service, serviceId, entetes, base: baseApi(env) })
+    console.log(`Cible vérifiée chez Render : « ${nom} » (${service}).`)
     const reponse = await fetch(appel.url, { method: appel.methode, headers: entetes, body: appel.corps })
     const texte = await reponse.text()
     if (!reponse.ok) {
@@ -167,18 +205,22 @@ async function main(argv, env) {
       deployId = JSON.parse(texte).deploy?.id ?? JSON.parse(texte).id ?? '?'
     } catch { /* réponse non JSON : on garde l'identifiant inconnu, le statut HTTP suffit */ }
     console.log(`Déploiement déclenché : deploy ${deployId} (statut HTTP ${reponse.status}).`)
-    console.log('Attendre « Live » dans le dashboard Render, puis vérifier docs/DEPLOIEMENT.md § 3.4 (GET /api/v1/sante + parcours de base).')
+    console.log('Attendre « Live » dans le dashboard Render, puis vérifier docs/DEPLOIEMENT.md § 3.5 (GET /api/v1/sante + parcours de base).')
     return 0
   } catch (e) {
     if (e instanceof ErreurUsage) {
       console.error(`Erreur : ${e.message}\n${AIDE}`)
       return 2
     }
-    throw e
+    // Erreur d'exécution (réseau, API Render…) : message propre, code 1 — jamais de déploiement partiel silencieux.
+    console.error(`Erreur : ${e instanceof Error ? e.message : e}`)
+    return 1
   }
 }
 
 // Point d'entrée CLI uniquement : importé par les tests, le module ne fait rien.
 if (import.meta.url === `file://${process.argv[1]}`) {
-  process.exitCode = await main(process.argv.slice(2), process.env)
+  const code = await main(process.argv.slice(2), process.env)
+  // fetch (undici) garde des sockets en keep-alive : sortir explicitement, sinon le script ne termine jamais.
+  process.exit(code)
 }
