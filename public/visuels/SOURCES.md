@@ -34,7 +34,7 @@ photo d'un autre restaurant, aucune personne identifiable.
 
 | Fichier | Contenu | Source |
 |---|---|---|
-| `menu-makis.jpg` (614×408) | Rouleau de makis (dragon/tiger) sur ardoise noire, filigrane « ASIAN HOME » au chapeau conique | Galerie lacarte.menu, photo 34229454 (contribution client sur la page du restaurant) |
+| `menu-makis.jpg` (614×408) | Rouleau de makis (dragon/tiger) sur ardoise noire, filigrane « ASIAN HOME » au chapeau conique | Galerie lacarte.menu, photo 34229454 (contribution client sur la page du restaurant) — **non rattachée à aucun plat depuis P1-M3 (11/11/2026)** : un seul rouleau pour deux plats différents, impossible de dire lequel elle montre ; voir `docs/PHOTOS-MANQUANTES.md` |
 | `menu-loc-lac.jpg` (1109×720) | Loc Lac : bœuf caramélisé, riz rouge, œuf au plat, salade, rosace de tomate | Galerie lacarte.menu, photo 122145160 |
 | `menu-nouilles-crevettes.jpg` (1140×720) | Nouilles sautées aux crevettes, bol bleu, tomate en rosace, baguettes | Galerie lacarte.menu, photo 122145184 |
 | `menu-mango-sticky-rice.jpg` (411×412) | Mango sticky rice : mangue et riz gluant coco | Galerie lacarte.menu, photo 95703556 |
@@ -111,7 +111,11 @@ fichier reste ici, rattaché à aucun plat.
   (p. 4, 65,818 → 413,1049) montre le même plat en plus basse résolution — non extrait.
 - **Mango Stick** → `menu-mango-sticky-rice.jpg` (vérifiée) : le PDF (p. 6,
   160,683 → 426,860) montre aussi le plat mais n'apporte rien — non extrait.
-- **8 Maki Tiger / 8 Maki Chicken Dragon** → `menu-makis.jpg` partagée, comme avant.
+- **8 Maki Tiger / 8 Maki Chicken Dragon** : SANS photo depuis P1-M3 (11/11/2026) — la photo
+  partagée `menu-makis.jpg` a été détachée : contribution client (lacarte.menu, pas une photo
+  fournie par le restaurant), un seul rouleau pour deux plats différents, impossible de dire
+  lequel elle montre. Le fichier est gardé, non rattaché, en attendant 2 photos distinctes du
+  commerçant (voir `docs/PHOTOS-MANQUANTES.md`).
 
 ### Photos du PDF NON rattachées (et pourquoi)
 - **Love Bao** (p. 3, en haut à droite) : la photo montre un bol de

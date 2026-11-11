@@ -99,7 +99,7 @@ cases à cocher des 14 allergènes UE par plat ; ou CSV, colonne `allergenes`, s
 
 Lot P1-B2 (10/11/2026) — détail des sources et des cadres : `public/visuels/SOURCES.md`.
 
-**13 plats photographiés** (vraies photos du restaurant uniquement, aucune photo client Google) :
+**11 plats photographiés** (vraies photos du restaurant uniquement, aucune photo client Google) :
 
 - **9 plats, photo recadrée du PDF officiel** (`assets/source/menu.pdf`, script `scripts/extraire-photos-menu.py`),
   chacune **légendée du nom du plat par le restaurant** : Poke Bowl, Dynamite, Mi Prat, Pad Thaï,
@@ -109,7 +109,11 @@ Lot P1-B2 (10/11/2026) — détail des sources et des cadres : `public/visuels/S
 - **Mi Prat** : l'ancienne photo `menu-nouilles-crevettes.jpg` (identification seulement « probable ») est
   remplacée par la photo légendée « MI PRAT » du PDF ; l'ancien fichier reste dans `public/visuels/`, rattaché à aucun plat.
 - **Photos existantes gardées** : Loc Lac → `menu-loc-lac.jpg` (meilleure résolution que le PDF),
-  Mango Stick → `menu-mango-sticky-rice.jpg`, 8 Maki Tiger et 8 Maki Chicken Dragon → `menu-makis.jpg` (partagée).
+  Mango Stick → `menu-mango-sticky-rice.jpg`.
+- **P1-M3 (11/11/2026) — photo détachée :** 8 Maki Tiger et 8 Maki Chicken Dragon n'ont plus de photo :
+  `menu-makis.jpg` (partagée entre les deux, contribution client sur lacarte.menu, impossible de dire
+  quel plat elle montre) a été détachée. Inventaire exact des 70 plats sans photo :
+  `docs/PHOTOS-MANQUANTES.md`.
 
 **Sans photo, et pourquoi** (règle : jamais une photo sur un plat qu'elle ne montre pas) :
 Love Bao (la photo du PDF montre un bol de brochettes/fritures, pas des bao : légende douteuse) ·

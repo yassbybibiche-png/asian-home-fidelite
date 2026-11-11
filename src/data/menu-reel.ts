@@ -17,7 +17,11 @@
 //
 // - 9 plats (PHOTOS_PDF, lot P1-B2) : photos recadrées du PDF de la carte, chacune
 //   légendée du nom du plat par le restaurant (fiche + vignette WebP).
-// - Loc Lac, Mango Stick, 8 Maki Tiger / Chicken Dragon : photos existantes gardées.
+// - Loc Lac, Mango Stick : photos existantes gardées.
+// - 8 Maki Tiger / 8 Maki Chicken Dragon : SANS photo depuis P1-M3 — la photo partagée
+//   `menu-makis.jpg` (contribution client sur lacarte.menu, un seul rouleau pour deux plats
+//   différents, impossible de dire lequel elle montre) a été détachée ; le fichier est gardé,
+//   non rattaché, en attendant 2 photos distinctes du commerçant (voir docs/PHOTOS-MANQUANTES.md).
 // - Sans photo, faute de photo qui montre CE plat : Love Bao (légende du PDF douteuse),
 //   6 Maki Gold, Tiramisu, boissons, variantes makis / california / sashimi / sushi.
 // - menu-nouilles-crevettes.jpg (ancienne photo PROBABLE de Mi Prat) et
@@ -240,13 +244,12 @@ export function menuReelAsianHome(): Menu {
         id: 'reel-cat-4',
         nom: 'Spécialités du chef',
         produits: [
-          plat('reel-c4-p10', '8 Maki Tiger', 1390, 'Crevette tempura, avocat, cheese, recouvert de saumon mi-cuit, avocat, mayonnaise spicy.', '/visuels/menu-makis.jpg'),
+          plat('reel-c4-p10', '8 Maki Tiger', 1390, 'Crevette tempura, avocat, cheese, recouvert de saumon mi-cuit, avocat, mayonnaise spicy.'),
           plat(
             'reel-c4-p9',
             '8 Maki Chicken Dragon',
             1390,
             "Poulet croustillant, avocat, cheese, sauce chili thaï, recouvert d'avocat, mayonnaise spicy et oignon frit.",
-            '/visuels/menu-makis.jpg',
           ),
           // P1-M1 : prix imprimé 100,00 € non confirmé par le commerçant → masqué (« Prix sur place »).
           // Valeur imprimée conservée dans PRIX_A_CONFIRMER, jamais affichée.

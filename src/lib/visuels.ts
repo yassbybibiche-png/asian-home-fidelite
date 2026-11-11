@@ -25,7 +25,10 @@ export const VISUELS = {
   interieur: '/visuels/interieur.jpg',
   /** Rouleau de sushis sur ardoise. */
   sushisArdoise: '/visuels/sushis-ardoise.jpg',
-  /** Makis sur ardoise, filigrane ASIAN HOME (8 Maki Chicken Dragon / 8 Maki Tiger). */
+  /** Rouleau de makis sur ardoise, filigrane ASIAN HOME — NON rattaché à aucun plat depuis P1-M3 :
+      contribution client sur lacarte.menu (pas une photo fournie par le restaurant), un seul rouleau
+      pour deux plats différents (8 Maki Tiger / 8 Maki Chicken Dragon), impossible de dire lequel
+      elle montre. Fichier gardé en attendant 2 photos distinctes du commerçant. */
   menuMakis: '/visuels/menu-makis.jpg',
   /** Loc Lac : bœuf caramélisé, riz rouge, œuf au plat. */
   menuLocLac: '/visuels/menu-loc-lac.jpg',
