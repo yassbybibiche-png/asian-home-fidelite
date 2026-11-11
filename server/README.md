@@ -44,6 +44,21 @@ npm run build:api    # optionnel : le serveur sert alors aussi le front en mode 
 npm run serveur      # → http://localhost:3001/api/v1/sante
 ```
 
+### Vérification des types (P0-S21)
+
+Node exécute le serveur en supprimant les types **sans les vérifier** (même chose pour `npm test`), et `npm run build`
+(`tsc -p .`) ne couvre que `src/`. Le serveur se vérifie donc à part :
+
+```bash
+npm run typecheck:server   # = tsc -p tsconfig.server.json
+```
+
+`tsconfig.server.json` étend `tsconfig.json` (mêmes règles : `strict`, `noUnusedLocals`, `noUnusedParameters`) avec les
+types Node (`@types/node` 24, dépendance de dev) au lieu de `vite/client`, et `lib: ["ES2022"]` sans le DOM (les `fetch`,
+`URL`, `Response`… viennent des types Node). Il inclut `server/` et, par les imports, les fichiers de `src/` partagés
+(`src/lib/*.ts`, `src/types.ts`, `src/data/*`, `seed.json`). À lancer avant chaque commit qui touche `server/` ; pas
+encore branché dans `npm run build` ni dans `npm test`.
+
 En développement, sans aucune variable : PIN admin `000000`, PIN commerçant d'Asian Home Paris `1234`
 (un avertissement s'affiche au démarrage). **Ces PIN de développement ne sont jamais acceptables en production** :
 en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
