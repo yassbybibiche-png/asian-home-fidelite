@@ -73,6 +73,14 @@ justification et mesure avant/après, vit dans `CHANGELOG.md`.
 - Variante recadrée de la bannière de la carte (~720×180, ratio d'affichage
   390×96) : l'`object-cover` jette beaucoup de pixels de la variante 720×480 —
   candidat t7 (revue Codex t6, point 3).
+- **TBT : profilage des longues tâches (tour 8, ANNULÉ — voir journal)** :
+  trace Chrome + profil CPU : 89,5 % `(idle)` (attente réseau), fonctions
+  diffuses (top 1,9 %), plus grosse tâche 167 ms (montage React), plus gros
+  layout 73 ms (rendu post-API) ; le « styleLayout 898 ms » de Lighthouse
+  est un artefact du throttling simulé (coût réel ~125 ms). Aucun levier
+  au-dessus du bruit : le découpage des dépendances partagées ne réduit pas
+  le travail initial (Codex t7, point 5) ; la sortie de Caisse/CartePublique
+  du bundle initial reste écartée (P2-Q2).
 
 ## Regard neuf — tour 5 (11/11/2026, tous les 5 tours)
 
@@ -737,3 +745,42 @@ réduire le travail initial ne garantit aucun gain).
 séparation nette sur les deux métriques de transition ; standard et
 Lighthouse plats ; bundle inchangé ; 0 erreur). Tours sans gain
 consécutifs : **0**.
+
+### Tour 8 — `autonome/boucle-t8-tbt-longues-taches` (annulé — aucun levier au-dessus du bruit)
+
+Sujet (recommandation Codex t7, point 5) : profiler les longues tâches du
+TBT (Lighthouse t7 passe 1 : 710 ms, `mainthread-work-breakdown` 2,3 s dont
+styleLayout 898 ms, scriptEvaluation 673 ms, other 486 ms ; 13 longues
+tâches, plus grosse 346 ms à 995 ms). Investigation sans changement de code
+— trace Chrome (`node_modules/.cache/profil-t8/tracer.mjs`, API Playwright
+`startTracing`, catégories `devtools.timeline` + `disabled-by-default-
+devtools.timeline` + `blink.user_timing` + `disabled-by-default-v8.cpu_profiler`,
+commerce générique, Pixel 7, Slow 4G + CPU ×4, SW bloqués, cache désactivé)
++ profil CPU :
+- Timeline : RunTask 665 ms (3 311 événements), Layout 92 ms (4 événements,
+  plus gros 73 ms à 1 580 ms — le rendu post-API), UpdateLayoutTree 33 ms
+  (14 événements), Paint 8 ms, ParseHTML 5 ms, ParseAuthorStyleSheet 5 ms —
+  **travail total du thread principal ~800 ms** ; plus grosse tâche unique
+  167 ms à 1 127 ms (montage React) ; seconde 94 ms à 1 567 ms (rendu
+  post-API) ; FunctionCall `te` (minifié, React) 41 ms × 2.
+- Profil CPU (15 820 échantillons, 229 fonctions) : **89,5 % `(idle)`**
+  (attente réseau), `(program)` 5,2 %, puis fonctions diffuses — top 1,9 %
+  (anonyme, `ui-*.js`), 0,3 %, 0,2 %, … ; aucune fonction au-dessus de 2 %.
+- Écart avec Lighthouse : le « styleLayout 898 ms » du breakdown est un
+  artefact du throttling SIMULÉ de Lighthouse (durées multipliées) — le
+  coût réel mesuré en trace CDP throttlée est Layout 92 ms + UpdateLayoutTree
+  33 ms ≈ 125 ms. Le TBT Lighthouse (710 ms) est lui aussi simulé ; le TBT
+  réel de la trace est ~350–400 ms (tâches > 50 ms : 167 + 94 + 73 + …).
+Leviers examinés et écartés (détail § « Leviers examinés et ÉCARTÉS ») :
+découpage des dépendances partagées en chunks supplémentaires (ne réduit pas
+le travail initial — Codex t7) ; sortie de Caisse/CartePublique du bundle
+initial (déjà écartée, P2-Q2 — les 61 KiB `unused-javascript` sont le code
+épinglé) ; réduction de la tâche de montage (167 ms, diffuse, pas de
+hotspot) ; réduction du layout post-API (73 ms pour 117 nœuds, ~18 ms non
+throttlé — normal). Aucun changement tenté : le TBT est (a) dominé par
+l'attente réseau (89,5 % idle), (b) diffus (top fonction 1,9 %), (c) fait
+de tâches inhérentes au rendu initial.
+**Décision : ANNULÉ** — aucun changement tenté. Tours sans gain
+consécutifs : **1**. Branche supprimée sans fusion ; seul `BOUCLE.md`
+fusionné (doc). Scripts de diagnostic conservés :
+`node_modules/.cache/profil-t8/tracer.mjs`, `trace.json`, `trace-cpu.json`.
