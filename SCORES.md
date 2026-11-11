@@ -121,11 +121,11 @@ référence P1-U1 est conservée verbatim juste après (titre et chiffres), comm
 archive historique — le test `tests/mesure-p1-u1.test.ts` y lit ses chiffres
 figés ; elle ne doit pas être modifiée.
 
-- JS initial non gzipé : 453181 o (442,5 Ko) — `index-CUtGS_Kd.js` 354843 o +
-  `ui-CBKMOBKV.js` 97739 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
+- JS initial non gzipé : 453485 o (442,8 Ko) — `index-CSDwCGsg.js` 354861 o +
+  `ui-Cql4fQQa.js` 98025 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
 - CSS non gzipé : 70766 o (69,1 Ko) — `index-BAxqKb1k.css`.
-- Total initial : 523947 o (511,7 Ko).
-- JS total (tous chunks) : 803414 o (784,6 Ko) ; 24 chunks ; plus gros chunk : 354843 o
+- Total initial : 524251 o (512,0 Ko).
+- JS total (tous chunks) : 803736 o (784,9 Ko) ; 24 chunks ; plus gros chunk : 354861 o
   (limite test : 500 000 o — respectée).
 - Différé (boucle t1) : `QrCode-D610mFEe.js` 21182 o (`qrcode-generator` + composant),
   chargé à la demande par la carte de fidélité ; `jsx-runtime-CkXRJ162.js` est un
@@ -146,7 +146,10 @@ figés ; elle ne doit pas être modifiée.
   gros 354742 o (+1 579 o — enrobage `lazy` dans `index-*.js`). Boucle t4 (héros
   WebP) : JS initial 453181 o (+153 o, +0,03 % vs t1 — enrobage `<picture>`
   dans CartePublique + constante `VISUELS.tableSushisPetit`), total 523947 o,
-  JS total 803414 o (+254 o), 24 chunks, plus gros 354843 o. Le bundle documenté ici provient d'un build frais
+  JS total 803414 o (+254 o), 24 chunks, plus gros 354843 o. Boucle t5 (logo
+  du commerce en WebP) : JS initial 453485 o (+304 o, +0,07 % vs t4 — branche
+  `<picture>` dans `LogoCommerce` + constante `LOGO_DEFAUT_PETIT`), total
+  524251 o, JS total 803736 o (+322 o), 24 chunks, plus gros 354861 o. Le bundle documenté ici provient d'un build frais
   distinct de celui servi aux deux passes Playwright (le serveur E2E construit
   son propre bundle).
 - Avertissements de build : 0 (aucun « chunk > 500 kB », aucune erreur).
@@ -201,8 +204,8 @@ ses imports statiques (méthode `fichiersInitiaux` de
 
 ## Couverture de tests
 
-Suite verte : **1176/1176** (`npm test`, typechecks inclus — 1090 après P2-Q2, +73 tests
-P2-Q3 à P2-Q6, +3 tests boucle t1, +4 tests boucle t2, +1 test SW boucle t2, +4 tests boucle t4, +1 test auto (nouvelle entrée VISUELS) ; voir `JOURNAL.md`).
+Suite verte : **1180/1180** (`npm test`, typechecks inclus — 1090 après P2-Q2, +73 tests
+P2-Q3 à P2-Q6, +3 tests boucle t1, +4 tests boucle t2, +1 test SW boucle t2, +4 tests boucle t4, +1 test auto (nouvelle entrée VISUELS), +4 tests boucle t5 ; voir `JOURNAL.md`).
 
 - Couverture globale : 97,90 % lignes / 91,49 % branches / 93,06 % fonctions
   (`node --test --experimental-test-coverage`, suite verte, 11/11/2026 —
@@ -310,6 +313,18 @@ chargement direct (LCP 1 496 / 1 716 ms). Le héros du menu n'apparaît pas
 dans ces passes (commerce générique, sans visuels) : son gain est mesuré
 par la mesure ponctuelle (voir § Temps de premier affichage, « Re-mesure
 boucle t4 — menu Asian Home »). Captures : 9 écrans, passe 2 (la passe 1
+n'a gardé que son JSON).
+
+**Re-mesure boucle t5 (11/11/2026 ~16:15–16:20 UTC, 2 passes, `node_modules/.cache/mesure-boucle-t5/`,
+`resultats-passe<N>.json`) : 0 erreur console, 0 requête échouée, sur les 2 passes.**
+Temps des 2 passes : premier affichage `#/jouer` 1 894 / 1 883 ms (LCP
+1 880 / 1 828 ms, élément `p.titre-carte`) ; parcours scan → lot 6 753 /
+6 534 ms d'étapes (taps identiques) ; ouverture de la carte 786 / 484 ms ;
+premier affichage `#/menu` 936 / 920 ms par hash, 1 690 / 1 706 ms en
+chargement direct (LCP 1 628 / 1 680 ms). Le logo du commerce n'apparaît
+pas dans ces passes (commerce générique, sans logo) : son gain est mesuré
+par la mesure ponctuelle (voir § Temps de premier affichage, « Re-mesure
+boucle t5 — pages Asian Home »). Captures : 9 écrans, passe 2 (la passe 1
 n'a gardé que son JSON).
 
 ## npm audit
@@ -470,6 +485,25 @@ Re-tenté le 11/11/2026 (P1-U1) : même 403, inchangé.
   Le tour ne touche pas au chemin `#/jouer` : aucune régression attendue, aucune
   observée au-delà du bruit.
 
+### Re-mesure boucle t5 (11/11/2026 ~16:15–16:20 UTC, 2 passes)
+
+| Page | Passe 1 | Passe 2 |
+| --- | --- | --- |
+| `#/jouer` — premier affichage (titre visible) | 1894 ms | 1883 ms |
+| `#/jouer` — navigation : réponse / DOM prêt / chargé | 152 / 1332 / 1333 ms | 152 / 1324 / 1325 ms |
+| `#/jouer` — LCP | 1880 ms (`p.titre-carte`) | 1828 ms (`p.titre-carte`) |
+| `#/menu` — premier affichage (par hash) | 936 ms | 920 ms |
+| `#/menu` — premier affichage (chargement direct) | 1690 ms | 1706 ms |
+| `#/menu` — LCP (chargement direct) | 1628 ms (`p.text-center`) | 1680 ms (`p.text-center`) |
+
+- Premier affichage `#/jouer` : 1 883–1 894 ms — **plat vs t4** (1 895–1 896 ms) ;
+  LCP `#/jouer` : 1 828–1 880 ms (t4 : 1 844–1 872 ms) ; menu direct
+  1 690 / 1 706 ms (t4 : 1 610 / 1 773 ms) ; menu hash 936 / 920 ms (t4 :
+  900 / 895 ms). Le tour ne touche pas au chemin standard (commerce
+  générique, sans logo) : aucune régression attendue, aucune observée
+  au-delà du bruit. Le gain du tour est sur les pages Asian Home (mesure
+  ponctuelle ci-dessous).
+
 ### Re-mesure boucle t4 — menu Asian Home (mesure ponctuelle, 11/11/2026 ~15:45–16:30 UTC)
 
 Le protocole standard utilise un commerce générique, sans visuels : le héros
@@ -488,6 +522,20 @@ plus aucun `table-sushis.jpg` dans le journal) — **moyenne 3 402 → 2 984 ms
 après : 2 960 ms, −442 ms). Résultat observé sur 2 passes (+ 2 de
 confirmation), pas un gain garanti en production ; la mesure ne couvre ni
 le SW actif ni une visite chaude.
+
+### Re-mesure boucle t5 — pages Asian Home (mesure ponctuelle, 11/11/2026 ~16:00–16:25 UTC)
+
+Même script (`scripts/mesurer-menu-asian-home.mjs`, étendu au tour 5 pour
+mesurer aussi `#/jouer` — page neuve par mesure, une navigation par hash ne
+rechargeant pas le document) : LCP `#/menu` **avant 2 892 / 2 908 ms →
+après 2 572 / 2 588 ms (moyenne −320 ms, 2 passes sur 2)** — le héros WebP
+finit à 2 537 / 2 548 ms (était 2 860 / 2 876 ms) et `logo.png` a disparu
+du journal ; gain compatible avec une moindre concurrence réseau (le logo
+74 Ko et le héros 95 Ko partaient en parallèle sur le même tuyau 4G),
+pas une preuve du temps de tuyau exact. LCP `#/jouer` : 1 744 / 1 648 ms
+→ 1 740 / 1 648 ms (**plat**, attendu : le logo n'est pas le LCP —
+`p.titre-carte` — et finit après lui) ; `logo.png` a disparu du journal
+(seul `logo-petit.webp` de l'écran de chargement subsiste).
 
 ## Lighthouse (mobile, local, `#/jouer`, 11/11/2026)
 
@@ -634,6 +682,21 @@ effacé). Hypothèse écartée par mesure : le préchargement SW du héros
 le héros n'est donc pas préchargé (décision documentée : photo de contenu,
 comme les photos de plats). Le TBT reste le levier n° 1 ; à re-vérifier à la
 prochaine baseline.
+
+### Re-mesure boucle t5 (11/11/2026, 2 passes)
+
+- **Score performance : 78 / 80** (était 78 / 76 à t4 ; 15 à 17 points sous le
+  seuil ≥ 95)
+- First Contentful Paint : 0,8 s (2 passes)
+- Largest Contentful Paint : 2,3 / 2,5 s (était 2,5 / 2,4 s à t4)
+- Total Blocking Time : 860 / 700 ms (était 850 / 1 030 ms à t4 — plat, dans
+  le bruit ± ~150 ms)
+- Cumulative Layout Shift : 0 (2 passes)
+- Speed Index : 1,3 / 1,1 s
+- Time to Interactive : 3,0 / 2,7 s (était 2,6 / 2,7 s à t4)
+
+**Plat vs t4** (2 passes, dans le bruit) — attendu : le tour ne touche pas au
+chemin `#/jouer` du commerce générique. Le TBT reste le levier n° 1.
 
 ## Parcours scan → lot (à chaud, 4G simulée)
 
@@ -802,6 +865,31 @@ validation en caisse — le vrai temps humain est plus long) :
   isolée (528–924 ms depuis t1) : bruit de mesure, pas un effet du tour
   (le tour ne touche pas au parcours).
 - **Parcours < 30 s à chaud : étapes scriptées sous 30 s, vérifié** (6,7–6,9 s) ;
+  le critère complet avec gestes et attente humains **n'est pas vérifié**
+  (pas de téléphone réel — protocole documenté plus haut). Le temps humain réel
+  (le client attend que la caisse valide) s'ajoute : **non mesuré**.
+  À froid (Render en veille ~60 s + cache vide) : **non mesuré**,
+  estimation seulement.
+
+### Re-mesure boucle t5 (11/11/2026 ~16:15–16:20 UTC, 2 passes, même protocole)
+
+| Étape | Passe 1 | Passe 2 |
+| --- | --- | --- |
+| Inscription (saisie téléphone + « C'est parti ») | 1032 ms | 994 ms |
+| Validation en caisse (code équipe + recherche + passage) | 4883 ms | 4638 ms |
+| Vérification côté client (« C'est validé ? ») | 323 ms | 359 ms |
+| Tirage (clic roue → gain affiché) | 515 ms | 543 ms |
+| **Total des étapes** | **6753 ms** | **6534 ms** |
+
+- Arithmétique : passe 1, 1 032 + 4 883 + 323 + 515 = 6 753 ms ; passe 2,
+  994 + 4 638 + 359 + 543 = 6 534 ms.
+- **Taps identiques** aux passes précédentes : client **4 clics + 1 saisie** ;
+  caisse **3 clics + 2 saisies**.
+- Ouverture de la carte après le gain : 786 / 484 ms (était 616 / 684 ms à t4 —
+  passe 1 isolée, dans la plage observée 484–786 ms depuis t0).
+- La validation en caisse (4 638–4 883 ms) est dans la plage historique
+  (4 331–5 123 ms depuis t1) ; le tour ne touche pas au parcours.
+- **Parcours < 30 s à chaud : étapes scriptées sous 30 s, vérifié** (6,5–6,8 s) ;
   le critère complet avec gestes et attente humains **n'est pas vérifié**
   (pas de téléphone réel — protocole documenté plus haut). Le temps humain réel
   (le client attend que la caisse valide) s'ajoute : **non mesuré**.

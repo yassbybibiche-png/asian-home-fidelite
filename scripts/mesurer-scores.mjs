@@ -8,7 +8,7 @@
 // Conditions : le port doit être libre avant le lancement (sinon le script s'arrête : il ne mesure jamais un
 // serveur déjà présent) ; toute requête navigateur hors de l'origine locale fait échouer la passe.
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { chromium, devices } from '@playwright/test'
@@ -31,6 +31,11 @@ const CPU_RALENTI = 4
 const DELAI_LCP_MS = 2000
 
 const sortie = values.sortie ?? join(RACINE, 'node_modules', '.cache', 'mesure-p0-u0', 'resultats.json')
+// Garde anti-écrasement (boucle t5) : la sortie par défaut pointe vers l'archive
+// mesure-p0-u0 — un lancement sans --sortie l'écrasait silencieusement (c'est arrivé
+// au tour 5 : resultats.json + 9 captures P0-U0 perdus, chiffres conservés dans
+// SCORES.md). Refuser plutôt que d'écraser.
+if (!values.sortie && existsSync(sortie)) throw new Error(`Sortie par défaut déjà présente (${sortie}) : passez --sortie <chemin> pour ne pas écraser l'archive.`)
 const dossier = join(sortie, '..')
 mkdirSync(dossier, { recursive: true })
 

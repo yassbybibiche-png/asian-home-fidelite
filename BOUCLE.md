@@ -71,6 +71,38 @@ justification et mesure avant/après, vit dans `CHANGELOG.md`.
 - Réveil à froid Render ~60 s jamais mesuré ; aucun rendu réel 375/390 px vérifié
   sur téléphone.
 
+## Regard neuf — tour 5 (11/11/2026, tous les 5 tours)
+
+Relecture critique des hypothèses, avant de choisir le changement du tour 5 :
+1. **Le protocole standard sous-mesure l'expérience Asian Home réelle.**
+   Commerce générique sans visuels : ni le logo du commerce (74 Ko sur
+   `#/jouer`, `#/menu`, `#/carte`, caisse) ni le héros du menu n'y
+   apparaissent. Les tours 2 et 4 ont mesuré leurs gains hors protocole
+   (écran de chargement / mesure ponctuelle). La mesure ponctuelle
+   versionnée (`scripts/mesurer-menu-asian-home.mjs`) devient le complément
+   officiel pour les visuels Asian Home ; étendue au tour 5 à `#/jouer`
+   (page neuve par mesure — une navigation par hash ne recharge pas le
+   document, pas de nouvelle entrée navigation, pas de nouveau FCP/LCP).
+2. **Lighthouse est trop bruité sur cette VM pour des décisions à 2 passes.**
+   9 passes t4 (74–81) contre 2 passes t2 (84/81) ; l'ABAB a été nécessaire
+   pour trancher. Règle ajoutée : toute décision Lighthouse contestée exige
+   un ABAB (stash/rebuild) ou 3+ passes.
+3. **Le TBT reste le levier n° 1** (590–1 030 ms) et le JS initial le chemin
+   critique (tour 3) — aucun levier au-dessus du bruit trouvé en t3. Le
+   prochain levier structurel serait le découpage des dépendances partagées
+   (pas les pages, P2-Q2) — à investiguer si les visuels ne suffisent plus.
+4. **DA 8,0/10** : les écrans commerçant restent clairs. Un tour DA
+   (assombrir) serait un changement visuel/productif sans métrique
+   objective — il exige d'abord une grille d'évaluation DA reproductible ;
+   différé, proposé dans `RAPPORT.md` (pas un tour de boucle sans métrique).
+5. **Le logo du commerce est le dernier visuel lourd non optimisé** : 74 Ko
+   pour un affichage 64×64, présent sur toutes les pages client du vrai
+   restaurant — le changement du tour 5. Après lui, tous les visuels
+   Asian Home servis sur les pages client sont des variantes légères
+   (logo 4,9 Ko, héros 95 Ko) ; il ne reste que les photos de plats
+   (déjà WebP, vignettes 192 px) et `hero-plats.jpg` (bannière de la
+   carte, 1024×683 — à mesurer si elle devient le LCP d'une page).
+
 ## Leviers examinés et ÉCARTÉS (ne pas les reproposer sans fait nouveau)
 
 - **Caisse et CartePublique en `React.lazy` hors bundle initial** : écarté. Le
@@ -453,3 +485,73 @@ reproductible mieux établie ; 5. 720 px q75 fondé (1,85 px source / px CSS
 au-delà du bruit ; `#/jouer` Playwright plat ; effet propre du tour sur
 Lighthouse ≈ 0–2 points d'après l'ABAB ; bundle +0,03 % ; 0 erreur).
 Tours sans gain consécutifs : **1** (t3).
+
+### Tour 5 — `autonome/boucle-t5-logo-commerce` (fusionné) — REGARD NEUF
+
+Sujet (regard neuf, § dédié ci-dessus) : le protocole standard ne voit
+jamais le logo du commerce (74 Ko, affiché 64×64 sur toutes les pages
+client du vrai restaurant). Changement : `LogoCommerce`
+(`src/components/ui.tsx`) sert la variante `logo-petit.webp` (192×192,
+WebP q80, 4 900 o, créée au tour 2) en premier via `<picture
+className="block shrink-0">`, le PNG 600×600 restant le repli — seulement
+quand `logo === VISUELS.logo` (logo par défaut) ; un logo téléversé
+(branche `estLogoTeleverse`, img simple `bg-nuit-950 object-contain`,
+inchangée) ou renseigné par le commerçant garde sa balise `<img>` simple.
+Constante `LOGO_DEFAUT_PETIT` dans `src/lib/visuels.ts`, hors de `VISUELS`
+(le test `visuels.test.ts` exige > 10 000 o par entrée) ; documenté dans
+`public/visuels/SOURCES.md`. `logo.png` reste intact partout.
+Mesure ponctuelle (`scripts/mesurer-menu-asian-home.mjs`, étendu au tour 5
+à `#/jouer` — page neuve par mesure, une navigation par hash ne recharge
+pas le document) : **LCP `#/menu` 2 892 / 2 908 ms → 2 572 / 2 588 ms
+(moyenne −320 ms, 2 passes sur 2)** — le héros WebP finit à 2 537 /
+2 548 ms (était 2 860 / 2 876 ms), `logo.png` a disparu du journal ; gain
+compatible avec une moindre concurrence réseau (le logo 74 Ko et le héros
+95 Ko partaient en parallèle sur le même tuyau 4G), pas une preuve du temps
+de tuyau exact. LCP `#/jouer` : 1 744 / 1 648 ms → 1 740 / 1 648 ms
+(**plat**, attendu : le logo n'est pas le LCP — `p.titre-carte` — et finit
+après lui). Mesures standard (2 passes) : premier affichage `#/jouer`
+1 894 / 1 883 ms ; LCP 1 880 / 1 828 ms ; parcours 6 753 / 6 534 ms ;
+ouverture carte 786 / 484 ms ; menu direct 1 690 / 1 706 ms ; menu hash
+936 / 920 ms ; 0 erreur console, 0 requête échouée. Lighthouse t5 :
+78 / 80 (TBT 860 / 700 ms, LCP 2,3 / 2,5 s) contre 78/76 à t4 — plat.
+Bundle : JS initial 453 181 → 453 485 o (+304 o, +0,07 %), CSS 70 766 o
+inchangé, total 523 947 → 524 251 o, 24 chunks.
+Tests : suite complète **1180/1180** (1176 + 4 `tests/boucle-t5-logo-commerce.test.ts`),
+73 fichiers ; E2E 3/3. Compteurs corrigés en cours de tour : README/SCORES
+annonçaient 72 fichiers (le test `documentation-p2-q5` l'a signalé) ; la
+ligne SCORES « +73 tests P2-Q3 à P2-Q6 » a failli être réécrite en +77
+par erreur — l'arithmétique de la ligne de couverture doit être vérifiée
+à chaque tour (1090 + 73 + 3 + 4 + 1 + 4 + 1 + 4 = 1180).
+Incident de mesure (tour 5) : un lancement de `mesurer-scores.mjs` SANS
+`--sortie` a écrasé `node_modules/.cache/mesure-p0-u0/resultats.json` +
+9 captures P0-U0 (archive brute non versionnée — ses chiffres sont
+conservés dans `SCORES.md`, la passe t5 contenue dans le fichier écrasé a
+été récupérée comme passe 1, `mesure-boucle-t5/resultats-passe1.json` ;
+`lighthouse-jouer.json` et `resultats-3/4/5.json` du même dossier ont
+survécu, noms différents). Correctif appliqué (revue Codex t5, point 5) :
+`mesurer-scores.mjs` et `mesurer-lighthouse.mjs` refusent désormais
+d'écraser leur sortie par défaut sans `--sortie` explicite (vérifié :
+les deux refusent, archives intactes). Règle : toujours passer `--sortie`.
+Revue Codex t5 (5 points) : 1. `<picture className="block shrink-0">`
+fondé — le `shrink-0` doit être sur le `<picture>` (élément flex), celui
+de l'`<img>` est superflu dans cette branche — **gardé tel quel**
+(inoffensif, cohérent avec les autres branches ; le test épingle la
+classe exacte) ; `block` redondant en flex mais utile ailleurs —
+**gardé** ; 2. égalité stricte `logo === VISUELS.logo` fondée, ne pas
+élargir à `estLogoLocal()` — un autre `/visuels/...` garde son image
+propre ; amélioration facultative (vérification du rendu avec un autre
+logo local) **notée, non appliquée** (le test regex couvre la condition) ;
+3. constante hors `VISUELS` acceptable — **noté pour plus tard** :
+l'intégrer avec une validation adaptée aux petits fichiers, sans abaisser
+indistinctement la garde de tous les visuels ; 4. fusion justifiée, avec
+réserve d'interprétation — le même contexte conserve le stockage et peut
+réutiliser des connexions (routes pas totalement indépendantes), protocole
+comparable avant/après ; gain formulé « compatible avec une moindre
+concurrence réseau » — **appliqué dans SCORES.md/CHANGELOG.md/BOUCLE.md** ;
+5. incident fondé — garde anti-écrasement **appliquée aux deux scripts**,
+perte des données brutes P0-U0 documentée ici, chiffres conservés dans
+`SCORES.md` distingués des brutes perdues ; captures P0-U0 également
+remplacées (même dossier).
+**Décision : FUSIONNÉ** (gain menu LCP −320 ms, 2/2 passes, bien au-delà
+du bruit ; `#/jouer` plat comme attendu ; standard et Lighthouse plats ;
+bundle +0,07 % ; 0 erreur). Tours sans gain consécutifs : **0**.

@@ -19,6 +19,48 @@ bundle 601,7 → 450,2 Ko (JS initial), dashboard enrichi + entonnoir, SEO/OG.
 
 ## Boucle d'amélioration continue
 
+### t5 — Logo du commerce en WebP léger (11/11/2026, fusionné) — REGARD NEUF
+
+Regard neuf (toutes les 5 itérations) : le protocole standard mesure
+`#/jouer` avec un commerce générique sans visuels — le logo du commerce
+(74 Ko) n'y apparaît jamais, alors que pour le vrai restaurant il est
+affiché 64×64 sur `#/jouer`, `#/menu`, `#/carte` et en caisse. Le tour 5
+applique le regard neuf : `LogoCommerce` (`src/components/ui.tsx`) sert
+désormais la variante `logo-petit.webp` (192×192, WebP q80, 4 900 o, créée
+au tour 2) en premier via `<picture className="block shrink-0">`, le PNG
+600×600 (74 Ko) restant le repli — seulement quand `logo === VISUELS.logo`
+(logo par défaut) ; un logo téléversé (branche `estLogoTeleverse`, img
+simple `bg-nuit-950 object-contain`, inchangée) ou renseigné par le
+commerçant garde sa balise `<img>` simple. Constante `LOGO_DEFAUT_PETIT`
+dans `src/lib/visuels.ts`, hors de `VISUELS` (le test `visuels.test.ts`
+exige > 10 000 o par entrée) ; documenté dans `public/visuels/SOURCES.md`.
+Mesures (ponctuelle, `scripts/mesurer-menu-asian-home.mjs` étendu à
+`#/jouer` — page neuve par mesure, une navigation par hash ne rechargeant
+pas le document) : LCP `#/menu` Asian Home **2 892/2 908 → 2 572/2 588 ms
+(moyenne −320 ms, 2 passes sur 2)** — gain compatible avec une moindre
+concurrence réseau (logo 74 Ko et héros 95 Ko partaient en parallèle) ;
+LCP `#/jouer` 1 744/1 648 → 1 740/1 648 ms (plat, attendu : le logo n'est
+pas le LCP) ; `logo.png` a disparu du journal des deux pages. Mesures
+standard (2 passes) : premier affichage 1 894/1 883 ms, LCP 1 880/1 828 ms,
+parcours 6 753/6 534 ms (plats, commerce générique sans logo) ; Lighthouse
+78/80 (TBT 860/700 ms) contre 78/76 à t4 (plat). Bundle : JS initial
+453 181 → 453 485 o (+304 o, +0,07 %), CSS inchangé, 24 chunks ; 0 erreur
+console. Tests 1176 → 1180/1180 (+4 `tests/boucle-t5-logo-commerce.test.ts`),
+E2E 3/3. Revue Codex t5 (5 points) : fusion justifiée ; `<picture>` et
+égalité stricte fondés ; constante hors VISUELS acceptable (à terme,
+l'intégrer avec une validation adaptée aux petits fichiers) ; gain formulé
+comme « compatible avec une moindre concurrence réseau » ; garde
+anti-écrasement ajoutée aux scripts de mesure (voir ci-dessous). Compteur
+de tours sans gain : **0** (le tour 5 a gagné).
+Incident de mesure (tour 5) : un lancement de `mesurer-scores.mjs` sans
+`--sortie` a écrasé `node_modules/.cache/mesure-p0-u0/resultats.json` +
+9 captures P0-U0 (archive brute non versionnée ; chiffres conservés dans
+`SCORES.md`, passe t5 récupérée comme passe 1). Correctif appliqué :
+les deux scripts (`mesurer-scores.mjs`, `mesurer-lighthouse.mjs`)
+refusent désormais d'écraser leur sortie par défaut sans `--sortie`
+explicite. Règle ajoutée : toujours passer `--sortie` ; toute décision
+Lighthouse contestée exige un ABAB ou 3+ passes.
+
 ### t4 — Héros du menu optimisé (11/11/2026, fusionné)
 
 Nouveau `public/visuels/table-sushis-petit.webp` (720×1279, WebP q75,

@@ -1,7 +1,7 @@
 import { useId, useState, type ReactNode } from 'react'
 import type { Commerce } from '../types'
 import { initiales } from '../lib/format'
-import { estLogoLocal, logoCommerce } from '../lib/visuels'
+import { estLogoLocal, LOGO_DEFAUT_PETIT, logoCommerce, VISUELS } from '../lib/visuels'
 import { estLogoTeleverse } from '../lib/logo'
 import { ETATS_WALLET, EXPLICATION_WALLET, LIBELLE_WALLET, MENTIONS_RGPD } from '../lib/integrations'
 import { useLangue } from './Langue'
@@ -14,6 +14,19 @@ export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Comme
     // l'app aussi, et entier (`object-contain`) — un logo large n'est pas rogné.
     if (estLogoTeleverse(logo)) {
       return <img src={logo} alt={`Logo ${commerce.nom}`} className={`${dims} shrink-0 rounded-xl bg-nuit-950 object-contain ring-1 ring-gray-200`} />
+    }
+    // Logo par défaut d'Asian Home : variante WebP 192×192 (4,9 Ko) servie en premier —
+    // le PNG 600×600 (74 Ko) reste le repli (boucle t5 : le logo est affiché 64×64 sur
+    // #/jouer et #/menu, et télécharge ~870 ms sur 4G lente en parallèle du héros).
+    // Seul le logo par défaut est concerné : un logo téléversé ou renseigné par le
+    // commerçant garde sa balise <img> simple (branche ci-dessus / ci-dessous).
+    if (logo === VISUELS.logo) {
+      return (
+        <picture className="block shrink-0">
+          <source srcSet={LOGO_DEFAUT_PETIT} type="image/webp" />
+          <img src={logo} alt={`Logo ${commerce.nom}`} className={`${dims} shrink-0 rounded-xl object-cover ring-1 ring-gray-200 bg-gray-950`} />
+        </picture>
+      )
     }
     return <img src={logo} alt={`Logo ${commerce.nom}`} className={`${dims} shrink-0 rounded-xl object-cover ring-1 ring-gray-200 ${estLogoLocal(logo) ? 'bg-gray-950' : 'bg-white'}`} />
   }
