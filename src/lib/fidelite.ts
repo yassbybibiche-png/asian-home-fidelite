@@ -79,14 +79,17 @@ export function recompenseDebloquee(client: Client, commerce: Pick<Commerce, 'se
 /**
  * 1 visite = 1 tampon, jamais plafonné : au-delà du seuil, l'excédent sera reporté sur la carte
  * suivante quand la récompense sera offerte (seul l'affichage est plafonné, cf. tamponsAffiches).
+ * Visite rejouée hors ligne (plus ancienne que la dernière) : l'historique reste chronologique et la
+ * dernière visite ne recule pas (même règle que appliquerRattrapageValide).
  */
 export function validerVisite(client: Client, _commerce: Commerce, maintenant = new Date()): Client {
   const iso = maintenant.toISOString()
+  const derniereVisite = client.derniereVisite && new Date(client.derniereVisite).getTime() > maintenant.getTime() ? client.derniereVisite : iso
   return {
     ...client,
     tampons: client.tampons + 1,
-    visites: [...client.visites, iso],
-    derniereVisite: iso,
+    visites: [...client.visites, iso].sort(),
+    derniereVisite,
   }
 }
 
