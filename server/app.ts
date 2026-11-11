@@ -738,6 +738,22 @@ async function initialiser(st: Stockage, o: OptionsServeur) {
   }
 }
 
+/**
+ * P0-S11 : sous Supabase, le journal d'audit (0003) et les traces du programme (0004) ne sont jamais ignorés — le
+ * stockage lève ErreurMigrationManquante sans leurs tables. Plutôt que des 503 au milieu d'une visite (fait métier écrit,
+ * trace refusée), le serveur refuse de démarrer. SQLite crée tout son schéma au démarrage : rien à vérifier.
+ */
+async function exigerMigrationsAudit(st: Stockage) {
+  if (st.type !== 'supabase') return
+  const conseil = 'Faites d’abord une sauvegarde (node scripts/sauvegarde-base.mjs, voir server/README.md), puis appliquez-la dans le SQL Editor de Supabase.'
+  if (!(await st.schemaCartiz())) {
+    throw new Error(`Démarrage refusé : migration supabase/migrations/0003_cartiz.sql absente (journal d’audit). ${conseil}`)
+  }
+  if (!(await st.schemaProgramme())) {
+    throw new Error(`Démarrage refusé : migration supabase/migrations/0004_programme.sql absente (traces de parrainage et de rattrapage). ${conseil}`)
+  }
+}
+
 // ---------- En-têtes HTTP de sécurité (P0-S4, faille F-08) — sur TOUTES les réponses (API, front, erreurs) ----------
 
 /**
@@ -946,6 +962,7 @@ export async function creerServeur(o: OptionsServeur) {
   const st: Stockage = o.supabase ? ouvrirStockageSupabase(o.supabase) : ouvrirStockage(o.fichierDb)
   try {
     await initialiser(st, o)
+    await exigerMigrationsAudit(st)
   } catch (e) {
     await st.fermer()
     throw e
@@ -1698,36 +1715,62 @@ export async function creerServeur(o: OptionsServeur) {
 
   /**
    * Récompense de parrainage après la 1re visite du filleul (jamais à l'inscription).
-   * À appeler dans la transaction du passage, une fois le filleul mis à jour : met à jour le parrain,
-   * journalise des deux côtés et écrit la trace d'audit (0004, ignorée si la migration manque).
-   * Retourne le filleul avec ses points de parrainage, et le texte à ajouter au journal du passage.
+   * À appeler dans la transaction du passage : calcule le filleul avec ses points de parrainage et le texte à ajouter
+   * au journal du passage. Rien n'est écrit ici : `ecrire()` (parrain, journal, trace d'audit 0004) s'appelle APRÈS
+   * l'écriture du filleul (P0-S11) — si le filleul est en conflit (409), le parrain n'est pas crédité, et un nouvel
+   * essai ne peut pas le créditer deux fois.
    */
-  async function reglerParrainage(commerce: Commerce, filleulApres: Client, quand: Date): Promise<{ filleul: Client; texte: string }> {
-    if (!filleulApres.parrainId || filleulApres.parrainagePaye) return { filleul: filleulApres, texte: '' }
+  async function reglerParrainage(commerce: Commerce, filleulApres: Client, quand: Date): Promise<{ filleul: Client; texte: string; ecrire: () => Promise<string> }> {
+    const rien = { filleul: filleulApres, texte: '', ecrire: async () => '' }
+    if (!filleulApres.parrainId || filleulApres.parrainagePaye) return rien
     const parrain = await st.client(commerce.id, filleulApres.parrainId)
-    if (!parrain) return { filleul: filleulApres, texte: '' }
+    if (!parrain) return rien
     const r = parrainageDu(filleulApres, parrain, commerce, quand)
-    if (!r) return { filleul: filleulApres, texte: '' }
+    if (!r) return rien
     const pointsFilleul = soldePoints(r.filleul) - soldePoints(filleulApres)
     const pointsParrain = r.parrain ? soldePoints(r.parrain) - soldePoints(parrain) : 0
     const texte = r.parrain
       ? `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) et +${pointsParrain} points pour ${parrain.prenom} (parrain)`
       : `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) — parrain au plafond annuel, rien pour ${parrain.prenom}`
-    if (r.parrain) {
-      await st.majClient(r.parrain)
-      await journaliser(commerce.id, { type: 'gerant', nom: 'Gérant' }, 'parrainage', texte, r.parrain, quand)
+    const ecrire = async (): Promise<string> => {
+      let parrainCredite = r.parrain
+      let points = pointsParrain
+      let texteJournal = texte
+      if (parrainCredite) {
+        try {
+          await st.majClient(parrainCredite)
+        } catch (e) {
+          // Le filleul est déjà marqué payé : sans reprise, le crédit du parrain serait perdu pour de bon (un nouvel essai
+          // ne règle plus rien). Parrain modifié entre-temps (2 filleuls du même parrain en même temps, ou une caisse) :
+          // relu frais (st.client mémorise sa nouvelle version), recalculé, réécrit UNE fois. Un 2e conflit remonte.
+          if (!(e instanceof ErreurConflit)) throw e
+          const frais = await st.client(commerce.id, parrain.id)
+          const r2 = frais ? parrainageDu(filleulApres, frais, commerce, quand) : null
+          if (!frais || !r2) throw e
+          parrainCredite = r2.parrain
+          points = r2.parrain ? soldePoints(r2.parrain) - soldePoints(frais) : 0
+          texteJournal = r2.parrain
+            ? `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) et +${points} points pour ${frais.prenom} (parrain)`
+            : `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) — parrain au plafond annuel, rien pour ${frais.prenom}`
+          if (parrainCredite) await st.majClient(parrainCredite)
+        }
+        if (parrainCredite) await journaliser(commerce.id, { type: 'gerant', nom: 'Gérant' }, 'parrainage', texteJournal, parrainCredite, quand)
+      }
+      const trace: Parrainage = {
+        id: `pr-${randomUUID()}`,
+        commerceId: commerce.id,
+        parrainId: parrain.id,
+        filleulId: filleulApres.id,
+        date: quand.toISOString(),
+        pointsParrain: points,
+        pointsFilleul,
+      }
+      await st.ajouterParrainage(trace)
+      // Texte FINAL du journal du passage (revue Codex P0-S11, point 5) : la reprise peut recalculer le crédit
+      // (plafond atteint entre-temps) — le journal doit dire ce qui a vraiment été crédité, pas le calcul initial.
+      return texteJournal
     }
-    const trace: Parrainage = {
-      id: `pr-${randomUUID()}`,
-      commerceId: commerce.id,
-      parrainId: parrain.id,
-      filleulId: filleulApres.id,
-      date: quand.toISOString(),
-      pointsParrain,
-      pointsFilleul,
-    }
-    await st.ajouterParrainage(trace)
-    return { filleul: r.filleul, texte }
+    return { filleul: r.filleul, texte, ecrire }
   }
 
   /** Inscrit le client, ou retrouve celui qui a déjà ce téléphone / e-mail dans ce commerce. */
@@ -1818,23 +1861,56 @@ export async function creerServeur(o: OptionsServeur) {
   // (Render = une instance) : chaque affichage public ne relit pas l'image en base.
   type LogoStocke = { type: FormatLogo; version: string; octets: Buffer }
   const cleMetaLogo = (commerceId: string) => `logo:${commerceId}`
+  // Blob immuable d'un envoi précis (revue Codex P0-S11, point 2) : deux PUT simultanés d'images différentes
+  // n'écrasent plus l'image gagnante — l'adresse `?v=<version>` retrouve toujours ses propres octets.
+  const cleMetaLogoVersion = (commerceId: string, version: string) => `logo:${commerceId}:${version}`
   const logosEnMemoire = new Map<string, LogoStocke | null>()
+  const logosVersionnesEnMemoire = new Map<string, LogoStocke>()
+
+  function serialiserLogo(logo: LogoStocke): string {
+    return JSON.stringify({ type: logo.type, version: logo.version, donnees: logo.octets.toString('base64') })
+  }
+  function deserialiserLogo(brut: string | undefined): LogoStocke | null {
+    if (!brut) return null
+    const v = JSON.parse(brut) as { type: FormatLogo; version: string; donnees: string }
+    return { type: v.type, version: v.version, octets: Buffer.from(v.donnees, 'base64') }
+  }
+  /** Version désignée par une adresse de logo (`/logo?v=<version>`), null sinon (adresse vide ou statique). */
+  function versionLogoAdresse(logo: string | undefined): string | null {
+    if (!logo) return null
+    try {
+      return new URL(logo, 'http://localhost').searchParams.get('v')
+    } catch {
+      return null
+    }
+  }
 
   async function lireLogo(commerceId: string): Promise<LogoStocke | null> {
     if (logosEnMemoire.has(commerceId)) return logosEnMemoire.get(commerceId)!
-    const brut = await st.meta(cleMetaLogo(commerceId))
-    let logo: LogoStocke | null = null
-    if (brut) {
-      const v = JSON.parse(brut) as { type: FormatLogo; version: string; donnees: string }
-      logo = { type: v.type, version: v.version, octets: Buffer.from(v.donnees, 'base64') }
-    }
+    const logo = deserialiserLogo(await st.meta(cleMetaLogo(commerceId)))
     logosEnMemoire.set(commerceId, logo)
+    return logo
+  }
+  async function lireLogoVersion(commerceId: string, version: string): Promise<LogoStocke | null> {
+    const cle = `${commerceId}:${version}`
+    if (logosVersionnesEnMemoire.has(cle)) return logosVersionnesEnMemoire.get(cle)!
+    const logo = deserialiserLogo(await st.meta(cleMetaLogoVersion(commerceId, version)))
+    if (logo) logosVersionnesEnMemoire.set(cle, logo)
     return logo
   }
   async function ecrireLogo(commerceId: string, logo: LogoStocke | null) {
     logosEnMemoire.delete(commerceId)
-    await st.majMeta(cleMetaLogo(commerceId), logo ? JSON.stringify({ type: logo.type, version: logo.version, donnees: logo.octets.toString('base64') }) : '')
+    if (logo) {
+      await st.majMeta(cleMetaLogoVersion(commerceId, logo.version), serialiserLogo(logo))
+      logosVersionnesEnMemoire.set(`${commerceId}:${logo.version}`, logo)
+    }
+    await st.majMeta(cleMetaLogo(commerceId), logo ? serialiserLogo(logo) : '')
     logosEnMemoire.set(commerceId, logo)
+  }
+  /** Supprime le blob d'une version (au mieux) : la version n'est plus désignée par aucune adresse. */
+  async function supprimerLogoVersion(commerceId: string, version: string) {
+    logosVersionnesEnMemoire.delete(`${commerceId}:${version}`)
+    await st.majMeta(cleMetaLogoVersion(commerceId, version), '')
   }
 
   type Reponse = {
@@ -2120,14 +2196,20 @@ export async function creerServeur(o: OptionsServeur) {
     if (!sous) {
       if (m === 'PATCH') {
         await exigerCommercant(req, id)
-        const maj = appliquerReglages(commerce, await lireCorps(req), CHAMPS_REGLAGES, jourParis(maintenant()))
+        const corps = await lireCorps(req)
+        const jour = jourParis(maintenant())
         // Comme le front : enregistrer les réglages réapplique les règles aux avis en attente.
-        await st.transaction(async () => {
+        // Commerce relu DANS la transaction (P0-S11) : sous Supabase, sa version y est mémorisée et `majCommerce` écrit
+        // « WHERE version = <lue> » — deux enregistrements simultanés : l'un passe, l'autre 409 « réessayez ».
+        const maj = await st.transaction(async () => {
+          const frais = await commerceOu404(id)
+          const maj = appliquerReglages(frais, corps, CHAMPS_REGLAGES, jour)
           await st.majCommerce(maj)
           for (const a of await st.avis(id)) {
             const r = appliquerRegles(a, maj)
             if (r !== a) await st.majAvis(r)
           }
+          return maj
         })
         return { json: { commerce: maj } }
       }
@@ -2140,12 +2222,24 @@ export async function creerServeur(o: OptionsServeur) {
     // (PNG / JPEG / WebP, 2 Mo maximum) : le format est lu dans ses octets, le Content-Type envoyé est ignoré.
     if (sous === 'logo' && !sousId) {
       if (m === 'GET') {
-        const logo = await lireLogo(id)
-        if (!logo) throw err(404, 'Aucun logo téléversé pour ce commerce : le logo par défaut s’affiche.')
         const versionDemandee = new URL(req.url ?? '/', 'http://localhost').searchParams.get('v')
-        // Adresse versionnée (celle du champ `logo`) : un nouvel envoi change l'adresse, on peut la garder un an.
-        const cache = versionDemandee === logo.version ? CACHE_IMMUABLE : 'public, max-age=300'
-        return { image: { type: logo.type, octets: logo.octets, etag: `"${logo.version}"`, cache } }
+        // Adresse versionnée : les octets de CETTE version, jamais ceux d'un autre envoi (revue Codex P0-S11,
+        // point 2). Une vieille adresse ne sert plus les octets d'un nouvel envoi : 404, pas une mauvaise image.
+        if (versionDemandee) {
+          const parVersion = await lireLogoVersion(id, versionDemandee)
+          if (parVersion) return { image: { type: parVersion.type, octets: parVersion.octets, etag: `"${parVersion.version}"`, cache: CACHE_IMMUABLE } }
+          // Compatibilité : logo téléversé avant les blobs versionnés (seul le pointeur existe).
+          const courant = await lireLogo(id)
+          if (courant?.version === versionDemandee) return { image: { type: courant.type, octets: courant.octets, etag: `"${courant.version}"`, cache: CACHE_IMMUABLE } }
+          throw err(404, 'Aucun logo téléversé pour ce commerce : le logo par défaut s’affiche.')
+        }
+        // Sans version : le pointeur, ou à défaut l'image désignée par la fiche du commerce — le pointeur a pu
+        // être effacé par une suppression arrivée entre-temps (revue Codex P0-S11, point 3) alors que l'adresse
+        // désigne toujours un envoi gagnant. La fiche fait foi, pas le pointeur.
+        const versionAdresse = versionLogoAdresse(commerce.logo)
+        const logo = (await lireLogo(id)) ?? (versionAdresse ? await lireLogoVersion(id, versionAdresse) : null)
+        if (!logo) throw err(404, 'Aucun logo téléversé pour ce commerce : le logo par défaut s’affiche.')
+        return { image: { type: logo.type, octets: logo.octets, etag: `"${logo.version}"`, cache: 'public, max-age=300' } }
       }
       if (m === 'PUT') {
         await exigerCommercant(req, id)
@@ -2159,17 +2253,73 @@ export async function creerServeur(o: OptionsServeur) {
         }
         const version = createHash('sha256').update(octets).digest('hex').slice(0, 16)
         // Fichier d'abord, adresse ensuite : un échec entre les deux laisse l'ancien logo affiché, jamais une image cassée.
+        const ancien = await lireLogo(id)
         await ecrireLogo(id, { type: infos.type, version, octets })
-        const maj: Commerce = { ...commerce, logo: urlLogo(id, version) }
-        await st.majCommerce(maj)
+        let maj: Commerce
+        try {
+          // Relecture dans la transaction (P0-S11) : verrou optimiste, ne réécrit pas des réglages enregistrés entre-temps.
+          maj = await st.transaction(async () => {
+            const maj: Commerce = { ...(await commerceOu404(id)), logo: urlLogo(id, version) }
+            await st.majCommerce(maj)
+            return maj
+          })
+        } catch (e) {
+          // Envoi refusé (409 du verrou ou autre) : remettre le pointeur sur l'image que l'adresse désigne
+          // (revue Codex P0-S11, point 2) — l'ancienne image si un PATCH a gagné, celle du PUT gagnant sinon
+          // (lue dans son blob versionné, que cet envoi n'a pas écrasé). L'erreur d'origine est toujours renvoyée.
+          try {
+            const logoAdresse = (await st.commerce(id))?.logo
+            if ((await lireLogo(id))?.version === version) {
+              const adresse = versionLogoAdresse(logoAdresse)
+              const cible =
+                logoAdresse === ''
+                  ? null
+                  : !adresse || adresse === ancien?.version
+                    ? ancien
+                    : adresse === version
+                      ? undefined
+                      : (await lireLogoVersion(id, adresse)) ?? ancien
+              if (cible !== undefined) await ecrireLogo(id, cible)
+            }
+            // Mon blob versionné n'est désigné par aucune adresse : le supprimer au mieux (sauf si un autre envoi
+            // des mêmes octets a gagné entre-temps — même version).
+            if (versionLogoAdresse(logoAdresse) !== version) await supprimerLogoVersion(id, version)
+          } catch {
+            // L'erreur d'origine reste celle renvoyée.
+          }
+          throw e
+        }
+        // Envoi accepté : le blob de l'image remplacée ne sert plus (au mieux, sauf si un envoi des mêmes octets
+        // l'a repris entre-temps — fenêtre résiduelle, voir server/README.md « Atomicité (P0-S11) »).
+        if (ancien && ancien.version !== version) {
+          try {
+            if (versionLogoAdresse((await st.commerce(id))?.logo) !== ancien.version) await supprimerLogoVersion(id, ancien.version)
+          } catch {
+            // Un blob orphelin ne gêne pas : aucune adresse ne le désigne.
+          }
+        }
         return { json: { commerce: maj, logo: { ...infos, octets: octets.length } } }
       }
       if (m === 'DELETE') {
         // « Revenir au logo par défaut » : champ vidé (repli sur public/visuels/logo.png pour Asian Home, initiales sinon).
         await exigerCommercant(req, id)
-        const maj: Commerce = { ...commerce, logo: '' }
-        await st.majCommerce(maj)
-        await ecrireLogo(id, null)
+        // L'adresse remplacée est lue DANS la transaction (revue Codex P0-S11, point 3) : un PUT arrivé entre-temps
+        // gagne et n'est pas effacé — l'effacement ne touche que l'image que ce DELETE a remplacée.
+        const { maj, adresseAvant } = await st.transaction(async () => {
+          const frais = await commerceOu404(id)
+          const adresseAvant = frais.logo
+          const maj: Commerce = { ...frais, logo: '' }
+          await st.majCommerce(maj)
+          return { maj, adresseAvant }
+        })
+        try {
+          const versionAvant = versionLogoAdresse(adresseAvant)
+          if (((await lireLogo(id))?.version ?? null) === (versionAvant ?? null)) await ecrireLogo(id, null)
+          // Le blob de l'adresse remplacée ne sert plus — sauf si un nouvel envoi des mêmes octets l'a reprise.
+          if (versionAvant && versionLogoAdresse((await st.commerce(id))?.logo) !== versionAvant) await supprimerLogoVersion(id, versionAvant)
+        } catch {
+          // Le champ est vidé ; un fichier orphelin ne gêne pas : aucune adresse ne le désigne.
+        }
         return { json: { commerce: maj } }
       }
       throw err(405, 'Méthode non autorisée.')
@@ -2255,9 +2405,10 @@ export async function creerServeur(o: OptionsServeur) {
           const regle = await reglerParrainage(commerce, apres, maintenant())
           apres = regle.filleul
           await st.majClient(apres)
-          texteJournal = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`
+          const texteParrainage = await regle.ecrire()
+          texteJournal =`+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${texteParrainage ? ` · ${texteParrainage}` : ''}`
           await journaliser(id, auteur, 'passage', texteJournal, apres)
-          if (regle.texte) await journaliser(id, auteur, 'parrainage', regle.texte, apres)
+          if (texteParrainage) await journaliser(id, auteur, 'parrainage', texteParrainage, apres)
           return apres
         }
         apres = offrirRecompense(avant, commerce, maintenant())
@@ -2302,6 +2453,8 @@ export async function creerServeur(o: OptionsServeur) {
         let apres: Client
         let details: string
         let journalAction: EntreeJournal['action'] = sousId === 'attente' ? 'recompense' : sousId === 'reserve' ? 'reserve' : sousId
+        // Parrainage éventuel : écrit après le client (P0-S11, métier puis journal).
+        let parrainage: { texte: string; ecrire: () => Promise<string> } | undefined
         if (sousId === 'passage') {
           // Paliers, défi, niveaux (multiplicateur), réserve et parrainage : décidés côté serveur.
           let evenements: EvenementPassage[] = []
@@ -2315,8 +2468,8 @@ export async function creerServeur(o: OptionsServeur) {
           apres = regle.filleul
           const gagnes = soldePoints(apres) - soldePoints(avant)
           const niveau = niveauClient(apres, commerce)
-          details = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${centimes ? ` · ${formaterPrix(centimes)} → +${gagnes} point${gagnes > 1 ? 's' : ''} (solde ${soldePoints(apres)}, ${niveau.nom} ×${niveau.multiplicateur})` : ''}${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`
-          if (regle.texte) await journaliser(id, auteur, 'parrainage', regle.texte, apres, quand)
+          details = `+1 tampon (${tamponsAffiches(apres, commerce)}/${commerce.seuilTampons})${centimes ? ` · ${formaterPrix(centimes)} → +${gagnes} point${gagnes > 1 ? 's' : ''} (solde ${soldePoints(apres)}, ${niveau.nom} ×${niveau.multiplicateur})` : ''}${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}`
+          parrainage = regle
         } else if (sousId === 'recompense') {
           if (!recompenseDebloquee(avant, commerce)) throw err(409, `Récompense pas encore débloquée : ${avant.tampons}/${commerce.seuilTampons} tampons.`)
           apres = avecAction(offrirRecompense(avant, commerce, quand), actionId)
@@ -2353,6 +2506,13 @@ export async function creerServeur(o: OptionsServeur) {
           journalAction = 'echange'
         }
         await st.majClient(apres)
+        // Texte final du parrainage (revue Codex P0-S11, point 5) : la reprise peut recalculer le crédit — le
+        // journal du passage reprend ce texte, pas le calcul initial.
+        const texteParrainage = (await parrainage?.ecrire()) ?? ''
+        if (texteParrainage) {
+          await journaliser(id, auteur, 'parrainage', texteParrainage, apres, quand)
+          details += ` · ${texteParrainage}`
+        }
         await journaliser(id, auteur, journalAction, details, apres, quand)
         return { client: apres, dejaTraite: false }
       })
@@ -2655,6 +2815,7 @@ export async function creerServeur(o: OptionsServeur) {
           ...avant,
           demandesRattrapage: (avant.demandesRattrapage ?? []).map((d) => (d.id === extra ? { ...d, statut: corps.decision === 'valider' ? 'validee' : 'refusee', decideLe: t.toISOString() } : d)),
         }
+        // Client d'abord, parrain et journal ensuite (P0-S11) : un conflit sur le client n'écrit rien d'autre.
         if (corps.decision === 'valider') {
           const raison = rattrapageRecevable(avant, commerce, new Date(demande.date), demande.montantCentimes, t)
           if (raison) throw err(409, raison)
@@ -2662,18 +2823,20 @@ export async function creerServeur(o: OptionsServeur) {
           apres = avecMessages(avecVisite, commerce, 'passage', t)
           const regle = await reglerParrainage(commerce, apres, t)
           apres = regle.filleul
+          await st.majClient(apres)
+          const texteParrainage = await regle.ecrire()
           await journaliser(
             id,
             { type: 'gerant', nom: 'Gérant' },
             'rattrapage',
-            `Visite oubliée validée (${new Date(demande.date).toLocaleDateString('fr-FR')}${demande.montantCentimes ? `, ${formaterPrix(demande.montantCentimes)}` : ''}) : +1 tampon${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${regle.texte ? ` · ${regle.texte}` : ''}`,
+            `Visite oubliée validée (${new Date(demande.date).toLocaleDateString('fr-FR')}${demande.montantCentimes ? `, ${formaterPrix(demande.montantCentimes)}` : ''}) : +1 tampon${evenements.length ? ` · ${evenements.map((e) => e.texte).join(' · ')}` : ''}${texteParrainage ? ` · ${texteParrainage}` : ''}`,
             apres,
             t,
           )
         } else {
+          await st.majClient(apres)
           await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'rattrapage', `Visite oubliée refusée (${new Date(demande.date).toLocaleDateString('fr-FR')})`, apres, t)
         }
-        await st.majClient(apres)
         return apres
       })
       return { json: { client: clientCaisse(client) } }

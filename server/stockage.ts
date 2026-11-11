@@ -71,6 +71,11 @@ export interface Stockage {
   commerce(id: string): P<Commerce | undefined>
   pin(id: string): P<Pin | undefined>
   ajouterCommerce(c: Commerce, pin: Pin): P<void>
+  /**
+   * Supabase (P0-S11) : dans une `transaction` qui a relu ce commerce, écriture conditionnée à la version lue
+   * (ErreurConflit si une autre requête l'a modifié entre-temps) ; sinon inconditionnelle. SQLite : transactions réelles
+   * et sérialisées (voir `transaction` plus bas), aucune autre écriture ne s'intercale — rien à vérifier.
+   */
   majCommerce(c: Commerce): P<void>
   majPin(id: string, pin: Pin): P<void>
   clients(commerceId: string): P<Client[]>
@@ -100,12 +105,19 @@ export interface Stockage {
   supprimerMembre(commerceId: string, id: string): P<void>
   /** Journal d'audit, du plus récent au plus ancien. */
   journal(commerceId: string, limite: number): P<EntreeJournal[]>
+  /**
+   * Jamais ignoré en silence (P0-S11) : Supabase sans la table (0003) lève ErreurMigrationManquante — le serveur refuse
+   * d'ailleurs de démarrer en Supabase sans la 0003. Les routes l'appellent APRÈS l'écriture métier.
+   */
   ajouterJournal(e: EntreeJournal): P<void>
   menu(commerceId: string): P<Menu | undefined>
   majMenu(m: Menu): P<void>
   /** Tables de la migration 0003 présentes (toujours vrai sous SQLite, le schéma est créé au démarrage). */
   schemaCartiz(): P<boolean>
-  /** Traces d'audit du programme (migration 0004 : parrainages, demandes de rattrapage). */
+  /**
+   * Traces d'audit du programme (migration 0004 : parrainages, demandes de rattrapage). Jamais ignorées (P0-S11) :
+   * Supabase sans les tables lève ErreurMigrationManquante ; le serveur refuse de démarrer en Supabase sans la 0004.
+   */
   ajouterParrainage(p: Parrainage): P<void>
   ajouterDemandeRattrapage(d: DemandeRattrapageTrace): P<void>
   /** Tables de la migration 0004 présentes (toujours vrai sous SQLite). */
@@ -172,9 +184,10 @@ export interface Stockage {
 export class ErreurConflit extends Error {}
 
 /**
- * Table de la migration 0003 (equipe / journal / menus) absente de la base Supabase : migration pas encore appliquée.
- * Les lectures renvoient du vide et le journal est ignoré (l'existant continue de marcher) ; les nouvelles écritures
- * (équipe, menu) lèvent cette erreur → 503 explicite.
+ * Table d'une migration (0003 equipe / journal / menus par défaut, ou la migration nommée) absente de la base Supabase :
+ * migration pas encore appliquée. Les lectures renvoient du vide ; les écritures lèvent cette erreur → 503 explicite.
+ * Depuis P0-S11, le journal (0003) et les traces du programme (0004) ne sont plus ignorés : le serveur refuse de
+ * démarrer en Supabase sans ces deux migrations.
  */
 export class ErreurMigrationManquante extends Error {
   constructor(table: string, migration = '0003_cartiz.sql') {
@@ -318,6 +331,8 @@ export function ouvrirStockage(fichier: string) {
 
   // Les transactions peuvent contenir des `await` (contrat commun avec Supabase) : elles passent une par une
   // (file d'attente). SQLite répondant sans attente réelle, aucune autre requête HTTP ne s'intercale pendant l'une d'elles.
+  // P0-S11 : c'est pourquoi SQLite n'a ni colonne `version` ni verrou optimiste (commerces, clients, avis) — BEGIN
+  // IMMEDIATE … COMMIT est déjà « tout ou rien » et sérialisé ; le verrou n'existe que sous Supabase.
   let file: Promise<unknown> = Promise.resolve()
 
   return {

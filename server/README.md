@@ -395,9 +395,10 @@ de portée `client`, remet la contrainte d'origine, garde les versions d'accès)
 
 ### Migration 0003 (modules caisse / points / équipe / messages / menu) — à appliquer en production
 
-La base Supabase en ligne ne se met pas à jour toute seule. Tant que `0003_cartiz.sql` n'est pas exécutée, les nouvelles
-routes qui touchent `equipe`, `journal` ou `menus` répondent 500 (table absente) — **et les routes historiques qui écrivent
-désormais dans le journal (visite, récompense, caisse) aussi**. À faire une fois, dans l'ordre :
+La base Supabase en ligne ne se met pas à jour toute seule. Depuis P0-S11, **le serveur refuse de démarrer** en Supabase
+tant que `0003_cartiz.sql` (journal d'audit) ou `0004_programme.sql` (traces du programme) n'est pas exécutée : message
+explicite nommant la migration (voir « Atomicité (P0-S11) »). Sauvegarde d'abord (`node --env-file=.env
+scripts/sauvegarde-base.mjs`). À faire une fois, dans l'ordre :
 1. supabase.com → projet **asian-home-fidelite** → **SQL Editor** → *New query* ;
 2. coller tout le contenu de `supabase/migrations/0003_cartiz.sql` → **Run** (rejouable : sans risque si exécuté deux fois) ;
 3. vérifier : `select relname, relrowsecurity from pg_class where relname in ('equipe','journal','menus');` → 3 lignes, `true` ;
@@ -412,6 +413,91 @@ curl -s -X POST localhost:3001/api/v1/commerces/c-asian-home-paris/tirages -H 'C
   -H 'Authorization: Bearer <jeton reçu à l’inscription>' -d '{}'   # → 409 tant que la visite du jour n'est pas validée
                                                                     #   (sans jeton : 401 en mode strict)
 ```
+
+## Atomicité (P0-S11, audit F-10)
+
+**SQLite** : rien à faire, rien de changé. `transaction` = `BEGIN IMMEDIATE … COMMIT` (tout ou rien), et les
+transactions passent une par une (file d'attente, `server/stockage.ts`) : aucune autre requête ne s'intercale.
+
+**Supabase** : PostgREST n'offre **pas** de transaction sur plusieurs requêtes HTTP. `transaction` y garde seulement les
+versions lues (une carte par requête) ; chaque écriture est atomique à elle seule, et les écritures sensibles sont
+protégées par la base elle-même :
+
+| Écriture | Protection | Effet d'un conflit |
+| --- | --- | --- |
+| Réglages du commerce (PATCH), logo (PUT / DELETE) — **nouveau P0-S11** | verrou optimiste : commerce relu DANS la transaction, `UPDATE … WHERE id = ? AND version = <lue>` | 0 ligne → 409 « Modification simultanée : réessayez. » ; rien n'est écrasé en silence |
+| Visite, récompense, caisse, avis | même verrou optimiste (clients, avis) | 409 « réessayez », aucun tampon perdu ni compté deux fois |
+| Inscription | contrainte unique `(commerce_id, cle_contact)` | le 2e INSERT est refusé, le serveur relit le client existant |
+| Tirage | index unique `(commerce_id, client_id, jour à Paris)` | 2e tirage du jour refusé (409) |
+| Remise d'un gain | `UPDATE … WHERE donnees->remis IS NULL` | 2e remise refusée (409 « déjà remis ») |
+| Caisse (file hors ligne) | `actionId` idempotent mémorisé dans le client | un rejeu répond `dejaTraite`, rien n'est recompté |
+
+`version` est incrémentée par le trigger `incrementer_version` (0001, recréé par la 0003 pour la base live qui ne
+l'avait pas). Hors `transaction`, ou si la ligne n'a pas été relue dedans, `majCommerce` / `majClient` / `majAvis`
+écrivent sans condition (comportement d'avant) : les routes relisent donc la ligne dans la transaction.
+
+**Ordre d'écriture : métier, puis journal.** Le fait (client, commerce, parrain) est écrit d'abord ; l'entrée de journal
+et les traces d'audit ensuite. Pourquoi : une interruption entre les deux peut **perdre une entrée de journal**, mais
+jamais créer un journal mensonger (action tracée mais pas faite) ni compter deux fois. P0-S11 a remis dans cet ordre
+les trois routes qui ne le respectaient pas : le parrainage (parrain + journal + trace étaient écrits AVANT le filleul :
+un conflit sur le filleul laissait le parrain crédité, et un nouvel essai pouvait le créditer une 2e fois), la caisse
+(journal « parrainage ») et la décision de rattrapage (journal écrit avant le client).
+
+**Reprise du crédit parrain (revue Codex P0-S11).** Le filleul étant écrit d'abord (`parrainagePaye: true`), un 409 sur
+le parrain ne pouvait plus être réparé par un nouvel essai (la caisse répond `dejaTraite`, le rattrapage est déjà
+traité) : deux premières visites simultanées de deux filleuls du même parrain perdaient un crédit. `ecrire()` réessaie
+donc **une fois** le crédit du parrain sur `ErreurConflit` : parrain relu frais dans la même transaction, parrainage
+recalculé (plafond annuel compris), puis crédit + journal + trace réécrits. Seul le 409 du crédit parrain est repris ;
+journal et trace ne sont jamais rejoués après un crédit réussi. Parrain disparu entre-temps → erreur d'origine ; plafond
+atteint entre-temps → pas de crédit, trace écrite avec `pointsParrain: 0`. `ecrire()` renvoie le texte FINAL du journal
+du passage (revue Codex, 2e passe) : si la reprise recalcule le crédit (plafond atteint entre-temps), le journal dit
+ce qui a vraiment été crédité, pas le calcul initial. **Fenêtre résiduelle** : deux conflits successifs sur la ligne
+du parrain dans la même requête → l'erreur remonte : filleul marqué payé, crédit parrain perdu, visible par le 409
+renvoyé à l'opérateur (à corriger à la main sur la fiche du parrain).
+
+**Logo refusé : image restaurée (revue Codex P0-S11, 2e passe).** Chaque envoi écrit un blob immuable
+`logo:<id>:<version>` en plus du pointeur `logo:<id>` : l'adresse `?v=<version>` retrouve toujours ses propres
+octets, même si un autre envoi a écrasé le pointeur entre-temps. Le PUT prend un instantané du logo avant d'écrire
+et, en cas d'échec, remet le pointeur sur l'image que l'adresse désigne (l'ancienne si un PATCH a gagné, celle du
+PUT gagnant sinon, lue dans son blob versionné) ; son propre blob est supprimé au mieux s'il n'est désigné par
+aucune adresse ; l'erreur d'origine est toujours celle renvoyée. Le DELETE ne vide le pointeur que s'il contient
+encore l'image que ce DELETE a remplacée (adresse lue DANS la transaction) et ne supprime le blob correspondant
+que si l'adresse courante ne le désigne plus. Le GET sans version sert le pointeur, ou à défaut l'image désignée
+par la fiche du commerce — un pointeur effacé par une suppression arrivée entre-temps ne casse plus l'adresse
+gagnante. Une vieille adresse `?v=` ne sert plus les octets d'un nouvel envoi : 404, pas une mauvaise image.
+**Fenêtres résiduelles** : la suppression d'un blob orphelin reste une vérification-puis-écriture (un envoi des
+mêmes octets qui gagnerait exactement entre les deux laisserait une adresse sans blob, réparable par un nouvel
+envoi) ; les blobs remplacés restent en `meta` tant qu'aucun nouvel envoi ne les nettoie (une ligne par ancien logo).
+
+**Garde au démarrage.** Sous Supabase, `creerServeur` refuse de démarrer si la migration `0003_cartiz.sql` (journal)
+ou `0004_programme.sql` (parrainages, demandes de rattrapage) manque — erreur explicite nommant la migration et la
+sauvegarde. `ajouterJournal`, `ajouterParrainage` et `ajouterDemandeRattrapage` ne masquent plus leur absence
+(`ErreurMigrationManquante` remonte, plus de `console.warn` qui continue). Les migrations 0005 à 0009 gardent leur repli
+documenté (mémoire, lecture vide, 503). SQLite crée tout son schéma : pas de garde.
+
+**Aucune migration pour ce lot** : colonne `version` + trigger (0001), table `journal` (0003), index unique des tirages
+(0001) existent déjà. **Avant toute migration** (ici : appliquer la 0003 / 0004 si ce n'est pas fait), une sauvegarde
+par l'opérateur : `node --env-file=.env scripts/sauvegarde-base.mjs` (ou `npm run sauvegarde`, aide : `--aide`,
+procédure : `docs/SAUVEGARDE.md`). Jamais lancée par un lot automatique contre la production.
+
+**Ce qui reste NON atomique (compensation, pas transaction).**
+- Une suite d'écritures interrompue entre deux requêtes HTTP (panne réseau, crash Render) n'est pas annulée : ex. le
+  PATCH d'un commerce enregistre les réglages puis échoue sur un des avis réévalués ; un parrain peut ne pas être
+  crédité si l'écriture du filleul a réussi juste avant la panne ; le logo (fichier puis adresse) garde l'ancien affiché.
+- **Journal en panne après écriture métier (revue Codex, 2e passe — non corrigé).** L'erreur remonte (plus de silence),
+  mais rien n'est restauré : une caisse rejouée répond `dejaTraite` sans recréer la trace, une visite historique
+  rejouée peut ajouter un 2e tampon. Le corriger demande un journal rejouable / une boîte d'envoi durable — nouveau lot,
+  pas une compensation.
+- **PATCH réglages + avis partiels (revue Codex, 2e passe — non corrigé).** Le commerce est écrit avant les avis, dans
+  la même `transaction` (atomique sous SQLite, pas sous Supabase) : un conflit sur un avis laisse les nouveaux réglages
+  et les premiers avis modifiés, puis 409. Même remède que ci-dessus (reprise durable), hors périmètre du lot.
+- Compensation choisie : ordre métier-puis-journal, verrous optimistes, contraintes uniques, `actionId` idempotent.
+- Écartée : une fonction RPC transactionnelle générique. Elle réécrirait toute la logique métier (programme,
+  parrainage, niveaux…) en PL/pgSQL — double implémentation, risque de divergence avec `src/lib/` — pour un gain nul sur
+  les conflits réellement observés (simultanéité), déjà tranchés par la base.
+- Hors périmètre : la route visite historique (`POST /clients/:id/visite`) n'a pas de garde « 1 tampon par jour »
+  (audit F-11, lot P1-S12). Deux visites **séquentielles** le même jour restent possibles ; seule la **simultanéité**
+  est tranchée par le verrou optimiste.
 
 ## Sécurité (minimale, assumée)
 

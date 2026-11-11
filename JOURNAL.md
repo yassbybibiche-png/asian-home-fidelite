@@ -998,3 +998,125 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   28/28 seul, puis 870/870 sur deux exécutions complètes → instabilité de charge, pas une régression.
 - **Non vérifié (revue Codex)** : la course du point 2 contre un vrai Supabase (simulée par stockage lent) ; le cas
   multi-instance ; le bouton de la fiche client n'est vérifié que par lecture de code (pas d'E2E du back-office).
+
+## 11/11/2026 — P0-S11 : atomicité des écritures Supabase (AUDIT.md § P0-S11, audit F-10, revue Codex points 1 et 12)
+- **Mécanisme retenu : compensation, pas transaction.** PostgREST n'a pas de transaction multi-requêtes ; une fonction
+  RPC transactionnelle générique a été écartée (toute la logique métier réécrite en PL/pgSQL = double implémentation,
+  risque de divergence avec `src/lib/`, aucun gain sur les conflits observés, qui sont des simultanéités déjà
+  tranchables par la base). Détail : `server/README.md` « Atomicité (P0-S11) » et en-tête de `server/stockage-supabase.ts`.
+- **A. Verrou optimiste sur `majCommerce`** : `commerces()` / `commerce()` lisent `id,version,donnees` (la version est
+  mémorisée dans la transaction en cours), `majVersionnee` généralisée à `commerces`. Route PATCH /commerces/:id : le
+  commerce est relu DANS la transaction avant `appliquerReglages` (même comportement : réglages + règles réappliquées
+  aux avis en attente, dans la même transaction). Logo PUT / DELETE : `majCommerce` dans une transaction avec relecture
+  fraîche ; ordre inchangé (PUT : fichier puis adresse ; DELETE : adresse puis fichier). Hors transaction : écriture
+  inconditionnelle (inchangé). SQLite : rien de changé (BEGIN IMMEDIATE + file d'attente) — documenté dans `stockage.ts`.
+- **B. Journal jamais perdu en silence** : `ajouterJournal`, `ajouterParrainage`, `ajouterDemandeRattrapage` ne font
+  plus `console.warn` + continuer ; `ErreurMigrationManquante` remonte. `creerServeur` (après `initialiser`, qui ne
+  journalise rien) refuse de démarrer sous Supabase sans `0003_cartiz.sql` ou `0004_programme.sql` : message nommant
+  la migration et `scripts/sauvegarde-base.mjs`. Pas de garde sous SQLite. Aucune autre suite n'utilise
+  `sans0003` / `sans0004` (grep `tests/`) ; les tests P0-U3 (sans0005 / sans0006) restent verts.
+- **Écart au brief (ajout)** : l'ordre « métier puis journal » à documenter n'était PAS respecté partout. Corrigé :
+  `reglerParrainage` écrivait le parrain, son journal et la trace 0004 AVANT le filleul — un conflit (409) sur le
+  filleul laissait le parrain crédité, et un nouvel essai pouvait le créditer une 2e fois. Il renvoie maintenant
+  `ecrire()`, appelé après l'écriture du filleul (visite, caisse, rattrapage). La caisse écrivait le journal
+  « parrainage » avant le client, et la décision de rattrapage son journal avant le client : remis après.
+  Pas de test dédié à cet ordre (l'entrelacement fautif n'est pas reproductible de façon déterministe avec la barrière
+  du faux PostgREST) ; les tests de parrainage existants restent verts.
+- **C. Aucune migration** : `version` + trigger `incrementer_version` (0001, recréés par la 0003), `journal` (0003),
+  index unique des tirages (0001). Liste figée 0001…0009 du test de sauvegarde inchangée.
+- **Tests** : avant **870/870**. Après : **875/875** (`npm test`, typecheck serveur inclus), `npm run build` et
+  `npx tsc -p .` OK. `+5` dans `tests/supabase.test.ts` : 2 PATCH simultanés → [200, 409] « réessayez », version
+  initiale + 1, une seule valeur retenue, garde `version=eq.<lue>` dans les deux requêtes ; PATCH + PUT logo
+  simultanés → jamais de mélange ; démarrage refusé sans 0003 (`/0003_cartiz/`) et sans 0004 (`/0004_programme/`),
+  accepté sans 0005…0008 ; stockage seul : `majCommerce` conditionné dans une transaction / inconditionnel hors ;
+  `ajouterJournal` sans 0003 et `ajouterParrainage` / `ajouterDemandeRattrapage` sans 0004 → ErreurMigrationManquante.
+  Les 3 tests de verrou échouent sans le correctif (vérifié : verrou retiré → 3 échecs ; relecture dans la transaction
+  retirée → le test PATCH échoue). Écart : la barrière est posée sur les **PATCH** `commerces`, pas sur les GET comme
+  suggéré — avant la lecture dans la transaction, la route lit déjà le commerce et le PIN, puis hache (scrypt) : une
+  barrière GET ne rend pas le test déterministe ; la barrière PATCH garantit que les deux requêtes ont relu la même
+  version avant d'écrire.
+- **Deux tests existants mis à jour (justifiés en commentaire P0-S11)** : « production AVANT la migration 0003 » →
+  le démarrage est désormais refusé (message `0003_cartiz.sql` + sauvegarde), la 2e partie (après migration : /sante
+  `cartiz: true`) est gardée ; « suppression sans migrations » → ne garde que `sans0007` (le bilan reste identique).
+  Non-régression citée (inchangés, verts) : double tirage simultané, double visite, double inscription, idempotence
+  caisse (`actionId`, rejeu `dejaTraite`, journal length 2 dans le test Cartiz), remise de gain unique (P0-U3).
+- **Ce qui reste non atomique** : suite d'écritures interrompue entre deux requêtes (panne réseau / crash) — réglages
+  écrits puis échec sur un avis réévalué, filleul écrit mais parrain pas crédité ; une entrée de journal peut se perdre
+  ainsi (jamais un journal mensonger). Hors périmètre : la route visite historique n'a pas de garde « 1 tampon / jour »
+  (F-11, lot P1-S12) — deux visites séquentielles le même jour restent possibles.
+- **Conséquence production** : si la base live n'a pas la 0003 ou la 0004, le prochain déploiement refusera de
+  démarrer (en principe, Render garde alors l'ancienne version en ligne — non vérifié). À vérifier AVANT de déployer : `GET /api/v1/sante` →
+  `migrations.cartiz` et `migrations.programme` à `true` ; sinon sauvegarde puis migrations. **Vérifié le 11/11/2026**
+  (GET public `https://asian-home-fidelite.onrender.com/api/v1/sante`) : `cartiz: true`, `programme: true` → la garde
+  ne bloquera pas le déploiement.
+- **Non vérifié** : contre un vrai Postgres / Supabase (faux PostgREST seulement) ; le comportement de Render si un
+  démarrage est refusé.
+
+## 11/11/2026 — P0-S11 : correctif revue Codex (crédit parrain repris sur conflit, logo refusé restauré)
+- **Point 1 [P1] — parrainage définitivement incomplet.** Depuis P0-S11 le filleul (`parrainagePaye: true`) est écrit
+  avant le parrain. Deux premières visites simultanées de deux filleuls du même parrain : les deux filleuls passaient,
+  un seul crédit parrain aussi — l'autre `majClient(parrain)` faisait 409, et aucun nouvel essai ne pouvait le réparer
+  (`parrainageDu` renvoie null pour un filleul payé ; caisse `dejaTraite` ; rattrapage déjà traité). Correctif dans
+  `reglerParrainage().ecrire()` : sur `ErreurConflit` du seul crédit parrain, une reprise — parrain relu frais
+  (`st.client`, nouvelle version mémorisée dans la transaction), `parrainageDu` recalculé, texte + trace reconstruits,
+  crédit + journal + trace réécrits. Toute autre erreur remonte sans reprise ; un crédit réussi n'est jamais rejoué.
+  Parrain disparu → erreur d'origine ; plafond atteint entre-temps → pas de crédit, trace `pointsParrain: 0`. Ordre
+  filleul-puis-parrain inchangé. Le texte du journal du passage (côté filleul, déjà calculé) n'est pas recalculé.
+- **Point 2 [P2] — logo refusé mais image remplacée.** `ecrireLogo` remplaçait les octets avant l'UPDATE conditionnel :
+  un PUT en 409 laissait la nouvelle image derrière l'ancienne adresse. Correctif (PUT seulement) : instantané
+  `lireLogo` avant l'écriture ; en cas d'échec de la transaction, restauration au mieux si le logo stocké a encore la
+  `version` de cet envoi (try/catch interne qui ne masque jamais l'erreur d'origine), puis l'erreur remonte.
+- **Tests** : avant **875/875**, après **876/876** (`npm test`), `npm run build` et `npx tsc -p .` OK. `+1` test
+  (`tests/supabase.test.ts`) : deux filleuls du même parrain, premières visites simultanées (barrière PATCH `clients`)
+  → [200, 200], parrain à 50 + 50 + 50, 2 `parrainagesGagnes`, 2 traces `parrainages` à 50, 2 journaux « parrainage »
+  du parrain, filleuls `parrainagePaye`. Test de course PATCH + PUT logo renforcé : 404 avant la course ; après, GET
+  brut du logo → 200 + octets identiques si le PUT a gagné, 404 et `meta` vide s'il a reçu 409. Vérifié : reprise
+  retirée → le nouveau test échoue ([200, 409]) ; restauration retirée → le test logo échoue (6/6 exécutions, le PUT
+  perd la course de façon stable avec la barrière).
+- **Résiduels** (documentés dans `server/README.md` § Atomicité) : deux conflits successifs sur le parrain dans la même
+  requête → 409, filleul payé, crédit parrain perdu (à corriger à la main) ; deux envois de logo simultanés d'images
+  différentes → un seul gagne l'adresse, octets cohérents sauf entrelacement extrême entre vérification et restauration.
+  Non couverts par un test : le cas « plafond atteint pendant la reprise », « parrain supprimé pendant la reprise » et
+  le double conflit.
+
+## 11/11/2026 — P0-S11 : 2e passe revue Codex (blobs logo versionnés, DELETE conditionnel, texte parrainage final)
+- **Contexte.** Le correctif de la 1re passe a été commité entre-temps par le coordinateur (`d48be12`, déjà poussé).
+  2e revue Codex du diff complet (`/tmp/codex-revue-p0-s11.txt`, 7 points). Incident d'outillage : `codex exec` restait
+  bloqué sans sortie quand le prompt est passé en argument et stdin laissé ouvert (« Reading additional input from
+  stdin... ») — relancé avec `< /dev/null`, réponse en 46 s. Leçon notée dans `AGENTS.md`.
+- **Point 2 [P1] — deux PUT logo restauraient une image qui ne correspond pas au gagnant (CORRIGÉ).** Le correctif de
+  la 1re passe ne demandait qu'un entrelacement extrême ; en fait deux PUT qui prennent le même instantané suffisent :
+  le perdant restaure l'ancien logo derrière l'adresse du gagnant. Correctif : chaque envoi écrit un blob immuable
+  `logo:<id>:<version>` en plus du pointeur ; le GET `?v=` sert le blob de CETTE version ; en cas de 409 le pointeur
+  est remis sur l'image que l'adresse désigne (ancienne si un PATCH a gagné, celle du PUT gagnant sinon, lue dans son
+  blob) ; le blob de l'envoi refusé est supprimé au mieux s'il n'est désigné par aucune adresse ; le blob remplacé est
+  nettoyé au mieux après un PUT accepté. Le GET sans version sert le pointeur, ou à défaut l'image désignée par la
+  fiche du commerce.
+- **Point 3 [P1] — DELETE logo pouvait effacer un PUT pourtant réussi (CORRIGÉ).** Le DELETE vidait le fichier après
+  l'UPDATE : un PUT arrivé entre-temps gagnait l'adresse puis voyait ses octets effacés. Correctif : l'adresse
+  remplacée est lue DANS la transaction ; le pointeur n'est vidé que s'il contient encore cette image, et le blob
+  correspondant n'est supprimé que si l'adresse courante ne le désigne plus.
+- **Point 5 [P2] — journal de parrainage potentiellement mensonger après reprise (CORRIGÉ).** Si le parrain atteignait
+  son plafond entre le calcul initial et la reprise, la trace était corrigée (0 point) mais le journal du passage
+  gardait « +50 points pour le parrain ». Correctif : `ecrire()` renvoie le texte FINAL ; les 3 appelants (visite,
+  caisse, rattrapage) l'utilisent pour le journal du passage et l'entrée « parrainage ».
+- **Points 1, 4, 6 (DOCUMENTÉS, non corrigés).** 1 — double conflit parrain dans la même requête : déjà résiduel
+  documenté, demande une reprise durable (hors périmètre). 4 — journal en panne après écriture métier (caisse
+  `dejaTraite` sans trace, visite historique rejouée = 2e tampon) : demande un journal rejouable / boîte d'envoi,
+  nouveau lot. 6 — PATCH réglages + avis partiels sous Supabase : même remède. Détail dans `server/README.md`
+  § Atomicité (« Ce qui reste NON atomique »).
+- **Tests** : avant **876/876**, après **879/879** (`npm test`, typecheck serveur inclus), `npx tsc -p .` OK. `+3` tests
+  (`tests/supabase.test.ts`) : deux PUT logo simultanés d'images différentes (barrière GET `meta` pour forcer les deux
+  instantanés) → [200, 409], adresse gagnante = octets gagnants (avec et sans `?v=`) ; PUT pendant un DELETE (effacement
+  retardé par un `fetch` enveloppé) → l'envoi gagnant survit, 200 + octets identiques ; plafond 1 parrainage, deux
+  filleuls simultanés → traces [0, 50], un journal de passage « +50 pour le parrain », l'autre « parrain au plafond
+  annuel, rien pour ». Contrôles négatifs : sans les blobs versionnés, les 2 tests logo échouent (10/10 et 3/3) ;
+  sans le texte final, le test plafond échoue (2 passages annoncent +50). Le test PUT/PUT avec la seule barrière PATCH
+  ne discriminait pas l'ancien code (l'ancien `ancien` du perdant était déjà l'image gagnante) — d'où la barrière GET
+  `meta`. Incident en cours de route : une édition a brièvement remplacé 3 lignes du test par du code serveur, réparée
+  aussitôt (test relu, suite verte) ; un revert de contrôle négatif oublié a été détecté par `grep` et restauré depuis
+  `/tmp/app.ts.fixed` avant la suite finale.
+- **Résiduels** (documentés dans `server/README.md` § Atomicité) : suppression d'un blob orphelin = vérification puis
+  écriture (un envoi des mêmes octets qui gagnerait exactement entre les deux laisserait une adresse sans blob,
+  réparable par un nouvel envoi) ; blobs remplacés conservés en `meta` (une ligne par ancien logo). Le pointeur seul
+  ne fait plus foi pour les lectures : le GET sans version se replie sur l'image désignée par la fiche.

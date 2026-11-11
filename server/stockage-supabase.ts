@@ -9,12 +9,22 @@
 //   (ErreurConflit), le serveur relit alors le client existant ;
 // • tirage : index unique (commerce_id, client_id, jour à Paris) → un 2e tirage le même jour est rejeté par la base ;
 // • remise d'un gain de la roue (P0-U3) : UPDATE conditionnel « … AND donnees->remis IS NULL » → une seule remise par code ;
-// • visite / récompense / avis : verrou optimiste. Dans une `transaction`, chaque client ou avis lu garde sa `version` ;
-//   l'écriture se fait « WHERE id = ? AND version = <lue> » (la base incrémente `version` à chaque UPDATE). Si une
-//   autre requête a écrit entre-temps → 0 ligne → ErreurConflit (409 « réessayez ») : aucun tampon n'est perdu ni compté
-//   deux fois en silence.
-// Ce qui n'est PAS garanti : une suite d'écritures interrompue au milieu (panne réseau) n'est pas annulée — ex. le PATCH
-// d'un commerce peut enregistrer les réglages puis échouer sur un des avis réévalués.
+// • visite / récompense / avis / réglages et logo du commerce (P0-S11) : verrou optimiste. Dans une `transaction`, chaque
+//   commerce, client ou avis lu garde sa `version` ; l'écriture se fait « WHERE id = ? AND version = <lue> » (la base
+//   incrémente `version` à chaque UPDATE, trigger `incrementer_version` de la 0001, recréé par la 0003). Si une autre
+//   requête a écrit entre-temps → 0 ligne → ErreurConflit (409 « réessayez ») : aucun tampon n'est perdu ni compté deux
+//   fois, aucun réglage n'en écrase un autre en silence. Hors `transaction` (ou ligne non relue dedans) : écriture
+//   inconditionnelle — d'où la relecture DANS la transaction côté routes ;
+// • caisse : `actionId` idempotent (un rejeu de la file hors ligne répond `dejaTraite`, rien n'est recompté) ;
+// • journal d'audit (0003) et traces du programme (0004) : jamais ignorés. Sans leur table, `ajouterJournal` /
+//   `ajouterParrainage` / `ajouterDemandeRattrapage` lèvent ErreurMigrationManquante, et `creerServeur` refuse de démarrer
+//   en Supabase sans ces deux migrations (P0-S11).
+// Ce qui n'est PAS garanti (compensation, pas transaction) : une suite d'écritures interrompue entre deux requêtes HTTP
+// (panne réseau, crash) n'est pas annulée — ex. le PATCH d'un commerce peut enregistrer les réglages puis échouer sur un
+// des avis réévalués. Les routes écrivent le fait métier PUIS le journal : une interruption peut perdre une entrée de
+// journal, jamais créer un journal mensonger ni compter deux fois. Une fonction RPC transactionnelle générique a été
+// écartée : elle réécrirait la logique métier en PL/pgSQL (double implémentation) sans gain sur les conflits observés.
+// Détails : server/README.md, « Atomicité (P0-S11) ».
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createClient, type PostgrestError } from '@supabase/supabase-js'
 import type { Avis, Client, Commerce, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
@@ -106,7 +116,7 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
   }
 
   /** UPDATE de `donnees`, conditionné à la version lue dans la transaction en cours (verrou optimiste). */
-  async function majVersionnee(table: 'clients' | 'avis', id: string, donnees: unknown) {
+  async function majVersionnee(table: 'commerces' | 'clients' | 'avis', id: string, donnees: unknown) {
     const lue = versions.getStore()?.get(`${table}:${id}`)
     let requete = sb.from(table).update({ donnees }).eq('id', id)
     if (lue != null) requete = requete.eq('version', lue)
@@ -126,15 +136,16 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     majMeta: async (cle, valeur) => void (await ok('meta', sb.from('meta').upsert({ cle, valeur }, { onConflict: 'cle' }))),
     supprimerMeta: async (cle) => void (await ok('meta', sb.from('meta').delete().eq('cle', cle))),
 
-    commerces: () => lire<Commerce>('commerces', sb.from('commerces').select('donnees').order('ordre')),
-    commerce: async (id) => (await lire<Commerce>('commerces', sb.from('commerces').select('donnees').eq('id', id)))[0],
+    commerces: () => lire<Commerce>('commerces', sb.from('commerces').select(AVEC_VERSION).order('ordre')),
+    commerce: async (id) => (await lire<Commerce>('commerces', sb.from('commerces').select(AVEC_VERSION).eq('id', id)))[0],
     pin: async (id) => {
       const [l] = await ok<{ pin_hash: string; pin_sel: string }[]>('commerces', sb.from('commerces').select('pin_hash,pin_sel').eq('id', id))
       return l && ({ hash: l.pin_hash, sel: l.pin_sel } satisfies Pin)
     },
     ajouterCommerce: async (c, pin) =>
       void (await ok('commerces', sb.from('commerces').insert({ id: c.id, donnees: c, pin_hash: pin.hash, pin_sel: pin.sel }))),
-    majCommerce: async (c) => void (await ok('commerces', sb.from('commerces').update({ donnees: c }).eq('id', c.id))),
+    // Verrou optimiste (P0-S11) dans une `transaction` qui a relu le commerce ; hors transaction : écriture inconditionnelle.
+    majCommerce: (c) => majVersionnee('commerces', c.id, c),
     majPin: async (id, pin) => void (await ok('commerces', sb.from('commerces').update({ pin_hash: pin.hash, pin_sel: pin.sel }).eq('id', id))),
 
     clients: (commerceId) => lire<Client>('clients', sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).order('ordre')),
@@ -190,15 +201,9 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     supprimerMembre: async (commerceId, id) => void (await ok('equipe', sb.from('equipe').delete().eq('commerce_id', commerceId).eq('id', id))),
     journal: (commerceId, limite) =>
       ouVide(lire<EntreeJournal>('journal', sb.from('journal').select('donnees').eq('commerce_id', commerceId).order('date', { ascending: false }).limit(limite)), []),
-    ajouterJournal: async (e) => {
-      try {
-        await ok('journal', sb.from('journal').insert({ id: e.id, commerce_id: e.commerceId, date: e.date, donnees: e }))
-      } catch (err) {
-        // Migration 0003 pas appliquée : l'action (visite, récompense…) reste enregistrée, seule la trace manque.
-        if (!(err instanceof ErreurMigrationManquante)) throw err
-        console.warn(`[stockage] journal non écrit (${e.action}) : ${err.message}`)
-      }
-    },
+    // Jamais avalé (P0-S11) : sans la 0003, ErreurMigrationManquante remonte. Le serveur refuse d'ailleurs de démarrer
+    // en Supabase sans elle (`creerServeur`), une trace d'audit ne peut donc plus manquer en silence.
+    ajouterJournal: async (e) => void (await ok('journal', sb.from('journal').insert({ id: e.id, commerce_id: e.commerceId, date: e.date, donnees: e }))),
     menu: async (commerceId) => (await ouVide(lire<Menu>('menus', sb.from('menus').select('donnees').eq('commerce_id', commerceId)), []))[0],
     schemaCartiz: async () => {
       try {
@@ -211,23 +216,11 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     },
     majMenu: async (m) => void (await ok('menus', sb.from('menus').upsert({ commerce_id: m.commerceId, donnees: m }, { onConflict: 'commerce_id' }))),
 
-    // ---- Programme (0004_programme.sql) : traces d'audit, ignorées tant que la migration manque ----
-    ajouterParrainage: async (p: Parrainage) => {
-      try {
-        await ok('parrainages', sb.from('parrainages').insert({ id: p.id, commerce_id: p.commerceId, parrain_id: p.parrainId, filleul_id: p.filleulId, date: p.date, donnees: p }))
-      } catch (err) {
-        if (!(err instanceof ErreurMigrationManquante)) throw err
-        console.warn(`[stockage] parrainage non tracé : ${err.message}`)
-      }
-    },
-    ajouterDemandeRattrapage: async (d: DemandeRattrapageTrace) => {
-      try {
-        await ok('demandes_rattrapage', sb.from('demandes_rattrapage').insert({ id: d.id, commerce_id: d.commerceId, client_id: d.clientId, date: d.date, donnees: d }))
-      } catch (err) {
-        if (!(err instanceof ErreurMigrationManquante)) throw err
-        console.warn(`[stockage] demande de rattrapage non tracée : ${err.message}`)
-      }
-    },
+    // ---- Programme (0004_programme.sql) : traces d'audit. Sans la migration : ErreurMigrationManquante (P0-S11) ----
+    ajouterParrainage: async (p: Parrainage) =>
+      void (await ok('parrainages', sb.from('parrainages').insert({ id: p.id, commerce_id: p.commerceId, parrain_id: p.parrainId, filleul_id: p.filleulId, date: p.date, donnees: p }))),
+    ajouterDemandeRattrapage: async (d: DemandeRattrapageTrace) =>
+      void (await ok('demandes_rattrapage', sb.from('demandes_rattrapage').insert({ id: d.id, commerce_id: d.commerceId, client_id: d.clientId, date: d.date, donnees: d }))),
     schemaProgramme: async () => {
       try {
         for (const t of TABLES_0004) await ok(t, sb.from(t).select('*').limit(0))
