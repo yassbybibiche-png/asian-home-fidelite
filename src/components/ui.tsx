@@ -1,12 +1,10 @@
-import { useId, useMemo, useState, type ReactNode } from 'react'
-import qrcode from 'qrcode-generator'
+import { useId, useState, type ReactNode } from 'react'
 import type { Commerce } from '../types'
 import { initiales } from '../lib/format'
 import { estLogoLocal, logoCommerce } from '../lib/visuels'
 import { estLogoTeleverse } from '../lib/logo'
 import { ETATS_WALLET, EXPLICATION_WALLET, LIBELLE_WALLET, MENTIONS_RGPD } from '../lib/integrations'
 import { useLangue } from './Langue'
-import { THEME } from '../theme.ts'
 
 export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Commerce, 'id' | 'nom' | 'logo'>; taille?: 'sm' | 'md' | 'lg' }) {
   const dims = { sm: 'h-9 w-9 text-sm', md: 'h-11 w-11 text-base', lg: 'h-16 w-16 text-xl' }[taille]
@@ -115,25 +113,6 @@ export function Icone({ nom, className = 'h-6 w-6' }: { nom: string; className?:
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={nom === 'plus' ? 3.5 : 1.9} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
       <path d={CHEMINS[nom]} />
-    </svg>
-  )
-}
-
-/** QR code dessiné en SVG, généré localement (aucun appel réseau). */
-export function QrCode({ texte, className = 'h-48 w-48', titre }: { texte: string; className?: string; titre?: string }) {
-  const { d, taille } = useMemo(() => {
-    const qr = qrcode(0, 'M')
-    qr.addData(texte)
-    qr.make()
-    const n = qr.getModuleCount()
-    let chemin = ''
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) chemin += `M${x + 4} ${y + 4}h1v1h-1z`
-    // Marge blanche de 4 modules autour (zone de silence exigée par la norme QR).
-    return { d: chemin, taille: n + 8 }
-  }, [texte])
-  return (
-    <svg viewBox={`0 0 ${taille} ${taille}`} className={`${className} bg-white`} role="img" aria-label={titre ?? 'QR code'} shapeRendering="crispEdges">
-      <path d={d} fill={THEME.texteFonce} />
     </svg>
   )
 }

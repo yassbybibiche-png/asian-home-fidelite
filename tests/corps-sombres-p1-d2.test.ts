@@ -41,7 +41,9 @@ describe('P1-D2 : périmètre — jouer / carte / menu sombres, roulette et cais
     const fidelite = lire('src/components/CarteFidelite.tsx')
     assert.match(fidelite, /<section\n\s*data-surface-claire/)
     // Le QR garde son fond blanc (zone de silence) : le svg porte bg-white, restauré dans l'îlot.
-    assert.match(lire('src/components/ui.tsx'), /className=\{`\$\{className\} bg-white`\}/)
+    // Boucle t1 : QrCode a déménagé de ui.tsx vers components/QrCode.tsx (le test lisait
+    // l'ancien emplacement — exigence inchangée, voir BOUCLE.md, revue Codex t1 point 3).
+    assert.match(lire('src/components/QrCode.tsx'), /className=\{`\$\{className\} bg-white`\}/)
   })
 })
 

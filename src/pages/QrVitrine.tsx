@@ -1,6 +1,7 @@
 import { useStore } from '../store'
 import { urlQrJeu } from '../router'
-import { LogoCommerce, QrCode } from '../components/ui'
+import { LogoCommerce } from '../components/ui'
+import { QrCode } from '../components/QrCode'
 import { NOM_APP } from '../data/defaults'
 
 /** QR grand format, affichable en caisse ou imprimable (étiquettes de table, adhésif vitrine). */

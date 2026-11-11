@@ -117,7 +117,31 @@ tour 1 est donc la sortie de `qrcode-generator` (~52 Ko de sources, dans
 dans le graphe initial, `CarteFidelite` (QR de la carte), qui peut le charger
 en différé sans toucher aux pages épinglées. Mesuré : `qrcode.mjs` minifié
 = 21 233 o (7 653 o gzip) — la réduction attendue du JS initial est donc
-d'environ 21 Ko.
+d'environ 21 Ko. Build après le tour : JS initial 452 343 o (−28 989 o,
+−6,0 % vs t0), `QrCode-*.js` différé 21 182 o, 24 chunks (le découpage sort
+aussi `jsx-runtime-*.js` du `ui-*.js`), JS total 802 475 o (+1 154 o —
+enrobage `lazy` + fichier partagé), plus gros chunk 354 246 o.
+
+### Test épinglé par le tour 1 — preuve et validation Codex requise
+
+Le tour 1 casse `tests/corps-sombres-p1-d2.test.ts:44`, qui lit
+`src/components/ui.tsx` pour vérifier que le QR garde son fond blanc (zone
+de silence) : `assert.match(lire('src/components/ui.tsx'),
+/className=\{`\$\{className\} bg-white`\}/)`. Preuve que le test est faux
+dans sa prémisse, pas dans son exigence :
+- l'exigence (« le svg du QR porte `bg-white` ») est intacte : la ligne est
+  reprise **verbatim** dans `src/components/QrCode.tsx` (même composant,
+  mêmes props, même rendu) ;
+- seule sa prémisse d'emplacement (« le QR vit dans `ui.tsx` ») est caduque,
+  puisque le déménagement est précisément le changement du tour ;
+- aucun comportement n'a changé : le QR s'affiche toujours, avec le même fond
+  blanc, dans l'îlot clair (vérifié par la capture `carte.png` de la mesure
+  t1 et par l'E2E `scan-gain-carte`).
+La correction proposée (une ligne : lire `src/components/QrCode.tsx` au lieu
+de `src/components/ui.tsx`) ne touche donc ni à l'exigence ni au seuil — elle
+met à jour l'emplacement lu. Séquence réelle : preuve documentée ici, puis
+revue Codex du tour (point 3 : « légitime ; aucune raison d'annuler le tour »),
+puis correction appliquée.
 
 ## Journal des tours
 
@@ -132,4 +156,22 @@ Roulette) importent le nouveau module directement. Les lignes JSX
 `carte-pwa-p1-c3` et `auth-client-p0-s7` les épinglent). Hypothèse : JS initial
 −~21 Ko minifiés, TBT −~50–150 ms, Lighthouse +1–3 points, sans régression
 (ouverture carte : le QR apparaît après le chargement du chunk, ~100 ms en
-Slow 4G, après le gain — pas dans le chemin scan → lot).
+Slow 4G, après le gain — pas dans le chemin scan → lot). Résultat mesuré
+(voir SCORES.md § « Re-mesure boucle t1 ») : JS initial −28 304 o (−5,9 %) ;
+Lighthouse 77/81 → 80/85, TBT 910/630 → 620/450 ms ; premier affichage,
+LCP et parcours plats (bruit de mesure, confirmé par une 3e passe) ;
+ouverture carte 600/622/691 ms (3 passes) sans régression. **Test épinglé** :
+le tour casse `corps-sombres-p1-d2.test.ts:44` (prémisse d'emplacement
+caduque, exigence intacte — preuve ci-dessus ; revue Codex point 3 : mise à
+jour légitime, correction d'une ligne appliquée après validation).
+**Revue Codex t1 (5 points)** : 1. `Suspense` ne traite pas un import rejeté
+→ frontière locale `ErreurQr` ajoutée (la carte reste visible, seule la case
+du QR affiche un repli) ; 2. repli annoncé comme un QR utilisable → remplacé
+par `role="status"` + « Chargement du QR code… » (traduit EN) ; 3. mise à jour
+du test épinglé légitime (appliquée) ; 4. QR hors ligne : suit désormais la
+règle des pages différées (disponible hors ligne après une première ouverture
+en ligne, pas avant — documenté, pas de préchargement ajouté pour ne pas
+fausser les mesures du tour) ; 5. incohérence de documentation (affirmations
+anticipées) → libellés corrigés, résultats actualisés après exécution réelle.
+**Décision : FUSIONNÉ** — bundle −5,9 %, TBT en baisse sur les 2 passes,
+Lighthouse en hausse sur les 2 passes, aucune régression au-delà du bruit.

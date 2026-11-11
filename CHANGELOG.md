@@ -19,6 +19,32 @@ bundle 601,7 → 450,2 Ko (JS initial), dashboard enrichi + entonnoir, SEO/OG.
 
 ## Boucle d'amélioration continue
 
+### t1 — QR code différé hors du bundle initial (11/11/2026, fusionné)
+
+`QrCode` déménage de `components/ui.tsx` vers `components/QrCode.tsx` ;
+`CarteFidelite` le charge en différé (`React.lazy` + `Suspense`, repli
+« Chargement du QR code… » annoncé `role="status"`, frontière locale
+`ErreurQr` si l'import est rejeté) ; les pages différées (Equipe, MenuCarte,
+FicheClient, QrVitrine, Roulette) importent le nouveau module. Jouer,
+CartePublique et Caisse restent statiques (décision P2-Q2 : caisse hors
+ligne). Justification : `qrcode-generator` (~21 Ko minifiés) ne servait que
+la carte ; le bundle initial repasse sous le seuil P2-Q2.
+Avant → après (3 passes Playwright + 2 Lighthouse, même protocole) : JS
+initial 481 332 → 453 028 o (−28 304 o, −5,9 %), total initial 552 098 →
+523 794 o, JS total 801 321 → 803 160 o (+1 839 o — enrobage `lazy` +
+frontière + libellés), 24 chunks ; Lighthouse 77/81 → 80/85, TBT 910/630 →
+620/450 ms ; premier affichage 2 261/2 197 → 2 355/2 232/2 235 ms, LCP
+2 248/2 148 → 2 340/2 220/2 224 ms, parcours 6 664/7 343 → 7 213/6 971/
+6 987 ms (plats, bruit de mesure) ; ouverture carte 592/699 → 600/622/
+691 ms (chunk chargé en parallèle de l'API, sans délai mesurable) ;
+0 erreur console, 0 requête échouée. Tests 1163 → 1166/1166 (+3
+`tests/boucle-t1-qrcode.test.ts`), E2E 3/3. Revue Codex 5 points : 3 fondés
+corrigés (frontière locale, repli annoncé, mise à jour du test épinglé —
+`corps-sombres-p1-d2.test.ts:44` lisait l'ancien emplacement, exigence
+inchangée, preuve dans `BOUCLE.md`), 1 fondé documenté (QR hors ligne :
+règle des pages différées), 1 fondé corrigé (libellés anticipés).
+Détail : `BOUCLE.md`, `SCORES.md` (§ « Re-mesure boucle t1 »).
+
 ### t0 — Baseline (11/11/2026, HEAD `7395522`)
 
 Pas un changement : re-mesure de référence avant le tour 1 (2 passes

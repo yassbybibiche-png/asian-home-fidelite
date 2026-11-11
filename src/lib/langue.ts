@@ -249,6 +249,8 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'Lien incomplet : ouvrez la caisse depuis le tableau de bord (Équipe → « Ouvrir la caisse »).': 'Incomplete link: open the till from the dashboard (Team → “Open the till”).',
   'Hors ligne et aucune donnée en mémoire sur cet appareil.': 'Offline, with no data stored on this device.',
   'À présenter en caisse pour valider votre visite': 'Show at the till to validate your visit',
+  'Chargement du QR code…': 'Loading the QR code…',
+  'QR code indisponible pour le moment. Rechargez la page pour réessayer.': 'QR code unavailable right now. Reload the page to try again.',
   'Dernière visite :': 'Last visit:',
   'aucune pour l’instant': 'none yet',
   'Messages': 'Messages',
