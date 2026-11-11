@@ -1,13 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { creerLecteurQr, ErreurScanQr, MESSAGE_DECODEUR_INDISPONIBLE, type ConstructeurDetecteur, type LecteurQr } from '../lib/scanQr'
 
 // Lecture d'un QR avec la caméra (getUserMedia). Décodage : `BarcodeDetector` du navigateur s'il existe (Chrome Android),
 // sinon `jsqr` chargé à la demande (morceau séparé, jamais téléchargé si le navigateur sait déjà lire les QR).
 // En cas de refus de la caméra ou d'échec, la saisie manuelle reste toujours possible (page Caisse).
-
-interface Detecteur {
-  detect(source: CanvasImageSource): Promise<{ rawValue: string }[]>
-}
-type ConstructeurDetecteur = new (o: { formats: string[] }) => Detecteur
 
 export function ScannerQr({ onLu, onFermer, onSaisieManuelle }: { onLu(texte: string): void; onFermer(): void; onSaisieManuelle?(): void }) {
   const video = useRef<HTMLVideoElement>(null)
@@ -36,40 +32,53 @@ export function ScannerQr({ onLu, onFermer, onSaisieManuelle }: { onLu(texte: st
       await video.current.play().catch(() => {})
       setPret(true)
 
-      const Natif = (globalThis as unknown as { BarcodeDetector?: ConstructeurDetecteur }).BarcodeDetector
-      let lire: () => Promise<string | null>
-      if (Natif) {
-        const d = new Natif({ formats: ['qr_code'] })
-        lire = async () => (await d.detect(video.current!))[0]?.rawValue ?? null
-      } else {
-        const jsQR = (await import('jsqr')).default
-        lire = async () => {
-          const v = video.current!
-          if (!v.videoWidth) return null
-          const l = Math.min(640, v.videoWidth)
-          const h = Math.round((v.videoHeight / v.videoWidth) * l)
-          canvas.width = l
-          canvas.height = h
-          const ctx = canvas.getContext('2d', { willReadFrequently: true })!
-          ctx.drawImage(v, 0, 0, l, h)
-          return jsQR(ctx.getImageData(0, 0, l, h).data, l, h)?.data ?? null
-        }
+      // Décodeur avec repli (src/lib/scanQr.ts) : natif → jsQR ; si rien n'est utilisable, ou si la lecture échoue sans
+      // cesse, on coupe la caméra et on affiche l'erreur avec la saisie manuelle (plus de caméra ouverte sans lecture).
+      const Natif = (globalThis as unknown as { BarcodeDetector?: ConstructeurDetecteur<HTMLVideoElement> }).BarcodeDetector
+      let lecteur: LecteurQr
+      try {
+        lecteur = await creerLecteurQr<HTMLVideoElement>({
+          Natif,
+          chargerJsQr: async () => (await import('jsqr')).default,
+          source: () => video.current!,
+          image: () => {
+            const v = video.current
+            if (!v?.videoWidth) return null
+            const l = Math.min(640, v.videoWidth)
+            const h = Math.round((v.videoHeight / v.videoWidth) * l)
+            canvas.width = l
+            canvas.height = h
+            const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+            ctx.drawImage(v, 0, 0, l, h)
+            return { donnees: ctx.getImageData(0, 0, l, h).data, largeur: l, hauteur: h }
+          },
+        })
+      } catch (e) {
+        return abandonner(e)
       }
       const boucle = async () => {
         if (fini) return
         try {
-          const t = await lire()
+          const t = await lecteur.lire()
           if (t && !fini) {
             fini = true
             onLu(t)
             return
           }
-        } catch {
-          // image illisible : on réessaie
+        } catch (e) {
+          return abandonner(e)
         }
         minuterie = window.setTimeout(boucle, 250)
       }
       void boucle()
+    }
+
+    function abandonner(e: unknown) {
+      if (fini) return
+      fini = true
+      window.clearTimeout(minuterie)
+      flux?.getTracks().forEach((t) => t.stop())
+      setErreur(e instanceof ErreurScanQr ? e.message : MESSAGE_DECODEUR_INDISPONIBLE)
     }
     void demarrer()
     return () => {
