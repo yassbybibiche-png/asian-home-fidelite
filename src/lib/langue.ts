@@ -1,4 +1,6 @@
-// Version anglaise des pages clientes (P2-Q1) : #/jouer, #/carte, #/menu. Le back-office reste en français.
+// Version anglaise des pages clientes (P2-Q1) : #/jouer, #/carte, #/menu, #/desinscription, #/confidentialite.
+// Le back-office et la caisse restent en français. #/desinscription et #/confidentialite n'ont pas de
+// commutateur : elles appliquent la langue mémorisée sur les autres pages clientes.
 // Logique pure (testée sans React) : le français est la clé, l'anglais la traduction ; une chaîne absente du
 // dictionnaire reste en français (jamais de texte vide). Les noms de plats et de lots ne sont pas traduits.
 
@@ -7,8 +9,9 @@ export type Langue = 'fr' | 'en'
 /** Choix mémorisé sur ce téléphone (localStorage). */
 export const CLE_LANGUE = 'fideliz:langue'
 
-/** Pages où le commutateur FR / EN est proposé (pages publiques du client final). */
-export const PAGES_TRADUITES = ['jouer', 'carte', 'menu'] as const
+/** Pages où la langue mémorisée s'applique (pages publiques du client final ; le commutateur FR / EN
+ *  n'est affiché que sur #/jouer, #/carte et #/menu). */
+export const PAGES_TRADUITES = ['jouer', 'carte', 'menu', 'desinscription', 'confidentialite'] as const
 
 export function estPageTraduite(page: string): boolean {
   return (PAGES_TRADUITES as readonly string[]).includes(page)
@@ -80,6 +83,9 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'Réessayer maintenant': 'Try again now',
   'Serveur injoignable': 'Server unreachable',
   'Serveur injoignable — vérifiez la connexion.': 'Server unreachable — check your connection.',
+  // Message affiché (via MessagePublic) quand l'app tourne sans serveur — P2-Q1 : manquait au
+  // dictionnaire (constante MESSAGE_MODE_SERVEUR, store.tsx), trouvé par l'analyseur t(…).
+  'Disponible avec le serveur (données partagées) : pas dans la démo locale.': 'Available with the server (shared data): not in the local demo.',
   '1 participation par visite validée au comptoir, 1 tirage par jour. Tirage effectué par le serveur.':
     '1 spin per visit validated at the counter, 1 draw per day. The draw is made by the server.',
   'Données stockées dans ce navigateur uniquement. 1 participation par visite validée, 1 tirage par jour.':
@@ -119,12 +125,29 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   '✉️ E-mail': '✉️ E-mail',
   'Téléphone ou e-mail': 'Phone or e-mail',
   'Déjà client ? Le même numéro ou e-mail retrouve votre carte de fidélité.': 'Already a customer? The same number or e-mail finds your loyalty card.',
+  // Bandeau parrainage sur le formulaire d'inscription (P2-Q1 : brut avant).
+  '👥 Vous êtes parrainé(e) ! Inscrivez-vous : vous gagnerez 50 points à votre 1re visite, et votre ami aussi.':
+    '👥 You were referred! Sign up: you will earn 50 points on your first visit, and so will your friend.',
   'J’accepte de recevoir les offres de {commerce} par SMS ou e-mail (désinscription à tout moment).':
     'I agree to receive offers from {commerce} by text or e-mail (unsubscribe at any time).',
+  // ---- Désinscription : clés enregistrées par src/pages/Desinscription.tsx (P2-Q1, bundle P2-Q2) ----
+  // ---- Navigation (‹ Retour est enregistré par src/pages/Confidentialite.tsx, P2-Q1) ----
   'Vos données servent uniquement à votre carte de fidélité, jamais revendues :': 'Your data is only used for your loyalty card, never sold:',
   'Un instant…': 'One moment…',
   'C’est parti': 'Let’s go',
   'Saisissez un numéro (10 chiffres) ou un e-mail valide.': 'Enter a valid phone number (10 digits) or e-mail.',
+  // Progression de la saisie (message dynamique « N chiffre(s) sur 10 » — seules les formes 0–9 sont
+  // atteignables : 10–13 chiffres forment déjà un numéro valide, « 0 chiffre » arrive en tapant « + »).
+  '0 chiffre sur 10': '0 digits out of 10',
+  '1 chiffre sur 10': '1 digit out of 10',
+  '2 chiffres sur 10': '2 digits out of 10',
+  '3 chiffres sur 10': '3 digits out of 10',
+  '4 chiffres sur 10': '4 digits out of 10',
+  '5 chiffres sur 10': '5 digits out of 10',
+  '6 chiffres sur 10': '6 digits out of 10',
+  '7 chiffres sur 10': '7 digits out of 10',
+  '8 chiffres sur 10': '8 digits out of 10',
+  '9 chiffres sur 10': '9 digits out of 10',
   '✓ E-mail valide': '✓ Valid e-mail',
   '✓ Numéro valide': '✓ Valid number',
   'E-mail incomplet (ex. marie@exemple.fr).': 'Incomplete e-mail (e.g. marie@exemple.fr).',
@@ -149,6 +172,10 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   '✓ Copié': '✓ Copied',
   'Copie impossible : sélectionnez le texte': 'Copy failed: select the text',
   '📲 Garder ma carte sur mon téléphone': '📲 Keep my card on my phone',
+  // Instructions « Garder ma carte » (P2-Q1 : brutes avant) — en-tête selon la plateforme (modèle
+  // {appareil}) ; les étapes sont choisies par la langue dans `etapesEcranAccueilLangue` (P2-Q1, bundle P2-Q2),
+  // hors dictionnaire : 8 clés de moins dans le bundle initial.
+  'Sur {appareil} : ajoutez votre carte à l’écran d’accueil': 'On {appareil}: add your card to your home screen',
   'Ouvrir ma carte': 'Open my card',
   'Politique de confidentialité': 'Privacy policy',
   'Démo': 'Demo',
@@ -170,6 +197,7 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'Laisser un avis 5★ sur Google': 'Leave a 5★ review on Google',
   'Google s’ouvre dans un nouvel onglet : sélectionnez-y vos étoiles et publiez votre avis.': 'Google opens in a new tab: choose your stars there and post your review.',
   'Sur Google, vous confirmez vous-même vos étoiles avant de publier.': 'On Google, you confirm your stars yourself before posting.',
+  '(Le commerce n’a pas encore renseigné son lien Google.)': '(The restaurant hasn’t added its Google link yet.)',
   'Avis publié ? Revenir à ma carte de fidélité': 'Review posted? Back to my loyalty card',
   'Le lot n’est pas conditionné à l’avis — gagnez d’abord, avis libre ensuite.': 'The prize never depends on a review — win first, review freely afterwards.',
   // ---- Carte (#/carte) ----
@@ -191,12 +219,50 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'Code à montrer :': 'Code to show:',
   'Valable aujourd’hui seulement': 'Valid today only',
   'Sans date limite': 'No expiry date',
+  // Forme datée de l'expiration (P2-Q1, revue Codex point 9) : l'appel texteExpiration(r.expireLe,
+  // maintenant) est conservé (épinglé par carte-pwa-p1-c3.test.ts:312), la date est reformulée en anglais.
+  'Valable jusqu’au {date}': 'Valid until {date}',
+  // Nouveaux tampons depuis la dernière ouverture + libellé d'accessibilité de la barre de défi.
+  '✨ +{n} tampon{s} depuis votre dernière ouverture de la carte': '✨ +{n} stamp{s} since you last opened your card',
+  'Progression du défi': 'Challenge progress',
   'Vos points': 'Your points',
+  // Programme (niveaux, paliers, défi, réserve, offre hebdo, parrainage) : cadres traduits, libellés
+  // du commerce (noms de niveaux, récompenses, offres) jamais traduits — comme les noms de plats.
+  '👑 VIP — nos clients les plus fidèles': '👑 VIP — our most loyal customers',
+  'Plus que {n} visite{s} avant :': 'Only {n} visit{s} to go:',
+  '🎯 Défi : {a}/{b} visites en {jours} jours': '🎯 Challenge: {a}/{b} visits in {jours} days',
+  'Plus que {n} visite{s} → {recompense}': 'Only {n} visit{s} to go → {recompense}',
+  '{recompense} gagné !': '{recompense} won!',
+  '🍜 Plat en réserve': '🍜 Dish on hold',
+  'Un plat offert à utiliser avant le {date}.': 'A free dish to use before {date}.',
+  'Aujourd’hui, membres :': 'Today, members:',
+  'Tous les {jour}s, membres :': 'Every {jour}, members:',
+  '👥 Parrainez un ami, vous gagnez chacun {n} points': '👥 Refer a friend, you each earn {n} points',
+  'Votre code :': 'Your code:',
+  'Votre ami le saisit à son inscription, vous gagnez vos points à sa 1re visite.': 'Your friend enters it when signing up, and you earn your points on their 1st visit.',
+  '✓ Lien copié !': '✓ Link copied!',
+  'Copier mon lien de parrainage': 'Copy my referral link',
+  // Caisse (back-office, en français par conception) : les libellés passent par t() via MessagePublic,
+  // mais estPageTraduite('caisse') est faux — ils s'affichent donc en français tant que la caisse
+  // n'est pas bilingue. Les clés restent présentes pour ce jour-là.
+  'Caisse': 'Checkout',
+  'Lien incomplet : ouvrez la caisse depuis le tableau de bord (Équipe → « Ouvrir la caisse »).': 'Incomplete link: open the till from the dashboard (Team → “Open the till”).',
+  'Hors ligne et aucune donnée en mémoire sur cet appareil.': 'Offline, with no data stored on this device.',
   'À présenter en caisse pour valider votre visite': 'Show at the till to validate your visit',
   'Dernière visite :': 'Last visit:',
   'aucune pour l’instant': 'none yet',
   'Messages': 'Messages',
   'Historique des visites et des lots': 'Visit and prize history',
+  // Libellés d'historique affichés (P2-Q1, revue Codex point 5) : les préfixes fixes sont traduits, les
+  // noms (récompense, lot) ne le sont pas ; historiqueCarte() reste en français (épinglé par
+  // carte-pwa-p1-c3.test.ts:346), l'adaptation se fait à l'affichage dans CartePublique.
+  'Visite validée (+1 tampon)': 'Visit validated (+1 stamp)',
+  'Récompense remise : {libelle}': 'Reward given: {libelle}',
+  'Défi réussi : {recompense}': 'Challenge completed: {recompense}',
+  'Roue : {lot} ({statut})': 'Wheel: {lot} ({statut})',
+  'retiré': 'collected',
+  'non retiré, expiré': 'not collected, expired',
+  'à retirer aujourd’hui': 'to collect today',
   'Aucune visite pour l’instant : votre premier tampon arrive au comptoir.': 'No visits yet: your first stamp is waiting at the counter.',
   'Votre lien personnel': 'Your personal link',
   'Votre lien personnel :': 'Your personal link:',
@@ -204,6 +270,7 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   '🎡 Tourner la roue du jour': '🎡 Spin today’s wheel',
   '📖 Voir le menu': '📖 See the menu',
   'Le restaurant': 'The restaurant',
+  // 'Commerce introuvable' est enregistré par src/pages/Confidentialite.tsx (P2-Q1, bundle P2-Q2).
   'Carte introuvable': 'Card not found',
   'Ce lien ne correspond à aucune carte de fidélité.': 'This link does not match any loyalty card.',
   'Carte indisponible': 'Card unavailable',
@@ -212,22 +279,42 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'Carte à jour.': 'Card up to date.',
   'Hors ligne : carte affichée telle qu’au dernier chargement.': 'Offline: card shown as last loaded.',
   'Votre profil': 'Your profile',
+  'Pour recevoir votre récompense d’anniversaire et des offres sur vos plats préférés.': 'To receive your birthday reward and offers on your favourite dishes.',
+  // Libellés du profil (P2-Q1 : bruts avant) — le suffixe « enregistré » est un modèle {valeur}.
+  'Anniversaire (JJ/MM)': 'Birthday (DD/MM)',
+  'Plat préféré': 'Favourite dish',
+  ' — enregistré : {valeur}': ' — saved: {valeur}',
   'Enregistrer mon profil': 'Save my profile',
   'J’ai oublié de scanner': 'I forgot to scan',
+  'Signalez une visite oubliée (sous {jours} jours) : le restaurant la validera et votre tampon + vos points seront crédités.': 'Report a forgotten visit (within {jours} days): the restaurant will validate it and your stamp and points will be credited.',
   'Date de la visite': 'Date of the visit',
   'Montant payé (€)': 'Amount paid (€)',
   'N° de ticket (optionnel)': 'Receipt number (optional)',
   'Envoyer ma demande': 'Send my request',
+  // Confirmations et erreurs des formulaires du programme (P2-Q1, revue Codex point 4) : affichées via
+  // t(message) / t(erreur) — les messages d'erreur du serveur restent en français (API en français).
+  'Merci, votre profil est à jour !': 'Thank you, your profile is up to date!',
+  'Demande envoyée : le restaurant la validera et votre visite sera créditée.': 'Request sent: the restaurant will validate it and your visit will be credited.',
+  'Indiquez la date de la visite et le montant payé.': 'Enter the visit date and the amount paid.',
+  'Envoi impossible pour le moment.': 'Cannot send right now.',
+  '{n} demande{s} en attente de validation par le restaurant.': '{n} request{s} awaiting validation by the restaurant.',
   'Mes données personnelles': 'My personal data',
+  'Recevez une copie de vos données ou demandez leur suppression.': 'Get a copy of your data or ask for it to be deleted.',
+  'Demande de suppression enregistrée le {date} : le restaurant va supprimer votre carte.': 'Deletion request recorded on {date}: the restaurant will delete your card.',
   'Recevoir mes données': 'Get my data',
   'Demander la suppression': 'Request deletion',
   'Votre téléphone ou e-mail (celui de l’inscription)': 'Your phone or e-mail (the one used to sign up)',
   'Retrouver ma carte': 'Find my card',
   'Téléphone ou e-mail donné à l’inscription': 'Phone or e-mail given when signing up',
+  // ---- Confidentialité (#/confidentialite) ----
+  // Chrome de la page (titre, chargement, retour) traduit ; le corps de la politique est un texte légal,
+  // il reste en français par conception. Les clés du chrome sont enregistrées par
+  // src/pages/Confidentialite.tsx (P2-Q1, bundle P2-Q2).
   // ---- Menu (#/menu) ----
   'Menu': 'Menu',
   'Menu introuvable': 'Menu not found',
-  'Ce lien ne correspond à aucun commerce.': 'This link does not match any business.',
+  // 'Ce lien ne correspond à aucun commerce.' est enregistré par src/pages/Confidentialite.tsx et
+  // src/pages/MenuPublic.tsx (P2-Q1, bundle P2-Q2).
   'Menu indisponible': 'Menu unavailable',
   'Le menu de ce commerce n’est plus disponible.': 'This business’s menu is no longer available.',
   'Un instant, le menu arrive.': 'One moment, the menu is on its way.',
@@ -256,9 +343,32 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   '★ Plat signature — l’un des best-sellers du restaurant.': '★ Signature dish — one of the restaurant’s best-sellers.',
   'Allergènes : demandez conseil à l’équipe en cas de doute.': 'Allergens: ask the team for advice if in doubt.',
   'Photo du plat : {nom}': 'Photo of the dish: {nom}',
+  // Badges déduits (🌶 / 🌱) : libellés fixes traduits, comme les cadres — les noms de plats, eux, ne le sont pas.
+  // Les 4 libellés sont enregistrés par src/pages/MenuPublic.tsx (P2-Q1, bundle P2-Q2).
+  'à confirmer': 'to confirm',
+  'Déduit de la description — {mention}': 'Inferred from the description — {mention}',
+  // Détail des badges sous le plat (P2-Q1, revue Codex point 3) : la branche FR garde littéralement
+  // `{MENTION_BADGE_DEDUIT} auprès de l’équipe` (épinglé par menu-client-p1-c5.test.ts:246) ; en EN,
+  // la phrase entière passe par ce modèle (libellés et mention déjà traduits par t()).
+  '{labels} — {mention} — ask the team.': '{labels} — {mention} — ask the team.',
+  '* 🌶 / 🌱 : déduit du nom ou de la description du plat, {mention} auprès de l’équipe.': '* 🌶 / 🌱: inferred from the dish name or description, {mention} — ask the team.',
 }
 
-/** Traduit un texte français (ou un modèle `{x}`) ; sans traduction connue, le français reste affiché. */
+/** Noms des jours de semaine en anglais, même ordre que JOURS_SEMAINE (0 = dimanche, src/lib/programme.ts). */
+export const JOURS_SEMAINE_EN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const
+
+/** Locale de formatage des dates affichées (historique, suppression, grâce, réserve) : anglaise en mode EN. */
+export function localeDate(langue: Langue): 'fr-FR' | 'en-GB' {
+  return langue === 'en' ? 'en-GB' : 'fr-FR'
+}
+
+/** Enregistre les traductions d'une page différée (P2-Q1, bundle P2-Q2) : les clés des pages #/menu
+ *  (badges seulement), #/desinscription et #/confidentialite ne sont pas dans le dictionnaire initial
+ *  — elles s'y ajoutent au chargement de la page, avant son premier rendu. Sans cela, le bundle
+ *  initial dépasserait le seuil du test performance-bundle-p2-q2 (80 % du bundle d'avant découpe). */
+export function enregistrerTraductions(supplement: Record<string, string>): void {
+  Object.assign(TRADUCTIONS_EN, supplement)
+}
 export function traduire(fr: string, langue: Langue, valeurs: Record<string, string | number> = {}): string {
   const modele = langue === 'en' ? (TRADUCTIONS_EN[fr] ?? fr) : fr
   return modele.replace(/\{(\w+)\}/g, (tout, cle: string) => (cle in valeurs ? String(valeurs[cle]) : tout))

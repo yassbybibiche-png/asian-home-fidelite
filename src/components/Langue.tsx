@@ -2,8 +2,10 @@ import { useSyncExternalStore } from 'react'
 import { lireRoute } from '../router'
 import { estPageTraduite, LIBELLES_LANGUE, lireLangue, memoriserLangue, traduire, type Langue } from '../lib/langue'
 
-// Langue des pages clientes (P2-Q1) : choix mémorisé sur le téléphone, appliqué seulement sur #/jouer, #/carte et
-// #/menu ; ailleurs (back-office, caisse, aperçus commerçant) tout reste en français.
+// Langue des pages clientes (P2-Q1) : choix mémorisé sur le téléphone, appliqué sur #/jouer, #/carte,
+// #/menu, #/desinscription et #/confidentialite ; ailleurs (back-office, caisse, aperçus commerçant)
+// tout reste en français. #/desinscription et #/confidentialite n'ont pas de commutateur : elles
+// appliquent la langue mémorisée sur les autres pages clientes.
 const abonnes = new Set<() => void>()
 
 function stockage(): Storage | null {

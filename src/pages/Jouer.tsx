@@ -25,7 +25,7 @@ import {
   detecterPlateforme,
   dureeConfettis,
   estInstallee,
-  etapesEcranAccueil,
+  etapesEcranAccueilLangue,
   genererConfettis,
   MOTIF_VIBRATION_GAIN,
   MOTIF_VIBRATION_PERDU,
@@ -751,7 +751,7 @@ function Identification({
       <p className="titre-carte">{t('Pour jouer, votre téléphone ou votre e-mail suffit')}</p>
       {parrain && (
         <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">
-          👥 Vous êtes parrainé(e) ! Inscrivez-vous : vous gagnerez 50 points à votre 1re visite, et votre ami aussi.
+          {t('👥 Vous êtes parrainé(e) ! Inscrivez-vous : vous gagnerez 50 points à votre 1re visite, et votre ami aussi.')}
         </p>
       )}
       <div>
@@ -928,8 +928,10 @@ function Confettis() {
 export function GarderCarte({ lienCarte }: { lienCarte: string }) {
   const [ouvert, setOuvert] = useState(false)
   const plateforme = useMemo(() => detecterPlateforme(navigator.userAgent, navigator.maxTouchPoints ?? 0), [])
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
   if (estInstallee()) return null
+  // Nom de l'appareil dans la langue courante (modèle {appareil} ; « iPhone » / « Android » sont identiques en EN).
+  const appareil = plateforme === 'ios' ? 'iPhone' : plateforme === 'android' ? 'Android' : langue === 'en' ? 'your phone' : 'votre téléphone'
   return (
     <div className="mt-3 text-left" data-garder-carte={plateforme}>
       <button type="button" className="bouton w-full" aria-expanded={ouvert} aria-controls="garder-carte" onClick={() => setOuvert((o) => !o)}>
@@ -937,11 +939,9 @@ export function GarderCarte({ lienCarte }: { lienCarte: string }) {
       </button>
       {ouvert && (
         <div id="garder-carte" className="apparition mt-3 space-y-2 rounded-xl bg-fond p-3 text-sm text-gray-800">
-          <p className="font-semibold text-gray-900">
-            {plateforme === 'ios' ? 'Sur iPhone' : plateforme === 'android' ? 'Sur Android' : 'Sur votre téléphone'} : ajoutez votre carte à l’écran d’accueil
-          </p>
+          <p className="font-semibold text-gray-900">{t('Sur {appareil} : ajoutez votre carte à l’écran d’accueil', { appareil })}</p>
           <ol className="list-decimal space-y-1 pl-5">
-            {etapesEcranAccueil(plateforme).map((e) => (
+            {etapesEcranAccueilLangue(plateforme, langue).map((e) => (
               <li key={e}>{e}</li>
             ))}
           </ol>

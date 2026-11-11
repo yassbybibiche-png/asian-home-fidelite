@@ -166,7 +166,7 @@ export function InvitationAvis({
           {t(libelleBoutonAvis(note))} ↗
         </a>
       ) : (
-        <p className="text-sm text-gray-600">(Le commerce n’a pas encore renseigné son lien Google.)</p>
+        <p className="text-sm text-gray-600">{t('(Le commerce n’a pas encore renseigné son lien Google.)')}</p>
       )}
       <p className="text-sm text-gray-600">{t(ouvert ? TEXTE_CONFIRMATION_GOOGLE : 'Sur Google, vous confirmez vous-même vos étoiles avant de publier.')}</p>
       {ouvert && lienCarte && (
