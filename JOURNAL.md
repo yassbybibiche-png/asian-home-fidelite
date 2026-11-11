@@ -958,5 +958,43 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   appeler la route du QR d'accès mais seul l'écran fiche client (gérant) a le bouton ; l'inscription révèle toujours
   qu'un contact a une carte dans CE commerce (409), sans code à usage unique (prestataire SMS / e-mail non branché) ;
   un jeton volé sur le téléphone reste valable jusqu'à révocation / expiration ; deux échanges simultanés du même lien
-  d'accès peuvent tous deux réussir (fenêtre de quelques ms) ; rendu de la vue limitée vérifié dans Chromium
-  seulement (pas sur un vrai téléphone).
+  d'accès peuvent tous deux réussir (fenêtre de quelques ms) — **corrigé ci-dessous (revue Codex, point 2)** ; rendu
+  de la vue limitée vérifié dans Chromium seulement (pas sur un vrai téléphone).
+- **Revue Codex (5 points, tous fondés, tous corrigés)** :
+  1. *[P1] Révocation contournée pendant la grâce* — `POST /cartes/:id/jeton` sans preuve délivrait un jeton à la
+     nouvelle version d'une ancienne carte révoquée. Correction (`server/app.ts`) : la branche « grâce » refuse (401
+     uniforme) dès que la version d'accès de la carte est > 0 ; une carte révoquée ne se rouvre que par un lien d'accès
+     (comptoir, « Retrouver ma carte »). `server/README.md` mis à jour.
+  2. *[P1] Lien à usage unique échangeable deux fois en concurrence* — `estRevoquee` et `revoquer` séparés par des
+     `await`. Correction : `reserverPendant` (exportée, `server/app.ts`) — `Set` des `jti` en cours d'échange, testé
+     et marqué de façon synchrone avant le 1er `await`, libéré en `finally` ; 2e échange concurrent → 401. La révocation
+     en base reste la garde durable. Limite documentée (`server/README.md`) : une seule instance (Render) ; à plusieurs
+     instances, il faudrait une consommation atomique en base. NB : avec SQLite, la course ne se produit pas (tout se
+     résout en microtâches) — elle demande la latence réseau de Supabase ; elle est donc reproduite par un test
+     unitaire à stockage lent (échoue sans réservation : les deux échanges passent), plus un test HTTP 4 × concurrent.
+  3. *[P1] Carte récupérée : impossible de rejouer* — la page de jeu ne connaissait pas la carte récupérée → ressaisie
+     du contact → 409. Correction : `memoriserJoueurCarte` (`src/data/jeuApi.ts`), appelée par `CartePublique` quand
+     la carte s'affiche EN ENTIER avec le jeton de ce téléphone : elle devient le joueur mémorisé de son commerce
+     (contact vide — le serveur ne le lit plus quand le jeton est là ; la dernière carte ouverte ainsi l'emporte,
+     « Ce n'est pas moi » reste possible). Le tirage passe par l'API enveloppée existante (`avecJetonClient`) : lignes
+     figées de `Jouer.tsx` (`lancerTirage(api, commerce, joueur.contact, joueur.prenom)`) inchangées.
+  4. *[P2] Jeton expiré : roue puis 401 sans issue* — `lancerTirage` signale `accesRefuse` sur 401 (champ ajouté
+     seulement dans ce cas : le `deepEqual` de `front-v2` reste vrai) ; `Jouer` oublie le jeton et affiche
+     `AccesCartePerdu` (message clair + lien « Retrouver ma carte » vers `#/carte/<id>`, dont la vue limitée porte le
+     formulaire). Chaînes traduites (EN). Serveur inchangé (401 reste 401).
+  5. *[P2] QR d'accès non régénérable* — `FicheClient.tsx` : bouton « Générer un nouveau lien d'accès » sous le QR
+     affiché. Choix documenté dans le code : l'ancien lien n'est pas révoqué (le serveur ne sait révoquer que la carte
+     entière), il reste à usage unique et expire à 15 min.
+- **Tests revue Codex** : avant **863/863** (+ E2E 2/2). Après : **870/870** (`npm test`, typecheck serveur inclus) —
+  `+7` dans `tests/auth-client-p0-s7.test.ts` (« P0-S7 — revue Codex ») : grâce perdue après révocation client puis
+  commerce (vérifié en échec sans la correction : 201 au lieu de 401) ; réservation synchrone à stockage lent ; 4
+  échanges HTTP simultanés → 1 seul 201 ; parcours QR comptoir → mémorisation → tirage 201 sans réinscription ;
+  règles de `memoriserJoueurCarte` ; jeton expiré → 401 + `accesRefuse` ; lecture du code (Jouer / FicheClient).
+  E2E **3/3** : nouveau test dans `tests-e2e/acces-carte-p0-s7.spec.ts` (QR du comptoir sur un nouveau téléphone →
+  « Tourner la roue du jour » → « Continuer avec ma carte » → gain ; puis accès retiré par le commerce → message
+  « Votre carte n'est plus ouverte sur ce téléphone » + « Retrouver ma carte ») — vérifié en échec sans la correction
+  du point 3 (timeout sur « Continuer »). Aucun test existant modifié. `npx tsc -p .` OK, `npm run build` OK.
+  Un `npm test` intermédiaire a eu 1 échec sur `avis-google-p1-b4` (« règle auto 4★ », 7,4 s, sans lien avec ce lot) :
+  28/28 seul, puis 870/870 sur deux exécutions complètes → instabilité de charge, pas une régression.
+- **Non vérifié (revue Codex)** : la course du point 2 contre un vrai Supabase (simulée par stockage lent) ; le cas
+  multi-instance ; le bouton de la fiche client n'est vérifié que par lecture de code (pas d'E2E du back-office).

@@ -341,7 +341,13 @@ et à tirer la roue à la place du client. Désormais :
 - **Autres preuves** : **lien d'accès** à usage unique (`typ: 'lien'`, échangé par `POST /cartes/:id/jeton { lien }`) —
   au comptoir (fiche client → « Afficher le QR d'accès à sa carte », équipe ou gérant, **15 min**, journalisé) ou dans le
   message « Retrouver ma carte » (**24 h**, seulement si un prestataire SMS / e-mail est branché ; jamais renvoyé à
-  l'écran du demandeur). Usage unique : son `jti` est rangé dans `sessions_revoquees` (0005).
+  l'écran du demandeur). Usage unique : son `jti` est rangé dans `sessions_revoquees` (0005) ; en plus, pendant
+  l'échange, le `jti` est **réservé en mémoire** (`reserverPendant`, test et réservation synchrones) : deux échanges
+  simultanés du même lien → un seul jeton, l'autre 401. **Limite** : cette réservation ne vaut que pour UNE instance
+  (Render aujourd'hui) ; avec plusieurs instances, la fenêtre entre « déjà révoqué ? » et « révoquer » (allers-retours
+  Supabase) reviendrait — il faudrait alors une consommation atomique en base (insertion conditionnelle du `jti`).
+  Comptoir : « Générer un nouveau lien d'accès » remplace le QR affiché ; l'ancien lien n'est pas révoqué (il faudrait
+  révoquer toute la carte) mais reste à usage unique et tombe à son expiration (15 min).
 - **Ce que le jeton protège** (mode strict ; 401 uniforme sinon, que la carte existe ou non) : `GET /cartes/:id` en vue
   **complète** (sans jeton : vue **limitée** = tampons + jeu du jour, sans prénom, messages, historique, demandes ni
   contact ; `codeDuJour` reste servi comme avant, retrait prévu en P0-S19, qui pourra s'appuyer sur `acces.jeton`),
@@ -364,7 +370,10 @@ et à tirer la roue à la place du client. Désormais :
   demande seule : migration transparente au 1er accès) ; un bandeau prévient que l'ancien lien seul cessera d'ouvrir la
   carte. Après : l'ancien identifiant seul → 404 (comme une carte inconnue), plus de jeton ; un jeton obtenu avant
   reste valable jusqu'à son expiration (et se renouvelle) ; sinon lien d'accès du comptoir ou « Retrouver ma carte ».
-  Les nouveaux identifiants n'ont jamais eu cette faculté.
+  Les nouveaux identifiants n'ont jamais eu cette faculté. **Une ancienne carte révoquée au moins une fois** (version
+  d'accès > 0, par le client ou le commerce) **perd la grâce tout de suite** : son ancien lien seul → 401 ; elle ne se
+  rouvre que par un lien d'accès (comptoir, « Retrouver ma carte ») — sinon la révocation se contournerait en
+  rechargeant la page.
 - **Liens courts** `/c/<id>` (SMS de relance) : redirection inchangée vers `#/carte/<id>` (vue limitée sans jeton) ;
   `/c/<id>?a=<lien d'accès>` (SMS « Retrouver ma carte ») → `#/carte/<id>?acces=<lien>`, échangé puis retiré de l'adresse.
 - **Modes** (`AUTH_CLIENT`) : `stricte` en production ; `transition` = tout ce qui précède est émis et un jeton présent

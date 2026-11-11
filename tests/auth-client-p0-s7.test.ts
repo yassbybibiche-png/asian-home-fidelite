@@ -9,13 +9,13 @@ import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { PGlite } from '@electric-sql/pglite'
 
-import { creerServeur, emettreJeton, emettreJetonClient, lireJeton, lireJetonClient, DUREE_JETON_CLIENT_S, type OptionsServeur } from '../server/app.ts'
+import { creerServeur, emettreJeton, emettreJetonClient, lireJeton, lireJetonClient, reserverPendant, DUREE_JETON_CLIENT_S, type OptionsServeur } from '../server/app.ts'
 import { ErreurMigrationManquante, ouvrirStockage } from '../server/stockage.ts'
 import { ouvrirStockageSupabase } from '../server/stockage-supabase.ts'
 import type { Client } from '../src/types.ts'
 import { estIdClientActuel, nouvelIdClient, nouveauClient } from '../src/lib/fidelite.ts'
 import { hashSansLienAcces, idCarteDuParam, lienAccesDuHash, memoireJetons, RENOUVELER_AVANT_MS } from '../src/lib/jetonCarte.ts'
-import { assurerJetonClient, avecJetonClient } from '../src/data/jeuApi.ts'
+import { assurerJetonClient, avecJetonClient, lancerTirage, memoireJoueur, memoriserJoueurCarte } from '../src/data/jeuApi.ts'
 import { creerClientApi, ErreurApi, estVueLimitee, type ClientApi } from '../src/data/api.ts'
 
 const ADMIN = '98765432'
@@ -725,5 +725,159 @@ describe('P0-S7 : front — jetons rangés sur le téléphone, API qui les porte
     } finally {
       await s.app.fermer()
     }
+  })
+})
+
+describe('P0-S7 — revue Codex', () => {
+  function stockage() {
+    const m = new Map<string, string>()
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), m }
+  }
+  const lienDe = (r: Reponse) => /acces=([\w.-]+)/.exec(r.contenu.lien)![1]
+
+  test('point 1 : une ancienne carte révoquée ne se rouvre plus par son ancien lien seul, même pendant la grâce', async () => {
+    const s = await demarrer('codex-grace.db', { graceAnciensIdJusquAu: '2026-12-01T00:00:00+01:00' }, { ipParAppel: true })
+    try {
+      const id = 'cl-mh8v2k3p-7r7r'
+      ajouterAncienneCarte(s.fichierDb, id, '0678787878')
+      const jeton = (await s.api('POST', `/cartes/${id}/jeton`, {})).contenu.jeton as string
+      assert.ok(jeton, 'avant révocation : jeton de grâce')
+      // Révocation par le client (tous ses appareils), puis par le commerce : l'ancien lien seul ne redonne rien.
+      assert.equal((await s.api('POST', `/cartes/${id}/revocation`, undefined, s.bearer(jeton))).statut, 200)
+      assert.equal((await s.api('POST', `/cartes/${id}/jeton`, {})).statut, 401, 'révoquée par le client')
+      assert.equal((await s.api('POST', `/commerces/${AH}/clients/${id}/revocation-acces`, undefined, PIN)).statut, 200)
+      const refus = await s.api('POST', `/cartes/${id}/jeton`, {})
+      const inconnue = await s.api('POST', '/cartes/cl-mh8v2k3p-zzzz/jeton', {})
+      assert.deepEqual([refus.statut, refus.texte], [inconnue.statut, inconnue.texte], '401 uniforme')
+      // Le lien d'accès du comptoir la rouvre ; l'ancien lien seul, toujours pas.
+      assert.equal((await s.api('POST', `/cartes/${id}/jeton`, { lien: lienDe(await s.api('POST', `/commerces/${AH}/clients/${id}/lien-acces`, undefined, PIN)) })).statut, 201)
+      assert.equal((await s.api('POST', `/cartes/${id}/jeton`, {})).statut, 401)
+      // Une ancienne carte jamais révoquée garde la grâce.
+      ajouterAncienneCarte(s.fichierDb, 'cl-mh8v2k3p-8s8s', '0679797979')
+      assert.equal((await s.api('POST', '/cartes/cl-mh8v2k3p-8s8s/jeton', {})).statut, 201)
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('point 2 : réservation synchrone — avec un stockage lent (réseau, Supabase), un seul de deux échanges simultanés passe', async () => {
+    // Le scénario de la revue : « déjà révoqué ? » puis « révoquer », séparés par des allers-retours réseau.
+    const revoques = new Set<string>()
+    const lent = () => new Promise((ok) => setTimeout(ok, 20))
+    const echanger = async () => {
+      if ((await lent(), revoques.has('jti-1'))) throw new Error('401')
+      await lent()
+      revoques.add('jti-1')
+      return 'jeton'
+    }
+    const refus = () => Promise.reject(new Error('401'))
+    // Sans réservation : les deux passent (le bug).
+    assert.deepEqual((await Promise.allSettled([echanger(), echanger()])).map((r) => r.status), ['fulfilled', 'fulfilled'])
+    revoques.clear()
+    // Avec : un seul ; la clé est libérée ensuite (succès ou échec), la révocation fait le reste.
+    const enCours = new Set<string>()
+    const r = await Promise.allSettled([reserverPendant(enCours, 'jti-1', refus, echanger), reserverPendant(enCours, 'jti-1', refus, echanger)])
+    assert.deepEqual(r.map((x) => x.status), ['fulfilled', 'rejected'])
+    assert.equal(enCours.size, 0)
+    await assert.rejects(reserverPendant(enCours, 'jti-1', refus, echanger), /401/)
+    assert.equal(enCours.size, 0, 'libérée aussi après un échec')
+  })
+
+  test('point 2 : deux échanges simultanés du même lien → un seul jeton, l’autre 401', async () => {
+    const s = await demarrer('codex-concurrence.db', {}, { ipParAppel: true })
+    try {
+      for (let essai = 0; essai < 5; essai++) {
+        const { client } = await s.inscrire(`06123400${String(essai).padStart(2, '0')}`)
+        const lien = lienDe(await s.api('POST', `/commerces/${AH}/clients/${client.id}/lien-acces`, undefined, PIN))
+        const r = await Promise.all(Array.from({ length: 4 }, () => s.api('POST', `/cartes/${client.id}/jeton`, { lien })))
+        assert.deepEqual(r.map((x) => x.statut).sort(), [201, 401, 401, 401], `essai ${essai}`)
+        assert.equal((await s.api('POST', `/cartes/${client.id}/jeton`, { lien })).statut, 401, 'toujours refusé ensuite')
+      }
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('point 3 : carte récupérée par le QR du comptoir sur un nouveau téléphone → la page de jeu la reprend, tirage 201 sans réinscription', async () => {
+    const s = await demarrer('codex-rejouer.db')
+    try {
+      const serveur = creerClientApi(`${s.racine}/api/v1`)
+      const { client } = await serveur.inscrirePublic(AH, '', '0614141414')
+      await serveur.prenomCarte(AH, client.id, '', 'Lina', (await s.api('POST', `/cartes/${client.id}/jeton`, { lien: lienDe(await s.api('POST', `/commerces/${AH}/clients/${client.id}/lien-acces`, undefined, PIN)) })).contenu.jeton)
+      const nombre = (await s.etat()).clients.length
+
+      // Nouveau téléphone : stockage vide ; le QR du comptoir ouvre la carte (échange du lien, carte complète).
+      const local = stockage()
+      const jetons = memoireJetons(local, () => s.horloge.t)
+      const lien = lienDe(await s.api('POST', `/commerces/${AH}/clients/${client.id}/lien-acces`, undefined, PIN))
+      assert.ok((await assurerJetonClient(serveur, jetons, client.id, { lien })).jeton)
+      const carte = await avecJetonClient(serveur, jetons).carte(client.id)
+      assert.equal(carte.acces?.jeton, true)
+      const memoire = memoireJoueur(local, AH)
+      assert.equal(memoriserJoueurCarte(memoire, jetons, carte.client), true)
+      const joueur = memoire.joueur()!
+      assert.deepEqual(joueur, { clientId: client.id, prenom: 'Lina', contact: '' })
+      assert.equal(memoriserJoueurCarte(memoire, jetons, carte.client), false, 'déjà mémorisé')
+
+      // Page de jeu : visite validée, le joueur repris tourne la roue avec SON jeton, sans ressaisir de contact.
+      await s.visite(client.id)
+      const api = avecJetonClient(serveur, jetons, () => joueur.clientId)
+      const commerce = await serveur.commerce(AH)
+      const issue = await lancerTirage(api, commerce, joueur.contact, joueur.prenom)
+      assert.equal(issue.ok, true, JSON.stringify(issue))
+      const apres = await s.etat()
+      assert.equal(apres.clients.length, nombre, 'aucune réinscription')
+      assert.deepEqual(apres.tirages.filter((t: { clientId: string }) => t.clientId === client.id).length, 1)
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('point 3 : la dernière carte ouverte AVEC son jeton devient le joueur ; sans jeton, rien ne change ; même carte : contact gardé', () => {
+    const local = stockage()
+    const jetons = memoireJetons(local, () => new Date('2026-11-12T12:00:00Z'))
+    const memoire = memoireJoueur(local, AH)
+    memoire.memoriser({ clientId: 'cl-a', prenom: '', contact: '0611111111' })
+    assert.equal(memoriserJoueurCarte(memoire, jetons, { id: 'cl-b', prenom: 'B' }), false, 'carte B sans jeton : rien')
+    assert.equal(memoire.joueur()?.clientId, 'cl-a')
+    jetons.ecrire('cl-a', { jeton: 'JA', expireLe: '2026-12-12T12:00:00Z' })
+    assert.equal(memoriserJoueurCarte(memoire, jetons, { id: 'cl-a', prenom: 'Lina' }), true, 'prénom mis à jour')
+    assert.deepEqual(memoire.joueur(), { clientId: 'cl-a', prenom: 'Lina', contact: '0611111111' })
+    jetons.ecrire('cl-b', { jeton: 'JB', expireLe: '2026-12-12T12:00:00Z' })
+    assert.equal(memoriserJoueurCarte(memoire, jetons, { id: 'cl-b', prenom: 'B' }), true, 'B ouverte avec son jeton : elle joue')
+    assert.deepEqual(memoire.joueur(), { clientId: 'cl-b', prenom: 'B', contact: '' })
+  })
+
+  test('point 4 : tirage avec un jeton expiré → 401, signalé au front (`accesRefuse`) pour proposer « Retrouver ma carte »', async () => {
+    const s = await demarrer('codex-expire.db')
+    try {
+      const serveur = creerClientApi(`${s.racine}/api/v1`)
+      const { client, jeton } = await serveur.inscrirePublic(AH, '', '0613131313')
+      await s.visite(client.id)
+      const commerce = await serveur.commerce(AH)
+      s.horloge.t = new Date(s.horloge.t.getTime() + DUREE_JETON_CLIENT_S * 1000 + 1000)
+      await s.visite(client.id)
+      assert.equal((await s.api('POST', `/commerces/${AH}/tirages`, {}, s.bearer(jeton!))).statut, 401)
+      const issue = await lancerTirage(serveur, commerce, '', '', jeton)
+      assert.equal(issue.ok, false)
+      assert.equal(!issue.ok && issue.accesRefuse, true)
+      // Autres refus : pas de renvoi vers la récupération.
+      const neuf = await lancerTirage(serveur, commerce, '', '', (await s.api('POST', `/cartes/${client.id}/jeton`, { lien: lienDe(await s.api('POST', `/commerces/${AH}/clients/${client.id}/lien-acces`, undefined, PIN)) })).contenu.jeton)
+      assert.equal(neuf.ok, true, 'jeton neuf (QR du comptoir) : la visite du jour valide le tirage')
+      const deja = await lancerTirage(serveur, commerce, '', '', (await s.api('POST', `/cartes/${client.id}/jeton`, { lien: lienDe(await s.api('POST', `/commerces/${AH}/clients/${client.id}/lien-acces`, undefined, PIN)) })).contenu.jeton)
+      assert.deepEqual(deja.ok ? null : [deja.refus, deja.accesRefuse], [true, undefined])
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('points 4 et 5 : textes du front (lecture du code)', () => {
+    const jouer = readFileSync(new URL('../src/pages/Jouer.tsx', import.meta.url), 'utf8')
+    assert.match(jouer, /issue\.accesRefuse/)
+    assert.match(jouer, /<AccesCartePerdu lienCarte=\{`#\/carte\/\$\{joueur\.clientId\}`\} \/>/)
+    assert.match(jouer, /t\('Retrouver ma carte'\)/)
+    const fiche = readFileSync(new URL('../src/pages/FicheClient.tsx', import.meta.url), 'utf8')
+    const bloc = fiche.slice(fiche.indexOf('<QrCode texte={lien.lien}'), fiche.indexOf('Afficher le QR d’accès à sa carte'))
+    assert.match(bloc, /onClick=\{\(\) => void afficherQr\(\)\}>\s*Générer un nouveau lien d’accès/, 'bouton visible à côté du QR affiché')
   })
 })

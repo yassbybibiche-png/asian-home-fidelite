@@ -8,7 +8,14 @@ import type { memoireJetons } from '../lib/jetonCarte.ts'
 
 export type IssueTirage =
   | { ok: true; resultat: ResultatTirage; /** Secteur de la roue à amener sous le pointeur (null si les lots ont changé entre-temps). */ secteur: Secteur | null }
-  | { ok: false; message: string; /** Serveur injoignable : rien n'a été joué. */ horsLigne: boolean; /** Refus d'une règle (409) : sans visite du jour, déjà joué… */ refus: boolean }
+  | {
+      ok: false
+      message: string
+      /** Serveur injoignable : rien n'a été joué. */ horsLigne: boolean
+      /** Refus d'une règle (409) : sans visite du jour, déjà joué… */ refus: boolean
+      /** 401 (P0-S7) : ce téléphone n'a plus de jeton valable pour la carte (expiré, révoqué) → « Retrouver ma carte ». */
+      accesRefuse?: true
+    }
 
 /** `jeton` : jeton client du joueur (P0-S7) ; sans lui, un serveur en mode strict refuse le tirage (401). */
 export async function lancerTirage(
@@ -22,7 +29,7 @@ export async function lancerTirage(
     const resultat = await api.tirer(commerce.id, contact, prenom, undefined, jeton)
     return { ok: true, resultat, secteur: secteurs(commerce.lots).find((s) => s.lot.libelle === resultat.lot) ?? null }
   } catch (e) {
-    if (e instanceof ErreurApi) return { ok: false, message: e.message, horsLigne: e.horsLigne, refus: e.statut === 409 }
+    if (e instanceof ErreurApi) return { ok: false, message: e.message, horsLigne: e.horsLigne, refus: e.statut === 409, ...(e.statut === 401 ? { accesRefuse: true as const } : {}) }
     return { ok: false, message: MESSAGE_HORS_LIGNE, horsLigne: true, refus: false }
   }
 }
@@ -93,6 +100,28 @@ export function signalerScan(api: Pick<ClientApi, 'signalerEvenement'>, commerce
 // ---------- Jeton client (P0-S7) ----------
 
 type Jetons = ReturnType<typeof memoireJetons>
+
+/**
+ * Carte ouverte EN ENTIER sur ce téléphone (jeton valable : inscription, QR du comptoir, « Retrouver ma carte ») : elle
+ * devient le joueur de la page de jeu de son commerce, pour tourner la roue sans ressaisir de contact (le serveur fait
+ * jouer la carte du jeton). Contact vide : il n'est plus lu quand le jeton est présent. La dernière carte ouverte
+ * ainsi l'emporte sur un autre joueur mémorisé (« Ce n’est pas moi » reste possible). Renvoie true si la mémoire a changé.
+ */
+export function memoriserJoueurCarte(
+  memoire: Pick<ReturnType<typeof memoireJoueur>, 'joueur' | 'memoriser'>,
+  jetons: Pick<Jetons, 'lire'>,
+  client: { id: string; prenom?: string },
+): boolean {
+  const actuel = memoire.joueur()
+  if (actuel?.clientId === client.id) {
+    if (actuel.prenom === (client.prenom ?? '') || !client.prenom) return false
+    memoire.memoriser({ ...actuel, prenom: client.prenom })
+    return true
+  }
+  if (!jetons.lire(client.id)) return false
+  memoire.memoriser({ clientId: client.id, prenom: client.prenom ?? '', contact: '' })
+  return true
+}
 type AppelsCarte = Pick<
   ClientApi,
   'carte' | 'tirer' | 'prenomCarte' | 'messagePrive' | 'profil' | 'declarerRattrapage' | 'donneesCarte' | 'demanderSuppression' | 'marquerLus'

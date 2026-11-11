@@ -298,6 +298,21 @@ export const GRACE_ANCIENS_ID_JUSQU_AU = '2027-02-10T00:00:00+01:00'
 /** Échecs d'accès client par IP (jeton falsifié, carte d'un autre, identifiant deviné…) avant blocage. */
 const MAX_ECHECS_CLIENT_IP = 30
 
+/**
+ * Exécute `fn` en réservant `cle` dans `reservees` : le test et la réservation sont synchrones (avant tout `await`),
+ * donc un 2e appel concurrent pour la même clé obtient `refus()`. Libérée à la fin, succès ou échec. En mémoire : ne
+ * vaut que pour UNE instance du serveur.
+ */
+export async function reserverPendant<T>(reservees: Set<string>, cle: string, refus: () => Promise<never>, fn: () => Promise<T>): Promise<T> {
+  if (reservees.has(cle)) return refus()
+  reservees.add(cle)
+  try {
+    return await fn()
+  } finally {
+    reservees.delete(cle)
+  }
+}
+
 export function emettreJetonClient(secret: string, c: ChargeClient): string {
   return signer(secret, c)
 }
@@ -1273,6 +1288,13 @@ export async function creerServeur(o: OptionsServeur) {
     return { jeton: emettreJetonClient(o.secretSession!, charge), expireLe: new Date(exp * 1000).toISOString() }
   }
 
+  /**
+   * `jti` des liens d'accès en cours d'échange (POST /cartes/:id/jeton) : réservation synchrone, en mémoire, contre deux
+   * échanges simultanés du même lien. Une seule instance (Render) ; à plusieurs instances, la fenêtre entre la lecture
+   * et l'écriture de la révocation en base reviendrait (server/README.md).
+   */
+  const echangesEnCours = new Set<string>()
+
   /** Lien d'accès à usage unique (`lien`), à échanger contre un jeton client sur la page de la carte. */
   async function lienAcces(commerceId: string, clientId: string, dureeS: number) {
     const exp = Math.floor(maintenant().getTime() / 1000) + dureeS
@@ -1873,7 +1895,8 @@ export async function creerServeur(o: OptionsServeur) {
       // PUBLIC (P0-S7) — obtenir / renouveler le jeton client de cette carte. Preuves acceptées, dans l'ordre :
       // 1. jeton client encore valable (Authorization) → renouvellement ;
       // 2. `{ lien }` : lien d'accès à usage unique (comptoir, « Retrouver ma carte ») → consommé ;
-      // 3. rien : seulement une carte à ANCIEN identifiant, pendant la période de grâce (migration au 1er accès).
+      // 3. rien : seulement une carte à ANCIEN identifiant, pendant la période de grâce (migration au 1er accès), et
+      //    jamais révoquée (version d'accès 0) : une carte révoquée ne se rouvre que par un lien d'accès.
       // Tout le reste : échec compté + 401 uniforme (que la carte existe ou non).
       limiterIp(req, 'fiche', limites.ficheClientParIp)
       compteurs.consommer(`carte:${id}`, limites.lectureParCarte, TROP)
@@ -1885,16 +1908,21 @@ export async function creerServeur(o: OptionsServeur) {
       if (charge) carte = await carteDuJeton(charge)
       else if (typeof corps.lien === 'string' && corps.lien) {
         const l = lireJetonClient(o.secretSession, corps.lien)
-        if (!l || l.typ !== 'lien' || l.cid !== id || l.exp * 1000 <= maintenant().getTime() || (await estRevoquee(l))) return refusCarte(req)
-        const commerce = await st.commerce(l.com)
-        const client = commerce && (await st.client(commerce.id, id))
-        if (!commerce || !client || l.ver !== (await versionAcces(commerce.id, id))) return refusCarte(req)
-        await revoquer(l) // usage unique
-        carte = { commerce, client }
+        if (!l || l.typ !== 'lien' || l.cid !== id) return refusCarte(req)
+        // Usage unique, aussi en concurrence : le `jti` est réservé dès ici, avant le 1er `await` ; un 2e échange
+        // simultané du même lien est refusé. La révocation en base reste la garde durable.
+        carte = await reserverPendant(echangesEnCours, l.jti, () => refusCarte(req), async () => {
+          if (l.exp * 1000 <= maintenant().getTime() || (await estRevoquee(l))) return refusCarte(req)
+          const commerce = await st.commerce(l.com)
+          const client = commerce && (await st.client(commerce.id, id))
+          if (!commerce || !client || l.ver !== (await versionAcces(commerce.id, id))) return refusCarte(req)
+          await revoquer(l) // usage unique
+          return { commerce, client }
+        })
       } else {
         if (estIdClientActuel(id) || graceTerminee(id)) return refusCarte(req)
         carte = await clientDeCarte(id).catch(() => undefined)
-        if (!carte) return refusCarte(req)
+        if (!carte || (await versionAcces(carte.commerce.id, carte.client.id)) > 0) return refusCarte(req)
       }
       exigerActif(carte.commerce)
       return { statut: 201, json: { ...(await accesClient(carte.commerce.id, carte.client.id)), clientId: carte.client.id, commerceId: carte.commerce.id } }

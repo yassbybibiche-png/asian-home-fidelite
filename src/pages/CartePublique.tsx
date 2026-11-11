@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, CommercePublic, MessageClient } from '../types'
 import { ErreurApi, estVueLimitee, type AccesCarte, type ClientApi, type ReponseCarte } from '../data/api'
-import { assurerJetonClient, avecJetonClient } from '../data/jeuApi'
+import { assurerJetonClient, avecJetonClient, memoireJoueur, memoriserJoueurCarte } from '../data/jeuApi'
 import { hashSansLienAcces, idCarteDuParam, lienAccesDuHash, memoireJetons } from '../lib/jetonCarte'
 import { CarteFidelite } from '../components/CarteFidelite'
 import { InvitationAvis } from '../components/InvitationAvis'
@@ -252,6 +252,8 @@ function CarteApi({ api: apiServeur }: { api: ClientApi }) {
         return
       }
       setLimitee(null)
+      // Carte ouverte avec le jeton de ce téléphone (P0-S7, ex. récupérée au comptoir) : la page de jeu la reprend.
+      if (r.acces?.jeton) memoriserJoueurCarte(memoireJoueur(stockageLocal(), r.commerce.id), jetons, r.client)
       // Asian Home : le menu public affiche la vraie carte en repli tant que le
       // commerçant n'a pas enregistré son propre menu — le lien est donc visible.
       setDonnees({

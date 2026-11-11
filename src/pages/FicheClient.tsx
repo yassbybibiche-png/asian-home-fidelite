@@ -366,6 +366,12 @@ function AccesCarteClient({ client, commerce }: { client: Client; commerce: Comm
         <div className="flex flex-col items-center gap-2">
           <QrCode texte={lien.lien} titre="QR d’accès à la carte du client" />
           <p className="text-sm text-gray-600">Valable jusqu’à {new Date(lien.expireLe).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}, une seule fois.</p>
+          {/* Expiré ou déjà scanné : un nouveau lien remplace ce QR à l'écran. L'ancien n'est pas révoqué (le serveur
+              ne le permet pas sans révoquer toute la carte) : il reste à usage unique et tombe à son expiration (15 min),
+              sans avoir quitté cet écran du comptoir. */}
+          <button type="button" className="bouton-secondaire min-h-11 w-full" disabled={enCours} onClick={() => void afficherQr()}>
+            Générer un nouveau lien d’accès
+          </button>
         </div>
       ) : (
         <button type="button" className="bouton-secondaire min-h-11 w-full" disabled={enCours} onClick={() => void afficherQr()}>

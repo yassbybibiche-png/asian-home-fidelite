@@ -224,6 +224,22 @@ function MessageDejaJoue({ prenom, lot, code, remis }: { prenom: string; lot: st
   )
 }
 
+/** Tirage refusé en 401 (P0-S7) : l'accès de ce téléphone à la carte a expiré ou a été révoqué. */
+export function AccesCartePerdu({ lienCarte }: { lienCarte: string }) {
+  const { t } = useLangue()
+  return (
+    <section className="carte space-y-3 text-center" role="alert" data-acces="perdu">
+      <p className="titre-carte">{t('Votre carte n’est plus ouverte sur ce téléphone')}</p>
+      <p className="text-gray-700">
+        {t('Pour des raisons de sécurité, l’accès a expiré ou a été retiré. Retrouvez votre carte avec votre téléphone ou votre e-mail, ou demandez au comptoir le QR d’accès à votre carte : vous pourrez ensuite tourner la roue.')}
+      </p>
+      <a href={lienCarte} className="bouton w-full">
+        {t('Retrouver ma carte')}
+      </a>
+    </section>
+  )
+}
+
 /** Client déjà connu sur ce téléphone : zéro saisie, un seul bouton (avec ou sans prénom sur la carte). */
 function Continuer({ prenom, onContinuer, onOublier }: { prenom: string; onContinuer(): void; onOublier(): void }) {
   const p = prenom.trim()
@@ -433,6 +449,7 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
   const [gain, setGain] = useState<ResultatTirage | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [enCours, setEnCours] = useState(false)
+  const [accesPerdu, setAccesPerdu] = useState(false)
   const [horsLigne, setHorsLigne] = useState(false)
   const [menuDisponible, setMenuDisponible] = useState(() => estAsianHome(commerce))
   const minuterie = useRef<number | undefined>(undefined)
@@ -536,6 +553,13 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
     setMessage(null)
     const issue = await lancerTirage(api, commerce, joueur.contact, joueur.prenom)
     setEnCours(false)
+    if (!issue.ok && issue.accesRefuse) {
+      // P0-S7 : jeton expiré (30 jours) ou révoqué — ce téléphone ne peut plus jouer pour cette carte. Plutôt qu'une
+      // erreur sèche : le chemin pour la retrouver (carte → « Retrouver ma carte », ou QR du comptoir).
+      jetons.ecrire(joueur.clientId, null)
+      setAccesPerdu(true)
+      return
+    }
     if (!issue.ok) {
       // Refusé par le serveur ou serveur injoignable : la roue ne tourne pas, aucun lot n'est affiché.
       setMessage(issue.message)
@@ -619,6 +643,8 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
           />
           {!horsLigne && <MessageErreur>{message}</MessageErreur>}
         </>
+      ) : accesPerdu ? (
+        <AccesCartePerdu lienCarte={`#/carte/${joueur.clientId}`} />
       ) : (
         <>
           {visiteValidee && <VisiteValidee />}
