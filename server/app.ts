@@ -157,6 +157,11 @@ export interface OptionsServeur {
   graceAnciensIdJusquAu?: string
   /** Seuils des routes publiques, si différents de LIMITES_PUBLIQUES (tests). */
   limitesPubliques?: Partial<LimitesPubliques>
+  /** Journal des lectures sensibles (P2-S15) : part des lectures `GET /cartes/:id` et `GET /commerces`
+   * journalisées (0–1, défaut 0,1) ; 0 = rien, 1 = tout (tests). Échantillonnage obligatoire (volume).
+   * `plafond` = lignes max par minute (défaut 600) : au-delà, les lignes sont comptées puis résumées en une
+   * seule ligne à la minute suivante (l'attaque reste visible par son volume, sans noyer les logs). */
+  journalLectures?: { taux?: number; plafond?: number }
   /** Horloge injectable (tests). */
   maintenant?: () => Date
 }
@@ -1245,6 +1250,59 @@ export async function creerServeur(o: OptionsServeur) {
 
   const ipDe = (req: IncomingMessage) =>
     (o.derriereProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()) || req.socket.remoteAddress || '?'
+
+  /**
+   * Journal des lectures sensibles (P2-S15) : un échantillon des lectures `GET /cartes/:id` et
+   * `GET /commerces` (liste), pour détecter une énumération — beaucoup d'identifiants distincts, beaucoup
+   * de 404, depuis une même IP (voir server/README.md « Journal des lectures sensibles »).
+   * Échantillonnage obligatoire (volume) : `taux` = part journalisée (défaut 0,1, borné à [0, 1] — un taux
+   * non fini, `NaN` par ex., retombe sur le défaut au lieu de tout journaliser, revue Codex point 4) ;
+   * 1 en test. Plafond : 600 lignes/min (option `plafond`) — au-delà, les lignes sont comptées puis
+   * résumées en une seule ligne à la minute suivante (revue Codex point 3). L'identifiant de carte n'est
+   * jamais écrit en clair : empreinte SHA-256 tronquée (12 car. hex., 48 bits — assez pour compter les
+   * identifiants distincts ; pseudonymisation, pas anonymisation : le hash sans sel permet de vérifier des
+   * identifiants candidats, revue Codex point 6). Une ligne par lecture :
+   * `[lecture-sensible] carte id=<empreinte> ip=… statut=…` ou
+   * `[lecture-sensible] commerces ip=… statut=… nb=…` (console.info, comme les autres lignes `[securite]`).
+   * La journalisation ne doit jamais faire échouer une lecture : toute erreur d'écriture est avalée.
+   */
+  const tauxBrut = o.journalLectures?.taux ?? 0.1
+  const tauxJournalLectures = Number.isFinite(tauxBrut) ? Math.min(1, Math.max(0, tauxBrut)) : 0.1
+  const plafondJournalLectures = Math.max(1, Math.floor(o.journalLectures?.plafond ?? 600))
+  let fenetreJournalLectures = -1
+  let lignesJournalLectures = 0
+  let lignesSupprimeesJournalLectures = 0
+  function journaliserLectureSensible(req: IncomingMessage, chemin: string[], statut: number, details?: string) {
+    if (req.method !== 'GET') return
+    const carte = chemin[0] === 'cartes' && chemin.length === 2
+    const commerces = chemin[0] === 'commerces' && chemin.length === 1
+    if (!carte && !commerces) return
+    if (Math.random() >= tauxJournalLectures) return
+    const minute = Math.floor(maintenant().getTime() / 60_000)
+    if (minute !== fenetreJournalLectures) {
+      if (lignesSupprimeesJournalLectures > 0) {
+        try {
+          console.info(`[lecture-sensible] plafond ${plafondJournalLectures} lignes/min atteint : ${lignesSupprimeesJournalLectures} ligne(s) supprimée(s) la minute précédente`)
+        } catch {
+          // La journalisation ne doit jamais faire échouer une lecture.
+        }
+      }
+      fenetreJournalLectures = minute
+      lignesJournalLectures = 0
+      lignesSupprimeesJournalLectures = 0
+    }
+    if (lignesJournalLectures >= plafondJournalLectures) {
+      lignesSupprimeesJournalLectures++
+      return
+    }
+    lignesJournalLectures++
+    const cible = carte ? `carte id=${createHash('sha256').update(chemin[1]).digest('hex').slice(0, 12)}` : 'commerces'
+    try {
+      console.info(`[lecture-sensible] ${cible} ip=${ipDe(req)} statut=${statut}${details ? ` ${details}` : ''}`)
+    } catch {
+      // La journalisation ne doit jamais faire échouer une lecture.
+    }
+  }
 
   // ---- Anti-abus des routes publiques (seuils : LIMITES_PUBLIQUES) ----
   const TROP = 'Trop de requêtes.'
@@ -3601,9 +3659,23 @@ export async function creerServeur(o: OptionsServeur) {
     throw err(404, 'Route inconnue.')
   }
 
+  /**
+   * Chemin avec identifiants porteurs masqués, pour les logs d'erreur (P2-S15, revue Codex point 2) : un
+   * identifiant de carte ou un jeton de désinscription ne doit pas apparaître en clair dans `console.error`
+   * quand une exception non HTTP survient sur ces routes. Le message de l'exception elle-même n'est pas
+   * masqué (les erreurs de stockage n'y incluent pas d'identifiant aujourd'hui).
+   */
+  const masquerIdentifiantsChemin = (pathname: string) =>
+    pathname
+      .replace(/(\/cartes\/)[^/?#]+/, '$1…')
+      .replace(/(\/desinscription\/)[^/?#]+\/[^/?#]+/, '$1…/…')
+      .replace(/(\/clients\/)[^/?#]+/, '$1…')
+
   const serveur = createServer(async (req, res) => {
     const entetes: Record<string, string> = { ...ENTETES_SECURITE, ...entetesCors(origineCors, req.headers.origin) }
     const url = new URL(req.url ?? '/', 'http://localhost')
+    // P2-S15 : le routeur a-t-il répondu (pour ne pas journaliser deux fois une lecture dont l'envoi échoue).
+    let routeurTermine = false
     try {
       if (req.method === 'OPTIONS') {
         res.writeHead(204, entetes).end()
@@ -3725,6 +3797,10 @@ export async function creerServeur(o: OptionsServeur) {
       }
       const chemin = url.pathname.slice('/api/v1/'.length).split('/').filter(Boolean).map(decodeURIComponent)
       const r = await router(req, chemin)
+      routeurTermine = true
+      // P2-S15 : échantillon des lectures sensibles (énumération détectable dans les logs).
+      const commercesLus = (r.json as { commerces?: unknown[] } | undefined)?.commerces
+      journaliserLectureSensible(req, chemin, r.statut ?? 200, Array.isArray(commercesLus) ? `nb=${commercesLus.length}` : undefined)
       if (r.redirection) {
         res.writeHead(302, { ...entetes, Location: r.redirection, 'Cache-Control': 'no-store' }).end()
         return
@@ -3771,8 +3847,21 @@ export async function creerServeur(o: OptionsServeur) {
               ? err(erreur.statut, erreur.message)
               : erreur
       const http = e instanceof ErreurHttp
-      if (!http) console.error(`[serveur] ${req.method} ${url.pathname} :`, e)
+      if (!http) console.error(`[serveur] ${req.method} ${masquerIdentifiantsChemin(url.pathname)} :`, e)
       const statut = http ? e.statut : 500
+      // P2-S15 : lectures sensibles en échec (404 / 429 : signaux d'énumération) — seulement si l'erreur vient
+      // du routeur (sinon la lecture a déjà été journalisée au retour du routeur, ci-dessus). Même décodage
+      // que le chemin du succès (empreinte identique en succès et en échec, revue Codex point 1) ; encodage
+      // invalide : pas de journalisation plutôt qu'une 500 de plus.
+      if (!routeurTermine) {
+        let cheminErreur: string[] = []
+        try {
+          cheminErreur = url.pathname.startsWith('/api/v1/') ? url.pathname.slice('/api/v1/'.length).split('/').filter(Boolean).map(decodeURIComponent) : []
+        } catch {
+          cheminErreur = []
+        }
+        journaliserLectureSensible(req, cheminErreur, statut)
+      }
       envoyerCorps(
         req,
         res,

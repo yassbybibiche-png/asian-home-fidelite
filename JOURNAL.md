@@ -1,5 +1,40 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P2-S15 « Journal des lectures sensibles » (AUDIT.md §7, F-12)
+- **Journal échantillonné** (`server/app.ts`, `journaliserLectureSensible`, branché au centre du
+  gestionnaire HTTP) : `GET /cartes/:id` et `GET /commerces` (liste) journalisés en `console.info`
+  (`[lecture-sensible]`) — carte : empreinte SHA-256 tronquée 12 car. hex. + IP + statut ; commerces :
+  IP + statut + `nb=`. Succès journalisé au retour du routeur, échecs (404/401/429) dans le `catch` —
+  un drapeau `routeurTermine` évite la double ligne quand l'envoi échoue après le routeur. Option
+  `journalLectures: { taux (défaut 0,1), plafond (défaut 600 lignes/min) }` ; `nb=` = nombre réel de
+  commerces renvoyés. `server/README.md` : format, détection (beaucoup d'empreintes distinctes + 404
+  depuis une même IP), volume, vie privée (pseudonymisation, pas anonymisation), limites.
+- **Revue Codex (8 points, `/tmp/codex-revue-p2-s15.txt`, diff `/tmp/codex-p2-s15.diff`)** : 1. [Fondé,
+  moyenne] empreinte différente en succès (décodé) et en échec (encodé) → CORRIGÉ : même décodage dans
+  les deux branches, encodage invalide → pas de journalisation (test id encodé `%63l-inconnu`).
+  2. [Fondé, élevée] `console.error` des erreurs internes écrivait le chemin en clair (id de carte) →
+  CORRIGÉ : `masquerIdentifiantsChemin` (`/cartes/…`, `/desinscription/…`, `/clients/…`) + test avec
+  encodage invalide (500, id absent de `console.error`). 3. [Fondé, moyenne] volume non borné → CORRIGÉ :
+  plafond 600 lignes/min, lignes excédentaires comptées puis résumées en une ligne à la minute suivante
+  (test plafond 2 + bascule d'horloge) ; wording README corrigé (les 429 ne sont pas journalisés
+  systématiquement, seuls les `[securite] BLOCAGE` le sont). 4. [Fondé, faible] taux `NaN` → tout
+  journalisé → CORRIGÉ : non fini → défaut 0,1 (tests bornes 2 → 1, -1 → 0). 5. [Non fondé] couverture
+  des chemins OK ; tests 401 et 429 AJOUTÉS quand même. 6. [Réserve fondée, faible] « pas pour retrouver
+  la carte » trop absolu → CORRIGÉ : README + commentaire disent « pseudonymisation » (hash sans sel
+  vérifiable par dictionnaire) ; HMAC avec secret dédié noté comme étape suivante possible, hors lot.
+  7. [Preuve partielle, faible] détection au taux 0,1 non prouvée, `nb` approximatif → CORRIGÉ : `nb`
+  exact testé ; taux 0,5 testé déterministe (stub `Math.random`) ; la détection automatique et
+  l'efficacité à 0,1 restent hors lot (pas d'agrégation ni d'alerte). 8. [Fondé, faible] latence stdout /
+  pas de protection → CORRIGÉ (plafond) + `console.info` isolé en try/catch (une défaillance de
+  journalisation ne fait jamais échouer une lecture) ; logger à tampon borné et mesure sous charge hors
+  lot. Limite connue notée : le statut journalisé est celui du routeur — un échec de sérialisation
+  ultérieur (500) laisserait une ligne à 200.
+- **Tests : 1124 → 1133 (+9, `tests/journal-lectures-p2-s15.test.ts`)**, suite verte (2 passages),
+  `npx tsc -p .` propre. **Flake** : 1er passage complet, 1 échec `fetch failed: ECONNRESET` sur
+  `tests/caisse-p0-s14.test.ts` (« fiche à la demande », connexion coupée, pas une assertion) — le fichier
+  seul passe, 2e passage complet vert (1133/1133) : non reproduit, attribué à la charge parallèle, à
+  surveiller si ça revient.
+
 ## 11/11/2026 — P2-S13 « Oracles d'énumération » (AUDIT.md §7, F-12)
 - **Changement de contrat (public, délibéré — 5 assertions existantes mises à jour, pas affaiblies)** :
   `POST /commerces/:id/clients` public répond désormais 201 + `{ client }` (sans téléphone ni e-mail) que
