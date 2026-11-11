@@ -15,7 +15,9 @@
     "test": "npm run typecheck:server && node --test \"tests/*.test.ts\"",
     "test:e2e": "playwright test",
     "seed": "node scripts/generer-seed.mjs",
-    "serveur": "node --env-file-if-exists=.env server/index.ts"
+    "serveur": "node --env-file-if-exists=.env server/index.ts",
+    "sauvegarde": "node scripts/sauvegarde-base.mjs",
+    "restaurer": "node scripts/restaurer-base.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.119.0",
