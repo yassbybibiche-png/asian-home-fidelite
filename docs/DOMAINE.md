@@ -2,7 +2,9 @@
 
 > **Rien n'a été acheté ni configuré.** Ce document propose la solution la moins chère et décrit les étapes ; la
 > décision et l'achat reviennent au restaurant. Les prix ont été relevés le 10/11/2026 (sources en bas) et **changent
-> souvent** : revérifier sur la page du bureau d'enregistrement au moment d'acheter.
+> souvent** : revérifier sur la page du bureau d'enregistrement au moment d'acheter. La partie technique est livrée
+> (P2-Q4 : prérendu du menu à `/menu/<commerceId>`, procédure ci-dessous) : il ne reste que l'achat du domaine, le
+> DNS et les variables Render.
 
 Aujourd'hui l'app est servie à `https://asian-home-fidelite.onrender.com` (sous-domaine gratuit de Render, certificat
 HTTPS inclus). Un domaine à soi (ex. `asianhome.fr`) n'est **pas nécessaire** pour que l'app marche ; il apporte une
@@ -48,9 +50,13 @@ coordonnées sont publiques de toute façon).
    automatiquement.
 5. **Mettre l'app à l'heure du nouveau domaine** (un commit + variables Render) :
    - `index.html` (canonical, `og:url`, `og:image`, `twitter:image`, JSON-LD `url` / `logo` / `image` / `hasMenu`),
-     `public/robots.txt` (ligne `Sitemap:`) et `public/sitemap.xml` (`<loc>`) : remplacer
-     `https://asian-home-fidelite.onrender.com` par `https://asianhome.fr` — `tests/seo-p2-q4.test.ts` vérifie qu'une
-     seule adresse est utilisée dans ces trois fichiers (adapter sa constante `SITE` et son motif `onrender.com`) ;
+     `public/robots.txt` (ligne `Sitemap:`) et `public/sitemap.xml` (`<loc>`, dont `/menu/c-asian-home-paris` prérendu)
+     : remplacer `https://asian-home-fidelite.onrender.com` par `https://asianhome.fr` — `tests/seo-p2-q4.test.ts`
+     vérifie qu'une seule adresse est utilisée dans ces trois fichiers (adapter sa constante `SITE` et son motif
+     `onrender.com`) ;
+   - les QR vitrine encodent `/r/<commerceId>` avec l'origine de la page ouverte (`window.location.origin`) : ouverts
+     depuis le nouveau domaine, ils l'encodent — mais comme l'adresse change, les QR déjà imprimés doivent de toute
+     façon être réimprimés (voir étape 6) ;
    - variables d'environnement Render : `CORS_ORIGIN=https://asianhome.fr`, `PUBLIC_URL=https://asianhome.fr`
      (liens des SMS / e-mails, QR des passes Wallet, webhook Twilio STOP → mettre à jour l'URL du webhook chez Twilio),
      et `GOOGLE_REDIRECT_URI` si elle est renseignée (+ la déclarer à l'identique dans la console Google Cloud) ;

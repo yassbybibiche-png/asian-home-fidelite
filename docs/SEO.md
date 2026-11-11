@@ -36,8 +36,6 @@ qu'une page**, `/`. Conséquences :
 - les balises ci-dessus valent pour toutes les routes à la fois (même titre, même description, même aperçu de lien
   pour `#/menu` et `#/jouer`) ; il est impossible, sans serveur ou prérendu, de donner un aperçu différent par page,
   car les robots des réseaux sociaux n'exécutent pas le JavaScript ;
-- les entrées `#/menu` et `#/jouer` du sitemap sont ramenées à `/` (listées pour documenter les pages publiques,
-  sans effet d'indexation propre) ;
 - le contenu du menu (plats, prix) est construit par le JavaScript : Google peut l'afficher en rendant la page, mais
   sans garantie ni délai, et toujours rattaché à `/` ;
 - toute adresse inconnue (`/n-importe-quoi`) renvoie `index.html` en 200 (pas de 404) : Google peut la classer en
@@ -47,21 +45,40 @@ Pour un restaurant de quartier, l'essentiel du référencement local passe de to
 Business Profile** (adresse, horaires, avis, photos, lien vers le site) — c'est elle qui apparaît dans Maps et dans
 le panneau de droite. Le site sert surtout de destination à ce lien et aux QR.
 
-## Ce qu'il faudrait pour aller plus loin (NON fait)
+## Prérendu du menu — FAIT (P2-Q4, lot « prérendu »)
 
-Par ordre d'effort croissant :
+Le menu a désormais une vraie adresse indexable : **`/menu/<commerceId>`** (ex. `/menu/c-asian-home-paris`), servie
+par le serveur (`server/app.ts`, avant le statique ; rendu dans `server/prerendu.ts`, tests
+`tests/prerendu-p2-q4.test.ts`) :
 
-1. **Pages statiques prérendues pour les pages publiques** : générer au build `dist/menu/index.html` (HTML du menu
-   rendu côté serveur avec `renderToString`, ses propres titre / description / og:*, et un JSON-LD `Menu` /
-   `MenuItem` avec `suitableForDiet: HalalDiet`) ; le serveur sert ce fichier à `/menu`. L'app reste en hash-router,
-   `/menu` est juste une porte d'entrée indexable qui renvoie vers `/#/menu` pour l'interactif. Point d'attention : le
-   menu vit en base (Réglages) → soit prérendu à chaque déploiement (menu figé jusqu'au suivant), soit rendu par le
-   serveur à la demande avec cache.
-2. **Passer au routage par chemin** (`/menu`, `/jouer`, `/carte/…` au lieu de `#/…`) : le serveur sait déjà renvoyer
-   `index.html` pour toute adresse inconnue, mais il faut changer `useRoute` et tous les liens, garder une redirection
-   des anciennes adresses `#/…` (QR imprimés !), et injecter côté serveur des balises par route. Plus de travail et
-   plus de risque de régression.
-3. **SSR complet** (framework type Next / Remix) : disproportionné ici.
+- **Contenu** : titre, description, canonical et Open Graph propres à la page ; JSON-LD `Menu` (`MenuSection` /
+  `MenuItem`, prix en EUR, `suitableForDiet: HalalDiet` seulement pour Asian Home) ; corps de page = catégories,
+  plats, descriptions, prix (« Prix sur place » quand le prix est inconnu ou non confirmé) et allergènes.
+- **Source des données** : même règle que la page publique `#/menu` — menu enregistré dès qu'il contient un plat,
+  sinon la carte réelle d'Asian Home en repli, sinon une page honnête sans plat inventé. Prix non confirmés masqués
+  comme dans le menu public (`masquerPrixNonConfirmes`). Photos non intégrées (base64 trop lourdes).
+- **Fraîcheur** : rendu à la demande, cache serveur 5 min par commerce (`Cache-Control: public, max-age=300`,
+  ETag faible → 304) ; un changement de menu met 5 min à apparaître ici. Limite par IP comme les autres lectures
+  publiques.
+- **Cas particuliers** : commerce en pause → page « Menu indisponible » (200, `noindex`, comme le menu public) ;
+  commerce inconnu ou `/menu` sans id → 404 (pas la SPA en 200 : pas de soft 404).
+- **Sécurité** : tout texte venu du commerçant est échappé (corps ET JSON-LD — un `</script>` dans un nom de plat
+  est neutralisé) ; page sans style en ligne (la CSP `style-src 'self'` l'interdirait).
+- **Sitemap et JSON-LD** : `public/sitemap.xml` liste `/` et `/menu/c-asian-home-paris` (plus de fragment) ;
+  `hasMenu` de `index.html` pointe vers l'adresse prérendue.
+
+## Ce qui n'est pas prérendu (et pourquoi)
+
+- **`#/jouer` (page de jeu)** : elle exige une visite validée au comptoir (et un jeton client) ; une page statique
+  « Tournez la roue » serait trompeuse (le client ne peut pas jouer sans passer en caisse) et ne serait de toute
+  façon pas listée utilement. Le QR vitrine pointe vers la redirection courte `/r/<commerceId>` (P2-Q3, comptage du
+  scan), pas vers une page indexable.
+- **Passer au routage par chemin** (`/menu`, `/jouer`, `/carte/…` au lieu de `#/…`) : le serveur sait déjà renvoyer
+  `index.html` pour toute adresse inconnue, mais il faut changer `useRoute` et tous les liens, garder une redirection
+  des anciennes adresses `#/…` (QR imprimés !), et injecter côté serveur des balises par route. Plus de travail et
+  plus de risque de régression — le prérendu du menu couvre le besoin (c'est la seule page publique au contenu
+  indexable).
+- **SSR complet** (framework type Next / Remix) : disproportionné ici.
 
 Avant tout cela : déclarer le site dans **Google Search Console** (après le choix du domaine, voir
 `docs/DOMAINE.md`), soumettre `sitemap.xml` et mesurer : si les recherches « asian home pré saint gervais » mènent
