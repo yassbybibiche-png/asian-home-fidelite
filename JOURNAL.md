@@ -1216,3 +1216,50 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   supprimées renvoyées par PostgREST (plafonné à 1 000 par table) — la suppression elle-même n'est pas plafonnée,
   seul le chiffre du journal peut être un minimum si un client avait plus de 1 000 tirages. La recherche caisse
   (P0-S14) filtre en mémoire côté serveur après lecture paginée complète : acceptable pour un commerce.
+
+## 11/11/2026 — P0-S19 : Code gagnant hors vue publique (AUDIT.md §7, revue Codex point 3)
+- **Contexte.** `GET /cartes/:id` re-servait le code gagnant du jour à quiconque connaissait un `clientId` (sans
+  authentification). **Option retenue : la 2e** — le code n'est servi qu'au titulaire authentifié (jeton client valable
+  de CETTE carte, `Authorization: Bearer`), jamais retiré de la réponse : le cas d'usage P0-U3 survit (voir ci-dessous).
+- **Serveur (`server/app.ts`, handler `GET /cartes/:id`).** `jeu.codeDuJour = charge && code && !perdant ? code : null`
+  — `charge` = jeton client accepté par `jetonClient`. Sans jeton : null, **même en vue complète (mode transition)** ;
+  le lot du jour reste affiché, seul le code est conditionné. Tirage perdant : null, même avec jeton. Vérification en
+  caisse (`GET /caisse/gains/:code`, `POST …/remise`) inchangée ; la réponse du tirage lui-même (`POST …/tirages`)
+  rend toujours son code au joueur qui vient de jouer (c'est son propre résultat, après visite validée).
+- **Front : aucun changement de comportement.** `Jouer.tsx` et `CartePublique.tsx` assuraient déjà le jeton avant
+  `api.carte` (P0-S7 : `assurerJetonClient`, repli mémoire du gain venant d'être tiré) ; seuls les commentaires ont été
+  mis à jour (`Jouer.tsx`, `src/data/api.ts`, `src/lib/carte.ts`). Titulaire légitime sur un autre téléphone / au
+  cache vidé : lien d'accès du comptoir (15 min) ou « Retrouver ma carte » (24 h) → `POST /cartes/:id/jeton` → jeton
+  → `GET` avec jeton → code ; testé de bout en bout (lien fabriqué avec le secret, comme la fiche client).
+- **Tests** : avant **891/891**, après **901/901** (`npm test`, typecheck serveur inclus), `npx tsc -p .` et
+  `npm run build` OK. `+10` tests (`tests/code-gagnant-p0-s19.test.ts`) : sans jeton en strict (vue limitée, code
+  null, texte brut sans code), avec jeton (code servi), jeton d'une autre carte / falsifié (401, aucun code), lien
+  d'accès → jeton → code (usage unique vérifié), perdant (null même avec jeton), remise en caisse (code + `remisDuJour`
+  avec jeton, null sans), 2e tirage (409 sans code), mode transition (vue complète sans jeton mais code null ; avec
+  jeton : code), sans `SESSION_SECRET` (GET null, `/jeton` 503), strict : tirage et export RGPD sans jeton → 401
+  (export du titulaire avec jeton + contact : 200, CSV avec son code). Adaptations au nouveau contrat (pas
+  d'affaiblissement) dans 4 tests existants : `code-gagnant-p0-u3` (le test « autre téléphone / cache vidé » exige
+  désormais null sans jeton), `serveur.test.ts`, `securite-s3.test.ts`, `carte-pwa-p1-c3.test.ts` (client du front sans
+  jeton → null).
+- **Incident de suite (flaky, hors lot).** 1re suite complète : 900/901, 1 échec `securite-s4` « définie et valide →
+  démarre sans avertissement CORS » (timeout 20 s au démarrage du serveur en sous-processus, même incident que P0-S14)
+  ; `server/index.ts` et CORS ne sont pas touchés par ce lot ; le test passe seul en 2,3 s (24/24). Suite relancée
+  pour un vert propre avant commit.
+- **Revue Codex** (texte complet `/tmp/codex-revue-p0-s19.txt`, diff `/tmp/codex-p0-s19.diff`) : 4 points.
+  1. [P0, fondé — verrouillé en strict, documenté] Export RGPD (`POST /cartes/:id/donnees`, `src/lib/rgpd.ts:146`
+     liste `(code …)` de tous les tirages) sans jeton en transition : CSV avec les codes. 2. [P0, fondé — idem]
+     `POST …/tirages` par contact seul en transition renvoie le code du tirage. Les deux sont le mode transition
+     lui-même (accès d'avant P0-S7 admis par conception) : les corriger ici aurait été changer la sémantique de la
+     transition lot par lot ; le correctif cohérent est le mode `stricte`, déjà le défaut en production dès que
+     `SESSION_SECRET` existe. Ajouté : test strict (tirage + export sans jeton → 401, aucun code) et mention du résiduel
+     dans `server/README.md` (§ Accès client, « Modes » + table des routes).
+  3. [P1, fondé — documenté, non corrigé] Anciennes cartes : un jeton s'obtient sans autre preuve pendant la période
+     de grâce P0-S7 (jusqu'au 10/02/2027), donc connaître un ancien identifiant suffit encore. Exception de migration
+     explicite de P0-S7, à échéance ; la retirer ici casserait la migration des cartes existantes.
+  4. [P1, fondé — documenté + test] Sans `SESSION_SECRET` (transition, dev seulement), aucun jeton ne peut être émis :
+     le titulaire ne relit plus son code côté serveur (repli : réponse de son tirage + mémoire du téléphone dans
+     `Jouer.tsx`). En production la variable est posée (Render, depuis le 10/11) ; test ajouté (GET null, `/jeton` 503).
+- **Résiduels.** En mode transition, un contact seul suffit encore à obtenir des codes (points 1–2 ci-dessus) — la
+  production est en `stricte` par défaut ; surveiller `GET /sante/acces-client → accesSansJeton` avant tout passage en
+  strict forcé. Le front ne prouve pas à lui seul le parcours titulaire authentifié (pas de navigateur sur la VM) :
+  relu + typechecké, à vérifier sur téléphone réel (lien comptoir → code affiché).

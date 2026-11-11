@@ -28,7 +28,8 @@ export function tamponsNouveaux(vus: number | null, tampons: number): number[] {
 
 // ---- Lots en attente (à retirer au comptoir) ----
 
-/** Gain de la roue du jour encore à retirer (servi par GET /cartes/:id : `jeu.codeDuJour`, `jeu.remisDuJour`). */
+/** Gain de la roue du jour encore à retirer (servi par GET /cartes/:id, avec jeton client seulement — P0-S19 :
+ * `jeu.codeDuJour`, `jeu.remisDuJour`). */
 export interface GainDuJour {
   lot: string
   code: string

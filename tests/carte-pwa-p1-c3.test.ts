@@ -360,7 +360,9 @@ describe('Carte : lots en attente avec expiration', () => {
       const tirage = (await s.json('POST', `/commerces/${AH}/tirages`, { contact: '0611111111' })).contenu as { code: string }
       const r = await s.json('GET', `/cartes/${c.id}`)
       assert.deepEqual(r.contenu.historiqueLots, [{ lot: 'Nems offerts', date: s.horloge.t.toISOString(), statut: 'valable' }])
-      assert.equal(r.contenu.jeu.codeDuJour, tirage.code, 'le code du jour reste servi à part')
+      // P0-S19 : sans jeton client, le code du jour n'est plus servi (le titulaire authentifié le reçoit :
+      // tests/code-gagnant-p0-s19.test.ts) — l'historique reste sans code, comme avant.
+      assert.equal(r.contenu.jeu.codeDuJour, null, 'aucun code sans jeton')
       // Le lendemain : expiré, et le code n'apparaît plus nulle part.
       s.horloge.t = new Date(2026, 10, 11, 12, 0)
       const demain = await s.api('GET', `/cartes/${c.id}`)
