@@ -11,7 +11,7 @@ services:
     # P0-U6 (11/11/2026) — plan Free conservé, DÉCISION documentée dans docs/DEPLOIEMENT.md § 7 :
     # l'écran d'attente honnête (« Le serveur se réveille, ~1 min ») remplace le correctif technique.
     # L'option payante reste isolée ici, sans effet tant que le plan n'est pas changé : passer au plan
-    # Starter (~7 $/mois, 512 Mo, 0,5 CPU, toujours allumé — prix vérifié le 11/11/2026, voir
+    # Starter (~7 $/mois, indicatif — à confirmer dans le dashboard avant tout achat, voir
     # docs/DEPLOIEMENT.md § 7) = changer `plan: free` ci-dessous en `plan: starter` (dashboard Render,
     # moyen de paiement requis) — NE PAS le faire sans décision explicite. Le keep-alive (ping régulier
     # pour empêcher la veille) est ÉCARTÉ : il consommerait les 750 h gratuites partagées et n'est pas

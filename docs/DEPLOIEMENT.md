@@ -322,28 +322,42 @@ minute »). **Le parcours < 30 s à froid reste donc impossible** : le premier c
 froid — il l'explique honnêtement. C'est une décision explicite, pas un correctif technique manqué :
 le seul correctif certain est le plan payant (§ 7.3).
 
+**Limite architecturale (revue Codex P0-U6, point 1 — à ne pas sur-vendre).** Pendant le réveil,
+c'est Render qui affiche **sa propre page de chargement** au navigateur (« Render displays a loading
+page to connecting browsers while a service is spinning up », même doc) : cet écran-ci, servi par
+notre serveur (`server/app.ts`), n'arrive qu'une fois le serveur réveillé. Il n'accompagne donc pas
+le réveil lui-même — il explique un chargement lent une fois le serveur répondu (fin de réveil, JS
+lent, réseau lent). Pour afficher une explication **pendant** le réveil, il faudrait une page servie
+indépendamment du service endormi (hébergement statique séparé) — hors périmètre de ce lot, non
+décidé. Le parcours à froid réel (page Render puis écran applicatif) reste à observer sur le staging.
+
 ### 7.2 Ce qui est livré : écran d'attente honnête
 
 - `index.html` : après 6 s sans JS, le message « Connexion lente : merci de patienter quelques
-  secondes » est remplacé par « Toujours rien après quelques secondes ? Le serveur se réveille —
-  environ 1 minute la première fois, merci de patienter. » Une barre de progression figurée
-  (`src/chargement.css`, 60 s) accompagne le message ; après 2 minutes, un second message propose
-  de recharger la page (au-delà, ce n'est plus un réveil normal).
-- **Honnêteté de la barre** : sans JS, on ne peut pas mesurer le réveil — la barre figure une
-  progression typique de 60 s (la durée documentée par Render), elle ne mesure rien. Le texte ne
-  promet plus « quelques secondes ». Quand le serveur est déjà éveillé, le JS charge en quelques
-  secondes et React remplace l'écran avant l'apparition du message (délai 6 s).
-- Mouvement réduit (`prefers-reduced-motion`) : la barre animée est masquée, le texte reste.
+  secondes » est remplacé par une formulation conditionnelle — « Le chargement prend plus de temps
+  que prévu. Après une période sans visite, le serveur peut mettre environ 1 minute à se réveiller
+  — merci de patienter. » — qui n'affirme pas la cause (un réseau lent ou un JS en échec déclenchent
+  le même message) et ne dit plus « la première fois » (le réveil se reproduit après chaque
+  période d'inactivité). Une barre de progression **indéterminée** (`src/chargement.css`, segment
+  magenta qui va et vient) accompagne le message : elle signale l'attente, elle ne mesure rien —
+  une barre déterminée de 60 s atteindrait 100 % même si le chargement reste bloqué. Après
+  2 minutes, un second message propose de recharger la page (au-delà, ce n'est plus un réveil normal).
 
 ### 7.3 L'option payante (isolée, non achetée)
 
-- **Prix vérifié le 11/11/2026 : plan Starter, 7 $/mois** (512 Mo, 0,5 CPU, service toujours
-  allumé, sans veille). Provenance : page `render.com/pricing` consultée le 11/11/2026 (page à
-  rendu JS — le tableau des tarifs n'était pas lisible en lecture texte), corroborée par plusieurs
-  sources tierces concordantes le même jour et par la vérification déjà consignée dans ce document
-  (§ 1, « passer un service en Starter (7 $/mois) », 11/11/2026). Le comportement de veille
-  (15 min, ~1 min de réveil, 750 h gratuites) vient lui de la doc officielle `render.com/docs/free`,
-  lue en texte intégral le 11/11/2026.
+- **Prix indicatif (revue Codex P0-U6, point 4) : plan Starter, environ 7 $/mois** (512 Mo,
+  0,5 CPU, service toujours allumé, sans veille). Provenance, dite honnêtement : la page
+  `render.com/pricing` consultée le 11/11/2026 est à rendu JS — son tableau des tarifs n'était pas
+  lisible en lecture texte (la même limite a été constatée par la revue Codex) — le montant n'est
+  donc **pas prouvé par une source officielle lisible** ; il est corroboré par plusieurs sources
+  tierces concordantes consultées le 11/11/2026 — `kuberns.com/blogs/render-pricing/` (« Always-on
+  Starter web service costs $7 per month »), `budgetforge.dev/tools/render-pricing-2026` (Starter
+  7 $/mois), `cloudpicked.com/render-review-en.html` (Starter 7 $), `agentdeals.dev/hosting-pricing`
+  (Starter 7 $/mois) et `bex.co/blog/2026/09/20/free-tier-dead-2026-zero-to-free-side-project-paas`
+  (Starter $7/month) — et par la vérification déjà consignée dans ce document (§ 1, 11/11/2026).
+  **À confirmer dans le dashboard Render avant tout achat.** Le comportement de veille (15 min,
+  ~1 min de réveil, 750 h gratuites), lui, vient de la doc officielle `render.com/docs/free`, lue
+  en texte intégral le 11/11/2026.
 - **Comment l'activer (le jour où la décision est prise)** : dashboard Render → service
   `asian-home-fidelite` → changer le plan Free en Starter (moyen de paiement requis) — ou changer
   `plan: free` en `plan: starter` dans `render.yaml` (commentaire P0-U6 au-dessus du service de
@@ -360,12 +374,15 @@ Un ping régulier (toutes les < 15 min) pour empêcher la veille n'est pas reten
 
 1. **Il consomme le quota partagé.** Render accorde 750 h gratuites par mois et par espace de
    travail, tous services gratuits réunis ; un service éveillé ne consomme pas d'heures en veille,
-   mais un service maintenu éveillé en consomme en continu (~744 h/mois). Production + staging
-   maintenus éveillés = ~1 488 h/mois, soit près du double du quota : Render **suspendrait tous
-   les services Free de l'espace jusqu'au mois suivant, production comprise** (doc officielle,
-   § 1). Même la production seule (~744 h) ne laisserait presque rien pour le staging.
+   mais un service maintenu éveillé en consomme en continu (~744 h pour un mois de 31 jours,
+   720 h pour un mois de 30 jours comme novembre). Production + staging maintenus éveillés =
+   ~1 488 h/mois pour un mois de 31 jours (1 440 h pour un mois de 30 jours), soit près du double
+   du quota : Render **suspendrait tous les services Free de l'espace jusqu'au mois suivant,
+   production comprise** (doc officielle, § 1). Même la production seule (~744 h) ne laisserait
+   presque rien pour le staging.
 2. **Il n'est pas garanti.** Render peut redémarrer un service Free à tout moment (doc officielle)
-   — un redémarrage = un réveil de ~1 min quand même, ping ou pas. Le keep-alive achète une
+   — le ping ne garantit donc pas une disponibilité continue ; la durée « environ 1 minute » est
+   documentée pour la sortie de veille, pas pour un redémarrage. Le keep-alive achète une
    probabilité, pas une disponibilité.
 3. **Il ne résout pas la cause.** La veille est le prix du plan gratuit ; la seule suppression
    certaine de la veille est le plan payant (§ 7.3).
@@ -374,11 +391,11 @@ Un ping régulier (toutes les < 15 min) pour empêcher la veille n'est pas reten
 
 - **Aucune mesure à froid réelle dans ce lot.** Pas de navigateur sur cette VM pour charger la page
   d'un service endormi, et la production n'a pas été touchée (ni réveil forcé, ni mesure). La durée
-  « environ 1 minute » est la durée documentée par Render (§ 7.1), pas une mesure locale ; la
-  durée de la barre CSS (60 s) en découle, et un test vérifie cette durée
-  (`tests/reveil-render-p0-u6.test.ts`).
+  « environ 1 minute » est la durée documentée par Render (§ 7.1), pas une mesure locale ; la barre
+  est désormais indéterminée (§ 7.2) et ne prétend plus figurer 60 s.
 - **Mesure simulée locale, non retenue comme preuve** : un démarrage local du serveur ne simule
   pas le réveil Render (pas de veille, pas de cold start d'instance) — il n'a donc pas été
   présenté comme une mesure avant/après. La mesure à froid réelle reste à faire : laisser le
   staging s'endormir (> 15 min sans trafic), puis chronométrer le premier chargement sur
-  téléphone — protocole à consigner dans SCORES.md quand il sera exécuté.
+  téléphone — en notant séparément la page de chargement Render (pendant le réveil) puis l'écran
+  applicatif — protocole à consigner dans SCORES.md quand il sera exécuté.
