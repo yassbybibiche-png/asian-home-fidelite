@@ -46,6 +46,7 @@ import {
   chiffrerJetons,
   dechiffrerJetons,
   echangerCode,
+  emplacementAImporter,
   emplacementValide,
   ErreurGoogle,
   googleBusinessConfigure,
@@ -3340,8 +3341,10 @@ export async function creerServeur(o: OptionsServeur) {
       // seulement si la règle est active ; tout le reste attend une validation manuelle.
       const auteur = await exigerCommercant(req, id)
       const g = exigerGoogle()
+      // GOOGLE_BUSINESS_LOCATION mal renseignée → 409 explicite AVANT tout appel à Google (même le
+      // rafraîchissement du jeton) ; sinon fiche mémorisée, sinon recherche parmi les fiches du compte.
+      let emplacement = emplacementAImporter(g.emplacement, (await lireJetonsGoogle(g, id))?.emplacement)
       let jetons = await accesGoogle(g, id)
-      let emplacement = emplacementValide(g.emplacement) ? g.emplacement : jetons.emplacement
       if (!emplacementValide(emplacement)) {
         emplacement = await trouverEmplacement(fetchGoogle, jetons.accessToken, placeIdDuLien(commerce.lienGoogle))
         jetons = { ...jetons, emplacement }

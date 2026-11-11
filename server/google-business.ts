@@ -225,8 +225,22 @@ export interface AvisGoogleBrut {
 
 const PAGES_MAX = 40
 
+/**
+ * Réponse Google : 4 096 OCTETS au plus (limite de l'API Business Profile, référence Google
+ * `ReviewReply.comment` — vérifié le 11/11/2026, pas des caractères : `'漢'.repeat(1400)` = 4 200 octets).
+ * L'app plafonne ses réponses à 2 000 caractères (route PATCH avis) : une réponse de 2 000 caractères
+ * multi-octets peut quand même dépasser 4 096 octets, d'où ce contrôle en octets ici.
+ */
+export const TAILLE_MAX_REPONSE_GOOGLE_OCTETS = 4096
+/** Segments d'identifiant Google : lettres, chiffres, `.`, `_`, `-` — jamais `?`, `#`, `/` ni `.` / `..` (navigation). */
+const SEGMENT_ID = String.raw`[A-Za-z0-9][A-Za-z0-9._-]*`
+const NOM_AVIS_GOOGLE = new RegExp(`^accounts/${SEGMENT_ID}/locations/${SEGMENT_ID}/reviews/${SEGMENT_ID}$`)
+
 /** Tous les avis d'une fiche (pages de 50, au plus 2 000 avis). */
 export async function listerAvisGoogle(f: typeof fetch, accessToken: string, emplacement: string): Promise<AvisGoogleBrut[]> {
+  if (!emplacementValide(emplacement)) {
+    throw new ErreurGoogle(409, `Fiche Google invalide « ${emplacement} » : attendue « accounts/…/locations/… » (GOOGLE_BUSINESS_LOCATION, voir docs/GOOGLE-BUSINESS.md étape 6).`)
+  }
   const tous: AvisGoogleBrut[] = []
   let page: string | undefined
   for (let i = 0; i < PAGES_MAX; i++) {
@@ -249,7 +263,7 @@ export function placeIdDuLien(lien: string): string | undefined {
   }
 }
 
-const EMPLACEMENT = /^accounts\/[^/\s]+\/locations\/[^/\s]+$/
+const EMPLACEMENT = new RegExp(`^accounts/${SEGMENT_ID}/locations/${SEGMENT_ID}$`)
 
 /**
  * Fiche à utiliser : GOOGLE_BUSINESS_LOCATION si renseignée ; sinon parmi les fiches des comptes accessibles, celle dont
@@ -279,8 +293,33 @@ export function emplacementValide(e: string | undefined): e is string {
   return !!e && EMPLACEMENT.test(e)
 }
 
+/**
+ * Fiche à utiliser pour l'import : `GOOGLE_BUSINESS_LOCATION` si renseignée (sinon 409 explicite quand elle est
+ * mal renseignée — jamais ignorée silencieusement), sinon la fiche mémorisée à la connexion, sinon `undefined`
+ * (l'appelant cherche alors la fiche parmi celles du compte).
+ */
+export function emplacementAImporter(emplacementConfigure: string | undefined, emplacementStocke: string | undefined): string | undefined {
+  if (emplacementConfigure !== undefined) {
+    if (!emplacementValide(emplacementConfigure)) {
+      throw new ErreurGoogle(409, `GOOGLE_BUSINESS_LOCATION mal renseignée : « ${emplacementConfigure} » — attendue « accounts/…/locations/… » (voir docs/GOOGLE-BUSINESS.md étape 6).`)
+    }
+    return emplacementConfigure
+  }
+  return emplacementValide(emplacementStocke) ? emplacementStocke : undefined
+}
+
 /** Publie (ou remplace) la réponse du propriétaire à un avis. `nomAvis` = `accounts/…/locations/…/reviews/…`. */
 export async function publierReponseGoogle(f: typeof fetch, accessToken: string, nomAvis: string, commentaire: string): Promise<{ updateTime?: string }> {
+  // Garde-fous avant tout appel à Google : une réponse vide ou trop longue serait refusée par l'API (502 opaque) ;
+  // un identifiant d'avis mal formé aussi. Erreur explicite, aucun appel réseau.
+  if (!NOM_AVIS_GOOGLE.test(nomAvis)) {
+    throw new ErreurGoogle(400, `Identifiant d’avis Google invalide « ${nomAvis} » : attendu « accounts/…/locations/…/reviews/… ».`)
+  }
+  if (!commentaire.trim()) throw new ErreurGoogle(400, 'Réponse vide : rédigez et validez d’abord une réponse avant de la publier sur Google.')
+  const octets = Buffer.byteLength(commentaire, 'utf8')
+  if (octets > TAILLE_MAX_REPONSE_GOOGLE_OCTETS) {
+    throw new ErreurGoogle(400, `Réponse trop longue (${octets} octets) : Google accepte au plus ${TAILLE_MAX_REPONSE_GOOGLE_OCTETS} octets.`)
+  }
   return appelApi<{ updateTime?: string }>(f, accessToken, `${URL_AVIS}/${nomAvis}/reply`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

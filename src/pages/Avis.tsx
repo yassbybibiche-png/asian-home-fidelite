@@ -395,7 +395,8 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
           <label className="sr-only" htmlFor={`rep-${a.id}`}>
             Réponse à {a.auteur}
           </label>
-          <textarea id={`rep-${a.id}`} className="champ min-h-32" value={texte} onChange={(e) => setTexte(e.target.value)} />
+          {/* Réponses plafonnées à 2 000 caractères côté serveur (route PATCH avis) ; Google accepte 4 096. */}
+          <textarea id={`rep-${a.id}`} className="champ min-h-32" maxLength={2000} value={texte} onChange={(e) => setTexte(e.target.value)} />
           <MessageErreur>{erreur && `Non enregistré : ${erreur}`}</MessageErreur>
           <div className="grid grid-cols-2 gap-2">
             <button
