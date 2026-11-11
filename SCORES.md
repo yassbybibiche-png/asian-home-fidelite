@@ -123,14 +123,14 @@ ses imports statiques (méthode `fichiersInitiaux` de
 
 ## Couverture de tests
 
-Suite verte : **1032/1032** (`npm test`, typechecks inclus — 1027 avant P1-U1, +5 tests
-de cohérence de la mesure, `tests/mesure-p1-u1.test.ts`).
+Suite verte : **1044/1044** (`npm test`, typechecks inclus — 1032 avant P1-C7, +12 tests
+`tests/ecrans-commercant-p1-c7.test.ts`).
 
-- Couverture globale : 97,89 % lignes / 91,48 % branches / 93,06 % fonctions
+- Couverture globale : 97,90 % lignes / 91,49 % branches / 93,06 % fonctions
   (`node --test --experimental-test-coverage`, suite verte, 11/11/2026 —
-  était 97,84 % / 91,43 % / 92,92 % après P1-D2).
+  était 97,89 % / 91,48 % / 93,06 % après P1-U1).
 - Fichiers les plus faibles : `pwa.ts` 55,00 %, `router.ts` 83,52 %, `points.ts` 83,75 %
-  (inchangés depuis P1-D2).
+  (inchangés) ; `ecransCommercant.ts` 100,00 % lignes / branches / fonctions.
 
 ## Erreurs console
 

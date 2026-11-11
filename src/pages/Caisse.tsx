@@ -632,7 +632,8 @@ function Comptoir({
     if (!d) return
     if (d.type === 'echange') void agir('echange', { recompenseId: d.recompense.id })
     else if (d.type === 'attente') void agir('attente', { recompenseId: d.attente.id })
-    else void agir(d.type)
+    // 'consentement' et 'rattrapage-refus' n'existent que sur la fiche client, jamais ici.
+    else if (d.type === 'recompense' || d.type === 'reserve') void agir(d.type)
   }
 
   const statut = libelleFile(etatFile, enLigne)

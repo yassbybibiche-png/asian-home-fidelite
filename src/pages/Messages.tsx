@@ -4,7 +4,8 @@ import type { MessageCommercant } from '../data/api'
 import { CIBLES, clientsCibles, texteCible, TYPES_MESSAGES, type Cible } from '../lib/messages'
 import { etatRelances, MENTION_ENVOI } from '../lib/integrations'
 import { libelleModele, libelleStatutEnvoi } from '../lib/relances'
-import { texteEtContacts } from '../lib/ecransCommercant'
+import { texteEtContacts, type Recapitulatif } from '../lib/ecransCommercant'
+import { Confirmation } from '../components/Confirmation'
 import { dateRelative } from '../lib/format'
 import type { EnvoiRelance } from '../types'
 import { BoutonCopier, EnTete, MessageErreur, Vide } from '../components/ui'
@@ -117,6 +118,7 @@ export default function Messages() {
   const [texte, setTexte] = useState(() => texteCible('inactifs', commerce))
   const { executer, enCours, erreur } = useAction()
   const [annonce, setAnnonce] = useState('')
+  const [demande, setDemande] = useState(false)
   const [recents, setRecents] = useState<MessageCommercant[] | null>(null)
   const [erreurListe, setErreurListe] = useState<string | null>(null)
   const cibles = clientsCibles(clients, commerce, cible, new Date())
@@ -145,12 +147,22 @@ export default function Messages() {
   }
 
   async function deposer() {
-    if (!window.confirm(`Déposer ce message dans l’espace client de ${cibles.length} client(s) ?`)) return
+    setDemande(false)
     const r = await executer(() => avecPin((a, api) => api.envoyerMessage(commerce.id, a, cible, texte.trim())))
     if (r.ok) {
       setAnnonce(`✓ Message déposé dans l’espace client de ${r.valeur} client(s) : ils le verront à la prochaine ouverture de leur carte.`)
       chargerRecents()
     }
+  }
+
+  const recapDepot: Recapitulatif = {
+    titre: 'Déposer ce message ?',
+    lignes: [
+      ['Destinataires', `${cibles.length} client(s)`],
+      ['Cible', CIBLES.find((c) => c.cible === cible)!.libelle],
+    ],
+    confirmer: 'Déposer le message',
+    avertissement: 'Le message s’affichera dans l’espace client des clients visés.',
   }
 
   const contacts = cibles.map((c) => c.telephone ?? c.email ?? '')
@@ -212,9 +224,10 @@ export default function Messages() {
           Rien n’est envoyé par SMS ni par e-mail depuis cet écran : sans les clés des prestataires configurées sur le serveur, SMS et e-mail ne sont pas branchés. Collez
           le texte dans votre messagerie et envoyez-le vous-même.
         </p>
-        <button className="bouton w-full" disabled={enCours || !texte.trim() || !cibles.length} onClick={() => void deposer()}>
+        <button className="bouton w-full" disabled={enCours || !texte.trim() || !cibles.length} onClick={() => setDemande(true)}>
           {enCours ? 'Dépôt…' : 'Déposer dans l’espace client'}
         </button>
+        {demande && <Confirmation recap={recapDepot} enCours={enCours} onConfirmer={() => void deposer()} onAnnuler={() => setDemande(false)} />}
         <MessageErreur>{erreur}</MessageErreur>
         {annonce && (
           <p className="alerte-succes" role="status">
