@@ -325,11 +325,42 @@ export function parrainageDu(
   if (!cfg.actif || filleul.parrainId !== parrain.id || filleul.parrainagePaye || filleul.visites.length !== 1) return null
   const filleulApres: Client = { ...filleul, parrainagePaye: true, points: soldePoints(filleul) + cfg.pointsFilleul }
   if (parrainagesAnnee(parrain, quand) >= cfg.plafondAn) return { filleul: filleulApres, parrain: null, parrainAuPlafond: true }
+  return { filleul: filleulApres, parrain: parrainCredite(parrain, filleul.id, cfg.pointsParrain, quand), parrainAuPlafond: false }
+}
+
+/** Parrain crédité pour ce filleul : points, date (plafond annuel) et marqueur `filleulsRegles`, dans le même objet. */
+function parrainCredite(parrain: Client, filleulId: string, points: number, quand: Date): Client {
   return {
-    filleul: filleulApres,
-    parrain: { ...parrain, points: soldePoints(parrain) + cfg.pointsParrain, parrainagesGagnes: [...(parrain.parrainagesGagnes ?? []), quand.toISOString()] },
-    parrainAuPlafond: false,
+    ...parrain,
+    points: soldePoints(parrain) + points,
+    parrainagesGagnes: [...(parrain.parrainagesGagnes ?? []), quand.toISOString()],
+    filleulsRegles: [...(parrain.filleulsRegles ?? []).filter((id) => id !== filleulId), filleulId],
   }
+}
+
+/** Le marqueur du parrain dit que le crédit de ce filleul a déjà été versé (point Codex 2). */
+export function filleulRegle(parrain: Client, filleulId: string): boolean {
+  return (parrain.filleulsRegles ?? []).includes(filleulId)
+}
+
+/**
+ * Reprise du crédit du parrain (point Codex 2) : le filleul est déjà payé (ses points sont sur sa carte) mais le
+ * marqueur du parrain ne le contient pas. Mêmes conditions que `parrainageDu` sans exiger « pas encore payé » ni
+ * « exactement 1 visite » (la reprise peut venir d'un passage suivant) : programme actif, bon parrain, filleul payé
+ * avec au moins une visite. Plafond recalculé sur `parrain` (à passer FRAIS). null = rien en attente côté marqueur ;
+ * l'appelant vérifie en plus la trace d'audit (voir `reglerParrainage`, server/app.ts).
+ */
+export function repriseParrainageDue(
+  filleul: Client,
+  parrain: Client,
+  commerce: Commerce,
+  quand: Date,
+): { parrain: Client | null; parrainAuPlafond: boolean } | null {
+  const cfg = configParrainage(commerce)
+  if (!cfg.actif || filleul.parrainId !== parrain.id || !filleul.parrainagePaye || !filleul.visites.length) return null
+  if (filleulRegle(parrain, filleul.id)) return null
+  if (parrainagesAnnee(parrain, quand) >= cfg.plafondAn) return { parrain: null, parrainAuPlafond: true }
+  return { parrain: parrainCredite(parrain, filleul.id, cfg.pointsParrain, quand), parrainAuPlafond: false }
 }
 
 // ---------- 3. Points de bienvenue + inscription ----------

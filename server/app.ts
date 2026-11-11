@@ -22,13 +22,16 @@ import { correspondRecherche } from '../src/lib/recherche.ts'
 import {
   appliquerInscription,
   appliquerRattrapageValide,
+  configParrainage,
   consommerRecompenseEnAttente,
+  filleulRegle,
   genererCodeParrainage,
   niveauClient,
   parrainageDu,
   passageAvecProgramme,
   peutCompleterProfil,
   rattrapageRecevable,
+  repriseParrainageDue,
   utiliserReserve,
   validerProgramme,
   type EvenementPassage,
@@ -776,7 +779,8 @@ function contactOuErreur(v: unknown) {
 /** Carte vue par le client lui-même (page publique) : sans téléphone, e-mail ni données techniques. */
 function cartePublique(c: Client) {
   // Messages privés (P1-C4) : destinés au commerce seul, jamais renvoyés sur le lien de la carte.
-  const { telephone: _t, email: _e, actionsTraitees: _a, clesMessages: _k, messagesPrives: _p, ...reste } = c
+  // `filleulsRegles` (point Codex 2) : ids d'autres clients, donnée technique du règlement de parrainage.
+  const { telephone: _t, email: _e, actionsTraitees: _a, clesMessages: _k, messagesPrives: _p, filleulsRegles: _f, ...reste } = c
   return reste
 }
 
@@ -2127,9 +2131,10 @@ export async function creerServeur(o: OptionsServeur) {
    */
   async function reglerParrainage(commerce: Commerce, filleulApres: Client, quand: Date): Promise<{ filleul: Client; texte: string; ecrire: () => Promise<string> }> {
     const rien = { filleul: filleulApres, texte: '', ecrire: async () => '' }
-    if (!filleulApres.parrainId || filleulApres.parrainagePaye) return rien
+    if (!filleulApres.parrainId) return rien
     const parrain = await st.client(commerce.id, filleulApres.parrainId)
     if (!parrain) return rien
+    if (filleulApres.parrainagePaye) return reprendreParrainage(commerce, filleulApres, parrain, quand)
     const r = parrainageDu(filleulApres, parrain, commerce, quand)
     if (!r) return rien
     const pointsFilleul = soldePoints(r.filleul) - soldePoints(filleulApres)
@@ -2150,6 +2155,9 @@ export async function creerServeur(o: OptionsServeur) {
           // relu frais (st.client mémorise sa nouvelle version), recalculé, réécrit UNE fois. Un 2e conflit remonte.
           if (!(e instanceof ErreurConflit)) throw e
           const frais = await st.client(commerce.id, parrain.id)
+          // Point Codex 2 : une reprise concurrente (rejeu de caisse) a pu créditer ce filleul entre-temps — son marqueur
+          // le dit, ne rien recréditer ni retracer.
+          if (frais && filleulRegle(frais, filleulApres.id)) return ''
           const r2 = frais ? parrainageDu(filleulApres, frais, commerce, quand) : null
           if (!frais || !r2) throw e
           parrainCredite = r2.parrain
@@ -2176,6 +2184,71 @@ export async function creerServeur(o: OptionsServeur) {
       return texteJournal
     }
     return { filleul: r.filleul, texte, ecrire }
+  }
+
+  /**
+   * Reprise d'un règlement de parrainage interrompu (point Codex 2). Sous Supabase, pas de transaction multi-requêtes :
+   * le filleul est écrit payé (`parrainagePaye`, ses points) PUIS le parrain, PUIS la trace `parrainages`. Une panne
+   * (non-conflit) sur le parrain laissait le filleul payé et le parrain sans rien, pour toujours. Ici, un filleul déjà
+   * payé dont le règlement n'est pas terminé est repris : on crédite le parrain seul (le filleul n'est pas retouché).
+   *
+   * « Terminé » se lit dans les données existantes, sans migration, avec des signes qui ne peuvent pas mentir :
+   * 1. le marqueur `filleulsRegles` du parrain contient le filleul — écrit dans la même ligne que ses points, donc
+   *    atomique : présent = crédit versé (dossiers d'après ce correctif) ;
+   * 2. la trace `parrainages` du filleul existe — écrite en DERNIER dans le chemin normal : présente = règlement allé
+   *    jusqu'au bout, y compris pour les dossiers d'avant le marqueur et pour un parrain au plafond (trace à 0 point) ;
+   * 3. garde-fou pour les très anciens dossiers : avant P0-S11 la trace était ignorée si la migration 0004 manquait.
+   *    Un parrain crédité alors porte dans `parrainagesGagnes` la date exacte du passage du filleul (même `quand`) :
+   *    si une date de visite du filleul y figure, le crédit a été versé — ne pas recréditer.
+   * Reprise seulement si AUCUN signe n'est présent. Plafond recalculé sur l'état frais du parrain : au plafond, la trace
+   * est écrite à 0 point pour clore le dossier.
+   */
+  async function reprendreParrainage(commerce: Commerce, filleul: Client, parrain: Client, quand: Date): Promise<{ filleul: Client; texte: string; ecrire: () => Promise<string> }> {
+    const rien = { filleul, texte: '', ecrire: async () => '' }
+    const r = repriseParrainageDue(filleul, parrain, commerce, quand)
+    if (!r) return rien
+    if (filleul.visites.some((v) => (parrain.parrainagesGagnes ?? []).includes(v))) return rien
+    if (await st.parrainageDuFilleul(commerce.id, filleul.id)) return rien
+    const texteReprise = (credite: Client | null, avant: Client) =>
+      credite
+        ? `Parrainage (reprise) : +${soldePoints(credite) - soldePoints(avant)} points pour ${avant.prenom} (parrain de ${filleul.prenom})`
+        : `Parrainage (reprise) : parrain au plafond annuel, rien pour ${avant.prenom} (parrain de ${filleul.prenom})`
+    const texte = texteReprise(r.parrain, parrain)
+    const ecrire = async (): Promise<string> => {
+      let parrainCredite = r.parrain
+      let points = r.parrain ? soldePoints(r.parrain) - soldePoints(parrain) : 0
+      let texteJournal = texte
+      if (parrainCredite) {
+        try {
+          await st.majClient(parrainCredite)
+        } catch (e) {
+          // Même reprise sur conflit que le chemin normal : relu frais, marqueur revérifié (un autre règlement a pu
+          // passer), recalculé, réécrit UNE fois.
+          if (!(e instanceof ErreurConflit)) throw e
+          const frais = await st.client(commerce.id, parrain.id)
+          if (frais && filleulRegle(frais, filleul.id)) return ''
+          const r2 = frais ? repriseParrainageDue(filleul, frais, commerce, quand) : null
+          if (!frais || !r2) throw e
+          parrainCredite = r2.parrain
+          points = r2.parrain ? soldePoints(r2.parrain) - soldePoints(frais) : 0
+          texteJournal = texteReprise(r2.parrain, frais)
+          if (parrainCredite) await st.majClient(parrainCredite)
+        }
+        if (parrainCredite) await journaliser(commerce.id, { type: 'gerant', nom: 'Gérant' }, 'parrainage', texteJournal, parrainCredite, quand)
+      }
+      const trace: Parrainage = {
+        id: `pr-${randomUUID()}`,
+        commerceId: commerce.id,
+        parrainId: parrain.id,
+        filleulId: filleul.id,
+        date: quand.toISOString(),
+        pointsParrain: points,
+        pointsFilleul: configParrainage(commerce).pointsFilleul,
+      }
+      await st.ajouterParrainage(trace)
+      return texteJournal
+    }
+    return { filleul, texte, ecrire }
   }
 
   /** Inscrit le client, ou retrouve celui qui a déjà ce téléphone / e-mail dans ce commerce. */
@@ -2896,7 +2969,14 @@ export async function creerServeur(o: OptionsServeur) {
       const resultat = await st.transaction(async () => {
         const avant = await clientOu404(id, clientId)
         // Idempotence : une action déjà reçue (file hors ligne rejouée, double tap) ne compte jamais deux fois.
-        if (actionDejaTraitee(avant, actionId)) return { client: avant, dejaTraite: true }
+        if (actionDejaTraitee(avant, actionId)) {
+          // Point Codex 2 : le passage d'origine a pu échouer APRÈS l'écriture du filleul (panne sur le parrain). Le rejeu
+          // termine le règlement en attente (parrain seul) ; le filleul et le journal du passage d'origine ne bougent pas.
+          // Seulement la reprise (filleul déjà payé) : jamais un 1er règlement, qui supposerait d'écrire le filleul.
+          const parrain = avant.parrainagePaye && avant.parrainId ? await st.client(id, avant.parrainId) : undefined
+          if (parrain) await (await reprendreParrainage(commerce, avant, parrain, maintenant())).ecrire()
+          return { client: avant, dejaTraite: true }
+        }
         // Date contrôlée après l'idempotence : une action déjà comptée, rejouée tard, répond « déjà traitée », pas 400.
         const quand = quandAction(corps.faitLe)
         let apres: Client

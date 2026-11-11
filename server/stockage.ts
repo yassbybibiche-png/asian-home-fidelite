@@ -130,6 +130,8 @@ export interface Stockage {
    * Supabase sans les tables lève ErreurMigrationManquante ; le serveur refuse de démarrer en Supabase sans la 0004.
    */
   ajouterParrainage(p: Parrainage): P<void>
+  /** Trace de parrainage de ce filleul, s'il y en a une (point Codex 2 : trace présente = règlement terminé). */
+  parrainageDuFilleul(commerceId: string, filleulId: string): P<Parrainage | undefined>
   ajouterDemandeRattrapage(d: DemandeRattrapageTrace): P<void>
   /** Tables de la migration 0004 présentes (toujours vrai sous SQLite). */
   schemaProgramme(): P<boolean>
@@ -326,6 +328,7 @@ export function ouvrirStockage(fichier: string) {
     menu: db.prepare('SELECT donnees FROM menus WHERE commerce_id = ?'),
     majMenu: db.prepare('INSERT INTO menus (commerce_id, donnees) VALUES (?, ?) ON CONFLICT (commerce_id) DO UPDATE SET donnees = excluded.donnees'),
     ajoutParrainage: db.prepare('INSERT INTO parrainages (id, commerce_id, parrain_id, filleul_id, date, donnees) VALUES (?, ?, ?, ?, ?, ?)'),
+    parrainageFilleul: db.prepare('SELECT donnees FROM parrainages WHERE commerce_id = ? AND filleul_id = ? LIMIT 1'),
     ajoutRattrapage: db.prepare('INSERT INTO demandes_rattrapage (id, commerce_id, client_id, date, donnees) VALUES (?, ?, ?, ?, ?)'),
     revoquerSession: db.prepare('INSERT INTO sessions_revoquees (jti, expire_le) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING'),
     purgerRevocations: db.prepare('DELETE FROM sessions_revoquees WHERE expire_le < ?'),
@@ -417,6 +420,7 @@ export function ouvrirStockage(fichier: string) {
     majMenu: (m: Menu) => void q.majMenu.run(m.commerceId, JSON.stringify(m)),
     schemaCartiz: () => true,
     ajouterParrainage: (p: Parrainage) => inserer(q.ajoutParrainage, p.id, p.commerceId, p.parrainId, p.filleulId, p.date, JSON.stringify(p)),
+    parrainageDuFilleul: (commerceId: string, filleulId: string) => lire<Parrainage>(q.parrainageFilleul.all(commerceId, filleulId))[0],
     ajouterDemandeRattrapage: (d: DemandeRattrapageTrace) => inserer(q.ajoutRattrapage, d.id, d.commerceId, d.clientId, d.date, JSON.stringify(d)),
     schemaProgramme: () => true,
     // Dates ISO UTC (`toISOString`) : l'ordre alphabétique est l'ordre chronologique.

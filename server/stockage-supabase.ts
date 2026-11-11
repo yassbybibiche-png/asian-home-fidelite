@@ -267,6 +267,8 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     // ---- Programme (0004_programme.sql) : traces d'audit. Sans la migration : ErreurMigrationManquante (P0-S11) ----
     ajouterParrainage: async (p: Parrainage) =>
       void (await ok('parrainages', sb.from('parrainages').insert({ id: p.id, commerce_id: p.commerceId, parrain_id: p.parrainId, filleul_id: p.filleulId, date: p.date, donnees: p }))),
+    parrainageDuFilleul: async (commerceId, filleulId) =>
+      (await lire<Parrainage>('parrainages', sb.from('parrainages').select('donnees').eq('commerce_id', commerceId).eq('filleul_id', filleulId).limit(1)))[0],
     ajouterDemandeRattrapage: async (d: DemandeRattrapageTrace) =>
       void (await ok('demandes_rattrapage', sb.from('demandes_rattrapage').insert({ id: d.id, commerce_id: d.commerceId, client_id: d.clientId, date: d.date, donnees: d }))),
     schemaProgramme: async () => {

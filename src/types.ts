@@ -406,6 +406,11 @@ export interface Client {
   parrainagePaye?: boolean
   /** Dates (ISO) des parrainages réussis de ce client (plafond annuel). */
   parrainagesGagnes?: string[]
+  /**
+   * Côté parrain (point Codex 2) : ids des filleuls dont le crédit a été versé, écrits dans le MÊME objet que les
+   * points (une seule ligne, donc atomique). Absent sur les parrains crédités avant ce marqueur.
+   */
+  filleulsRegles?: string[]
   /** Paliers déjà remis au comptoir (seuils). */
   paliersOfferts?: number[]
   /** Récompenses gagnées, à retirer au comptoir. */
