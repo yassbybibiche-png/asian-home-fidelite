@@ -19,6 +19,38 @@ bundle 601,7 → 450,2 Ko (JS initial), dashboard enrichi + entonnoir, SEO/OG.
 
 ## Boucle d'amélioration continue
 
+### t9 — Héros du menu recadré à la bande visible de la carte (11/11/2026, fusionné)
+
+Même fichier `public/visuels/table-sushis-petit.webp`, recadré : 720×1279,
+95 494 o → **720×590, 51 402 o** (recadrage centré à la bande visible de
+la carte 720×590, Pillow, WebP q75, −46 %) — le menu montre
+approximativement le centre 720×413 de cette bande à ~390 px, la carte
+approximativement la bande entière ; le rendu est très proche sur les deux
+pages (vérifié visuellement sur planche de comparaison des bandes avant
+le changement). Aucun changement de code (le `<picture>` du tour 4 sert
+le même fichier) ; seuls changent l'actif, son commentaire dans
+`src/lib/visuels.ts`, sa ligne dans `public/visuels/SOURCES.md`, et le
+test `tests/boucle-t4-hero.test.ts` (dimensions 720×1279 → 720×590,
+plafond < 120 Ko → < 60 Ko, « ~2× » → « ~4× plus léger » — mise à jour
+validée par la revue Codex t9, preuve dans `BOUCLE.md`).
+Mesures (ponctuelle, `scripts/mesurer-menu-asian-home.mjs`) : LCP `#/menu`
+Asian Home **2 540/2 492 → 2 324/2 252 ms (moyenne −228 ms, 2 passes sur 2)**
+— le héros WebP finit à 2 296/2 226 ms (était 2 510/2 454 ms), 51 702 o
+transférés (51 402 o sur disque : `transferSize` ajoute forfaitairement
+300 o) ; les 44 092 o économisés valent ~220 ms à 1,6 Mbit/s. LCP `#/jouer`
+1 684/1 704 → 1 648/1 672 ms (plat, attendu). Mesures standard (2 passes) :
+premier affichage 1 894/1 882 ms, LCP 1 872/1 832 ms, parcours 6 853/6 696 ms
+(plats) ; Lighthouse 78/86 (TBT 780/490 ms) contre 80/81 à t7 (plat — le 86
+est la meilleure passe observée depuis t0). Bundle : IDENTIQUE à t6
+(453 667 o — actif seul, aucun JS) ; 0 erreur console. Tests 1184/1184
+(inchangés), E2E 3/3. Revue Codex t9 (5 points) : fusion favorable après
+corrections documentaires (« bande entière / identique » →
+« approximativement, à cette largeur », « via `<picture>` sur le menu ») ;
+un habitué peut conserver l'ancienne variante temporairement (SW + fraîcheur
+HTTP 1 h — sans régression visuelle significative) ; ensuite : DA si les
+irritants sont identifiés, TBT si une tâche précise devient attribuable,
+photos paresseuses en levier secondaire. Compteur de tours sans gain : **0**.
+
 ### t7 — Bannière de la carte recadrée au ratio d'affichage (11/11/2026, fusionné)
 
 Même fichier `public/visuels/hero-plats-petit.webp`, recadré : 720×480,

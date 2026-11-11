@@ -4,9 +4,9 @@
 // du menu est à 3 376–3 428 ms (mesure ponctuelle, commerce « Asian Home Paris »,
 // `node_modules/.cache/profil-t4/mesurer-menu-asian-home.mjs` — le protocole standard
 // utilise un commerce générique, sans visuels : le héros n'y apparaît pas).
-// `table-sushis-petit.webp` (720×1279, WebP q75, ~95 Ko, dérivé de la vraie photo) est
-// servi en premier via `<picture>` (repli JPEG inchangé, navigateurs sans WebP) sur le
-// menu ET sur la carte (même visuel, même motif) ; `table-sushis.jpg` reste intact
+// `table-sushis-petit.webp` (720×590, WebP q75, ~51 Ko, dérivé de la vraie photo,
+// recadré à la bande visible de la carte — boucle t9) est servi en premier via
+// `<picture>` sur le menu ET sur la carte (même visuel, même motif) ; `table-sushis.jpg` reste intact
 // partout (repli, OG, SOURCES.md). Le test P1-C5 (`menu-client-p1-c5.test.ts`) continue
 // de passer sans modification : il lit la balise `<img>` de repli (seule image sans
 // `loading="lazy"`, src `VISUELS.tableSushis`).
@@ -19,7 +19,7 @@ const RACINE = join(import.meta.dirname, '..')
 const lire = (chemin: string) => readFileSync(join(RACINE, chemin), 'utf8')
 
 describe('Boucle t4 : héros du menu optimisé', () => {
-  test('table-sushis-petit.webp : WebP valide 720 px de large, ~2× plus léger que table-sushis.jpg', () => {
+  test('table-sushis-petit.webp : WebP valide 720×590, ~4× plus léger que table-sushis.jpg', () => {
     const chemin = join(RACINE, 'public', 'visuels', 'table-sushis-petit.webp')
     assert.ok(existsSync(chemin), 'public/visuels/table-sushis-petit.webp introuvable')
     const octets = readFileSync(chemin)
@@ -32,8 +32,8 @@ describe('Boucle t4 : héros du menu optimisé', () => {
     const largeur = octets.readUInt16LE(26) & 0x3fff
     const hauteur = octets.readUInt16LE(28) & 0x3fff
     assert.equal(largeur, 720)
-    assert.equal(hauteur, 1279)
-    assert.ok(octets.length < 120_000, `table-sushis-petit.webp : ${octets.length} o (attendu < 120 Ko)`)
+    assert.equal(hauteur, 590)
+    assert.ok(octets.length < 60_000, `table-sushis-petit.webp : ${octets.length} o (attendu < 60 Ko)`)
     assert.ok(octets.length < statSync(join(RACINE, 'public', 'visuels', 'table-sushis.jpg')).size / 1.5, 'au moins 1,5× plus léger que table-sushis.jpg')
   })
 
