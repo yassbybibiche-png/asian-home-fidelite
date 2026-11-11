@@ -70,6 +70,9 @@ justification et mesure avant/après, vit dans `CHANGELOG.md`.
   contourner).
 - Réveil à froid Render ~60 s jamais mesuré ; aucun rendu réel 375/390 px vérifié
   sur téléphone.
+- Variante recadrée de la bannière de la carte (~720×180, ratio d'affichage
+  390×96) : l'`object-cover` jette beaucoup de pixels de la variante 720×480 —
+  candidat t7 (revue Codex t6, point 3).
 
 ## Regard neuf — tour 5 (11/11/2026, tous les 5 tours)
 
@@ -555,3 +558,78 @@ remplacées (même dossier).
 **Décision : FUSIONNÉ** (gain menu LCP −320 ms, 2/2 passes, bien au-delà
 du bruit ; `#/jouer` plat comme attendu ; standard et Lighthouse plats ;
 bundle +0,07 % ; 0 erreur). Tours sans gain consécutifs : **0**.
+
+### Tour 6 — `autonome/boucle-t6-banniere-carte` (fusionné)
+
+Sujet : la bannière de la carte (`hero-plats.jpg`, 1024×683, 177 369 o,
+affichée 390×96 en `object-cover`, `h-24`) partage le tuyau 4G avec le
+héros de la carte (`table-sushis-petit.webp`, élément LCP de `#/carte`).
+Changement : nouveau `public/visuels/hero-plats-petit.webp` (720×480,
+WebP q75, 75 588 o, Pillow, −57 %) servi en premier via `<picture
+className="block">` dans `CarteFidelite.tsx`, le JPEG restant le repli ;
+le `<source>` WebP n'est rendu que si `banniere === VISUELS.heroPlats`
+(bannière par défaut) — une bannière configurée par le commerçant garde
+sa balise `<img>` simple (le `<picture>` reste, sans `<source>`) ;
+constante `VISUELS.heroPlatsPetit` dans `src/lib/visuels.ts` ; documenté
+dans `public/visuels/SOURCES.md`. `hero-plats.jpg` reste intact partout.
+Mesure ponctuelle (nouveau script versionné
+`scripts/mesurer-carte-asian-home.mjs`, commerce « Asian Home Paris »,
+parcours complet, Pixel 7, Slow 4G + CPU ×4, SW bloqués, cache désactivé,
+navigateur relancé par passe) : deux mesures — (1) la transition réelle
+(clic « Voir ma carte » depuis `#/jouer` → héros et bannière
+chargés/décodés/affichés, `currentSrc` relevé) ; (2) le chargement direct
+(nouvelle page du même contexte, jeton dans le localStorage) pour le LCP
+classique (le LCP d'une navigation par hash n'est pas mesurable — comme
+pour `#/menu` dans le protocole standard, où le LCP par hash est null).
+Première version du script : LCP par hash null (attendu, cf. standard) +
+crash en passe 2 (même téléphone deux fois sur le même commerce : la
+seconde inscription ne repasse pas par `[data-attente="en-cours"]`) +
+`href` lu après le clic (le lien n'existe plus une fois sur la carte) —
+corrigés : téléphone différent par passe, `href` lu avant le clic,
+mesure directe dans une nouvelle page du même contexte.
+**Avant** (ABAB, `git stash -u` des fichiers du tour, rebuild) :
+transition — héros 1 531 / 1 604 ms (moyenne 1 568 ms), bannière 1 919 /
+1 921 ms (moyenne 1 920 ms), `currentSrc` = `hero-plats.jpg` ; LCP
+direct 3 464 / 3 308 ms et 3 432 / 3 192 ms (moyenne des 4 passes
+3 349 ms, élément `img.h-80` = le héros, pas la bannière) ; bannière JPEG
+2 226 → 3 775 ms (177 669 o).
+**Après** (3 runs, 6 passes) : transition — héros 1 432 / 1 365 ms puis
+1 375 / 1 345 ms (moyenne ~1 379 ms, **−~190 ms**), bannière 1 439 /
+1 372 ms puis 1 382 / 1 351 ms (moyenne ~1 386 ms, **−~530 ms**),
+`currentSrc` = `hero-plats-petit.webp` ; LCP direct 3 208 / 3 092 ms,
+3 220 / 3 208 ms, 3 204 / 3 224 ms (moyenne des 6 passes ~3 176 ms,
+**−~170 ms**) ; chargement direct 2 503 / 2 284 ms puis 2 425 / 2 409 ms
+puis 2 416 / 2 487 ms (était 2 656 / 2 480 ms et 2 658 / 2 404 ms).
+Le gain se transpose donc au parcours réel (transition par hash), pas
+seulement au chargement direct — c'est le point que la revue Codex t6
+demandait de démontrer (point 2, levé par l'ABAB).
+Mesures standard (2 passes) : premier affichage `#/jouer` 1 881 / 1 817 ms ;
+LCP 1 868 / 1 800 ms ; parcours 6 396 / 6 577 ms ; ouverture carte 513 / 602 ms ;
+menu direct 1 618 / 1 681 ms ; 0 erreur console, 0 requête échouée.
+Lighthouse t6 : 78 / 79 (TBT 740 / 770 ms, LCP 2,7 / 2,4 s) contre 78/80 à t5
+— plat. Bundle : JS initial 453 485 → 453 667 o (+182 o, +0,04 %),
+CSS 70 766 o inchangé, total 524 251 → 524 433 o, 24 chunks.
+Tests : suite complète **1184/1184** (1180 + 3 `tests/boucle-t6-banniere.test.ts`
++ 1 test auto : `tests/visuels.test.ts` génère un test par entrée `VISUELS`,
+et le tour ajoute `heroPlatsPetit`), 74 fichiers ; E2E 3/3.
+Revue Codex t6 (5 points) : 1. `<picture>` systématique fondé (zéro
+`<source>` autorisé, reset Tailwind : l'img est déjà en bloc) — **aucune
+correction** ; 2. mesure par chargement direct valable seulement pour le
+chargement direct — **corrigé par l'ABAB** : mesure de la transition réelle
+ajoutée (clic → héros/bannière affichés) + passes avant/après alternées
+(stash/rebuild) — le gain se transpose au parcours réel (héros −~190 ms,
+bannière −~530 ms) ; 3. 720 px q75 fondé (1,85 px source / px CSS) —
+**gardé** ; variante recadrée au ratio de la bannière (~720×180) **notée
+comme candidat t7** (l'`object-cover` jette beaucoup de pixels téléchargés) ;
+4. script partiellement fondé — **corrigé** : écouteurs d'erreurs ajoutés
+sur `pageCarte` (console/pageerror/requestfailed/HTTP ≥ 400) avant son
+`goto`, en-tête corrigé (transition réelle + chargement direct) ; 5. fusion
+justifiée, conclusion de performance limitée — **noté** : ~102 Ko économisés
+pour +182 o de JS ; aucun risque fonctionnel dans `Reglages`/`FicheClient`
+(même condition, même repli, mêmes dimensions) ; contrôle navigateur
+`currentSrc` **fait** (relevé dans la transition réelle, pas seulement
+dans le journal).
+**Décision : FUSIONNÉ** (gain transition réelle héros −~190 ms et bannière
+−~530 ms, LCP direct −~170 ms, 2/2 passes dans chaque run ; standard et
+Lighthouse plats ; bundle +0,04 % ; 0 erreur). Tours sans gain
+consécutifs : **0**.
