@@ -38,6 +38,8 @@ export function libelleStatutEnvoi(s: EnvoiRelance['statut']): string {
       return 'Non branché (501) — rien envoyé'
     case 'test':
       return 'Test — rien envoyé'
+    case 'incertain':
+      return 'Incertain — peut-être envoyé (pas de renvoi automatique)'
   }
 }
 
@@ -234,7 +236,8 @@ export function modelesSuggeres(client: Client, commerce: Pick<Commerce, 'seuilT
   return r
 }
 
-const occupe = (e: Pick<EnvoiRelance, 'statut'>) => e.statut === 'envoye' || e.statut === 'en_cours'
+// `incertain` (point Codex 10) : le message a peut-être été livré → même prudence qu'`envoye` pour l'automatique.
+const occupe = (e: Pick<EnvoiRelance, 'statut'>) => e.statut === 'envoye' || e.statut === 'en_cours' || e.statut === 'incertain'
 
 /**
  * Relance automatique due pour ce client (déjà filtrée sur le consentement par le serveur) ?

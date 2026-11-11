@@ -1,6 +1,7 @@
 // Adaptateur e-mail Brevo (API « transactional email ») + SMS Brevo (API « transactional SMS »).
 // Prêts, jamais exécutés contre le vrai Brevo : aucune clé configurée.
 import type { Adaptateur, Message } from './index.ts'
+import { DELAI_PRESTATAIRE_MS } from './delai.ts'
 
 export interface ConfigBrevo {
   cleApi: string
@@ -53,7 +54,8 @@ export function configBrevoSms(env: Record<string, string | undefined>): ConfigB
     : undefined
 }
 
-export function adaptateurBrevo(c: ConfigBrevo | undefined, f: typeof fetch): Adaptateur {
+/** `delaiMs` : délai d'expiration de l'appel (voir `delai.ts`), injectable pour les tests. */
+export function adaptateurBrevo(c: ConfigBrevo | undefined, f: typeof fetch, delaiMs = DELAI_PRESTATAIRE_MS): Adaptateur {
   return {
     canal: 'email',
     prestataire: 'Brevo',
@@ -73,6 +75,7 @@ export function adaptateurBrevo(c: ConfigBrevo | undefined, f: typeof fetch): Ad
           // de lien de désinscription aux e-mails transactionnels : c'est la route de l'app qui retire le consentement.
           ...(Object.keys(entetes).length ? { headers: entetes } : {}),
         }),
+        signal: AbortSignal.timeout(delaiMs),
       })
       if (!r.ok) throw new Error(`Brevo a refusé l’envoi (HTTP ${r.status}).`)
       const j = (await r.json()) as { messageId?: string }
@@ -99,7 +102,7 @@ export function adaptateurBrevo(c: ConfigBrevo | undefined, f: typeof fetch): Ad
  *   court `/d/<client>/<jeton HMAC>` → page #/desinscription, même jeton que les e-mails), depuis la fiche client,
  *   ou auprès du commerçant. Le webhook `stop-sms` de l'app reste réservé à Twilio (voir `server/app.ts`).
  */
-export function adaptateurBrevoSms(c: ConfigBrevoSms | undefined, f: typeof fetch): Adaptateur {
+export function adaptateurBrevoSms(c: ConfigBrevoSms | undefined, f: typeof fetch, delaiMs = DELAI_PRESTATAIRE_MS): Adaptateur {
   return {
     canal: 'sms',
     prestataire: 'Brevo',
@@ -119,6 +122,7 @@ export function adaptateurBrevoSms(c: ConfigBrevoSms | undefined, f: typeof fetc
           type: 'transactional',
           tag: 'fidelite',
         }),
+        signal: AbortSignal.timeout(delaiMs),
       })
       if (!r.ok) throw new Error(`Brevo a refusé l’envoi (HTTP ${r.status}).`)
       const j = (await r.json()) as { messageId?: string | number }

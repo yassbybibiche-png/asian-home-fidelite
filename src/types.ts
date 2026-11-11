@@ -131,9 +131,10 @@ export type ModeleRelance = 'bienvenue' | 'proche' | 'inactif' | 'anniversaire'
 /**
  * Statut d'une tentative de relance : `en_cours` (réservée, envoi en cours), `envoye` (accepté par le prestataire),
  * `refuse` (rien envoyé : pas de consentement, pas de contact, déjà envoyée aujourd'hui), `erreur` (le prestataire a
- * refusé ou ne répond pas), `non_branche` (aucun prestataire configuré : 501, rien envoyé).
+ * refusé ou ne répond pas), `non_branche` (aucun prestataire configuré : 501, rien envoyé), `incertain` (délai
+ * dépassé / appel abandonné : le message a PEUT-ÊTRE été envoyé — jamais renvoyé automatiquement, point Codex 10).
  */
-export type StatutEnvoi = 'en_cours' | 'envoye' | 'refuse' | 'erreur' | 'non_branche' | 'test'
+export type StatutEnvoi = 'en_cours' | 'envoye' | 'refuse' | 'erreur' | 'non_branche' | 'test' | 'incertain'
 
 /** Journal des envois (migration 0007 : table `envois`). Jamais le téléphone ni l'e-mail, jamais le texte complet. */
 export interface EnvoiRelance {

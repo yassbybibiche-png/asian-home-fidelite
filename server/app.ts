@@ -45,6 +45,7 @@ import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWalle
 import { menuAffichePour, pageMenuIndisponible, pageMenuPrerendue, pageNonTrouvee } from './prerendu.ts'
 import { cheminMasquePourErreur, journaliserRequete } from './logs.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
+import { estAbandon } from './notifications/delai.ts'
 import {
   chiffrerJetons,
   dechiffrerJetons,
@@ -1854,7 +1855,8 @@ export async function creerServeur(o: OptionsServeur) {
   /**
    * Une tentative de relance, tracée dans `envois` quel qu'en soit le résultat :
    * 501 sans prestataire pour ce canal · 409 sans consentement, sans contact, ou déjà envoyée aujourd'hui (même modèle)
-   * · 503 migration 0007 absente (rien ne part sans anti-doublon) · 502 prestataire en erreur · 200 envoyée.
+   * · 503 migration 0007 absente (rien ne part sans anti-doublon) · 502 prestataire en erreur (`erreur`) ou délai
+   * dépassé (`incertain` : peut-être envoyé) · 200 envoyée.
    * L'envoi est RÉSERVÉ en base (`en_cours`) avant l'appel au prestataire : l'index unique empêche tout doublon.
    */
   async function relancer(
@@ -1942,8 +1944,18 @@ export async function creerServeur(o: OptionsServeur) {
         ? { http: 200, message: 'Mode test : rien envoyé (simulation tracée dans le journal).', envoi: { ...envoi, statut: 'test', raison: 'Mode test Brevo : simulation, rien envoyé.', idPrestataire: 'test' } }
         : { http: 200, message: 'Relance envoyée.', envoi: { ...envoi, statut: 'envoye', ...(r.id ? { idPrestataire: r.id } : {}) } }
     } catch (e) {
-      const raison = e instanceof Error && e.message ? e.message : 'Le prestataire n’a pas répondu.'
-      fin = { http: 502, message: `Relance non envoyée : ${raison}`, envoi: { ...envoi, statut: 'erreur', raison } }
+      if (estAbandon(e)) {
+        // Point Codex 10 — délai dépassé / appel abandonné (`TimeoutError` / `AbortError`) : la requête a pu atteindre le
+        // prestataire, le message est peut-être parti. Statut `incertain` : `relanceAutoDue` le compte comme un envoi
+        // (aucun renvoi automatique, ni le même jour ni pour la même absence). Le commerçant garde la main : l'index
+        // unique anti-doublon ne couvre que `en_cours` / `envoye`, donc une relance MANUELLE reste possible (après
+        // vérification auprès du client), elle n'est jamais bloquée par une ligne `incertain`.
+        const raison = 'Le prestataire n’a pas répondu à temps : état de l’envoi inconnu (le message est peut-être parti). Il ne sera pas renvoyé automatiquement.'
+        fin = { http: 502, message: `Relance incertaine : ${raison}`, envoi: { ...envoi, statut: 'incertain', raison } }
+      } else {
+        const raison = e instanceof Error && e.message ? e.message : 'Le prestataire n’a pas répondu.'
+        fin = { http: 502, message: `Relance non envoyée : ${raison}`, envoi: { ...envoi, statut: 'erreur', raison } }
+      }
     }
     try {
       await st.majEnvoi(fin.envoi)
@@ -1967,7 +1979,8 @@ export async function creerServeur(o: OptionsServeur) {
   // partiel (commerce, client, modèle, jour) sur ces deux statuts refuse en dernier recours une 2e réservation le même
   // jour (ErreurConflit → « refuse », sans appel au prestataire). C'est déjà ce qui protégeait d'un redémarrage du
   // serveur (cette Map est en mémoire). Les échecs du prestataire (statut `erreur`) ne sont pas une panne de tournée :
-  // le message a pu partir malgré l'erreur (délai dépassé…), on ne le retente pas automatiquement.
+  // on ne les retente pas dans la même tournée. Un délai dépassé (statut `incertain`, point Codex 10 : chaque appel est
+  // borné par DELAI_PRESTATAIRE_MS) compte comme un envoi pour `relanceAutoDue` : jamais de renvoi automatique.
   const tournees = new Map<string, string>()
   const tourneesActives = new Set<string>()
   const tourneesEnCours = new Set<Promise<void>>()
