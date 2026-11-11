@@ -77,6 +77,16 @@ export function urlAbsolue(page: Page, param: string): string {
   return `${window.location.origin}${window.location.pathname}#/${page}/${encodeURIComponent(param)}`
 }
 
+/**
+ * URL du QR vitrine (page de jeu) : redirection courte `/r/<commerceId>` (P2-Q3) — le serveur compte le scan puis
+ * renvoie vers `#/jouer/<id>`. Le scan est donc compté même si la page ne se charge jamais (réseau coupé, serveur
+ * endormi). En développement local (Vite, sans serveur), `/r/` n'existe pas : le QR s'imprime depuis l'adresse
+ * publique définitive, comme l'indique la page QR vitrine.
+ */
+export function urlQrJeu(commerceId: string): string {
+  return `${window.location.origin}/r/${encodeURIComponent(commerceId)}`
+}
+
 export function useRoute(): Route {
   const [route, setRoute] = useState<Route>(lireRoute)
   useEffect(() => {

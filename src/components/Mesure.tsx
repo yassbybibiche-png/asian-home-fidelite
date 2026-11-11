@@ -29,6 +29,7 @@ import {
   type PointSerie,
   type Totaux,
 } from '../lib/mesure'
+import { comparerOffreSemaine, JOURS_OFFRE, JOURS_SEMAINE_COURTS } from '../lib/mesure-offre'
 import { telecharger, Vide } from './ui'
 
 const GRANULARITES: { valeur: Granularite; libelle: string; courante: string }[] = [
@@ -123,6 +124,11 @@ export function Mesure() {
   // Retour après gain : gains d'il y a 30 à 120 jours (fenêtre de 30 jours close).
   const retour = retourApresGain(clients, tirages, ajouterJours(aujourdhui, -(JOURS_RETOUR + 90)), aujourdhui, aujourdhui)
   const ab = resultatsAccroche(compteurs, commerce.testsAB?.accroche, aujourdhui)
+  // Test A/B « offre de la semaine » (test 2, docs/TESTS-AB.md) : par défaut, les deux derniers blocs complets de
+  // 4 semaines (lundi il y a 8 semaines, puis lundi il y a 4 semaines) — à ajuster aux vraies dates du protocole.
+  const [debutOffreA, setDebutOffreA] = useState(() => debutPeriode(ajouterJours(aujourdhui, -2 * JOURS_OFFRE), 'semaine'))
+  const [debutOffreB, setDebutOffreB] = useState(() => debutPeriode(ajouterJours(aujourdhui, -JOURS_OFFRE), 'semaine'))
+  const offre = useMemo(() => comparerOffreSemaine(clients, debutOffreA, debutOffreB), [clients, debutOffreA, debutOffreB])
   const libelleCourant = GRANULARITES.find((x) => x.valeur === g)!.courante
   const { precedent } = comparaison
   const c = comparaison.courant.totaux
@@ -246,7 +252,7 @@ export function Mesure() {
               <LigneComparaison libelle="Gains" courant={c.gains} precedent={p.gains} />
               <LigneComparaison libelle="Lots distribués" courant={c.distribues} precedent={p.distribues} />
               <LigneComparaison libelle="Coût distribué" courant={c.coutDistribues} precedent={p.coutDistribues} format={formaterEuros} />
-              <LigneComparaison libelle="Pages de jeu ouvertes" courant={c.evenements.scan} precedent={p.evenements.scan} />
+              <LigneComparaison libelle="Scans du QR" courant={c.evenements.scan} precedent={p.evenements.scan} />
               <LigneComparaison libelle="Clics vers Google" courant={c.evenements.clicGoogle} precedent={p.evenements.clicGoogle} />
             </tbody>
           </table>
@@ -349,6 +355,73 @@ export function Mesure() {
             </>
           )}
         </div>
+      </div>
+
+      <div className="carte">
+        <h3 className="surtitre">Test A/B · offre de la semaine</h3>
+        <p className="mt-1 text-sm text-gray-600">
+          Offre du mardi pendant 4 semaines, puis offre du jeudi pendant 4 semaines (ou l’inverse) — protocole :
+          docs/TESTS-AB.md. Seules les visites validées au comptoir comptent ; rien de nouveau n’est collecté.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-4">
+          <label className="text-sm">
+            <span className="mr-2 font-semibold">Période A (début, lundi)</span>
+            <input type="date" className="rounded-lg border border-gray-300 px-2 py-1" value={debutOffreA} onChange={(e) => setDebutOffreA(e.target.value)} />
+          </label>
+          <label className="text-sm">
+            <span className="mr-2 font-semibold">Période B (début, lundi)</span>
+            <input type="date" className="rounded-lg border border-gray-300 px-2 py-1" value={debutOffreB} onChange={(e) => setDebutOffreB(e.target.value)} />
+          </label>
+        </div>
+        {!offre ? (
+          <p className="mt-2 text-sm text-amber-800">Les deux périodes de 4 semaines ne doivent pas se chevaucher (ni de date invalide).</p>
+        ) : (
+          <>
+            <table className="mt-2 w-full text-sm">
+              <thead className="text-gray-600">
+                <tr>
+                  <th scope="col" className="py-1 text-left font-medium">
+                    Jour
+                  </th>
+                  <th scope="col" className="text-right font-medium">
+                    Visites A
+                  </th>
+                  <th scope="col" className="text-right font-medium">
+                    Visites B
+                  </th>
+                  <th scope="col" className="text-right font-medium">
+                    Écart
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {JOURS_SEMAINE_COURTS.map((jour, i) => (
+                  <tr key={jour}>
+                    <th scope="row" className="py-1.5 text-left font-medium">
+                      {jour}
+                    </th>
+                    <td className="text-right tabular-nums">{offre.A.jours[i]}</td>
+                    <td className="text-right tabular-nums">{offre.B.jours[i]}</td>
+                    <td className="text-right font-semibold tabular-nums">{texteVariation(offre.B.jours[i], offre.A.jours[i])}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <th scope="row" className="py-1.5 text-left font-medium">
+                    Total (28 jours)
+                  </th>
+                  <td className="text-right font-semibold tabular-nums">{offre.A.total}</td>
+                  <td className="text-right font-semibold tabular-nums">{offre.B.total}</td>
+                  <td className="text-right font-semibold tabular-nums">{texteVariation(offre.B.total, offre.A.total)}</td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="mt-2 text-sm text-gray-600">
+              Variation nette : {offre.variationNette === null ? '—' : `${offre.variationNette > 0 ? '+' : ''}${offre.variationNette} %`}. Écart net
+              inférieur à ~10 % : considérer les deux jours équivalents. Vérifiez aussi les autres jours : si le mercredi baisse quand
+              l’offre est le mardi, le gain net est plus faible (l’offre déplace des visites au lieu d’en créer).
+            </p>
+          </>
+        )}
       </div>
 
       <details className="carte">

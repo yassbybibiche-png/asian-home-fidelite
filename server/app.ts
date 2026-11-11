@@ -3607,6 +3607,34 @@ export async function creerServeur(o: OptionsServeur) {
         res.writeHead(302, { ...entetes, Location: `/#/desinscription/${courtDesinscription[1]}/${courtDesinscription[2]}`, 'Cache-Control': 'no-store' }).end()
         return
       }
+      // Lien court du QR vitrine (P2-Q3) : /r/<commerceId> → la page de jeu (#/jouer/<id>). Le scan est compté ici,
+      // AVANT la redirection : il l'est donc même si la page ne se charge jamais (réseau coupé, serveur endormi,
+      // navigateur qui abandonne). Anonyme comme POST /evenements : un compteur par jour, sans identité ni IP
+      // stockée ; même limite par IP (dépassée, on redirige quand même sans compter — jamais d'erreur affichée au
+      // client). HEAD : sonde, pas comptée. Commerce inconnu ou en pause : redirection sans compteur (la page
+      // affiche « fermé »). `?via=qr` dit à la page de ne pas re-signaler le scan (sinon double comptage).
+      const courtJeu = /^\/r\/([\w-]{1,80})$/.exec(url.pathname)
+      if (courtJeu && (req.method === 'GET' || req.method === 'HEAD')) {
+        if (req.method === 'GET') {
+          let compterCeScan = true
+          try {
+            limiterIp(req, 'evenement', limites.evenementParIp)
+          } catch {
+            compterCeScan = false
+          }
+          if (compterCeScan) {
+            let commerce: Commerce | null = null
+            try {
+              commerce = (await st.commerce(courtJeu[1])) ?? null
+            } catch {
+              commerce = null // base en panne : on redirige quand même, sans compter
+            }
+            if (commerce?.actif) await compter(courtJeu[1], 'scan')
+          }
+        }
+        res.writeHead(302, { ...entetes, Location: `/?via=qr#/jouer/${courtJeu[1]}`, 'Cache-Control': 'no-store' }).end()
+        return
+      }
       if (!url.pathname.startsWith('/api/v1/') && url.pathname !== '/api/v1') {
         if (o.dossierStatique && (req.method === 'GET' || req.method === 'HEAD') && !url.pathname.startsWith('/api/')) {
           if (servirStatique(o.dossierStatique, url.pathname, req, res, entetes)) return
