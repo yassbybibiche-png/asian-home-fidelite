@@ -54,6 +54,15 @@ const Confidentialite = lazy(IMPORTS.confidentialite)
 const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidentialite']
 
 /**
+ * Pages client à corps sombres (P1-D2, AUDIT.md §6.2/§6.3) : fond noir, surfaces sombres
+ * (règles `.page-client`, `src/index.css`, correspondances `src/theme.ts` PAGE_CLIENT_SOMBRE).
+ * #/roulette n'en fait PAS partie : c'est une page commerçant (configuration de la roue), elle
+ * reste claire — comme la caisse (#/caisse, pourtant publique, car utilisée au comptoir) et les
+ * pages de texte (#/desinscription, #/confidentialite, lecture longue sur fond clair).
+ */
+const PAGES_CLIENT_SOMBRES: Page[] = ['jouer', 'carte', 'menu']
+
+/**
  * Une fois l'espace commerçant ouvert, les autres pages du back-office sont téléchargées en arrière-plan (navigateur
  * au repos) : le service worker les garde en cache, la navigation reste immédiate et marche ensuite sans réseau.
  * Jamais sur les pages clientes : un client qui scanne un QR ne télécharge pas le back-office.
@@ -243,9 +252,11 @@ export default function App() {
   }, [espaceOuvert])
 
   // Pages vues par le client final (QR code scanné) : ni en-tête ni navigation commerçant.
+  // La bascule `.page-client` est sur <main>, autour de la frontière d'erreur : la vue
+  // d'erreur de chargement (import différé en échec) reste sombre, elle aussi.
   if (publique) {
     return (
-      <main className="min-h-dvh">
+      <main className={PAGES_CLIENT_SOMBRES.includes(page) ? 'page-client' : 'min-h-dvh'}>
         <ErreurChargementPage key={page}>
           <Suspense fallback={<SquelettePublique page={page} />}>
             <Contenu />

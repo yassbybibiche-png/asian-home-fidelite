@@ -58,3 +58,43 @@ export const COULEURS_ROUE = [THEME.magenta700, THEME.noir, THEME.magenta400, TH
 
 /** Confettis du gain (src/lib/animationRoue.ts) : décor uniquement, jamais du texte. */
 export const COULEURS_CONFETTIS = [THEME.magenta400, THEME.magenta300, THEME.magenta500, THEME.magenta700, THEME.blanc, THEME.surface2] as const
+
+/**
+ * Corps sombres côté client (P1-D2, AUDIT.md §6.2/§6.3) : fond #111111, surfaces #1B1B22 / #26262E.
+ * La bascule est faite en CSS (`src/index.css`, règles `.page-client`, appliquées par `src/App.tsx`
+ * aux pages #/jouer, #/carte, #/menu uniquement — #/roulette est une page commerçant, elle reste
+ * claire) ; ce tableau est la source des correspondances clair → sombre, vérifiées par
+ * `tests/corps-sombres-p1-d2.test.ts` (ratios WCAG recalculés, jamais recopiés). Les gris sont les
+ * gris Tailwind standard, centralisés ici pour que la correspondance vive en un seul endroit.
+ * - textes gris-900/800/700/600 → blanc / gris-200 / gris-300 / gris-400 (tous ≥ 6,7:1 sur fond et surface) ;
+ * - magenta-700 en texte → magenta-400 (5,49:1 sur #111111, 4,98:1 sur #1b1b22) ;
+ * - rouge-700 → red-300, vert-800 → green-300, note d'étoiles ambre foncé → blanc (pas de token
+ *   ambre dans `index.css` : la garde P0-D1 réserve l'ambre aux alertes et aux étoiles, et les
+ *   étoiles gardent leur couleur ambre) ;
+ * - fonds blanc / gris-50 / gris-100 / gris-200 / fond → surface / blanc translucide.
+ * Écart à l'AUDIT §6.3 (conservé depuis P0-D1) : le tampon posé reste blanc sur magenta bouton
+ * #d1006f (5,33:1) — le cercle #ff2e9a + coche blanche proposé par l'audit vaut 3,44:1, sous le
+ * seuil AA du texte courant (4,5:1) ; la coche est un indicateur graphique (seuil non-texte 3:1),
+ * mais le tampon est traité comme texte par prudence.
+ * Limite connue : le magenta clair en texte (#ff2e9a) vaut 4,37:1 sur surface2 #26262e — il n'est
+ * jamais utilisé sur surface2 (champs sombres) ; les alertes sémantiques (fonds ambre / vert /
+ * rouge, textes ambre / vert / rouge foncés) restent des îlots clairs, non converties.
+ * La carte de fidélité elle-même (`src/components/CarteFidelite.tsx`, `data-surface-claire`) reste
+ * un objet clair (fond configurable par commerce, défaut ivoire) posé sur la page sombre — les
+ * restaurations couvrent la section elle-même (`[data-surface-claire].bg-white`, la règle
+ * descendant ne suffit pas) et la carte de gain (`data-resultat="gain"`, seul dégradé clair côté
+ * client) passe en dégradé sombre en CSS.
+ */
+export const PAGE_CLIENT_SOMBRE = {
+  fond: THEME.noir,
+  surface: THEME.surface,
+  surface2: THEME.surface2,
+  texte: THEME.blanc,
+  texteSecondaire: '#e5e7eb', // gris-200 : 15,25:1 sur #111111, 13,83:1 sur #1b1b22
+  texteAttenue: '#d1d5db', // gris-300 : 12,81:1 sur #111111, 11,62:1 sur #1b1b22
+  texteDiscret: '#9ca3af', // gris-400 : 7,44:1 sur #111111, 6,74:1 sur #1b1b22
+  accent: THEME.magenta400, // 5,49:1 sur #111111, 4,98:1 sur #1b1b22
+  noteEtoiles: THEME.blanc, // blanc (les étoiles gardent leur couleur ambre ; voir commentaire ci-dessus)
+  erreur: '#fca5a5', // red-300 : 9,95:1 sur #111111, 9,02:1 sur #1b1b22
+  ok: '#86efac', // green-300 : 13,45:1 sur #111111, 12,19:1 sur #1b1b22
+} as const

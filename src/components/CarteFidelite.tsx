@@ -108,7 +108,11 @@ export function CarteFidelite({
   }
 
   return (
-    <section className="overflow-hidden rounded-3xl bg-white shadow-relief ring-1 ring-gray-900/5" style={estCouleur(fond) ? { backgroundColor: fond } : undefined}>
+    <section
+      data-surface-claire
+      className="overflow-hidden rounded-3xl bg-white shadow-relief ring-1 ring-gray-900/5"
+      style={estCouleur(fond) ? { backgroundColor: fond } : undefined}
+    >
       {banniere && (
         <img
           src={banniere}

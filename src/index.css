@@ -256,3 +256,240 @@ h3 {
     animation: none;
   }
 }
+
+/* =====================================================================================
+ * Corps sombres côté client (P1-D2, AUDIT.md §6.2/§6.3).
+ * Appliqués par `src/App.tsx` (`.page-client` autour des pages #/jouer, #/carte, #/menu).
+ * Règles NON stratifiées, en fin de feuille : elles priment sur les couches Tailwind
+ * (components, utilities) quelle que soit leur spécificité, sans toucher aux composants.
+ * Correspondances et ratios : `src/theme.ts` (PAGE_CLIENT_SOMBRE) — ne rien changer ici sans
+ * mettre à jour le tableau et `tests/corps-sombres-p1-d2.test.ts`. Aucun hex dans ce bloc :
+ * les couleurs viennent des tokens du thème ou de blancs translucides.
+ * Îlots clairs conservés : alertes sémantiques (amber / green / red, jamais converties)
+ * et carte de fidélité (`[data-surface-claire]`, restaurations en fin de bloc).
+ * ===================================================================================== */
+.page-client {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: var(--color-nuit-950);
+  color: var(--color-white);
+}
+
+/* Cartes et titres partagés : surface sombre, texte blanc. */
+.page-client .carte {
+  background-color: var(--color-nuit-900);
+  --tw-ring-color: rgb(255 255 255 / 0.1);
+}
+.page-client .titre-carte {
+  color: var(--color-white);
+}
+.page-client .surtitre {
+  color: var(--color-magenta-300);
+}
+.page-client .etiquette {
+  color: rgb(255 255 255 / 0.85);
+}
+
+/* Champs sombres : fond surface2, bordure claire, texte blanc, placeholder lisible. */
+.page-client .champ {
+  background-color: var(--color-nuit-800);
+  border-color: rgb(255 255 255 / 0.25);
+  color: var(--color-white);
+}
+.page-client .champ::placeholder {
+  color: rgb(255 255 255 / 0.65);
+}
+.page-client .champ:focus {
+  border-color: var(--color-magenta-600);
+}
+/* Champ invalide : la bordure rouge du socle (`aria-invalid:border-red-500`, en couche Tailwind)
+   était écrasée par la bordure sombre — règle explicite, rouge clair (5,43:1 sur surface2),
+   anneau de focus rouge lui aussi. */
+.page-client .champ[aria-invalid='true'] {
+  border-color: var(--color-red-400);
+}
+.page-client .champ[aria-invalid='true']:focus {
+  border-color: var(--color-red-400);
+  --tw-ring-color: var(--color-red-400);
+}
+
+/* Bouton secondaire sombre ; désactivé terne ; lien magenta clair (jamais magenta-700, 3,54:1). */
+.page-client .bouton-secondaire {
+  background-color: rgb(255 255 255 / 0.1);
+  border-color: rgb(255 255 255 / 0.3);
+  color: var(--color-white);
+}
+.page-client .bouton-secondaire:hover {
+  background-color: rgb(255 255 255 / 0.2);
+}
+.page-client .bouton-secondaire:disabled {
+  background-color: rgb(255 255 255 / 0.05);
+  color: rgb(255 255 255 / 0.45);
+}
+.page-client .lien {
+  color: var(--color-magenta-400);
+}
+/* Lien dans une alerte claire (ambre/vert/rouge, jamais converties) : le magenta clair (3,31:1
+   sur ambre-50) échoue AA — le lien garde le magenta foncé (7,56/7,49/7,17:1). */
+.page-client .bg-amber-50 .lien,
+.page-client .bg-green-50 .lien,
+.page-client .bg-red-50 .lien {
+  color: var(--color-magenta-700);
+}
+
+/* Pilules sombres ; sélectionnée = magenta bouton, texte blanc (comme sur fond clair). */
+.page-client .puce {
+  background-color: rgb(255 255 255 / 0.1);
+  color: var(--color-white);
+  --tw-ring-color: rgb(255 255 255 / 0.3);
+}
+.page-client .puce[aria-selected='true'],
+.page-client .puce[aria-pressed='true'] {
+  background-color: var(--color-magenta-500);
+  color: var(--color-white);
+  --tw-ring-color: var(--color-magenta-500);
+}
+
+/* Textes gris clair → clairs (hiérarchie conservée : 900 blanc, 800 gris-200, 700 gris-300, 600 gris-400). */
+.page-client .text-gray-900 {
+  color: var(--color-white);
+}
+.page-client .text-gray-800 {
+  color: var(--color-gray-200);
+}
+.page-client .text-gray-700 {
+  color: var(--color-gray-300);
+}
+.page-client .text-gray-600 {
+  color: var(--color-gray-400);
+}
+/* Textes colorés sur fond sombre : magenta bouton → magenta clair, erreur/ok éclaircis. */
+.page-client .text-magenta-700 {
+  color: var(--color-magenta-400);
+}
+.page-client .text-red-700 {
+  color: var(--color-red-300);
+}
+.page-client .text-green-800 {
+  color: var(--color-green-300);
+}
+/* Note d'étoiles (InvitationAvis) : texte ambre foncé (2,41:1 sur surface) → blanc, lisible sans
+   introduire de token ambre dans cette feuille (garde P0-D1 : ambre = alerte/étoiles seulement,
+   les étoiles elles-mêmes gardent leur couleur ambre). Le badge clair (ui.tsx, pastille ambre sur
+   fond ambre clair) garde sa couleur. */
+.page-client .text-amber-800:not(.rounded-full) {
+  color: var(--color-white);
+}
+
+/* Fonds clairs → sombres (les alertes ambre / vert / rouge ne sont pas converties). */
+.page-client .bg-white {
+  background-color: var(--color-nuit-900);
+}
+.page-client .bg-gray-50 {
+  background-color: rgb(255 255 255 / 0.05);
+}
+.page-client .bg-gray-100 {
+  background-color: rgb(255 255 255 / 0.1);
+}
+.page-client .bg-gray-200 {
+  background-color: rgb(255 255 255 / 0.15);
+}
+.page-client .bg-fond {
+  background-color: var(--color-nuit-900);
+}
+.page-client .bg-fond\/95 {
+  background-color: color-mix(in srgb, var(--color-nuit-950) 95%, transparent);
+}
+.page-client .active\:bg-gray-50:active {
+  background-color: rgb(255 255 255 / 0.08);
+}
+
+/* Filets et séparateurs clairs → blancs translucides. */
+.page-client .ring-gray-900\/5 {
+  --tw-ring-color: rgb(255 255 255 / 0.08);
+}
+.page-client .ring-gray-200 {
+  --tw-ring-color: rgb(255 255 255 / 0.15);
+}
+.page-client .ring-gray-300 {
+  --tw-ring-color: rgb(255 255 255 / 0.3);
+}
+.page-client .border-gray-100 {
+  border-color: rgb(255 255 255 / 0.08);
+}
+.page-client .border-gray-200 {
+  border-color: rgb(255 255 255 / 0.15);
+}
+.page-client .border-gray-400 {
+  border-color: rgb(255 255 255 / 0.3);
+}
+.page-client .divide-gray-100 > :not(:last-child) {
+  border-color: rgb(255 255 255 / 0.08);
+}
+
+/* Îlot clair : la carte de fidélité reste un objet clair (fond configurable par commerce).
+   Restaurations — chaque correspondance sombre est annulée dans ce sous-arbre, dans le même ordre. */
+.page-client [data-surface-claire] .text-gray-900 {
+  color: var(--color-gray-900);
+}
+.page-client [data-surface-claire] .text-gray-800 {
+  color: var(--color-gray-800);
+}
+.page-client [data-surface-claire] .text-gray-700 {
+  color: var(--color-gray-700);
+}
+.page-client [data-surface-claire] .text-gray-600 {
+  color: var(--color-gray-600);
+}
+.page-client [data-surface-claire] .surtitre {
+  color: var(--color-gray-600);
+}
+.page-client [data-surface-claire] .text-magenta-700 {
+  color: var(--color-magenta-700);
+}
+.page-client [data-surface-claire] .bg-white {
+  background-color: var(--color-white);
+}
+/* L'élément porteur lui-même : `[data-surface-claire] .bg-white` ne cible que les descendants —
+   la section porte `bg-white` ET l'attribut, il faut la règle accolée (sans elle, le corps de la
+   carte devenait sombre avec des textes restaurés en gris foncé — illisible, vu en capture). */
+.page-client [data-surface-claire].bg-white {
+  background-color: var(--color-white);
+}
+/* Bouton secondaire dans l'îlot clair (parrainage, CarteFidelite) : la conversion sombre
+   (texte blanc, fond blanc translucide) le rendait invisible sur la carte blanche — restauré
+   à sa définition claire (fond blanc, texte gris-800, filet gris-300, survol gris-50). */
+.page-client [data-surface-claire] .bouton-secondaire {
+  background-color: var(--color-white);
+  border-color: var(--color-gray-300);
+  color: var(--color-gray-800);
+}
+.page-client [data-surface-claire] .bouton-secondaire:hover {
+  background-color: var(--color-gray-50);
+  border-color: var(--color-gray-400);
+}
+.page-client [data-surface-claire] .bg-gray-50 {
+  background-color: var(--color-gray-50);
+}
+.page-client [data-surface-claire] .bg-gray-100 {
+  background-color: var(--color-gray-100);
+}
+.page-client [data-surface-claire] .bg-gray-200 {
+  background-color: var(--color-gray-200);
+}
+.page-client [data-surface-claire] .ring-gray-900\/5 {
+  --tw-ring-color: rgb(17 24 39 / 0.05);
+}
+.page-client [data-surface-claire] .ring-gray-200 {
+  --tw-ring-color: var(--color-gray-200);
+}
+.page-client [data-surface-claire] .border-gray-400 {
+  border-color: var(--color-gray-400);
+}
+
+/* Carte de gain (Jouer, `data-resultat="gain"`) : dégradé clair (magenta pâle → blanc) — le seul
+   dégradé clair côté client. Avec les textes passés en blanc, le contraste tombait ; le dégradé
+   devient sombre (teinte magenta en haut, nuit en bas), texte blanc 17,12:1 en bas. */
+.page-client [data-resultat='gain'] {
+  background-image: linear-gradient(to bottom, color-mix(in srgb, var(--color-magenta-500) 14%, transparent), var(--color-nuit-900));
+}
