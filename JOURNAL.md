@@ -1530,3 +1530,111 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   non mesuré ; `npm audit` à mesurer hors de cette VM. Le 404 jouer → carte est un
   défaut réel à corriger dans un lot ultérieur (piste : garder `page === 'jouer'` dans
   `JouerApi` ou unifier l'abonnement `useRoute`).
+
+## 11/11/2026 — P0-D1 : Thème noir+magenta isolé + correctif 404 (AUDIT.md §6–§7, revue Codex point 14)
+
+Branche `autonome/p0-d1-theme-magenta` → fusion `--no-ff` dans `autonome/integration`
+(`0e1a10f`, poussée). Commits : `63596c9` (thème), `473a122` (correctif 404 +
+re-mesure), `15b72ad` (correctifs revue Codex). Production non touchée, rien déployé,
+rien sur master. Tests 950 → **974/974**, typechecks serveur + front verts,
+E2E scan→gain→carte 1/1, erreurs console 0, bundle 537804 o (+0,36 % vs référence
+P0-U0), DA 6,1 → **7,6/10** (cible ≥ 9 non atteinte — voir « Point ouvert »).
+
+- **Palette retenue (AUDIT §6.2, ratios recalculés par script Python, confirmés par
+  Codex par recalcul indépendant)** : fond `#111111`, surface `#1B1B22`, surface 2
+  `#26262E`, fond clair `#F7F5F2` ; texte magenta sur noir `#FF2E9A` 5,49:1,
+  `#FF4D6D` 5,88:1 ; fond de bouton (texte blanc) `#D1006F` 5,33:1, `#C4007A` 5,79:1,
+  `#A1005E` 7,84:1 ; laque `#B3262D` blanc dessus 6,5:1. Règles négatives assertées :
+  `#D1006F`/`#C4007A` sur `#111111` 3,54:1/3,26:1, `#FF2E9A` sur `#F7F5F2` 3,16:1,
+  blanc sur `#FF2E9A` 3,44:1 ; texte d'accent sur fond clair = `#A1005E` 7,21:1 ou
+  `#C4007A` 5,32:1. Cas limite : `#FF4D6D` sur gris-800 `#1F2937` (bandeau « commerce
+  désactivé », App.tsx) = 4,57:1, juste au-dessus d'AA. Ancien commentaire CSS
+  « or #c9a227 sur #111111 ≈ 8,9:1 » faux : vrai calcul 7,81:1.
+- **Décisions** : laque conservée **uniquement** comme réserve danger/erreur (échelle
+  `marque-*` définie, zéro usage dans les composants ; les erreurs actuelles utilisent
+  déjà `red-*`) ; `FOND_DEFAUT` reste ivoire `#fbf8f3` — l'AUDIT §6.4.3 proposait
+  `#111111`, rejeté : le fond est le corps de la carte rendu avec du texte foncé,
+  `#111111` échouerait au propre contrôle `problemesApparence` et rendrait la carte
+  illisible ; le noir par défaut est porté par le bandeau/héros, pas par
+  `apparence.fond`. `amber-*` conservé comme sémantique d'alerte/étoiles (pas comme DA)
+  — désormais verrouillé par une garde explicite (classes autorisées listées, étoiles
+  limitées à InvitationAvis/ui/Avis). Étoile SVG `stroke="currentColor"`. Tampons
+  pleins `bg-magenta-500` (blanc 5,33:1) — **écart à l'AUDIT §6.3** : le cercle
+  `#FF2E9A` + coche blanche qu'il propose vaut 3,44:1, donc contraire à WCAG.
+  Roue : secteurs `['#a1005e', '#111111', '#ff2e9a', '#fbf3e4', '#26262e',
+  '#fdf3f2']`, `couleurTexte('#ff2e9a') = '#111111'` (5,49:1) ; confettis magenta.
+  `.bouton` primaire magenta, `.lien` magenta-700, focus `magenta-400`,
+  `.titre-or` → `.titre-magenta`, `.puce-sombre` pressed magenta.
+- **Isolation** : `src/theme.ts` source unique ; `@theme` miroir exact (vérifié par
+  test, ensemble des tokens comparé) ; `chargement.css` / `hors-ligne.css` reprennent
+  des valeurs du thème ; halos et ombre du bouton en `color-mix()` sur les tokens
+  (jamais de rgb() d'une couleur du thème hors theme.ts — garde ajoutée).
+  Garde par test : aucun hex dans `src/**/*.ts(x)` sauf `theme.ts`, zéro
+  `or-300|or-400|or-500|#c9a227|#d4a73c|#f2d48a|titre-or|neon-500`, zéro usage
+  `marque-*` dans les `.tsx`, `text-magenta-300/400` seulement sur fond sombre prouvé.
+- **Tests existants modifiés** (changement de spec, assertions de même force
+  re-pointées sur magenta, rien affaibli) : `identite-accessibilite-p2-q1`,
+  `menu-reel`, `roue-p0-u2`, `attente-visite-p0-u4`, `menu-client-p1-c5`,
+  `chargement-p0-u1`, `integrations-v3` (fond du pass Wallet `rgb(179, 38, 45)` →
+  `rgb(209, 0, 111)`).
+- **Incidents** : imports `from '../theme'` sans extension `.ts` → `ERR_MODULE_NOT_FOUND`
+  (3 fichiers) ; ré-export `COULEURS_CONFETTIS` seul sans liaison locale dans
+  `animationRoue.ts` → `ReferenceError` ; `tsc` `roue.ts(34,28)` (Set inféré trop
+  étroit) → `Set<string>` ; `#fff` 3 chiffres dans `.hero-sombre` → `#ffffff`.
+  Coquille dans le message du commit 1 : « FOND_DEFAUT reste ivoire #fff8f3 » au lieu
+  de `#fbf8f3` (code correct, message seul — non amendé).
+- **Correctif 404** (`473a122`) : `GET /api/v1/commerces/<id-client>` → 404 à chaque
+  transition `#/jouer` → `#/carte` (mesuré 5/5 par P0-U0). Cause : `JouerApi` se
+  re-rendait une fois avec le nouveau `param` (identifiant client) avant d'être
+  démonté. Correctif : garde `page === 'jouer'` avant tout appel réseau (retour
+  silencieux) + `demandeEnCours` (revue Codex) : réponse obsolète ignorée après
+  jouer/A → jouer/B, ancien commerce effacé pendant le chargement du nouveau.
+  Preuves : `tests/jouer-404-p0-d1.test.ts` (5 tests), E2E avec assertion zéro
+  requête ≥ 400 (1/1) ; **contrôle négatif** : sans le correctif (stash de
+  `Jouer.tsx` seul), l'E2E échoue. Re-mesure (`node_modules/.cache/mesure-p0-d1/`,
+  1 passe) : 0 erreur console, 0 requête échouée. Les temps de cette passe ne sont
+  pas retenus (`npm test` tournait en parallèle sur la même VM).
+- **Captures 375 px** (`node_modules/.cache/mesure-p0-d1/`) : 9 écrans de la passe
+  standard + 5 complémentaires (script `captures-richesse.mjs`) : roue à 8 lots
+  (6 couleurs alternées, libellés lisibles), vrai menu 81 plats (prix magenta),
+  carte à bandeau personnalisé `#d1006f` (sous-titre blanc lisible). DA : Jouer 8,
+  Carte 8, Caisse 7, Menu 8, Tableau de bord 8, Clients 8, Roulette 7, Réglages 7.
+- **Revue Codex** (`/tmp/codex-revue-p0-d1.txt`, diff `/tmp/codex-p0-d1.diff`) :
+  **7 points** — ratios confirmés exacts à deux décimales par recalcul indépendant ;
+  adaptations des anciens tests confirmées légitimes ; aucun secret, envoi réel,
+  changement de prix/probabilités/textes légaux :
+  1. [Bloquant, fondé, CORRIGÉ] Magenta clair sur bandeau personnalisé (1,66:1 sur
+     `#d1006f`) → sous-titre blanc, test de propriété (blanc ≥ 4,5:1 sur tout
+     `assombrir(couleur)` validée), validé visuellement par `carte-couleur-perso.png`.
+  2. [Bloquant, fondé, CORRIGÉ partiellement] `theme.ts` pas la seule source
+     effective (copie manuelle + rgb() dans les halos) → halos/ombre en `color-mix()`
+     sur les tokens + garde anti-rgb(). **Génération du CSS depuis theme.ts
+     ÉCARTÉE** : les feuilles avant-JS (chargement/hors-ligne) ne peuvent pas
+     consommer de tokens TS au chargement, et le test du miroir exact bloque déjà
+     toute dérive — le coût d'un générateur n'apporte rien à l'utilisateur.
+  3. [Bloquant, fondé, NON CORRIGÉ — décision parent, voir « Point ouvert »]
+     Corps sombres côté client (AUDIT §6.2/§6.3) reportés comme « hors périmètre ».
+  4. [Fondé, CORRIGÉ] Doré subsistant (étoiles amber) → gardé par convention
+     (note/5) et sémantique d'alerte, mais verrouillé par une garde explicite.
+  5. [Fondé, CORRIGÉ] Cycle des requêtes incomplet (réponses obsolètes jouer/A →
+     jouer/B) → `demandeEnCours` + effacement de l'ancien commerce. Annulation
+     réelle (AbortSignal) hors périmètre : l'API ne le supporte pas ; `setState`
+     après démontage est un no-op (React 18+).
+  6. [Fondé, CORRIGÉ] Captures 1 secteur / menu vide → captures complémentaires
+     (8 lots, vrai menu, couleur perso).
+  7. [Remarque] Adaptations des anciens tests légitimes ; l'EROFS vu par Codex sur
+     `menu-client-p1-c5` venait de son bac à sable en lecture seule — suite
+     complète re-vérifiée ici : 974/974.
+- **Point ouvert — décision parent requise.** L'AUDIT §6.2 (« Fond principal
+  (client) `#111111` ») et §6.3 (« Cartes : fond `#1B1B22` sur écrans client »)
+  demandent des corps sombres côté client ; P0-D1 les a laissés clairs/ivoire
+  (DA 7,6/10, cible ≥ 9 non atteinte). C'est une refonte visuelle à part entière
+  (Jouer, Carte, Menu : fonds, cartes, champs, contrastes à re-vérifier), hors
+  mandat de P0-D1 (isolation du thème + substitution magenta). Trancher : lot P1
+  « surfaces sombres client » dédié, ou accepter les corps clairs comme périmètre
+  définitif (et abaisser la cible DA). Le back-office reste clair dans les deux cas
+  (AUDIT §6.2, lisibilité de travail).
+- **Résiduels / non vérifié.** Pas de mesure sur téléphone réel (Lighthouse et
+  parcours à refaire sur le staging) ; le vrai logo Asian Home n'a pas été mesuré
+  (commerce de test sans logo) ; délai à froid Render non mesuré ; `npm audit` à
+  mesurer hors de cette VM.
