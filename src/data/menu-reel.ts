@@ -29,7 +29,7 @@
 // - Ids : les plats déjà présents dans l'ancien menu gardent leur id `reel-cN-pM` ;
 //   les nouveaux plats ont un id `reel-o-…`.
 import type { Menu, Produit } from '../types'
-import { ID_ASIAN_HOME, PHOTOS_PDF } from '../lib/visuels.ts'
+import { ID_ASIAN_HOME, PHOTOS_PDF, VISUELS } from '../lib/visuels.ts'
 
 /** Plats signature mis en avant (best-sellers cités dans les avis et sur Instagram). */
 export const PLATS_SIGNATURE = ['Dynamite', 'Thaï-sty Krusty', 'Love Bao', 'Loc Lac', '8 Maki Chicken Dragon', '8 Maki Tiger'] as const
@@ -64,6 +64,28 @@ export function masquerPrixNonConfirmes(menu: Menu): Menu {
     categories: menu.categories.map((c) => ({
       ...c,
       produits: c.produits.map((p) => (estPrixNonConfirme(p.nom, p.prix) ? { ...p, prix: null } : p)),
+    })),
+  }
+}
+
+/**
+ * Photos détachées (P1-M3) : ne doivent plus s'afficher sur un plat nommé, même si un menu
+ * enregistré avant le lot les contient encore. Pour l'instant, la seule est `menu-makis.jpg`
+ * (photo partagée entre 8 Maki Tiger et 8 Maki Chicken Dragon, contribution client, impossible
+ * de dire quel plat elle montre). Ne modifie pas le menu d'origine.
+ */
+export const PHOTOS_DETACHEES = [VISUELS.menuMakis] as const
+
+export function retirerPhotosDetachees(menu: Menu): Menu {
+  return {
+    ...menu,
+    categories: menu.categories.map((c) => ({
+      ...c,
+      produits: c.produits.map((p) => {
+        if (!p.photo || !(PHOTOS_DETACHEES as readonly string[]).includes(p.photo)) return p
+        const { photo: _photo, photoVignette: _vignette, ...reste } = p
+        return reste
+      }),
     })),
   }
 }

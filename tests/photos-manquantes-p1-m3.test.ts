@@ -5,7 +5,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 
-import { menuReelAsianHome } from '../src/data/menu-reel.ts'
+import { menuReelAsianHome, retirerPhotosDetachees } from '../src/data/menu-reel.ts'
 import { VISUELS } from '../src/lib/visuels.ts'
 
 const plats = () => menuReelAsianHome().categories.flatMap((c) => c.produits)
@@ -63,6 +63,34 @@ describe('Inventaire exact : 11 plats avec photo, 70 sans photo (P1-M3)', () => 
       assert.ok(existsSync(fichier(chemin)), `${chemin} : fichier gardé`)
       for (const p of plats()) assert.notEqual(p.photo, chemin, p.nom)
     }
+  })
+
+  test('retirerPhotosDetachees : un menu enregistré avant P1-M3 avec menu-makis.jpg ne l’affiche plus', () => {
+    const ancien = {
+      categories: [
+        {
+          id: 'c1',
+          nom: 'Spécialités du chef',
+          produits: [
+            { id: 'p1', nom: '8 Maki Tiger', prix: 1390, allergenes: [], photo: '/visuels/menu-makis.jpg' },
+            { id: 'p2', nom: '6 Maki Gold', prix: null, allergenes: [] },
+          ],
+        },
+        { id: 'c2', nom: 'Plats thaï', produits: [{ id: 'p3', nom: 'Loc Lac', prix: 1490, allergenes: [], photo: '/visuels/menu-loc-lac.jpg' }] },
+      ],
+    }
+    const nettoye = retirerPhotosDetachees(ancien as never)
+    assert.equal(nettoye.categories[0].produits[0].photo, undefined)
+    assert.equal(nettoye.categories[0].produits[0].nom, '8 Maki Tiger')
+    assert.equal(nettoye.categories[1].produits[0].photo, '/visuels/menu-loc-lac.jpg')
+    // Le menu d'origine n'est pas modifié ; la carte de repli est déjà nettoyée.
+    assert.equal(ancien.categories[0].produits[0].photo, '/visuels/menu-makis.jpg')
+    assert.deepEqual(retirerPhotosDetachees(menuReelAsianHome()), menuReelAsianHome())
+  })
+
+  test('#/menu applique le retrait des photos détachées au menu affiché (repli ou enregistré)', () => {
+    const tsx = readFileSync(new URL('../src/pages/MenuPublic.tsx', import.meta.url), 'utf8')
+    assert.match(tsx, /retirerPhotosDetachees\(masquerPrixNonConfirmes\(repliReel \? menuReelAsianHome\(\) : menu\)\)/)
   })
 
   test('aucune photo du restaurant en attente dans assets/source/photos/ (que le README)', () => {

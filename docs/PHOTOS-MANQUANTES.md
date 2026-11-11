@@ -105,7 +105,8 @@ Thaï-sty Krusty · Bœuf Basilic · Boisson 33cl
 - **6 Maki Gold** : aucune photo dans le PDF ni ailleurs.
 - **Boissons** : les photos du PDF ne sont attribuables à aucune boisson précise (la catégorie
   garde la photo d'ambiance `cocktails.jpg`).
-- **Variantes makis / california / sashimi / sushi** (28 plats) : seules des icônes minuscules dans
+- **Variantes makis / california / sashimi / sushi** (36 plats : 7 California + 6 Green + 6 Black
+  + 4 Neige + 5 Pink + 4 Sashimi + 4 Sushi) : seules des icônes minuscules dans
   le PDF, inexploitables.
 - **Tous les autres plats** (salades, entrées hors Dynamite, menu midi, dessert du jour, hors carte) :
   aucune photo dans le PDF ni dans les galeries du restaurant consultées.
@@ -122,9 +123,9 @@ Thaï-sty Krusty · Bœuf Basilic · Boisson 33cl
 
 1. **Photos des 70 plats ci-dessus** — photos du restaurant uniquement (prises par l'équipe ou
    fournies par le commerçant), jamais de photos de clients (Google, avis…) ni de banque d'images.
-   Une photo par plat, qui montre bien CE plat. Priorité suggérée : les 2 spécialités sans photo
-   (8 Maki Tiger, 8 Maki Chicken Dragon), Love Bao, puis les entrées et les variantes makis /
-   california les plus vendues.
+   Une photo par plat, qui montre bien CE plat. Priorité suggérée : les 3 spécialités sans photo
+   (8 Maki Tiger, 8 Maki Chicken Dragon, 6 Maki Gold), Love Bao, puis les entrées et les variantes
+   makis / california les plus vendues.
 2. **Dépôt** : `assets/source/photos/`, nom `plat-<nom-du-plat>.jpg` (minuscules, tirets, sans
    accents — ex. `plat-love-bao.jpg`), voir son `README.md`.
 3. **Rattachement** (côté développement, après vérification visuelle) : conversion en WebP dans
