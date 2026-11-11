@@ -885,3 +885,75 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   mot de passe Postgres pour un `pg_dump` en complément ; planification + copie hors VM ; exercice de restauration
   réelle sur un projet Supabase de test. Docs : `docs/SAUVEGARDE.md`, `server/README.md` § Sauvegarde / export,
   `.env.example` (variables `SAUVEGARDE_*` commentées : `tests/supabase.test.ts` n'y autorise que 2 variables actives).
+
+## 11/11/2026 — P0-S7 : authentification client élargie (AUDIT.md § P0-S7, revue Codex points 4 et 5, audit F-03)
+- **Constat** : l'identifiant d'une carte (`cl-<horodatage base36>-<4 car.>`, `src/lib/fidelite.ts`) suffisait à la
+  lire en entier (messages, historique), à la modifier (prénom, profil, rattrapage, lus, message privé, demande de
+  suppression avec le contact) ; le téléphone seul suffisait à reprendre la carte (inscription publique → carte
+  existante renvoyée) et à jouer à la place du client (`POST /tirages` avec le contact → code gagnant).
+- **Mécanisme retenu** : jeton client signé HMAC, même format et même `SESSION_SECRET` que les sessions P0-S1, contenu
+  `{ typ, jti, cid, com, ver, exp }` (`typ` ≠ `role` : jamais confondu avec une session). En-tête
+  `Authorization: Bearer`. 30 jours, renouvelé par la page sous 15 jours. 1re preuve = le téléphone qui s'inscrit (le
+  serveur tire l'identifiant et renvoie le jeton de la NOUVELLE carte) ; preuves de remplacement sans SMS : **lien
+  d'accès à usage unique** montré en QR au comptoir (fiche client, 15 min, journalisé) ou envoyé par « Retrouver ma
+  carte » quand un prestataire est branché (24 h). Révocation : version d'accès par carte dans `meta`
+  (`acces_client:<commerce>:<client>`), incrémentée par le client (« Déconnecter tous mes appareils ») ou le gérant ;
+  usage unique des liens par `sessions_revoquees` (0005). Choix `meta` plutôt qu'une table : rien de neuf à
+  sauvegarder (14 tables), lisible par service_role seul, supprimée avec la carte (RGPD).
+- **Périmètre couvert** (mode strict) : vue complète de `GET /cartes/:id` (sans jeton : vue limitée = tampons + jeu du
+  jour ; `codeDuJour` inchangé, P0-S19 pourra s'appuyer sur `acces.jeton`), lus, profil, rattrapage (client), prénom,
+  message privé, données / suppression RGPD (jeton ET contact), tirage (le joueur = la carte du jeton, contact du
+  corps ignoré ; « 1 tirage / jour après visite validée » inchangé, testé), inscription d'un contact existant (409
+  sans carte ni identifiant, rien de modifié, aucun doublon), récupération (202 identique, lien d'accès seulement dans
+  le message au titulaire), liens courts `/c/<id>` (vue limitée ; `?a=` transmis). 401 uniforme que la carte existe
+  ou non ; échecs comptés dans `tentatives_auth` (portée `client`, clé `client-ip:<ip>`, 30 → blocage, séparé des PIN).
+- **Identifiants** : `cl-` + UUID v4 (`nouvelIdClient`, repli `getRandomValues` hors contexte sécurisé). Anciennes
+  cartes NON réécrites (aucune donnée modifiée) : **grâce jusqu'au 10/02/2027 00:00 Paris**
+  (`GRACE_ANCIENS_ID_JUSQU_AU`, 90 j après un déploiement supposé le 12/11/2026 — à décaler s'il glisse) : l'ancien
+  lien seul ouvre la vue limitée et donne un jeton (la page le demande seule, une fois par affichage), bandeau sur la
+  carte ; après, ancien lien seul → 404 comme une carte inconnue (un jeton déjà obtenu reste valable).
+- **Migration 0009** (`0009_auth_client.sql` + `.down.sql`) : contrainte `tentatives_auth.portee` élargie à `client`,
+  marqueur `auth_client_active()` (service_role seul) lu par `GET /sante/acces-client` ; RLS / revoke / grant comme
+  0005–0008. Testée aller / retour / rejeu sur PGlite. Sans elle : échecs client comptés en mémoire (comme sans 0006).
+  À appliquer APRÈS une sauvegarde (`scripts/sauvegarde-base.mjs`, documenté, **non exécuté**).
+- **Modes** (`AUTH_CLIENT`, `server/index.ts`) : `stricte` par défaut en production **si `SESSION_SECRET` existe**,
+  sinon `transition` avec avertissement ; `creerServeur` sans option = `transition` (jetons émis et vérifiés, accès
+  d'avant P0-S7 admis et compté dans `GET /sante/acces-client`). **Pourquoi ce défaut** : les suites existantes
+  (≈ 15 fichiers : tirage par contact seul, réinscription publique qui renvoie la carte, lecture par identifiant)
+  encodent exactement le comportement que le lot supprime, et la consigne interdit de modifier un test existant ;
+  elles tournent donc en mode transition (inchangées et vertes), le mode strict est couvert par les nouveaux tests et
+  par l'E2E. À trancher par l'orchestrateur : basculer ces suites en strict (modifier leurs appels) puis rendre
+  `stricte` le défaut de `creerServeur`.
+- **Front** : `src/lib/jetonCarte.ts` (jeton rangé par carte, expiration, repli mémoire), `avecJetonClient` /
+  `assurerJetonClient` (`src/data/jeuApi.ts`) : la page de jeu et la carte appellent l'API au travers d'une API qui
+  ajoute le jeton (les lignes `lancerTirage(api, …)` / `api.prenomCarte(…)` figées par `entree-qr-p1-c1` restent
+  identiques). Carte : vue limitée, échange du `?acces=` puis retrait de l'adresse, bandeau de grâce, « Sécurité de
+  ma carte ». Fiche client (gérant) : « Afficher le QR d'accès à sa carte », « Révoquer tous ses accès… ». Journal :
+  action `acces`. Chaînes client traduites (EN).
+- **Tests** : avant **830/830**. Après : **863 tests, 862 OK, 1 KO** — `+33` dans `tests/auth-client-p0-s7.test.ts`
+  (refus sans preuve uniforme, preuve OK, expirée, falsifiée / autre carte / autre commerce / lien en Bearer, révoquée
+  par le client puis le commerce, lien comptoir 15 min / usage unique, renouvellement, ancien lien pendant puis après
+  la grâce, contact existant sans reprise, tirage sans / avec jeton et 1 / jour, récupération sans oracle avec lien
+  d'accès, 30 échecs → 429 persistant au redémarrage, énumération, mode transition, strict sans secret refusé,
+  migration 0009 PGlite aller / retour / rejeu / droits, stockage Supabase sans / avec 0009, logique front).
+  **Le KO** : `tests/sauvegarde-p0-s5.test.ts:95` fige la liste des migrations à `0001…0008` ; toute migration 0009
+  (exigée par le brief) le fait échouer, et aucun changement de code applicatif ne peut le satisfaire sans exclure
+  la 0009 de la restauration (ce qui serait un vrai bug). **Non modifié** (consigne) ; correction attendue d'une ligne :
+  ajouter `'0009'` au tableau attendu. Aucun autre test existant modifié ; deux ont imposé un ajustement du code :
+  `/sante` a ses clés figées (`securite-s1`) → état de l'accès client sur `GET /sante/acces-client` ; la ligne
+  « hors ligne » de `CartePublique` est figée (`chargement-p0-u1`) → gardée telle quelle.
+- **E2E** (`npm run test:e2e`, Chromium) : **2/2**. `tests-e2e/serveur.ts` passe en `authClient: 'stricte'` (helper,
+  rendu plus exigeant, pas plus permissif) : le parcours existant scan → inscription → visite → tirage → gain → carte
+  passe avec le jeton obtenu par la page. Nouveau `tests-e2e/acces-carte-p0-s7.spec.ts` (vue limitée sur un autre
+  appareil, QR d'accès → carte complète, lien retiré de l'adresse, 2e usage refusé) — il a trouvé un vrai défaut,
+  corrigé : un `?acces=` arrivé sur une carte déjà ouverte (même onglet) n'était pas lu.
+- **Vérifications** : `npm test` (typecheck serveur inclus) 862/863 (le KO ci-dessus), `npx tsc -p .` OK,
+  `npm run build` OK, E2E 2/2.
+- **Non vérifié / limites** : rien contre Supabase réel (0009 non appliquée, PGlite seulement) ni en production ;
+  aucun SMS / e-mail réel ; `SESSION_SECRET` présent sur Render **non vérifié** — absent, la production resterait en
+  `transition` (avertissement au démarrage) : à vérifier avant de compter sur P0-S7 ; la caisse (code équipe) peut
+  appeler la route du QR d'accès mais seul l'écran fiche client (gérant) a le bouton ; l'inscription révèle toujours
+  qu'un contact a une carte dans CE commerce (409), sans code à usage unique (prestataire SMS / e-mail non branché) ;
+  un jeton volé sur le téléphone reste valable jusqu'à révocation / expiration ; deux échanges simultanés du même lien
+  d'accès peuvent tous deux réussir (fenêtre de quelques ms) ; rendu de la vue limitée vérifié dans Chromium
+  seulement (pas sur un vrai téléphone).

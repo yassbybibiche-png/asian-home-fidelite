@@ -72,6 +72,7 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `ADMIN_PIN` | dev : `000000` ; **production : obligatoire** | PIN admin (création de commerces, accès à tous les commerces, réinitialisation d'un PIN). En production : 8 à 12 chiffres, pas tous identiques, sinon refus de démarrer. |
 | `PIN_ASIAN_HOME` | dev : `1234` ; **production : obligatoire au 1er démarrage** | PIN commerçant (4 à 6 chiffres) donné à Asian Home Paris lors de la création de la base. Ignoré ensuite (le changer via `PUT /pin`). |
 | `SESSION_SECRET` | dev : secret éphémère (avertissement) ; **production : à créer** | **P0-S1.** Secret de signature (HMAC-SHA256) des jetons de session, 32 caractères minimum (ex. `openssl rand -base64 48`). Absente en production : le serveur **démarre quand même** (avertissement dans les journaux), `POST /sessions` répond 503 et le front reste sur le PIN en en-tête. Trop courte en production : refus de démarrer. La changer ferme toutes les sessions ouvertes. |
+| `AUTH_CLIENT` | production : `stricte` si `SESSION_SECRET` existe, sinon `transition` (avertissement) ; dev : `transition` | **P0-S7.** Accès des clients à leur carte (voir « Accès client aux cartes »). `stricte` = jeton client exigé pour la carte complète, le tirage, le profil, les messages, le rattrapage, les droits RGPD ; `transition` = jetons émis et vérifiés, mais l'accès d'avant P0-S7 (lien ou contact seuls) reste admis. `stricte` sans `SESSION_SECRET` → refus de démarrer ; autre valeur → refus de démarrer. |
 | `NODE_ENV` | — | `production` active le mode production. Sur Render, la variable `RENDER` (posée par Render) l'active aussi. |
 | `DB_FILE` | `data/fidelite.db` | Chemin du fichier SQLite. |
 | `DEMO` | `0` | `1` = ajoute aussi les 2 commerces de démo (Atelier Coiff' Camille, Maison Lila) avec leurs données fictives, marqués `demo: true`. |
@@ -319,6 +320,70 @@ redémarrage du serveur. Supabase → **SQL Editor** → coller `supabase/migrat
 (rejouable). Vérifier : `select relname, relrowsecurity from pg_class where relname = 'sessions_revoquees';` → 1 ligne,
 `true`. Annulation : `0005_sessions_revoquees.down.sql` (supprime la table ; sans effet sur les données métier).
 
+### Accès client aux cartes (P0-S7, audit F-03)
+
+Avant P0-S7, connaître l'identifiant d'une carte (`cl-<horodatage base36>-<4 caractères>`, prévisible) suffisait à la
+lire en entier, à la modifier et à jouer à sa place ; connaître un téléphone suffisait à reprendre la carte (inscription)
+et à tirer la roue à la place du client. Désormais :
+
+- **Identifiant imprévisible** : `cl-` + UUID v4 (`nouvelIdClient`, `src/lib/fidelite.ts`), tiré **par le serveur** à la
+  création. Les cartes existantes gardent leur identifiant (aucune donnée réécrite) : voir « période de grâce ».
+- **Jeton client** (`Authorization: Bearer <jeton>`) : même format et même secret que les sessions
+  (`v1.<base64url(JSON)>.<HMAC-SHA256(SESSION_SECRET)>`), contenu `{ typ: 'client', jti, cid (carte), com (commerce),
+  ver, exp }` — jamais accepté comme session, ni l'inverse (`typ` ≠ `role`). **30 jours**, renouvelé par la page
+  (`POST /cartes/:id/jeton` avec le jeton) dès qu'il reste moins de 15 jours. Rangé dans le `localStorage` du téléphone
+  (`src/lib/jetonCarte.ts`, repli en mémoire si le stockage est bloqué).
+- **1re preuve = le téléphone qui s'inscrit** : `POST /commerces/:id/clients` (public) renvoie le jeton de la NOUVELLE
+  carte. Un contact **déjà inscrit** sans preuve → **409** « ce contact a déjà une carte ici » : ni la carte, ni son
+  identifiant, ni jeton, rien de modifié, aucun doublon (compté comme échec d'accès). Limite assumée : cette réponse dit
+  qu'un contact a une carte dans CE commerce — inhérent à une inscription sans code à usage unique (SMS / e-mail non
+  branchés), bornée par les limites par IP / par contact et par l'anti-bruteforce.
+- **Autres preuves** : **lien d'accès** à usage unique (`typ: 'lien'`, échangé par `POST /cartes/:id/jeton { lien }`) —
+  au comptoir (fiche client → « Afficher le QR d'accès à sa carte », équipe ou gérant, **15 min**, journalisé) ou dans le
+  message « Retrouver ma carte » (**24 h**, seulement si un prestataire SMS / e-mail est branché ; jamais renvoyé à
+  l'écran du demandeur). Usage unique : son `jti` est rangé dans `sessions_revoquees` (0005).
+- **Ce que le jeton protège** (mode strict ; 401 uniforme sinon, que la carte existe ou non) : `GET /cartes/:id` en vue
+  **complète** (sans jeton : vue **limitée** = tampons + jeu du jour, sans prénom, messages, historique, demandes ni
+  contact ; `codeDuJour` reste servi comme avant, retrait prévu en P0-S19, qui pourra s'appuyer sur `acces.jeton`),
+  `POST /cartes/:id/lus`, `/donnees` et `/suppression` (jeton **et** contact), `…/clients/:id/profil`, `…/rattrapage`
+  (demande du client), `…/prenom`, `…/message-prive`, et **`POST …/tirages`** (le joueur est la carte du jeton ; le
+  contact du corps n'est plus lu — la règle « 1 tirage par jour après visite validée » est inchangée).
+- **Révocation** : version d'accès par carte dans `meta` (`acces_client:<commerce>:<client>`, absente = 0) ; tout jeton
+  ou lien d'une version antérieure est refusé. `POST /cartes/:id/revocation` (le client, avec son jeton : « Déconnecter
+  tous mes appareils ») et `POST /commerces/:id/clients/:id/revocation-acces` (gérant). La version est supprimée avec la
+  carte (RGPD). Choisi plutôt qu'une table : pas de nouvelle table à sauvegarder (14 tables inchangées), `meta` est
+  déjà sauvegardée et lisible par service_role seul.
+- **Anti-bruteforce** : jeton falsifié / d'une autre carte / d'un autre commerce, lien invalide, identifiant inconnu,
+  contact déjà inscrit → échec compté dans `tentatives_auth` (portée `client`, clé `client-ip:<ip>`) : **30 échecs
+  sans pause de 10 min → IP bloquée** (429, 10 min doublés à chaque série, 24 h max), persistant (migration 0009).
+  Compteur séparé de celui des PIN : des clients sur le wifi du restaurant ne bloquent pas la tablette du gérant.
+  Jeton expiré ou révoqué : 401 sans compter (usure normale).
+- **Période de grâce des anciennes cartes** : jusqu'au **10/02/2027 00:00 (Paris)** — `GRACE_ANCIENS_ID_JUSQU_AU`,
+  `server/app.ts` (90 jours après le déploiement prévu le 12/11/2026 ; décaler la constante si le déploiement glisse).
+  Jusque-là, l'ancien lien / QR / lien court ouvre la vue limitée **et** donne un jeton sans autre preuve (la page le
+  demande seule : migration transparente au 1er accès) ; un bandeau prévient que l'ancien lien seul cessera d'ouvrir la
+  carte. Après : l'ancien identifiant seul → 404 (comme une carte inconnue), plus de jeton ; un jeton obtenu avant
+  reste valable jusqu'à son expiration (et se renouvelle) ; sinon lien d'accès du comptoir ou « Retrouver ma carte ».
+  Les nouveaux identifiants n'ont jamais eu cette faculté.
+- **Liens courts** `/c/<id>` (SMS de relance) : redirection inchangée vers `#/carte/<id>` (vue limitée sans jeton) ;
+  `/c/<id>?a=<lien d'accès>` (SMS « Retrouver ma carte ») → `#/carte/<id>?acces=<lien>`, échangé puis retiré de l'adresse.
+- **Modes** (`AUTH_CLIENT`) : `stricte` en production ; `transition` = tout ce qui précède est émis et un jeton présent
+  est toujours vérifié, mais l'accès d'avant P0-S7 reste admis (lien seul = vue complète, contact seul = tirage, contact
+  existant = carte renvoyée **sans** jeton). Utile le temps d'un déploiement (anciens fronts en cache) ; les appels sans
+  jeton sont comptés : `GET /api/v1/sante/acces-client` → `{ mode, jetons, migration, graceAnciensLiensJusquAu,
+  accesSansJeton }` (route à part : le contenu de `/sante` est figé). Les tests historiques tournent dans ce mode.
+
+### Migration 0009 (portée « client » de l'anti-bruteforce, P0-S7) — à appliquer en production
+
+**Avant toute migration : une sauvegarde.** `node --env-file=.env scripts/sauvegarde-base.mjs` (voir « Sauvegarde /
+export » et `docs/SAUVEGARDE.md`) — à lancer par l'opérateur, jamais par un lot automatique.
+Puis Supabase → **SQL Editor** → coller `supabase/migrations/0009_auth_client.sql` → **Run** (rejouable). Elle élargit la
+contrainte `portee` de `tentatives_auth` (0006) à `'client'` et crée le marqueur `auth_client_active()` (lecture seule,
+service_role seul). Aucune table, aucune donnée client. Vérifier : `GET /api/v1/sante/acces-client` → `migration: true`.
+Sans elle, tout marche, mais les échecs d'accès client sont comptés **en mémoire seulement** (perdus au redémarrage ;
+avertissement `[securite]` dans les journaux). Annulation : `0009_auth_client.down.sql` (retire les seuls compteurs
+de portée `client`, remet la contrainte d'origine, garde les versions d'accès).
+
 ### Migration 0003 (modules caisse / points / équipe / messages / menu) — à appliquer en production
 
 La base Supabase en ligne ne se met pas à jour toute seule. Tant que `0003_cartiz.sql` n'est pas exécutée, les nouvelles
@@ -335,7 +400,8 @@ Exemple :
 curl -s -X POST localhost:3001/api/v1/commerces -H 'X-Admin-PIN: 000000' -H 'Content-Type: application/json' \
   -d '{"nom":"Chez Lin","type":"restaurant","pin":"4321"}'
 curl -s -X POST localhost:3001/api/v1/commerces/c-asian-home-paris/tirages -H 'Content-Type: application/json' \
-  -d '{"contact":"06 12 34 56 78"}'          # → 409 tant que la visite du jour n'est pas validée
+  -H 'Authorization: Bearer <jeton reçu à l’inscription>' -d '{}'   # → 409 tant que la visite du jour n'est pas validée
+                                                                    #   (sans jeton : 401 en mode strict)
 ```
 
 ## Sécurité (minimale, assumée)

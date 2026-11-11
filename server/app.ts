@@ -9,7 +9,7 @@ import type { Apparence, Avis, Client, Commerce, DemandeRattrapage, EntreeJourna
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
-import { analyserContact, cleContact, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
+import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
 import { canalDuClient, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
 import { estPerdant, lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
@@ -145,6 +145,13 @@ export interface OptionsServeur {
   googleBusiness?: ConfigGoogleBusiness
   /** Secret de signature des jetons de session (SESSION_SECRET) ; absent = POST /sessions répond 503, le PIN en en-tête reste accepté. */
   secretSession?: string
+  /**
+   * Accès aux cartes (P0-S7) : 'stricte' = jeton client exigé (production) ; 'transition' (défaut) = jetons émis et
+   * vérifiés, mais l'accès d'avant P0-S7 (identifiant ou contact seuls) reste admis — voir server/README.md.
+   */
+  authClient?: ModeAuthClient
+  /** Fin de la période de grâce des anciens identifiants (ISO), si différente de GRACE_ANCIENS_ID_JUSQU_AU (tests). */
+  graceAnciensIdJusquAu?: string
   /** Seuils des routes publiques, si différents de LIMITES_PUBLIQUES (tests). */
   limitesPubliques?: Partial<LimitesPubliques>
   /** Horloge injectable (tests). */
@@ -224,24 +231,83 @@ const DUREE_SESSION_S: Record<RoleSession, number> = { commerce: 8 * 3600, admin
 
 const signature = (secret: string, charge: string) => createHmac('sha256', secret).update(charge).digest()
 
-export function emettreJeton(secret: string, c: ChargeSession): string {
-  const charge = Buffer.from(JSON.stringify(c)).toString('base64url')
+function signer(secret: string, contenu: object): string {
+  const charge = Buffer.from(JSON.stringify(contenu)).toString('base64url')
   return `v1.${charge}.${signature(secret, charge).toString('base64url')}`
 }
 
-/** Jeton bien formé et signé par ce secret (l'expiration et la révocation sont vérifiées à part) ; sinon null. */
-export function lireJeton(secret: string, jeton: string): ChargeSession | null {
+/** Contenu d'un jeton bien formé et signé par ce secret ; sinon null. La forme du contenu est vérifiée par l'appelant. */
+function contenuSigne(secret: string, jeton: string): Record<string, unknown> | null {
   const parties = jeton.split('.')
   if (parties.length !== 3 || parties[0] !== 'v1' || jeton.length > 2048) return null
   if (!egaux(Buffer.from(parties[2], 'base64url'), signature(secret, parties[1]))) return null
   try {
-    const c = JSON.parse(Buffer.from(parties[1], 'base64url').toString('utf8')) as ChargeSession
-    const roleOk = c.role === 'admin' || ((c.role === 'commerce' || c.role === 'equipe') && typeof c.commerceId === 'string')
-    if (!roleOk || typeof c.jti !== 'string' || !Number.isInteger(c.exp) || (c.role === 'equipe' && typeof c.membreId !== 'string')) return null
-    return c
+    const c: unknown = JSON.parse(Buffer.from(parties[1], 'base64url').toString('utf8'))
+    return c && typeof c === 'object' && !Array.isArray(c) ? (c as Record<string, unknown>) : null
   } catch {
     return null
   }
+}
+
+export function emettreJeton(secret: string, c: ChargeSession): string {
+  return signer(secret, c)
+}
+
+/** Jeton bien formé et signé par ce secret (l'expiration et la révocation sont vérifiées à part) ; sinon null. */
+export function lireJeton(secret: string, jeton: string): ChargeSession | null {
+  const c = contenuSigne(secret, jeton) as ChargeSession | null
+  if (!c) return null
+  const roleOk = c.role === 'admin' || ((c.role === 'commerce' || c.role === 'equipe') && typeof c.commerceId === 'string')
+  if (!roleOk || typeof c.jti !== 'string' || !Number.isInteger(c.exp) || (c.role === 'equipe' && typeof c.membreId !== 'string')) return null
+  return c
+}
+
+// ---------- Jetons client (P0-S7) ----------
+// Même format et même secret que les sessions, contenu différent : `typ` au lieu de `role`. Un jeton client n'est donc
+// jamais accepté comme session (pas de `role`), ni une session comme jeton client (pas de `typ`).
+// • `client` : accès à UNE carte (`cid`) d'UN commerce (`com`), DUREE_JETON_CLIENT_S, renouvelable tant qu'il est valable ;
+// • `lien` : lien d'accès à usage unique (comptoir : DUREE_LIEN_COMPTOIR_S ; « Retrouver ma carte » :
+//   DUREE_LIEN_RECUPERATION_S), échangé contre un jeton `client` par POST /cartes/:id/jeton.
+// `ver` = version d'accès de la carte (table `meta`) : la révocation l'incrémente, tout jeton d'une version antérieure
+// est refusé.
+
+export type ModeAuthClient = 'stricte' | 'transition'
+
+export interface ChargeClient {
+  typ: 'client' | 'lien'
+  jti: string
+  /** Identifiant de la carte (client). */
+  cid: string
+  /** Commerce de la carte. */
+  com: string
+  ver: number
+  /** Expiration, en secondes unix. */
+  exp: number
+}
+
+export const DUREE_JETON_CLIENT_S = 30 * 24 * 3600
+export const DUREE_LIEN_COMPTOIR_S = 15 * 60
+export const DUREE_LIEN_RECUPERATION_S = 24 * 3600
+/**
+ * Fin de la période de grâce des cartes à ANCIEN identifiant (`cl-<horodatage>-<4 car.>`, prévisible) : 90 jours après
+ * le déploiement prévu de P0-S7 (12/11/2026). Jusque-là, l'ancien lien / QR seul ouvre la carte en vue limitée et
+ * donne un jeton (migration au 1er accès) ; ensuite il ne donne plus rien. Déploiement décalé : décaler cette date
+ * (et server/README.md, JOURNAL.md).
+ */
+export const GRACE_ANCIENS_ID_JUSQU_AU = '2027-02-10T00:00:00+01:00'
+/** Échecs d'accès client par IP (jeton falsifié, carte d'un autre, identifiant deviné…) avant blocage. */
+const MAX_ECHECS_CLIENT_IP = 30
+
+export function emettreJetonClient(secret: string, c: ChargeClient): string {
+  return signer(secret, c)
+}
+
+/** Jeton client bien formé et signé par ce secret (expiration, version et usage unique vérifiés à part) ; sinon null. */
+export function lireJetonClient(secret: string, jeton: string): ChargeClient | null {
+  const c = contenuSigne(secret, jeton) as ChargeClient | null
+  if (!c || 'role' in c || (c.typ !== 'client' && c.typ !== 'lien')) return null
+  if (typeof c.jti !== 'string' || typeof c.cid !== 'string' || typeof c.com !== 'string' || !Number.isInteger(c.ver) || !Number.isInteger(c.exp)) return null
+  return c
 }
 
 // ---------- Anti-abus des routes publiques (en mémoire, fenêtres fixes d'une minute) ----------
@@ -342,13 +408,13 @@ function creerLimiteurAuth(st: Stockage, maintenant: () => Date) {
 
   return {
     /** 429 si l'une des clés est bloquée (Retry-After = secondes restantes du plus long blocage). */
-    async verifier(cles: string[]) {
+    async verifier(cles: string[], motif = 'Trop de PIN incorrects.') {
       const t = maintenant().getTime()
       let fin = 0
       for (const cle of cles) fin = Math.max(fin, (await charger(cle)).bloqueJusqua)
       if (fin > t) {
         const s = Math.ceil((fin - t) / 1000)
-        throw new ErreurHttp(429, `Trop de PIN incorrects. Réessayez dans ${Math.ceil(s / 60)} min.`, { 'Retry-After': String(s) })
+        throw new ErreurHttp(429, `${motif} Réessayez dans ${Math.ceil(s / 60)} min.`, { 'Retry-After': String(s) })
       }
     },
     /**
@@ -730,7 +796,7 @@ export function lireOrigineCors(valeur: string): string {
 function entetesCors(autorisee: string, origine: string | undefined): Record<string, string> {
   const autorisation = {
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Session, X-Commerce-PIN, X-Admin-PIN, X-Equipe-Code',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session, X-Commerce-PIN, X-Admin-PIN, X-Equipe-Code',
     'Access-Control-Max-Age': '600',
   }
   if (autorisee === '*') return { 'Access-Control-Allow-Origin': '*', ...autorisation }
@@ -855,6 +921,12 @@ function codeGagnant(): string {
 
 export async function creerServeur(o: OptionsServeur) {
   const origineCors = lireOrigineCors(o.origineCors ?? '*')
+  const modeAuthClient: ModeAuthClient = o.authClient ?? 'transition'
+  if (modeAuthClient === 'stricte' && !o.secretSession) {
+    throw new Error('Accès client strict (AUTH_CLIENT=stricte) impossible sans SESSION_SECRET : les jetons client sont signés avec ce secret.')
+  }
+  const finGrace = Date.parse(o.graceAnciensIdJusquAu ?? GRACE_ANCIENS_ID_JUSQU_AU)
+  if (Number.isNaN(finGrace)) throw new Error('Date de fin de grâce des anciens identifiants de carte illisible.')
   // Supabase seulement s'il est configuré ; sinon SQLite local (dev, tests, comportement d'avant S1).
   const st: Stockage = o.supabase ? ouvrirStockageSupabase(o.supabase) : ouvrirStockage(o.fichierDb)
   try {
@@ -978,7 +1050,8 @@ export async function creerServeur(o: OptionsServeur) {
     for (const [jti, fin] of nonRevoquees) if (fin <= t) nonRevoquees.delete(jti)
   }
 
-  async function estRevoquee(c: ChargeSession): Promise<boolean> {
+  /** Session ou lien d'accès client (usage unique) déjà révoqué ? Même table, même cache (identifiant `jti`). */
+  async function estRevoquee(c: { jti: string; exp: number }): Promise<boolean> {
     if (revoquees.has(c.jti)) return true
     const t = maintenant().getTime()
     if ((nonRevoquees.get(c.jti) ?? 0) > t) return false
@@ -990,7 +1063,7 @@ export async function creerServeur(o: OptionsServeur) {
     return false
   }
 
-  async function revoquer(c: ChargeSession) {
+  async function revoquer(c: { jti: string; exp: number }) {
     revoquees.set(c.jti, c.exp * 1000)
     nonRevoquees.delete(c.jti)
     purgerCaches(maintenant().getTime())
@@ -1119,6 +1192,98 @@ export async function creerServeur(o: OptionsServeur) {
     return { json: { ok: true } }
   }
 
+  // ---- Accès client aux cartes (P0-S7) : jeton `Authorization: Bearer`, version d'accès, échecs comptés ----
+
+  const REFUS_CARTE = 'Accès à cette carte refusé : ouvrez-la sur le téléphone utilisé à l’inscription, demandez un lien d’accès au comptoir, ou retrouvez-la avec votre téléphone ou votre e-mail.'
+  const CONTACT_DEJA_INSCRIT = 'Ce téléphone ou cet e-mail a déjà une carte ici. Ouvrez-la sur le téléphone utilisé à l’inscription, demandez un lien d’accès au comptoir, ou utilisez « Retrouver ma carte ».'
+  /** Appels sans jeton acceptés en mode transition (GET /sante) : quand il n'en reste plus, passer en mode strict. */
+  let accesSansJeton = 0
+
+  // Version d'accès par carte, dans `meta` (clé `acces_client:<commerce>:<client>`, absente = 0) ; gardée en mémoire
+  // après la 1re lecture (Render = une instance, et toute révocation passe par `revoquerAccesCarte`).
+  const cleVersionAcces = (commerceId: string, clientId: string) => `acces_client:${commerceId}:${clientId}`
+  const versionsAcces = new Map<string, number>()
+  async function versionAcces(commerceId: string, clientId: string): Promise<number> {
+    const cle = cleVersionAcces(commerceId, clientId)
+    const connue = versionsAcces.get(cle)
+    if (connue !== undefined) return connue
+    const v = Number(await st.meta(cle)) || 0
+    versionsAcces.set(cle, v)
+    return v
+  }
+  /** Révoque TOUS les jetons et liens d'accès de la carte (version + 1, relue en base). */
+  async function revoquerAccesCarte(commerceId: string, clientId: string) {
+    const cle = cleVersionAcces(commerceId, clientId)
+    const v = (Number(await st.meta(cle)) || 0) + 1
+    await st.majMeta(cle, String(v))
+    versionsAcces.set(cle, v)
+  }
+
+  const cleClientIp = (req: IncomingMessage) => `client-ip:${ipDe(req)}`
+  const verifierBlocageClient = (req: IncomingMessage) => limiteur.verifier([cleClientIp(req)], 'Trop de tentatives d’accès à une carte.')
+  /** Échec d'accès client (compté par IP dans `tentatives_auth`, portée `client`) → 401 uniforme, ou 404 « introuvable ». */
+  async function refusCarte(req: IncomingMessage, statut: 401 | 404 = 401): Promise<never> {
+    await limiteur.echec([[cleClientIp(req), MAX_ECHECS_CLIENT_IP]], 'client')
+    throw err(statut, statut === 404 ? 'Carte de fidélité introuvable.' : REFUS_CARTE)
+  }
+
+  /**
+   * Jeton client de l'en-tête `Authorization: Bearer` (absent → undefined). Falsifié, de type `lien`, d'une autre carte
+   * ou d'un autre commerce → échec compté + 401 ; expiré ou révoqué → 401 (non compté : usure normale). Même réponse
+   * dans tous les cas, que la carte existe ou non.
+   */
+  async function jetonClient(req: IncomingMessage, cible: { clientId?: string; commerceId?: string }): Promise<ChargeClient | undefined> {
+    const brut = enTete(req, 'authorization')
+    if (brut === undefined) return undefined
+    await verifierBlocageClient(req)
+    const jeton = /^Bearer\s+(\S+)$/i.exec(brut)?.[1]
+    const c = jeton && o.secretSession ? lireJetonClient(o.secretSession, jeton) : null
+    if (!c || c.typ !== 'client' || (cible.clientId && c.cid !== cible.clientId) || (cible.commerceId && c.com !== cible.commerceId)) return refusCarte(req)
+    if (c.exp * 1000 <= maintenant().getTime() || c.ver !== (await versionAcces(c.com, c.cid))) throw err(401, REFUS_CARTE)
+    return c
+  }
+
+  /**
+   * Preuve exigée par les routes protégées d'une carte : jeton client. Mode transition : sans jeton, l'accès d'avant
+   * P0-S7 reste admis (undefined, l'appelant applique alors ses anciennes vérifications) et il est compté.
+   */
+  async function exigerAccesCarte(req: IncomingMessage, cible: { clientId?: string; commerceId?: string }): Promise<ChargeClient | undefined> {
+    const c = await jetonClient(req, cible)
+    if (c) return c
+    if (modeAuthClient === 'transition') {
+      accesSansJeton++
+      return undefined
+    }
+    await verifierBlocageClient(req)
+    return refusCarte(req)
+  }
+
+  /** Carte désignée par un jeton valide ; supprimée depuis (ou commerce disparu) → 401 uniforme. */
+  async function carteDuJeton(c: ChargeClient): Promise<{ commerce: Commerce; client: Client }> {
+    const commerce = await st.commerce(c.com)
+    const client = commerce && (await st.client(commerce.id, c.cid))
+    if (!commerce || !client) throw err(401, REFUS_CARTE)
+    return { commerce, client }
+  }
+
+  /** Jeton client neuf (version d'accès actuelle de la carte), à ranger par le navigateur. */
+  async function accesClient(commerceId: string, clientId: string) {
+    const exp = Math.floor(maintenant().getTime() / 1000) + DUREE_JETON_CLIENT_S
+    const charge: ChargeClient = { typ: 'client', jti: randomUUID(), cid: clientId, com: commerceId, ver: await versionAcces(commerceId, clientId), exp }
+    return { jeton: emettreJetonClient(o.secretSession!, charge), expireLe: new Date(exp * 1000).toISOString() }
+  }
+
+  /** Lien d'accès à usage unique (`lien`), à échanger contre un jeton client sur la page de la carte. */
+  async function lienAcces(commerceId: string, clientId: string, dureeS: number) {
+    const exp = Math.floor(maintenant().getTime() / 1000) + dureeS
+    const charge: ChargeClient = { typ: 'lien', jti: randomUUID(), cid: clientId, com: commerceId, ver: await versionAcces(commerceId, clientId), exp }
+    return { jeton: emettreJetonClient(o.secretSession!, charge), expireLe: new Date(exp * 1000).toISOString() }
+  }
+
+  /** Ancienne carte (identifiant prévisible) dont le lien seul n'ouvre plus rien : période de grâce terminée. */
+  const graceTerminee = (clientId: string) => !estIdClientActuel(clientId) && maintenant().getTime() >= finGrace
+  const infosGrace = (clientId: string) => (estIdClientActuel(clientId) ? {} : { ancienLien: true, graceJusquAu: new Date(finGrace).toISOString() })
+
   async function journaliser(commerceId: string, auteur: Auteur, action: EntreeJournal['action'], details: string, client?: Client, date = maintenant()) {
     const e: EntreeJournal = { id: `jr-${randomUUID()}`, commerceId, date: date.toISOString(), action, auteur, details }
     if (client) {
@@ -1184,6 +1349,20 @@ export async function creerServeur(o: OptionsServeur) {
       mesurePresent = false
     }
     return mesurePresent
+  }
+
+  // Même principe pour la migration 0009 (portée `client` des échecs d'accès, P0-S7) ; lue par GET /sante seulement.
+  let authClientPresent = false
+  let authClientVerifieLe = 0
+  async function schemaAuthClient(): Promise<boolean> {
+    if (authClientPresent || Date.now() - authClientVerifieLe < 60_000) return authClientPresent
+    authClientVerifieLe = Date.now()
+    try {
+      authClientPresent = await st.schemaAuthClient()
+    } catch {
+      authClientPresent = false
+    }
+    return authClientPresent
   }
 
   /**
@@ -1427,13 +1606,16 @@ export async function creerServeur(o: OptionsServeur) {
         const client = await st.clientParContact(c.id, contact)
         if (!client) continue
         const destinataire = canal === 'sms' ? (/^0\d{9}$/.test(cle) ? `+33${cle.slice(1)}` : `+${cle}`) : cle
+        // P0-S7 : avec SESSION_SECRET, le lien porte un lien d'accès à usage unique (24 h) — seul le titulaire du
+        // contact le reçoit ; ouvert, il donne le jeton client à ce téléphone. Sans secret : lien de la carte seul.
+        const acces = o.secretSession ? (await lienAcces(c.id, client.id, DUREE_LIEN_RECUPERATION_S)).jeton : ''
         const message: Message =
           canal === 'sms'
-            ? { destinataire, texte: `${c.nom} : votre carte de fidélité ${lienCourtCarte(site, client.id)}` }
+            ? { destinataire, texte: `${c.nom} : votre carte de fidélité ${lienCourtCarte(site, client.id)}${acces ? `?a=${acces}` : ''}` }
             : {
                 destinataire,
                 sujet: `Votre carte de fidélité ${c.nom}`,
-                texte: `Bonjour,\n\nVoici le lien de votre carte de fidélité ${c.nom} :\n${lienCarte(site, client.id)}\n\nVous n’avez rien demandé ? Ignorez ce message.\n\nL’équipe de ${c.nom}`,
+                texte: `Bonjour,\n\nVoici le lien de votre carte de fidélité ${c.nom} :\n${lienCarte(site, client.id)}${acces ? `?acces=${acces}\n\nCe lien ouvre votre carte complète sur votre téléphone (valable 24 h, une seule fois).` : ''}\n\nVous n’avez rien demandé ? Ignorez ce message.\n\nL’équipe de ${c.nom}`,
               }
         await notifications.envoyer(canal, message)
       }
@@ -1478,6 +1660,13 @@ export async function creerServeur(o: OptionsServeur) {
   async function clientOu404(commerceId: string, id: string): Promise<Client> {
     const c = await st.client(commerceId, id)
     if (!c) throw err(404, 'Client inconnu dans ce commerce.')
+    return c
+  }
+
+  /** Carte d'un jeton client valable, supprimée depuis : même refus qu'un jeton invalide (P0-S7). */
+  async function clientOu401(commerceId: string, id: string): Promise<Client> {
+    const c = await st.client(commerceId, id)
+    if (!c) throw err(401, REFUS_CARTE)
     return c
   }
 
@@ -1580,6 +1769,8 @@ export async function creerServeur(o: OptionsServeur) {
    * journal ici : l'appelant journalise l'opération SANS prénom ni contact (sinon la trace garderait la donnée effacée).
    */
   async function supprimerClientCascade(commerceId: string, clientId: string): Promise<BilanSuppression> {
+    // Version d'accès de la carte (P0-S7) : plus rien à protéger une fois la carte supprimée.
+    const cleAcces = cleVersionAcces(commerceId, clientId)
     for (const filleul of (await st.clients(commerceId)).filter((c) => c.parrainId === clientId)) {
       await st.transaction(async () => {
         const avant = await st.client(commerceId, filleul.id)
@@ -1588,7 +1779,12 @@ export async function creerServeur(o: OptionsServeur) {
         await st.majClient(apres)
       })
     }
-    return st.transaction(() => st.supprimerClient(commerceId, clientId))
+    const bilan = await st.transaction(() => st.supprimerClient(commerceId, clientId))
+    if (bilan.client) {
+      await st.supprimerMeta(cleAcces)
+      versionsAcces.delete(cleAcces)
+    }
+    return bilan
   }
 
   const resumeBilan = (b: BilanSuppression) =>
@@ -1649,6 +1845,20 @@ export async function creerServeur(o: OptionsServeur) {
         },
       }
     }
+    if (ressource === 'sante' && id === 'acces-client' && !sous && m === 'GET') {
+      // P0-S7 (à part : le contenu de /sante est figé) — mode d'accès aux cartes, jetons possibles (SESSION_SECRET),
+      // migration 0009 appliquée, fin de grâce des anciens liens, et appels encore faits SANS jeton depuis le démarrage
+      // (mode transition) : quand ce compteur reste à 0, passer AUTH_CLIENT à `stricte`. Aucune donnée client.
+      return {
+        json: {
+          mode: modeAuthClient,
+          jetons: !!o.secretSession,
+          migration: await schemaAuthClient(),
+          graceAnciensLiensJusquAu: new Date(finGrace).toISOString(),
+          accesSansJeton,
+        },
+      }
+    }
     if (ressource === 'cartes' && id === 'retrouver' && !sous && m === 'POST') {
       // PUBLIC (P1-C3) : « Carte introuvable » → recevoir le lien de sa carte. Même réponse 202 que le contact ait une
       // carte ou non (audit F-12) ; `envoi` = un prestataire est configuré pour ce canal (état du serveur, déjà dans /sante).
@@ -1659,19 +1869,91 @@ export async function creerServeur(o: OptionsServeur) {
       if (envoi) envoyerLiensCarte(contact, canal, sitePublic(req))
       return { statut: 202, json: { ok: true, envoi } }
     }
+    if (ressource === 'cartes' && id && sous === 'jeton' && !sousId && m === 'POST') {
+      // PUBLIC (P0-S7) — obtenir / renouveler le jeton client de cette carte. Preuves acceptées, dans l'ordre :
+      // 1. jeton client encore valable (Authorization) → renouvellement ;
+      // 2. `{ lien }` : lien d'accès à usage unique (comptoir, « Retrouver ma carte ») → consommé ;
+      // 3. rien : seulement une carte à ANCIEN identifiant, pendant la période de grâce (migration au 1er accès).
+      // Tout le reste : échec compté + 401 uniforme (que la carte existe ou non).
+      limiterIp(req, 'fiche', limites.ficheClientParIp)
+      compteurs.consommer(`carte:${id}`, limites.lectureParCarte, TROP)
+      if (!o.secretSession) throw err(503, 'Accès client non configuré sur ce serveur (SESSION_SECRET absente) : la carte reste ouverte par son lien.')
+      await verifierBlocageClient(req)
+      const corps = await lireCorps(req)
+      const charge = await jetonClient(req, { clientId: id })
+      let carte: { commerce: Commerce; client: Client } | undefined
+      if (charge) carte = await carteDuJeton(charge)
+      else if (typeof corps.lien === 'string' && corps.lien) {
+        const l = lireJetonClient(o.secretSession, corps.lien)
+        if (!l || l.typ !== 'lien' || l.cid !== id || l.exp * 1000 <= maintenant().getTime() || (await estRevoquee(l))) return refusCarte(req)
+        const commerce = await st.commerce(l.com)
+        const client = commerce && (await st.client(commerce.id, id))
+        if (!commerce || !client || l.ver !== (await versionAcces(commerce.id, id))) return refusCarte(req)
+        await revoquer(l) // usage unique
+        carte = { commerce, client }
+      } else {
+        if (estIdClientActuel(id) || graceTerminee(id)) return refusCarte(req)
+        carte = await clientDeCarte(id).catch(() => undefined)
+        if (!carte) return refusCarte(req)
+      }
+      exigerActif(carte.commerce)
+      return { statut: 201, json: { ...(await accesClient(carte.commerce.id, carte.client.id)), clientId: carte.client.id, commerceId: carte.commerce.id } }
+    }
+    if (ressource === 'cartes' && id && sous === 'revocation' && !sousId && m === 'POST') {
+      // PUBLIC (P0-S7) — « Déconnecter tous mes appareils » : le titulaire (jeton valable) révoque tous les jetons et
+      // liens d'accès de sa carte, celui-ci compris. Le lien seul ne suffit jamais.
+      limiterIp(req, 'fiche', limites.ficheClientParIp)
+      const charge = await jetonClient(req, { clientId: id })
+      if (!charge) {
+        await verifierBlocageClient(req)
+        return refusCarte(req)
+      }
+      const { commerce: c, client } = await carteDuJeton(charge)
+      await revoquerAccesCarte(c.id, client.id)
+      await journaliser(c.id, { type: 'client', nom: 'Client (depuis sa carte)' }, 'acces', 'Accès à la carte révoqué par le client (tous ses appareils)', client)
+      return { json: { ok: true } }
+    }
     if (ressource === 'cartes' && id && !sous && m === 'GET') {
       // PUBLIC (ajout V2) : la carte vue par le client (#/carte/<clientId>) et l'état de son jeu du jour.
       // Mêmes informations que POST /clients en public : jamais de téléphone ni d'e-mail. Seule exception (P0-U3) : le
       // code gagnant DU JOUR de ce client, re-servi à son titulaire (autre téléphone, cache vidé) — jamais dans une liste.
+      // P0-S7 : vue COMPLÈTE avec un jeton client de cette carte (ou en mode transition) ; sinon vue LIMITÉE (tampons,
+      // jeu du jour — `codeDuJour` inchangé jusqu'à P0-S19 —, sans prénom, messages, historique ni demandes). Ancien
+      // identifiant après la période de grâce, sans jeton : 404, comme une carte inconnue.
       limiterIp(req, 'lecture', limites.lectureParIp)
       compteurs.consommer(`carte:${id}`, limites.lectureParCarte, TROP)
-      for (const c of await st.commerces()) {
+      const charge = await jetonClient(req, { clientId: id })
+      if (!charge) await verifierBlocageClient(req)
+      const complete = !!charge || modeAuthClient === 'transition'
+      const commerces = charge ? [(await carteDuJeton(charge)).commerce] : await st.commerces()
+      for (const c of commerces) {
         let client = await st.client(c.id, id)
         if (!client) continue
+        if (!complete && graceTerminee(id)) break
         exigerActif(c)
         const tirages = await st.tiragesClient(c.id, client.id)
         const t = maintenant()
         const duJour = tirageDuJour(tirages, c.id, client.id, t)
+        const jeu = {
+          statut: statutJeu(client, tirages, c.id, t),
+          lotDuJour: duJour?.lot ?? null,
+          codeDuJour: duJour?.code && !estPerdant(duJour.lot) ? duJour.code : null,
+          remisDuJour: !!duJour?.remis,
+        }
+        const acces = { vue: complete ? 'complete' : 'limitee', jeton: !!charge, ...infosGrace(id) }
+        if (!complete) {
+          const menu = await st.menu(c.id)
+          return {
+            json: {
+              client: { id: client.id, commerceId: c.id, tampons: client.tampons },
+              commerce: commercePublic(c),
+              jeu,
+              menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
+              acces,
+            },
+          }
+        }
+        if (!charge) accesSansJeton++
         // Ouverture de la carte : relance des inactifs / anniversaire, si ces règles sont activées (une seule fois chacune).
         const avec = avecMessages(client, c, 'ouverture', t)
         if (avec !== client) {
@@ -1692,12 +1974,7 @@ export async function creerServeur(o: OptionsServeur) {
           json: {
             client: cartePublique(client),
             commerce: commercePublic(c),
-            jeu: {
-              statut: statutJeu(client, tirages, c.id, t),
-              lotDuJour: duJour?.lot ?? null,
-              codeDuJour: duJour?.code && !estPerdant(duJour.lot) ? duJour.code : null,
-              remisDuJour: !!duJour?.remis,
-            },
+            jeu,
             menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
             // P1-C3 : historique des lots de la roue (gagnants seulement), sans aucun code — seul celui du jour est servi ci-dessus.
             historiqueLots: tirages
@@ -1705,16 +1982,20 @@ export async function creerServeur(o: OptionsServeur) {
               .sort((a, b) => b.date.localeCompare(a.date))
               .slice(0, 20)
               .map((x) => ({ lot: x.lot, date: x.date, statut: statutGain(x, t) })),
+            acces,
           },
         }
       }
-      throw err(404, 'Carte de fidélité introuvable.')
+      // Carte supprimée depuis l'émission du jeton : même refus qu'un jeton invalide.
+      if (charge) throw err(401, REFUS_CARTE)
+      return refusCarte(req, 404)
     }
     if (ressource === 'cartes' && id && sous === 'lus' && m === 'POST') {
-      // PUBLIC : le client marque ses messages comme lus (même niveau d'accès que la lecture de sa carte).
+      // PUBLIC : le client marque ses messages comme lus (P0-S7 : jeton client de cette carte ; mode transition : lien seul).
       limiterIp(req, 'lecture', limites.lectureParIp)
       compteurs.consommer(`carte:${id}`, limites.lectureParCarte, TROP)
-      for (const c of await st.commerces()) {
+      const charge = await exigerAccesCarte(req, { clientId: id })
+      for (const c of charge ? [(await carteDuJeton(charge)).commerce] : await st.commerces()) {
         if (!(await st.client(c.id, id))) continue
         exigerActif(c)
         await st.transaction(async () => {
@@ -1731,10 +2012,12 @@ export async function creerServeur(o: OptionsServeur) {
       // la suppression » (demande enregistrée ; la suppression elle-même est faite par le commerce, fiche client).
       // Identité : lien de la carte + téléphone ou e-mail du client (403 sinon). Le commerce inactif n'empêche pas ces
       // droits. Limité par IP et par carte (même seuil que les autres formulaires de la carte).
+      // P0-S7 : jeton client de cette carte EN PLUS du contact (mode transition : lien + contact, comme avant).
       limiterIp(req, 'fiche', limites.ficheClientParIp)
       compteurs.consommer(`rgpd:${id}`, limites.ficheClientParIp, TROP)
+      const charge = await exigerAccesCarte(req, { clientId: id })
       const corps = await lireCorps(req)
-      const { commerce: c, client } = await clientDeCarte(id)
+      const { commerce: c, client } = charge ? await carteDuJeton(charge) : await clientDeCarte(id)
       if (!contactDuClient(client, corps.contact)) {
         throw err(403, 'Ce téléphone ou cet e-mail ne correspond pas à cette carte : indiquez celui donné à l’inscription.')
       }
@@ -1901,6 +2184,7 @@ export async function creerServeur(o: OptionsServeur) {
       else {
         exigerActif(commerce)
         limiterIp(req, 'inscription', limites.inscriptionParIp)
+        await verifierBlocageClient(req)
       }
       const corps = await lireCorps(req)
       if (!commercant) limiterContact('inscription', id, corps.contact, limites.inscriptionParContact)
@@ -1908,7 +2192,20 @@ export async function creerServeur(o: OptionsServeur) {
       // Consentement aux relances : case séparée, jamais pré-cochée ; absent = pas de consentement.
       const consentement = corps.consentementRelance == null ? false : booleen(corps.consentementRelance, 'consentementRelance')
       const { client, existant } = await st.transaction(() => inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain, consentement))
-      return { statut: existant ? 200 : 201, json: { client: commercant ? client : cartePublique(client), existant } }
+      if (commercant) return { statut: existant ? 200 : 201, json: { client, existant } }
+      // P0-S7 — contact déjà inscrit, sans preuve : jamais la carte d'un autre (mode strict). Le refus dit seulement que
+      // ce contact a une carte DANS CE COMMERCE (inhérent à une inscription sans code à usage unique), borné par les
+      // limites par IP / par contact et compté comme échec d'accès. Mode transition : comme avant, carte sans jeton.
+      if (existant) {
+        if (modeAuthClient === 'stricte') {
+          await limiteur.echec([[cleClientIp(req), MAX_ECHECS_CLIENT_IP]], 'client')
+          throw err(409, CONTACT_DEJA_INSCRIT)
+        }
+        accesSansJeton++
+        return { statut: 200, json: { client: cartePublique(client), existant } }
+      }
+      // Nouvelle carte : son jeton client (1re preuve = celui qui vient de s'inscrire sur ce téléphone).
+      return { statut: 201, json: { client: cartePublique(client), existant, ...(o.secretSession ? await accesClient(id, client.id) : {}) } }
     }
 
     if (sous === 'clients' && sousId && m === 'POST' && (action === 'visite' || action === 'recompense')) {
@@ -2174,6 +2471,29 @@ export async function creerServeur(o: OptionsServeur) {
       return { json: { client: clientCaisse(client) } }
     }
 
+    // ---------- Accès du client à sa carte (P0-S7) : lien d'accès au comptoir, révocation ----------
+    // Lien d'accès : l'équipe (code équipe ou gérant) le montre en QR au client présent au comptoir — c'est la preuve
+    // de remplacement quand le téléphone d'inscription est perdu ou changé, sans SMS ni e-mail. 15 min, usage unique.
+    // Révocation : gérant seulement ; tous les jetons et liens de la carte tombent (téléphone perdu, carte reprise).
+
+    if (sous === 'clients' && sousId && action === 'lien-acces' && !extra && m === 'POST') {
+      const { auteur } = await exigerAuteur(req, id)
+      exigerActif(commerce)
+      if (!o.secretSession) throw err(503, 'Accès client non configuré sur ce serveur (SESSION_SECRET absente).')
+      const client = await clientOu404(id, sousId)
+      const { jeton, expireLe } = await lienAcces(id, client.id, DUREE_LIEN_COMPTOIR_S)
+      await journaliser(id, auteur, 'acces', 'Lien d’accès à la carte remis au comptoir (15 min, usage unique)', client)
+      return { statut: 201, json: { lien: `${sitePublic(req)}/#/carte/${encodeURIComponent(client.id)}?acces=${jeton}`, expireLe } }
+    }
+
+    if (sous === 'clients' && sousId && action === 'revocation-acces' && !extra && m === 'POST') {
+      const nom = await exigerCommercant(req, id)
+      const client = await clientOu404(id, sousId)
+      await revoquerAccesCarte(id, client.id)
+      await journaliser(id, { type: 'gerant', nom }, 'acces', 'Accès à la carte révoqué par le commerce (jetons et liens d’accès en cours invalidés)', client)
+      return { json: { ok: true } }
+    }
+
     // ---------- Prénom demandé APRÈS le tirage (P1-C1) ----------
     // PUBLIC — l'inscription depuis le QR ne demande que le téléphone ou l'e-mail ; le prénom est proposé sur l'écran de
     // gain. Identité : lien de la carte + contact donné à l'inscription (403 sinon, comme les routes RGPD). Seulement si
@@ -2182,12 +2502,14 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'clients' && sousId && action === 'prenom' && m === 'POST') {
       exigerActif(commerce)
       limiterIp(req, 'fiche', limites.ficheClientParIp)
+      // P0-S7 : jeton client de cette carte ; mode transition sans jeton : lien + contact, comme avant.
+      const charge = await exigerAccesCarte(req, { clientId: sousId, commerceId: id })
       const corps = await lireCorps(req)
       const prenom = texte(corps.prenom ?? '', 'prenom', 40)
       if (!prenom) throw err(400, 'Indiquez votre prénom.')
       const client = await st.transaction(async () => {
-        const avant = await clientOu404(id, sousId)
-        if (!contactDuClient(avant, corps.contact)) {
+        const avant = charge ? await clientOu401(id, sousId) : await clientOu404(id, sousId)
+        if (!charge && !contactDuClient(avant, corps.contact)) {
           throw err(403, 'Ce téléphone ou cet e-mail ne correspond pas à cette carte : indiquez celui donné à l’inscription.')
         }
         if ((avant.prenom ?? '').trim()) throw err(409, 'Cette carte a déjà un prénom.')
@@ -2208,12 +2530,14 @@ export async function creerServeur(o: OptionsServeur) {
       exigerActif(commerce)
       limiterIp(req, 'fiche', limites.ficheClientParIp)
       compteurs.consommer(`message-prive:${sousId}`, limites.ficheClientParIp, TROP)
+      // P0-S7 : jeton client de cette carte ; mode transition sans jeton : lien + contact, comme avant.
+      const charge = await exigerAccesCarte(req, { clientId: sousId, commerceId: id })
       const corps = await lireCorps(req)
       const valide = validerMessagePrive(corps)
       if (typeof valide === 'string') throw err(400, valide)
       const message = await st.transaction(async () => {
-        const avant = await clientOu404(id, sousId)
-        if (!contactDuClient(avant, corps.contact)) {
+        const avant = charge ? await clientOu401(id, sousId) : await clientOu404(id, sousId)
+        if (!charge && !contactDuClient(avant, corps.contact)) {
           throw err(403, 'Ce téléphone ou cet e-mail ne correspond pas à cette carte : indiquez celui donné à l’inscription.')
         }
         const t = maintenant()
@@ -2232,6 +2556,8 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'clients' && sousId && action === 'profil' && m === 'POST') {
       exigerActif(commerce)
       limiterIp(req, 'fiche', limites.ficheClientParIp)
+      // P0-S7 : jeton client de cette carte (mode transition : lien seul, comme avant).
+      const charge = await exigerAccesCarte(req, { clientId: sousId, commerceId: id })
       const corps = await lireCorps(req)
       const inconnus = Object.keys(corps).filter((k) => k !== 'anniversaire' && k !== 'platPrefere')
       if (inconnus.length) throw err(400, `Champ non modifiable : ${inconnus.join(', ')}.`)
@@ -2240,7 +2566,7 @@ export async function creerServeur(o: OptionsServeur) {
       const plat = corps.platPrefere == null ? '' : texte(corps.platPrefere, 'platPrefere', 80)
       if (!anniversaire && !plat) throw err(400, 'Indiquez au moins votre anniversaire ou votre plat préféré.')
       const client = await st.transaction(async () => {
-        const avant = await clientOu404(id, sousId)
+        const avant = charge ? await clientOu401(id, sousId) : await clientOu404(id, sousId)
         if (!peutCompleterProfil(avant)) throw err(409, 'Votre profil se complète après votre 2e visite : revenez nous voir !')
         const apres: Client = { ...avant }
         if (anniversaire) apres.anniversaire = anniversaire
@@ -2255,14 +2581,16 @@ export async function creerServeur(o: OptionsServeur) {
 
     if (sous === 'clients' && sousId && action === 'rattrapage' && !extra && m === 'POST') {
       // Public (depuis la carte du client) : le commerçant valide ou refuse ensuite.
+      // P0-S7 : jeton client de cette carte (mode transition : lien seul, comme avant).
       exigerActif(commerce)
       limiterIp(req, 'fiche', limites.ficheClientParIp)
+      const charge = await exigerAccesCarte(req, { clientId: sousId, commerceId: id })
       const corps = await lireCorps(req)
       const dateVisite = new Date(typeof corps.date === 'string' ? corps.date : '')
       const montant = typeof corps.montantCentimes === 'number' ? corps.montantCentimes : NaN
       const ticket = corps.ticket == null ? '' : texte(corps.ticket, 'ticket', 80)
       const client = await st.transaction(async () => {
-        const avant = await clientOu404(id, sousId)
+        const avant = charge ? await clientOu401(id, sousId) : await clientOu404(id, sousId)
         const raison = rattrapageRecevable(avant, commerce, dateVisite, montant, maintenant())
         if (raison) throw err(409, raison)
         if ((avant.demandesRattrapage ?? []).some((d) => d.statut === 'en_attente' && new Date(d.date).toDateString() === dateVisite.toDateString())) {
@@ -2508,14 +2836,18 @@ export async function creerServeur(o: OptionsServeur) {
 
     if (sous === 'tirages' && !sousId && m === 'POST') {
       // PUBLIC : tout est décidé ici (visite du jour, 1 tirage par jour, lot tiré) — rien ne vient du navigateur.
+      // P0-S7 : le joueur est le titulaire du jeton client (Authorization) de CE commerce, jamais « celui qui connaît le
+      // contact ». Mode transition sans jeton : comme avant (contact → inscription ou carte retrouvée).
       exigerActif(commerce)
       limiterIp(req, 'tirage', limites.tirageParIp)
+      const charge = await exigerAccesCarte(req, { commerceId: id })
       const corps = await lireCorps(req)
-      limiterContact('tirage', id, corps.contact, limites.tirageParContact)
+      if (charge) compteurs.consommer(`tirage:${id}:${charge.cid}`, limites.tirageParContact, 'Trop de tentatives pour ce contact.')
+      else limiterContact('tirage', id, corps.contact, limites.tirageParContact)
       const prenom = corps.prenom == null ? '' : texte(corps.prenom, 'prenom', 40)
       const dejaJoue = 'Vous avez déjà tourné la roue aujourd’hui. Revenez lors de votre prochaine visite !'
       const resultat = await st.transaction(async () => {
-        const { client } = await inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain)
+        const client = charge ? await clientOu401(id, charge.cid) : (await inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain)).client
         const t = maintenant()
         const statut = statutJeu(client, await st.tiragesClient(id, client.id), id, t)
         if (statut === 'dejaJoue') return { refus: dejaJoue }
@@ -2758,10 +3090,14 @@ export async function creerServeur(o: OptionsServeur) {
         res.writeHead(204, entetes).end()
         return
       }
-      // Lien court des SMS de relance (P1-B3) : /c/<clientId> → la carte du client (#/carte/<clientId>).
+      // Lien court des SMS de relance (P1-B3) : /c/<clientId> → la carte du client (#/carte/<clientId>). Sans jeton, la
+      // page n'en reçoit que la vue limitée (P0-S7). `?a=<lien d'accès>` (SMS « Retrouver ma carte ») : transmis à la
+      // page, qui l'échange contre un jeton ; dans le fragment, il n'est jamais renvoyé à un serveur.
       const court = /^\/c\/([\w-]{1,80})$/.exec(url.pathname)
       if (court && (req.method === 'GET' || req.method === 'HEAD')) {
-        res.writeHead(302, { ...entetes, Location: `/#/carte/${court[1]}`, 'Cache-Control': 'no-store' }).end()
+        const a = url.searchParams.get('a')
+        const acces = a && /^[\w.-]{1,2048}$/.test(a) ? `?acces=${a}` : ''
+        res.writeHead(302, { ...entetes, Location: `/#/carte/${court[1]}${acces}`, 'Cache-Control': 'no-store' }).end()
         return
       }
       if (!url.pathname.startsWith('/api/v1/') && url.pathname !== '/api/v1') {

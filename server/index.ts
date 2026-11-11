@@ -47,6 +47,21 @@ if (!secretSession) {
   }
 }
 
+// Accès client aux cartes (P0-S7, server/README.md « Accès client ») : `stricte` = jeton client exigé ; `transition` =
+// jetons émis et vérifiés, mais l'accès d'avant P0-S7 (lien ou contact seuls) reste admis. Défaut : `stricte` en
+// production quand SESSION_SECRET existe (les jetons en dépendent), `transition` sinon.
+const authClientDemande = env.AUTH_CLIENT?.trim()
+if (authClientDemande && authClientDemande !== 'stricte' && authClientDemande !== 'transition') arreter('AUTH_CLIENT doit valoir « stricte » ou « transition ».')
+if (authClientDemande === 'stricte' && !secretSession) arreter('AUTH_CLIENT=stricte exige SESSION_SECRET (signature des jetons client).')
+const authClient: 'stricte' | 'transition' = (authClientDemande as 'stricte' | 'transition' | undefined) ?? (production && secretSession ? 'stricte' : 'transition')
+if (authClient === 'transition') {
+  console.warn(
+    production
+      ? '[serveur] ACCÈS CLIENT EN MODE TRANSITION : le lien ou le contact seuls ouvrent encore une carte (comportement d’avant P0-S7). Passer en mode strict dès que /api/v1/sante → authClient.accesSansJeton reste à 0.'
+      : '[serveur] Accès client en mode transition (développement) : AUTH_CLIENT=stricte pour essayer le mode de production.',
+  )
+}
+
 // CORS strict (P0-S4) : seule l'origine CORS_ORIGIN peut appeler l'API depuis un autre site. Absente : '*' comme avant,
 // sans refuser de démarrer — en production le front est servi par CE serveur (même origine), le CORS ne le concerne pas.
 let origineCors = '*'
@@ -82,6 +97,7 @@ try {
     adminPin,
     pinInitial,
     secretSession,
+    authClient,
     demo: env.DEMO === '1',
     production,
     derriereProxy: env.TRUST_PROXY === '1' || !!env.RENDER,

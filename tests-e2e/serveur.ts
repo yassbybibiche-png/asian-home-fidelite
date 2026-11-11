@@ -25,6 +25,8 @@ const app = await creerServeur({
   adminPin: ADMIN_PIN_E2E,
   pinInitial: '1234',
   secretSession: 'e2e-secret-de-session-local-uniquement-0123456789',
+  // P0-S7 : comme en production — le parcours n'avance qu'avec le jeton client obtenu par la page à l'inscription.
+  authClient: 'stricte',
   production: false,
   dossierStatique: statique,
   version: 'e2e',

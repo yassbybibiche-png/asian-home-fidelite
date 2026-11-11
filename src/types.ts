@@ -246,7 +246,7 @@ export interface MembreEquipe {
   creeLe: string
 }
 
-export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi' | 'gain' | 'consentement' | 'avisGoogle' | 'rgpd'
+export type ActionJournal = 'passage' | 'recompense' | 'echange' | 'message' | 'equipe' | 'menu' | 'parrainage' | 'rattrapage' | 'palier' | 'reserve' | 'defi' | 'gain' | 'consentement' | 'avisGoogle' | 'rgpd' | 'acces'
 
 /** Parrainage réussi (trace d'audit ; les points sont sur les cartes des deux clients). */
 export interface Parrainage {

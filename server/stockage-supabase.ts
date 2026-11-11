@@ -80,6 +80,8 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     const { data, error } = await requete
     if (error) {
       if (error.code === '23505') throw new ErreurConflit(`Doublon refusé par la base (${table}) : ${error.message}`)
+      // Portée `client` refusée par la contrainte d'origine de la 0006 (23514) : migration 0009 pas encore appliquée.
+      if (error.code === '23514' && table === 'tentatives_auth') throw new ErreurMigrationManquante(table, '0009_auth_client.sql')
       // Table inconnue (PostgREST : PGRST205 ; Postgres : 42P01) → migration 0003 / 0004 / 0005 pas encore appliquée.
       // Fonction inconnue (PostgREST : PGRST202 ; Postgres : 42883) → idem pour la fonction d'incrément de la 0008.
       if (error.code === 'PGRST205' || error.code === '42P01' || error.code === 'PGRST202' || error.code === '42883') {
@@ -122,6 +124,7 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
 
     meta: async (cle) => (await ok<{ valeur: string }[]>('meta', sb.from('meta').select('valeur').eq('cle', cle)))[0]?.valeur,
     majMeta: async (cle, valeur) => void (await ok('meta', sb.from('meta').upsert({ cle, valeur }, { onConflict: 'cle' }))),
+    supprimerMeta: async (cle) => void (await ok('meta', sb.from('meta').delete().eq('cle', cle))),
 
     commerces: () => lire<Commerce>('commerces', sb.from('commerces').select('donnees').order('ordre')),
     commerce: async (id) => (await lire<Commerce>('commerces', sb.from('commerces').select('donnees').eq('id', id)))[0],
@@ -274,6 +277,13 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       )
     },
     effacerTentativesAuth: async (cle) => void (await ok('tentatives_auth', sb.from('tentatives_auth').delete().eq('cle', cle))),
+    // ---- Accès client (0009_auth_client.sql) : marqueur `auth_client_active()` (lecture seule, aucune ligne écrite) ----
+    schemaAuthClient: async () => {
+      const { error } = await sb.rpc('auth_client_active')
+      if (!error) return true
+      if (error.code === 'PGRST202' || error.code === '42883') return false
+      throw new Error(`Supabase (auth_client_active) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
+    },
 
     // ---- Relances (0007_relances.sql) : tant que la migration manque, le journal se lit vide et aucun envoi ne part ----
     ajouterEnvoi: async (e) =>
