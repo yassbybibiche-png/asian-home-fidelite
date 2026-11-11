@@ -1177,3 +1177,42 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   serveur (pas de filtre PostgREST sur le JSONB) : acceptable pour un commerce, à revoir si la base grossit
   beaucoup. Les correctifs front (points 2–7) ne sont pas couverts par un test automatisé (pas de navigateur sur la
   VM) : relus + typecheckés, à vérifier sur tablette réelle au premier usage.
+
+## 11/11/2026 — P0-S18 : Pagination serveur Supabase (AUDIT.md §7, revue Codex point 2)
+- **Contexte.** Les lectures `clients()` et `tirages()` ne paginaient pas : au-delà du plafond PostgREST (1 000 lignes
+  par réponse), listes, exports et statistiques étaient silencieusement incomplets.
+- **Stockage (`server/stockage-supabase.ts`).** Nouveau `lirePages` / `lireLignesPages` : boucle `.range()` par pages
+  de 1 000 lignes, dernière page (< 1 000) arrêtant la boucle, versions mémorisées pour le verrou optimiste comme
+  dans `lire`. Convertis : `commerces()`, `clients()`, `tirages()`, `tiragesClient()`, `tiragesParCode()`, `avis()`,
+  `membres()` (et déjà `compteursEvenements()`). `tiragesClient()` gagne un tri explicite (date croissante, même ordre
+  que l'ancienne lecture sans tri) : sans tri déterministe, les pages ne seraient pas stables. Inchangés : lectures
+  d'une seule ligne (`eq('id', …)`, `clientParContact`), `journal` / `envois` (limite explicite du caller). Aucun
+  changement dans `server/app.ts`, `src/pages/Clients.tsx` ni `src/lib/stats.ts` : ils reçoivent désormais des listes
+  complètes — l'écran Clients paginait déjà l'affichage (50 par 50, « Charger plus »), l'export CSV et les stats
+  n'avaient pas de plafond propre.
+- **Tests** : avant **887/887**, après **891/891** (`npm test`, typecheck serveur inclus), `npx tsc -p .` et
+  `npm run build` OK. `+4` tests (`tests/supabase.test.ts`, describe P0-S18) : 1 200 clients / tirages / avis lus en
+  entier (offsets `['0', '1000']`, `limit=1000` prouvés par requête) ; 1 050 tirages d'un seul client (ordre stable,
+  séquence complète vérifiée) ; 1 001 tirages à la même date, à cheval sur la frontière (aucun doublon, départage
+  par `id`) ; /etat + statistiques (`cartesEmises`, `passagesTotal`) + export CSV complets à 1 050 clients
+  (1 051 lignes CSV).
+- **Contrôle négatif (2 passages).** Avec l'ancien stockage (sans pagination) restauré temporairement : d'abord
+  seuls les 2 premiers tests échouaient (le 3e passait : le faux PostgREST ne simulait pas le plafond) ; après le
+  correctif du point 4 ci-dessous, les 4 tests échouent — ils discriminent tous la régression. Restauration vérifiée
+  : 45/45 ensuite.
+- **Revue Codex** (2 P1, 2 P2, 0 P0 ; texte complet `/tmp/codex-revue-p0-s18.txt`, diff
+  `/tmp/codex-p0-s18.diff`) : 1. [P1, corrigé] tri non déterministe à dates égales → départage par `id` ajouté aux
+  4 lectures triées par date (`tirages`, `tiragesClient`, `tiragesParCode`, `avis`) ; assertion d'ordre existante
+  mise à jour (`date.desc,id.asc`) et nouveau test « dates identiques à la frontière » (1 001 tirages, même date,
+  semés en ordre inverse, séquence complète vérifiée). 2. [P1, non corrigé — documenté] les offsets dérivent si une
+  écriture concurrente s'insère avant la page en cours (doublon ou omission possible) : la pagination par curseur
+  demanderait de restructurer toutes les lectures de listes, pour un risque négligeable ici (fenêtre de < 1 s, stats
+  et exports tolèrent une ligne de plus ou de moins ; le critère du lot — listes complètes au-delà du plafond en
+  conditions normales — est rempli) ; consigné comme résiduel dans `server/README.md`. 3. [P2, corrigé] le test
+  « ordre stable » ne vérifiait pas le tri (semis dans l'ordre chronologique) → semis en ordre inverse + séquence
+  complète des ids vérifiée. 4. [P2, corrigé] le test HTTP ne discriminait pas → le faux PostgREST plafonne
+  désormais à 1 000 lignes même sans `limit`, comme le vrai (max-rows par défaut) ; le contrôle négatif le prouve.
+- **Résiduels** (documentés dans `server/README.md`, § Supabase) : le bilan de `supprimerClient` compte les lignes
+  supprimées renvoyées par PostgREST (plafonné à 1 000 par table) — la suppression elle-même n'est pas plafonnée,
+  seul le chiffre du journal peut être un minimum si un client avait plus de 1 000 tirages. La recherche caisse
+  (P0-S14) filtre en mémoire côté serveur après lecture paginée complète : acceptable pour un commerce.
