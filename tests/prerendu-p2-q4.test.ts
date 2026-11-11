@@ -217,6 +217,20 @@ describe('Serveur : GET /menu/<commerceId> (page prérendue)', () => {
     }
   })
 
+  test('slash final accepté ; /menu/, /menu/inconnu/ et /menu/a/b : 404, pas la SPA (revue Codex)', async () => {
+    const { app, racine } = await demarrer(join(dossier, 'menu-slash.db'))
+    try {
+      const avecSlash = await fetch(`${racine}/menu/c-asian-home-paris/`)
+      assert.equal(avecSlash.status, 200)
+      assert.match(await avecSlash.text(), /<title>Menu — Asian Home Paris<\/title>/)
+      assert.equal((await fetch(`${racine}/menu/`)).status, 404, '/menu/ : 404, pas la SPA')
+      assert.equal((await fetch(`${racine}/menu/inconnu/`)).status, 404)
+      assert.equal((await fetch(`${racine}/menu/a/b`)).status, 404, 'deux segments : 404, pas la SPA')
+    } finally {
+      await app.fermer()
+    }
+  })
+
   test('sitemap : / et /menu/<id> prérendu (plus de fragment #/menu ni #/jouer) ; index.html : hasMenu = adresse prérendue', () => {
     const sitemap = readFileSync(join(RACINE, 'public/sitemap.xml'), 'utf8')
     const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1])
@@ -224,5 +238,89 @@ describe('Serveur : GET /menu/<commerceId> (page prérendue)', () => {
     assert.doesNotMatch(sitemap, /#\//)
     const html = readFileSync(join(RACINE, 'index.html'), 'utf8')
     assert.match(html, new RegExp(`"hasMenu": "${SITE}/menu/c-asian-home-paris"`))
+  })
+})
+
+// ---------- Service worker : le menu prérendu n'écrase pas la SPA en cache ----------
+// Revue Codex P2-Q3/P2-Q4 : le service worker gardait TOUTE navigation HTML sous « / » — après une visite de
+// /menu/<id>, la caisse hors ligne affichait le menu statique au lieu de l'application. Le menu est désormais
+// gardé sous sa propre adresse. Simulation minimale (même approche que tests/performance-bundle-p2-q2.test.ts).
+import { runInNewContext } from 'node:vm'
+
+describe('Service worker : le menu prérendu n’écrase pas la SPA en cache', () => {
+  const SPA = '<!doctype html><title>app</title>'
+  const MENU = '<!doctype html><title>Menu — Asian Home Paris</title>'
+
+  function serviceWorkerMenu() {
+    const ecouteurs = new Map<string, (e: unknown) => void>()
+    const stores = new Map<string, Map<string, { corps: string }>>()
+    const cle = (r: string | { url: string }) => new URL(typeof r === 'string' ? r : r.url, SITE).href
+    const caches = {
+      open: async (nom: string) => {
+        if (!stores.has(nom)) stores.set(nom, new Map())
+        const m = stores.get(nom)!
+        return {
+          match: async (r: string | { url: string }) => m.get(cle(r)),
+          put: async (r: string | { url: string }, v: { corps: string }) => void m.set(cle(r), v),
+          keys: async () => [...m.keys()],
+          delete: async (k: string) => m.delete(k),
+        }
+      },
+      match: async (r: string | { url: string }) => {
+        for (const m of stores.values()) if (m.has(cle(r))) return m.get(cle(r))
+        return undefined
+      },
+      keys: async () => [...stores.keys()],
+      delete: async (k: string) => stores.delete(k),
+    }
+    const self = {
+      location: { origin: SITE },
+      addEventListener: (t: string, f: (e: unknown) => void) => void ecouteurs.set(t, f),
+      skipWaiting: async () => {},
+      clients: { claim: async () => {} },
+    }
+    const reponse = (corps: string, ok = true) => ({
+      ok,
+      redirected: false,
+      corps,
+      headers: { get: (n: string) => (n.toLowerCase() === 'content-type' ? 'text/html; charset=utf-8' : null) },
+      clone() {
+        return this
+      },
+    })
+    let enLigne = true
+    const fetchFaux = async (r: { url: string }) => {
+      if (!enLigne) throw new TypeError('Failed to fetch')
+      const corps = { '/': SPA, '/menu/c-asian-home-paris': MENU }[new URL(r.url).pathname]
+      return corps === undefined ? reponse('', false) : reponse(corps)
+    }
+    runInNewContext(readFileSync(join(RACINE, 'public/sw.js'), 'utf8'), {
+      self,
+      caches,
+      fetch: fetchFaux,
+      URL,
+      Response: { error: () => reponse('', false) },
+    })
+    async function naviguer(chemin: string) {
+      let p: Promise<{ corps: string }> | null = null
+      ecouteurs.get('fetch')!({
+        request: { url: SITE + chemin, method: 'GET', mode: 'navigate' },
+        respondWith: (x: Promise<{ corps: string }>) => (p = x),
+      })
+      const r = await p!
+      await new Promise((ok) => setImmediate(ok))
+      await new Promise((ok) => setImmediate(ok))
+      return r
+    }
+    return { naviguer, setEnLigne: (v: boolean) => void (enLigne = v) }
+  }
+
+  test('visite du menu puis hors ligne : / sert la SPA (pas le menu), le menu reste sous sa propre adresse', async () => {
+    const sw = serviceWorkerMenu()
+    assert.equal((await sw.naviguer('/')).corps, SPA)
+    assert.equal((await sw.naviguer('/menu/c-asian-home-paris')).corps, MENU)
+    sw.setEnLigne(false)
+    assert.equal((await sw.naviguer('/')).corps, SPA, 'le menu ne doit pas avoir écrasé la SPA en cache')
+    assert.equal((await sw.naviguer('/menu/c-asian-home-paris')).corps, MENU, 'menu gardé sous sa propre adresse')
   })
 })

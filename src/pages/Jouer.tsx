@@ -17,7 +17,7 @@ import {
 import { estAsianHome } from '../lib/visuels'
 import { attributsChamp, avecPrenom, etatSaisieContact, virgulePrenom, type ModeContact } from '../lib/inscriptionJeu'
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ReponseCarte, type ResultatTirage } from '../data/api'
-import { assurerJetonClient, avecJetonClient, lancerTirage, memoireJoueur, signalerScan, type JoueurMemorise } from '../data/jeuApi'
+import { assurerJetonClient, avecJetonClient, lancerTirage, marquerScanSignale, memoireJoueur, signalerScan, type JoueurMemorise } from '../data/jeuApi'
 import { memoireJetons } from '../lib/jetonCarte'
 import { accrocheJeu, jourParis } from '../lib/mesure'
 import {
@@ -479,11 +479,15 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
   const visiteValidee = useVisiteValidee(jeu?.statut)
   // Mesure anonyme (P2-Q3) : page de jeu ouverte, une fois par onglet ; seul le type part, jamais la carte.
   // Arrivée par la redirection courte du QR (`/r/` : la seule requête émise est `?via=qr`) : le scan est déjà
-  // compté par le serveur, on ne le recompte pas. La requête est retirée de l'adresse : une ouverture directe
-  // de #/jouer plus tard dans le même onglet est alors comptée normalement.
+  // compté par le serveur, on ne le recompte pas — et on pose le marqueur de l'onglet AVANT de retirer la
+  // requête, sinon un rechargement ou un remontage recompterait le scan (revue Codex P2-Q3/P2-Q4).
+  // La requête est retirée de l'adresse : une ouverture directe de #/jouer plus tard dans le même onglet
+  // est alors comptée normalement.
   useEffect(() => {
-    if (window.location.search === '?via=qr') window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`)
-    else void signalerScan(api, commerce.id, stockageSession())
+    if (window.location.search === '?via=qr') {
+      marquerScanSignale(stockageSession(), commerce.id)
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`)
+    } else void signalerScan(api, commerce.id, stockageSession())
   }, [api, commerce.id])
 
   // État du jeu du jour, vu par le serveur (visite validée ? déjà joué ?). Renvoie le statut, ou null en cas d'échec.

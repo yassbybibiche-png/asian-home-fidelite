@@ -3645,14 +3645,17 @@ export async function creerServeur(o: OptionsServeur) {
       // (le menu change rarement ; un changement met 5 min à apparaître ici comme chez les robots) ; ETag faible
       // sur le contenu (304 si repris). Limite par IP comme les autres lectures publiques. Commerce inconnu (ou
       // /menu sans id) : 404, pas la SPA en 200 (soft 404) ; commerce en pause : page « indisponible » (noindex).
-      const pageMenu = /^\/menu(?:\/([\w-]{1,80}))?$/.exec(url.pathname)
-      if (pageMenu && (req.method === 'GET' || req.method === 'HEAD')) {
+      // Slash final accepté (/menu/<id>/) ; toute autre adresse sous /menu/ (/menu/a/b, /menu/%20) : 404 aussi
+      // (revue Codex : ces formes retombaient sur la SPA en 200).
+      const pageMenu = /^\/menu(?:\/([\w-]{1,80}))?\/?$/.exec(url.pathname)
+      const menuInvalide = url.pathname.startsWith('/menu/') && !pageMenu
+      if ((pageMenu || menuInvalide) && (req.method === 'GET' || req.method === 'HEAD')) {
         limiterIp(req, 'lecture', limites.lectureParIp)
         const site = sitePublic(req)
-        const id = pageMenu[1]
+        const id = pageMenu?.[1]
         let page = id ? cachePrerendu.get(id) : undefined
         if (page && page.expire <= Date.now()) {
-          cachePrerendu.delete(id)
+          if (id) cachePrerendu.delete(id) // page en cache ⇒ id défini
           page = undefined
         }
         if (!page) {

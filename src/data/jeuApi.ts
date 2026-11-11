@@ -80,6 +80,10 @@ export function memoireJoueur(s: Stockage | null, commerceId: string) {
   }
 }
 
+/** Marqueurs de scan déjà signalés dans CETTE page (repli quand sessionStorage est indisponible : navigation
+ * privée stricte — le signal part alors une fois par affichage, pas à chaque remontage ; cf. StrictMode en dev). */
+const scansSignalesMemoire = new Set<string>()
+
 /**
  * Mesure anonyme (P2-Q3) : « page de jeu ouverte » (scan du QR ou lien), signalée UNE fois par onglet et par commerce
  * (`sessionStorage` : oublié à la fermeture de l'onglet, jamais envoyé). Rien d'autre que le type ne part : ni carte,
@@ -87,14 +91,31 @@ export function memoireJoueur(s: Stockage | null, commerceId: string) {
  */
 export function signalerScan(api: Pick<ClientApi, 'signalerEvenement'>, commerceId: string, session: Stockage | null): boolean {
   const cle = `fidelite:scan:${commerceId}`
+  if (scansSignalesMemoire.has(cle)) return false
   try {
     if (session?.getItem(cle)) return false
     session?.setItem(cle, '1')
   } catch {
-    // Stockage indisponible (navigation privée stricte) : le signal part quand même, une fois par affichage.
+    // Stockage indisponible (navigation privée stricte) : on s'appuie sur la garde mémoire ci-dessous.
   }
+  scansSignalesMemoire.add(cle)
   api.signalerEvenement(commerceId, 'scan').catch(() => {})
   return true
+}
+
+/**
+ * Scan déjà compté par le serveur (arrivée par la redirection courte `/r/` : `?via=qr`) : on pose le marqueur de
+ * l'onglet SANS envoyer de signal, pour qu'un rechargement ou un remontage de la page ne recompte pas le scan
+ * (P2-Q3, revue Codex : sans ce marqueur, le serveur comptait 1 puis la page 1 de plus au rechargement).
+ */
+export function marquerScanSignale(session: Stockage | null, commerceId: string): void {
+  const cle = `fidelite:scan:${commerceId}`
+  scansSignalesMemoire.add(cle)
+  try {
+    session?.setItem(cle, '1')
+  } catch {
+    // Stockage indisponible : la garde mémoire ci-dessus suffit pour cet affichage.
+  }
 }
 
 // ---------- Jeton client (P0-S7) ----------

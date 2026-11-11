@@ -12,7 +12,7 @@ import type { AddressInfo } from 'node:net'
 
 import { creerServeur, type OptionsServeur } from '../server/app.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
-import { signalerScan } from '../src/data/jeuApi.ts'
+import { marquerScanSignale, signalerScan } from '../src/data/jeuApi.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import {
   ACCROCHE_GENERIQUE,
@@ -323,6 +323,20 @@ describe('Signal « page de jeu ouverte » : une fois par onglet, rien que le ty
     await new Promise((r) => setImmediate(r))
   })
 
+  test('marquerScanSignale (?via=qr, scan déjà compté par /r/) : un signalement ultérieur ne part pas, même sans stockage', () => {
+    const appels: unknown[][] = []
+    const api = { signalerEvenement: async (...a: unknown[]) => void appels.push(a) as never }
+    const memoire = new Map<string, string>()
+    const session = { getItem: (k: string) => memoire.get(k) ?? null, setItem: (k: string, v: string) => void memoire.set(k, v), removeItem: (k: string) => void memoire.delete(k) }
+    // Arrivée par /r/ puis rechargement (la requête ?via=qr a été retirée) : pas de deuxième scan.
+    marquerScanSignale(session, 'c9')
+    assert.equal(signalerScan(api as never, 'c9', session), false)
+    // Stockage indisponible : la garde mémoire suffit pour cet affichage.
+    marquerScanSignale(null, 'c10')
+    assert.equal(signalerScan(api as never, 'c10', null), false)
+    assert.deepEqual(appels, [])
+  })
+
   test('client API : POST …/evenements avec { type } seulement', () => {
     const api = source('src/data/api.ts')
     assert.match(api, /requete\('POST', `\/commerces\/\$\{enc\(commerceId\)\}\/evenements`, \{ corps: \{ type \}, delaiMs: 5_000 \}\)/)
@@ -331,6 +345,7 @@ describe('Signal « page de jeu ouverte » : une fois par onglet, rien que le ty
   test('page de jeu : scan signalé à l’ouverture (mode serveur) sauf après la redirection /r/ (?via=qr, déjà comptée) ; accroche A/B ; garde consentement intacte', () => {
     const jouer = source('src/pages/Jouer.tsx')
     assert.match(jouer, /window\.location\.search === '\?via=qr'/)
+    assert.match(jouer, /marquerScanSignale\(stockageSession\(\), commerce\.id\)/)
     assert.match(jouer, /else void signalerScan\(api, commerce\.id, stockageSession\(\)\)/)
     assert.match(jouer, /window\.history\.replaceState\(null, '', `\$\{window\.location\.pathname\}\$\{window\.location\.hash\}`\)/)
     assert.match(jouer, /const accroche = accrocheJeu\(commerce, jourParis\(new Date\(\)\)\)/)
