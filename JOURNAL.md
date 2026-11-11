@@ -1,5 +1,10 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — Boucle t4 « Héros du menu optimisé » (fusionné dans `autonome/integration`)
+- **Changement** : nouveau `public/visuels/table-sushis-petit.webp` (720×1279, WebP q75, 95 494 o, dérivé du vrai `table-sushis.jpg` par Pillow, −51 %) servi en premier via `<picture className="block">` (repli JPEG inchangé) dans `MenuPublic.tsx` (héros) et `CartePublique.tsx` (bannière) ; constante `VISUELS.tableSushisPetit` ; documenté dans `public/visuels/SOURCES.md` (dimensions `table-sushis.jpg` corrigées : 788×1400 sur disque). Le héros n'est PAS préchargé par le SW (photo de contenu, comme les photos de plats) ; script de mesure ponctuelle versionné `scripts/mesurer-menu-asian-home.mjs`.
+- **Mesures** : LCP `#/menu` Asian Home 3 428/3 376 → 3 076/2 892 ms (moyenne −418 ms, 2 passes sur 2 ; + 2 passes de confirmation 2 912/2 960 ms) ; `#/jouer` plat (premier affichage 1 896/1 895 ms, LCP 1 872/1 844 ms, parcours 6 738/6 854 ms) ; Lighthouse 84/81 → 78/76 (TBT 590/720 → 850/1 030 ms) — réserve ABAB conservée dans `SCORES.md` (effet propre du tour ≈ −2 points, dans le bruit) ; bundle JS initial +153 o (+0,03 %) ; 0 erreur console. Détail dans `SCORES.md` et `BOUCLE.md`.
+- **Tests : 1171 → 1176/1176** (+4 `tests/boucle-t4-hero.test.ts`, +1 test auto dans `tests/visuels.test.ts` — une entrée `VISUELS` = un test), E2E 3/3. Revue Codex t4 (5 points) : fusion raisonnable après `className="block"` sur les deux `<picture>` ; aucun motif d'annulation. Compteur de tours sans gain : 1 (t3).
+
 ## 11/11/2026 — Boucle t2 « Logo de chargement optimisé » (fusionné dans `autonome/integration`)
 - **Changement** : nouveau `public/visuels/logo-petit.webp` (192×192, WebP q80,
   4 900 o, dérivé du vrai logo par Pillow) servi en premier via `<picture>`

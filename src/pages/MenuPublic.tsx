@@ -179,11 +179,14 @@ export function MenuAffiche({
       )}
 
       {asianHome && (
-        <img
-          src={VISUELS.tableSushis}
-          alt="Table dressée chez Asian Home Paris : bao buns, plateau de sushis et cocktails"
-          className="h-56 w-full rounded-3xl object-cover shadow-relief ring-1 ring-gray-900/5"
-        />
+        <picture className="block">
+          <source srcSet={VISUELS.tableSushisPetit} type="image/webp" />
+          <img
+            src={VISUELS.tableSushis}
+            alt="Table dressée chez Asian Home Paris : bao buns, plateau de sushis et cocktails"
+            className="h-56 w-full rounded-3xl object-cover shadow-relief ring-1 ring-gray-900/5"
+          />
+        </picture>
       )}
 
       {bandeauPrix && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">{bandeauPrix}</p>}

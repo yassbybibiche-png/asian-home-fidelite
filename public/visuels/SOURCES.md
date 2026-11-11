@@ -8,7 +8,8 @@ Les fichiers sont servis localement par l'app (pas de hotlink).
 | `logo.png` (600×600) | Logo officiel ASIAN HOUSE (chapeau conique, blanc sur noir) | Page Facebook Asian House Paris (fb.com, photo 424198893163205) |
 | `logo-petit.webp` (192×192, 4 900 o) | Même logo, réduit pour l'écran de chargement (affiché à 96×96) — dérivé de `logo.png` par redimensionnement (Pillow, WebP q80), boucle t2 | Dérivé de `logo.png` ci-dessus, pas une nouvelle source |
 | `hero-plats.jpg` (1024×683) | Plateau de plats vu de dessus : sushis, makis, saumon, nouilles, riz, dessert mangue | Page Facebook Asian House Paris (photo 424198889829872) |
-| `table-sushis.jpg` (2268×4032) | Table dressée : bao buns, plateau de sushis, cocktails, gobelet « ASIAN HOME » | Instagram @asianhomeparis — affiche du reel C0mvZW_iQ24 |
+| `table-sushis.jpg` (788×1400 sur disque — original Instagram 2268×4032) | Table dressée : bao buns, plateau de sushis, cocktails, gobelet « ASIAN HOME » | Instagram @asianhomeparis — affiche du reel C0mvZW_iQ24 |
+| `table-sushis-petit.webp` (720×1279, 95 494 o) | Même table dressée, réduite pour l'en-tête du menu et de la carte (affichée ~390×224 / ~390×320) — dérivé de `table-sushis.jpg` par redimensionnement (Pillow, WebP q75), boucle t4 | Dérivé de `table-sushis.jpg` ci-dessus, pas une nouvelle source |
 | `cocktails.jpg` (640×1136) | Cocktails signature Koh Samui / Tokyo / Piña Colada (texte de la publication inclus dans l'image) | Instagram @asianhomeparis — affiche du reel DY2lhwmIIN1 |
 | `interieur.jpg` (675×900, converti depuis WebP) | Salle du restaurant : plafond d'ombrelles, tables dressées, sans personne | Galerie du restaurant sur desicorner.fr (page Asian Home Paris) |
 | `sushis-ardoise.jpg` (614×408) | Rouleau de sushis sur ardoise, filigrane « ASIAN HOME » | Galerie du restaurant sur lacarte.menu (Asian Home Paris) |
