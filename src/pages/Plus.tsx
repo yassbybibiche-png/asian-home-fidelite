@@ -57,7 +57,7 @@ export default function Plus() {
       <nav className="carte divide-y divide-gray-100 py-1" aria-label="Autres pages">
         {LIENS.map((l) => (
           <a key={l.page} href={`#/${l.page}`} className="-mx-2 flex min-h-16 items-center gap-4 rounded-xl px-2 py-3 transition-colors hover:bg-gray-50 active:bg-gray-100">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-marque-50 text-marque-500">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-magenta-500/10 text-magenta-600">
               <Icone nom={l.page} />
             </span>
             <span className="min-w-0 flex-1">

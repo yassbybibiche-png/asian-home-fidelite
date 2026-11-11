@@ -282,21 +282,21 @@ describe('DA sombre : contrastes texte/fond ≥ 4,5:1 (WCAG AA)', () => {
     return (clair + 0.05) / (sombre + 0.05)
   }
   const NUIT = '#111111' // noir [ESTIMÉ] Instagram
-  const OR = '#c9a227' // doré [ESTIMÉ] Instagram
+  const MAGENTA = '#ff2e9a' // magenta clair, texte sur noir (P0-D1)
   const LAQUE = '#b3262d' // rouge laque (valeur certifiée de la charte actuelle)
 
-  test('titres dorés et texte blanc sur fond noir', () => {
+  test('titres magenta et texte blanc sur fond noir', () => {
     assert.ok(contraste('#ffffff', NUIT) >= 4.5, `blanc/noir : ${contraste('#ffffff', NUIT).toFixed(1)}`)
-    assert.ok(contraste(OR, NUIT) >= 4.5, `or/noir : ${contraste(OR, NUIT).toFixed(1)}`)
-    assert.ok(contraste('#f2d48a', NUIT) >= 4.5, `or clair/noir : ${contraste('#f2d48a', NUIT).toFixed(1)}`)
+    assert.ok(contraste(MAGENTA, NUIT) >= 4.5, `magenta/noir : ${contraste(MAGENTA, NUIT).toFixed(1)}`)
+    assert.ok(contraste('#ff4d6d', NUIT) >= 4.5, `magenta doux/noir : ${contraste('#ff4d6d', NUIT).toFixed(1)}`)
     assert.ok(contraste('#f5c2be', NUIT) >= 4.5, `laque claire/noir : ${contraste('#f5c2be', NUIT).toFixed(1)}`)
   })
   test('rouge laque conservé comme accent (texte blanc dessus, texte laque sur ivoire)', () => {
     assert.ok(contraste('#ffffff', LAQUE) >= 4.5, `blanc/laque : ${contraste('#ffffff', LAQUE).toFixed(1)}`)
     assert.ok(contraste('#7f1a1f', '#f7f5f2') >= 4.5, `laque foncée/ivoire : ${contraste('#7f1a1f', '#f7f5f2').toFixed(1)}`)
-    assert.ok(contraste('#1f2937', '#f2d48a') >= 4.5, `encre/or clair (roue) : ${contraste('#1f2937', '#f2d48a').toFixed(1)}`)
+    assert.ok(contraste('#111111', '#ff2e9a') >= 4.5, `noir/magenta clair (roue) : ${contraste('#111111', '#ff2e9a').toFixed(1)}`)
   })
-  test('texte doré foncé sur fond clair (badges, étoiles)', () => {
+  test('texte foncé sur fond clair (badges, étoiles)', () => {
     assert.ok(contraste('#92400e', '#ffffff') >= 4.5, `amber-800/blanc : ${contraste('#92400e', '#ffffff').toFixed(1)}`)
     assert.ok(contraste('#92400e', '#fef3c7') >= 4.5, `amber-800/amber-100 : ${contraste('#92400e', '#fef3c7').toFixed(1)}`)
   })

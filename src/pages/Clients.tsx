@@ -387,7 +387,7 @@ function LigneClient({ client: c }: { client: Client }) {
           <span className="flex items-center gap-2">
             <span className="text-lg font-semibold text-gray-900 underline decoration-gray-300 underline-offset-4">{nomAffiche(c.prenom)}</span>
             {estARelancer(c) && <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-semibold text-gray-700">inactif</span>}
-            {debloquee && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">récompense</span>}
+            {debloquee && <span className="rounded-full bg-magenta-500/15 px-2 py-0.5 text-xs font-semibold text-magenta-700">récompense</span>}
           </span>
           <span className="block truncate text-sm text-gray-600">{c.telephone ?? c.email}</span>
         </a>
@@ -400,7 +400,7 @@ function LigneClient({ client: c }: { client: Client }) {
         </div>
       </div>
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100" aria-hidden>
-        <div className={`h-full rounded-full transition-all duration-500 ${debloquee ? 'bg-or-500' : 'bg-marque-500'}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full transition-all duration-500 bg-magenta-500`} style={{ width: `${pct}%` }} />
       </div>
       <div className="mt-2 flex justify-between gap-3 text-sm text-gray-600">
         <span>Dernière visite : {c.derniereVisite ? dateRelative(c.derniereVisite) : 'aucune'}</span>
@@ -422,7 +422,7 @@ function LigneClient({ client: c }: { client: Client }) {
           {enCours ? 'Enregistrement…' : valide ? '✓ Tampon ajouté' : 'Valider une visite (+1)'}
         </button>
         {debloquee && (
-          <a href={`#/client/${c.id}`} className="bouton-secondaire min-h-11 border-or-500 bg-amber-50 py-2 text-amber-900 hover:bg-amber-100">
+          <a href={`#/client/${c.id}`} className="bouton-secondaire min-h-11 border-magenta-500 bg-magenta-500/10 py-2 text-magenta-700 hover:bg-magenta-500/15">
             🎁 Récompense
           </a>
         )}

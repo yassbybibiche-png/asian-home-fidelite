@@ -36,7 +36,7 @@ export function SqueletteJeu({ libelle }: { libelle: string }) {
   return (
     <Squelette libelle={libelle} className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
       <EnTeteSombre />
-      <div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-or-400/30">
+      <div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-magenta-400/30">
         <Bloc sombre className="mx-auto aspect-square w-full max-w-80 rounded-full" />
       </div>
       <div className="carte space-y-3">

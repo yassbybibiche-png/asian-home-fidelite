@@ -37,7 +37,7 @@ describe('P0-U2 : règle de longueur et abréviation', () => {
     for (const ecran of [360, 375, 390, 414, 430]) assert.ok(policePx(ecran) >= 14, `${ecran} px → ${policePx(ecran)} px`)
     assert.match(lire('src/components/Roue.tsx'), /aspect-square w-full max-w-80/)
     assert.match(lire('src/pages/Jouer.tsx'), /<div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">/)
-    assert.match(lire('src/pages/Jouer.tsx'), /<div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-or-400\/30">/)
+    assert.match(lire('src/pages/Jouer.tsx'), /<div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-magenta-400\/30">/)
     // Un libellé de 12 caractères tient dans la longueur utile du rayon.
     assert.ok(largeurEstimee('Mochi offert') <= LONGUEUR_TEXTE_MAX)
     // …et la longueur utile reste entre le moyeu (r = 15) et le bord (r = 88).

@@ -6,6 +6,7 @@ import { estLogoLocal, logoCommerce } from '../lib/visuels'
 import { estLogoTeleverse } from '../lib/logo'
 import { ETATS_WALLET, EXPLICATION_WALLET, LIBELLE_WALLET, MENTIONS_RGPD } from '../lib/integrations'
 import { useLangue } from './Langue'
+import { THEME } from '../theme.ts'
 
 export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Commerce, 'id' | 'nom' | 'logo'>; taille?: 'sm' | 'md' | 'lg' }) {
   const dims = { sm: 'h-9 w-9 text-sm', md: 'h-11 w-11 text-base', lg: 'h-16 w-16 text-xl' }[taille]
@@ -20,7 +21,7 @@ export function LogoCommerce({ commerce, taille = 'md' }: { commerce: Pick<Comme
   }
   return (
     <span
-      className={`${dims} inline-flex shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-marque-500 to-marque-700 font-bold tracking-wide text-white shadow-sm ring-1 ring-black/5`}
+      className={`${dims} inline-flex shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-magenta-500 to-magenta-700 font-bold tracking-wide text-white shadow-sm ring-1 ring-black/5`}
       aria-hidden
     >
       {(logo || initiales(commerce.nom)).slice(0, 3).toUpperCase()}
@@ -82,7 +83,7 @@ export function Interrupteur({ actif, onChange, libelle, aide }: { actif: boolea
         className="relative inline-flex h-11 w-16 shrink-0 items-center justify-center rounded-full"
         data-interrupteur
       >
-        <span className={`relative h-8 w-14 rounded-full transition-colors ${actif ? 'bg-marque-500' : 'bg-gray-500'}`} aria-hidden>
+        <span className={`relative h-8 w-14 rounded-full transition-colors ${actif ? 'bg-magenta-500' : 'bg-gray-500'}`} aria-hidden>
           <span className={`absolute top-1 left-1 h-6 w-6 rounded-full bg-white shadow transition-transform ${actif ? 'translate-x-6' : ''}`} />
         </span>
       </button>
@@ -132,7 +133,7 @@ export function QrCode({ texte, className = 'h-48 w-48', titre }: { texte: strin
   }, [texte])
   return (
     <svg viewBox={`0 0 ${taille} ${taille}`} className={`${className} bg-white`} role="img" aria-label={titre ?? 'QR code'} shapeRendering="crispEdges">
-      <path d={d} fill="#111827" />
+      <path d={d} fill={THEME.texteFonce} />
     </svg>
   )
 }
@@ -234,7 +235,7 @@ export function EncartWallet({ demo = false, lienCarte, replie = false }: { demo
       </ul>
       <p className="mt-1.5">{EXPLICATION_WALLET}</p>
       {lienCarte && (
-        <a href={lienCarte} className="mt-1 flex min-h-11 items-center font-semibold text-marque-700 underline">
+        <a href={lienCarte} className="mt-1 flex min-h-11 items-center font-semibold text-magenta-700 underline">
           Ouvrir la carte publique (QR) ↗
         </a>
       )}
@@ -261,7 +262,7 @@ export function BlocRgpd({ commerceId }: { commerceId?: string }) {
 export function LienConfidentialite({ commerceId, className = '' }: { commerceId: string; className?: string }) {
   const { t } = useLangue()
   return (
-    <a href={`#/confidentialite/${encodeURIComponent(commerceId)}`} className={`font-semibold text-marque-700 underline ${className}`}>
+    <a href={`#/confidentialite/${encodeURIComponent(commerceId)}`} className={`font-semibold text-magenta-700 underline ${className}`}>
       {t('Politique de confidentialité')}
     </a>
   )

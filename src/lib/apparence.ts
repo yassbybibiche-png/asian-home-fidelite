@@ -1,9 +1,10 @@
-// Apparence de la carte : couleurs vérifiées (contraste WCAG ≥ 4,5:1), charte par défaut inchangée.
+// Apparence de la carte : couleurs vérifiées (contraste WCAG ≥ 4,5:1). Défauts P0-D1 : magenta/noir (AUDIT.md §6.4).
 import type { Apparence } from '../types'
+import { THEME } from '../theme.ts'
 
-export const COULEUR_DEFAUT = '#b3262d' // rouge laque
-export const FOND_DEFAUT = '#fbf8f3' // ivoire
-export const TEXTE_FONCE = '#111827'
+export const COULEUR_DEFAUT = THEME.magenta500 // magenta bouton (blanc dessus : 5,33:1)
+export const FOND_DEFAUT = THEME.ivoire // ivoire — voir JOURNAL P0-D1 : le noir n'est pas un fond de carte valide (texte foncé dessus)
+export const TEXTE_FONCE = THEME.texteFonce
 export const CONTRASTE_MIN = 4.5
 
 export const estCouleur = (s: unknown): s is string => typeof s === 'string' && /^#[0-9a-f]{6}$/i.test(s)
@@ -26,7 +27,7 @@ export function problemesApparence(a: Apparence): string[] {
   const p: string[] = []
   if (a.couleur) {
     if (!estCouleur(a.couleur)) p.push('Couleur principale : format #rrggbb attendu.')
-    else if (contraste(a.couleur, '#ffffff') < CONTRASTE_MIN) p.push(`Couleur principale trop claire : texte blanc illisible (contraste ${contraste(a.couleur, '#ffffff')}:1, il faut ${CONTRASTE_MIN}:1).`)
+    else if (contraste(a.couleur, THEME.blanc) < CONTRASTE_MIN) p.push(`Couleur principale trop claire : texte blanc illisible (contraste ${contraste(a.couleur, THEME.blanc)}:1, il faut ${CONTRASTE_MIN}:1).`)
   }
   if (a.fond) {
     if (!estCouleur(a.fond)) p.push('Fond : format #rrggbb attendu.')

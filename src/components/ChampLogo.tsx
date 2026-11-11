@@ -124,7 +124,7 @@ export function ChampLogo({ commerce, onChange }: { commerce: Commerce; onChange
           />
           <p id="logo-aide" className="mt-1 text-sm text-gray-600">
             PNG, JPEG ou WebP · 2 Mo maximum · entre {LIMITES_LOGO.coteMin} et {LIMITES_LOGO.coteMax} px de côté. Idéal : logo carré, clair, sur fond
-            transparent ou sombre (l’app est noire et dorée).
+            transparent ou sombre (l’app est noire et magenta).
           </p>
           {refus && <div className="mt-2"><MessageErreur>{refus}</MessageErreur></div>}
           {choix && (

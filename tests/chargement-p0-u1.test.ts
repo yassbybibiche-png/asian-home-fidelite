@@ -39,7 +39,7 @@ describe('P0-U1 : écran de chargement inline (index.html)', () => {
     }
     // DA nocturne : noir + doré.
     assert.match(css, /background: #111111/)
-    assert.match(css, /color: #c9a227/)
+    assert.match(css, /color: #ff2e9a/)
     // CSS pur : pas de ressource externe, pas d'expression.
     assert.doesNotMatch(css, /url\(|@import|expression\(/)
     assert.match(css, /prefers-reduced-motion: reduce/)

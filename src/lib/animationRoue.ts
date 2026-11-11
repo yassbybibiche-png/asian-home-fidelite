@@ -1,6 +1,9 @@
 // Mise en scène de la roue (P1-C2) : durée de rotation, mouvement réduit, vibration, confettis, textes des écrans
 // de résultat et parcours « garder ma carte ». Logique pure, testable sans navigateur ; aucune logique de tirage ici.
 import { jourEnClair } from './roulette.ts'
+import { COULEURS_CONFETTIS } from '../theme.ts'
+
+export { COULEURS_CONFETTIS }
 
 /** Rotation de la roue : 3,6 s (fourchette demandée 3 à 4 s). Animation CSS de `transform` seul (composité, 60 fps). */
 export const DUREE_ROTATION_MS = 3600
@@ -61,7 +64,6 @@ export function vibrer(motif: number[], nav: { vibrate?: (m: number[]) => boolea
 
 // ---- Confettis (CSS maison, aucune dépendance) ----
 
-export const COULEURS_CONFETTIS = ['#b3262d', '#f2d48a', '#d4a73c', '#fff7e0', '#1f2937', '#ff4d6d']
 export const NOMBRE_CONFETTIS = 36
 
 export interface Confetti {

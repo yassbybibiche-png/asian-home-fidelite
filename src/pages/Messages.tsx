@@ -244,7 +244,7 @@ export default function Messages() {
                   <span className="shrink-0">{dateRelative(m.date)}</span>
                 </p>
                 <p className="text-gray-800">{m.texte}</p>
-                <BoutonCopier texte={m.texte} libelle="Copier" className="min-h-11 text-sm font-semibold text-marque-700 underline" />
+                <BoutonCopier texte={m.texte} libelle="Copier" className="min-h-11 text-sm font-semibold text-magenta-700 underline" />
               </li>
             ))}
           </ul>

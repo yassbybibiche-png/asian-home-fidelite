@@ -204,7 +204,7 @@ function ApercuInvitation() {
   return (
     <details className="carte mb-4">
       <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 font-bold">
-        Invitation à l’avis vue par le client <span className="text-sm font-semibold text-marque-600">aperçu</span>
+        Invitation à l’avis vue par le client <span className="text-sm font-semibold text-magenta-700">aperçu</span>
       </summary>
       <p className="mt-2 text-sm text-gray-600">
         Après la roue, le client voit 5 étoiles déjà sélectionnées dans l’app (modifiables d’un tap), puis ouvre votre lien Google. Google ne permet pas de
@@ -305,7 +305,7 @@ function ConnecterGoogle() {
       {commerce.lienGoogle && (
         <p className="mt-3 text-sm text-gray-700">
           En attendant, le moyen réel de recevoir des avis est le lien « laisser un avis » (QR de la roulette) :{' '}
-          <a href={commerce.lienGoogle} target="_blank" rel="noopener noreferrer" className="font-semibold text-marque-600 underline">
+          <a href={commerce.lienGoogle} target="_blank" rel="noopener noreferrer" className="font-semibold text-magenta-700 underline">
             ouvrir le lien ↗
           </a>
         </p>
@@ -375,7 +375,7 @@ function CarteAvis({ avis: a }: { avis: Avis }) {
                 type="button"
                 onClick={() => setTexte(texteModele(m.cle, a, commerce))}
                 className={`min-h-11 rounded-full px-3 text-sm font-semibold ring-1 ${
-                  modeleSuggere(a) === m.cle ? 'bg-marque-50 text-marque-700 ring-marque-200' : 'bg-white text-gray-700 ring-gray-300'
+                  modeleSuggere(a) === m.cle ? 'bg-magenta-500/10 text-magenta-700 ring-magenta-500/30' : 'bg-white text-gray-700 ring-gray-300'
                 }`}
               >
                 {m.libelle}

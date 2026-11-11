@@ -134,7 +134,7 @@ export function MenuAffiche({
           <LogoCommerce commerce={commerce} taille="lg" />
         </div>
         <p className="surtitre-sombre mt-3">{t('Menu')}</p>
-        <h1 className="titre-or mt-1 text-2xl">{commerce.nom}</h1>
+        <h1 className="titre-magenta mt-1 text-2xl">{commerce.nom}</h1>
         <p className="mt-1 text-sm text-white/80">{t('Cuisine asiatique halal · Thaï, Japon, Vietnam, Chine')}</p>
       </header>
 
@@ -150,7 +150,7 @@ export function MenuAffiche({
 
       {/* Bandeau « Menu Midi » : seulement du lundi au vendredi, 11h30–14h30, heure de Paris. */}
       {bandeauMidi && midi && (
-        <div className="apparition flex items-center gap-3 rounded-2xl bg-or-400/15 p-4 ring-1 ring-or-400/50" role="note">
+        <div className="apparition flex items-center gap-3 rounded-2xl bg-magenta-400/15 p-4 ring-1 ring-magenta-400/50" role="note">
           <span className="text-2xl" aria-hidden="true">
             🍱
           </span>
@@ -239,7 +239,7 @@ export function MenuAffiche({
                                   <span className="font-semibold">{p.nom}</span>
                                   {/* Pastilles (étiquettes décoratives) : text-xs, 12,75 px, exception documentée (P2-Q1). */}
                                   {signature && (
-                                    <span className="rounded-full bg-marque-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">★ Signature</span>
+                                    <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">★ Signature</span>
                                   )}
                                   {badges.map((b) => (
                                     <span key={b} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700" title={`Déduit de la description — ${MENTION_BADGE_DEDUIT}`}>
@@ -252,7 +252,7 @@ export function MenuAffiche({
                               {p.prix == null ? (
                                 <span className="shrink-0 text-sm text-gray-600 italic">{t('Prix sur place')}</span>
                               ) : (
-                                <span className="shrink-0 font-semibold text-marque-700 tabular-nums">{formaterPrix(p.prix)}</span>
+                                <span className="shrink-0 font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix)}</span>
                               )}
                             </button>
                             {detail && (
@@ -265,7 +265,7 @@ export function MenuAffiche({
                                 )}
                                 <p className="text-sm">
                                   <span className="font-semibold">{t('Prix :')} </span>
-                                  {p.prix == null ? <span className="text-gray-600 italic">{t('sur place')}</span> : <span className="font-semibold text-marque-700 tabular-nums">{formaterPrix(p.prix)}</span>}
+                                  {p.prix == null ? <span className="text-gray-600 italic">{t('sur place')}</span> : <span className="font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix)}</span>}
                                 </p>
                                 {badges.length > 0 && (
                                   <p className="text-sm text-gray-600">
@@ -273,7 +273,7 @@ export function MenuAffiche({
                                   </p>
                                 )}
                                 {p.allergenes.length > 0 && <p className="text-sm text-gray-600">{t('Allergènes :')} {p.allergenes.join(', ')}</p>}
-                                {signature && <p className="text-sm font-semibold text-marque-700">{t('★ Plat signature — l’un des best-sellers du restaurant.')}</p>}
+                                {signature && <p className="text-sm font-semibold text-magenta-700">{t('★ Plat signature — l’un des best-sellers du restaurant.')}</p>}
                               </div>
                             )}
                           </li>
@@ -300,7 +300,7 @@ function OngletCategorie({ libelle, choisi, indique, onClick }: { libelle: strin
   return (
     <button
       type="button"
-      className={`puce relative whitespace-nowrap ${indique ? 'after:absolute after:inset-x-4 after:-bottom-0.5 after:h-1 after:rounded-full after:bg-or-400' : ''}`}
+      className={`puce relative whitespace-nowrap ${indique ? 'after:absolute after:inset-x-4 after:-bottom-0.5 after:h-1 after:rounded-full after:bg-magenta-400' : ''}`}
       aria-pressed={choisi}
       aria-current={indique ? 'true' : undefined}
       onClick={onClick}

@@ -1,5 +1,6 @@
 // Affichage de la roue (P0-U2) : couleurs des secteurs, libellés lisibles, légende. Aucune logique de tirage ici.
 import { secteurs, type LotRoue } from './roulette.ts'
+import { COULEURS_ROUE, THEME } from '../theme.ts'
 
 /**
  * Règle d'affichage : un libellé de 12 caractères au plus tient en entier sur un secteur ≥ 30°, en police
@@ -18,9 +19,9 @@ export const LONGUEUR_TEXTE_MAX = 68
 /** Centre du libellé sur le rayon. */
 export const RAYON_LIBELLE = 52
 
-// Palette laque / encre / ivoire / or ; texte choisi pour un contraste ≥ 4,5:1 sur chaque secteur.
-export const COULEURS = ['#b3262d', '#fbf3e4', '#1f2937', '#f2d48a', '#7f1a1f', '#fdf3f2']
-const FONDS_SOMBRES = new Set(['#b3262d', '#1f2937', '#7f1a1f'])
+// Palette noir / magenta / ivoire (P0-D1) ; texte choisi pour un contraste ≥ 4,5:1 sur chaque secteur.
+export const COULEURS = [...COULEURS_ROUE]
+const FONDS_SOMBRES: Set<string> = new Set([THEME.magenta700, THEME.noir, THEME.surface2])
 
 /** Couleur du secteur i sur n : jamais identique à sa voisine, même quand le dernier secteur rejoint le premier. */
 export function couleurSecteur(i: number, n: number): string {
@@ -28,7 +29,9 @@ export function couleurSecteur(i: number, n: number): string {
 }
 
 export function couleurTexte(fond: string): string {
-  return FONDS_SOMBRES.has(fond) ? '#fff' : '#1f2937'
+  // Magenta clair : texte foncé (5,49:1 avec le noir ; blanc dessus ne vaudrait que 3,44:1).
+  if (fond === THEME.magenta400) return THEME.noir
+  return FONDS_SOMBRES.has(fond) ? THEME.blanc : THEME.encre
 }
 
 const caracteres = (texte: string) => Array.from(texte.trim())
