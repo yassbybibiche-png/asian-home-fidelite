@@ -1638,3 +1638,59 @@ P0-U0), DA 6,1 → **7,6/10** (cible ≥ 9 non atteinte — voir « Point ouvert
   parcours à refaire sur le staging) ; le vrai logo Asian Home n'a pas été mesuré
   (commerce de test sans logo) ; délai à froid Render non mesuré ; `npm audit` à
   mesurer hors de cette VM.
+
+## 11/11/2026 — P0-U6 « Réveil Render » (écran d'attente honnête, décision documentée)
+- **Décision (coordinateur, mode autonome : option la moins chère, isolée derrière une configuration).**
+  Ni plan payant acheté, ni keep-alive : écran d'attente honnête + option payante documentée et
+  isolée en commentaire dans `render.yaml` (plan `free` inchangé sur les deux services). Le
+  keep-alive est écarté (docs/DEPLOIEMENT.md § 7.4) : il consommerait les 750 h gratuites partagées
+  (production + staging éveillés = ~1 488 h/mois pour un mois de 31 jours, 1 440 h pour 30 jours —
+  près du double du quota, suspension de tous les services Free à épuisement) et n'est pas garanti
+  (Render peut redémarrer un service Free à tout moment).
+- **Livré (`9647a1f`, puis correctifs revue Codex `8ba0ea9`).** `index.html` : après 6 s sans JS,
+  message conditionnel « Le chargement prend plus de temps que prévu. Après une période sans visite,
+  le serveur peut mettre environ 1 minute à se réveiller — merci de patienter. » ; après 2 minutes,
+  proposition de recharger. `src/chargement.css` : indicateur indéterminé (segment magenta qui va et
+  vient — il signale l'attente, il ne mesure rien) ; mouvement réduit : barre masquée, texte conservé.
+  `docs/DEPLOIEMENT.md` § 7 : décision complète, option payante, rejet du keep-alive, mesure à froid.
+- **Dit explicitement : le parcours < 30 s à froid reste impossible.** L'écran ne le rend pas
+  possible, il l'explique. Le seul correctif certain est le plan payant.
+- **Prix Render : environ 7 $/mois (Starter, 512 Mo, 0,5 CPU, toujours allumé) — INDICATIF, pas
+  « vérifié ».** La page render.com/pricing (consultée le 11/11/2026) est à rendu JS : son tableau
+  des tarifs n'était pas lisible en lecture texte ; le montant est corroboré par 5 sources tierces
+  concordantes nommées avec liens dans docs/DEPLOIEMENT.md § 7.3 (kuberns, budgetforge, cloudpicked,
+  agentdeals, bex.co) + la vérification déjà consignée au § 1 — à confirmer dans le dashboard Render
+  avant tout achat. Le comportement de veille (15 min, réveil ~1 min, 750 h) vient lui de la doc
+  officielle render.com/docs/free, lue en texte intégral le 11/11/2026. Le message de commit
+  `9647a1f` dit encore « prix vérifié » : formulation corrigée dans § 7.3 et dans ce JOURNAL, pas
+  dans l'historique (branche non poussée au moment du correctif, mais deux commits conservés pour
+  tracer la revue).
+- **Revue Codex** (`/tmp/codex-revue-p0-u6.txt`, diff `/tmp/codex-p0-u6.diff`) : **7 points** —
+  1. [Bloquant, fondé, CORRIGÉ] Limite architecturale : pendant le réveil, Render affiche SA
+     propre page de chargement — notre écran n'est servi qu'une fois le serveur réveillé ; il
+     n'accompagne donc pas le réveil lui-même. Documenté dans § 7.1 (ne pas sur-vendre l'écran) ;
+     une page servie indépendamment du service endormi reste hors périmètre, non décidée.
+  2. [Fondé, CORRIGÉ] Message affirmatif (« le serveur se réveille », « la première fois ») →
+     conditionnel (la cause n'est pas connue après 6 s ; le réveil se reproduit après chaque inactivité).
+  3. [Fondé, CORRIGÉ] Barre déterminée 60 s → indicateur indéterminé (une barre à 100 % sur un
+     chargement bloqué affirmait une mesure inexistante).
+  4. [Fondé, CORRIGÉ] Prix « vérifié » → indicatif, sources nommées, « à confirmer dans le
+     dashboard avant tout achat », répercuté dans render.yaml.
+  5. [Remarque, CORRIGÉ] Arithmétique précisée (744 h = 31 jours, 720 h = 30 jours) ; équivalence
+     redémarrage = réveil retirée (durée documentée pour la sortie de veille seulement).
+  6. [Fondé, CORRIGÉ partiellement] Tests renforcés (propriétés CSS vérifiées dans leur règle,
+     plan free rattaché à chaque service par découpage — sans importer le mini-lecteur, qui
+     exécuterait ses tests deux fois). Pas de contrôle comportemental des délais : pas de navigateur
+     sur cette VM — reste à observer sur le staging (§ 7.5).
+  7. [Remarque] CSP, mouvement réduit, YAML : rien à corriger.
+- **Tests : 974 → 988 (+14, `tests/reveil-render-p0-u6.test.ts`), suite verte, `npx tsc -p .`
+  propre, typecheck serveur inclus dans `npm test`.** Aucun test existant modifié. Incident en
+  cours de route : une ligne de commentaire `render.yaml` avait perdu son `#` (mini-lecteur YAML
+  refusant le fichier) — corrigée avant le commit ; puis mon premier balisage (div imbriquée dans
+  le loader) cassait la regex du test P0-U1 existant — résolu sans toucher au test, en passant la
+  barre en un seul élément (fond animé).
+- **Non vérifié.** Aucune mesure à froid réelle (pas de navigateur sur cette VM, production non
+  touchée — ni réveil forcé, ni mesure) ; la durée « environ 1 minute » est la durée documentée
+  par Render, pas une mesure locale. Mesure simulée locale non retenue (un démarrage local ne
+  simule pas le réveil Render). Protocole de mesure à froid sur le staging : docs/DEPLOIEMENT.md
+  § 7.5 (observer séparément la page Render puis l'écran applicatif).
