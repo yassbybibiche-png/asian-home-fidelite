@@ -1,5 +1,46 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P1-P1 « Egress / polling » (AUDIT.md §7, F-16)
+- **Décision (intervalle allongé, pas de différentiel) :** le rechargement périodique du store passe de 10 s à 30 s
+  (`INTERVALLE_RECHARGEMENT_MS`, `src/store.tsx`) ; rechargement sur action, au retour au premier plan et au retour du
+  réseau conservés. Un rechargement différentiel n'est pas fait dans ce lot : il exige un point de reprise côté serveur
+  (version/horodatage par ligne) et le seuil mesuré laisse de la marge à l'échelle actuelle (voir ci-dessous).
+- **Mesure locale (vrais octets UTF-8, `tests/egress-p1-p1.test.ts`, 150 clients / 100 visites / journal 100 entrées,
+  1 onglet visible 12 h/j, 30 j) :** HTTP `/etat` 69 210 o + `/commerces` 1 088 o = 70 298 o par rechargement →
+  **9,11 Go/mois à 10 s, 3,04 Go/mois à 30 s** ; côté PostgREST (lignes lues avec les colonnes sélectionnées dans
+  `server/stockage-supabase.ts` — `id,version,donnees` pour clients, `donnees` pour tirages/journal — proxy de l'egress
+  Supabase, pas la mesure dashboard) : 81 037 o → **3,50 Go/mois à 30 s**, sous les 5 Go gratuits. À 300 clients :
+  4,68 Go HTTP / 5,60 Go PostgREST à 30 s — **seuil 5 Go côté PostgREST vers ~257 clients** (pente mesurée sur deux
+  volumes, 324 o/client) : le différentiel deviendra nécessaire à ce volume. La minuterie caisse 15 s (`GET /caisse`,
+  240 o) ne pèse que 0,02 Go/mois ; un 2e onglet double le rechargement périodique. **Reste : l'egress réel dans le
+  dashboard Supabase** (pas d'accès navigateur sur cette VM — à lire par l'agent parent, Database → Usage ou
+  Settings → Usage).
+- **Roue :** la boucle Jouer (`INTERVALLE_VERIFICATION_MS`, `attenteVisite.ts`) est indépendante du store et inchangée —
+  vérification espacée de 10 s après chaque réponse réussie (hors latence réseau ; recul jusqu'à 60 s après échecs), donc
+  déblocage inchangé par le lot. Le critère « déblocage toujours < 10 s » de l'AUDIT est approximatif en ce sens (il
+  l'était déjà avant le lot) : la garantie exacte est l'espacement de 10 s après réponse.
+- **Revue Codex (7 points, `/tmp/p1-p1-revue-codex.md`) — tous fondés, corrigés :**
+  1. [Majeur] La mesure comptait des caractères UTF-16, pas des octets (accents sous-estimés) → `arrayBuffer().byteLength`
+     partout ; chiffres publiés recalculés (74 169 o → 70 298 o HTTP, 9,61 → 9,11 Go à 10 s, 3,20 → 3,04 Go à 30 s).
+  2. [Majeur] La taille HTTP mesure le flux Node → navigateur, pas Supabase → Node → mesure PostgREST ajoutée
+     (enveloppes `id,version,donnees`, 3,50 Go/mois à 30 s) + libellé précisé dans le test et l'AUDIT.
+  3. [Majeur] Le « < 5 Go » ne valait que pour le scénario périodique 1 onglet → exclusions explicitées (2e onglet,
+     caisse 15 s mesurée à 0,02 Go/mois, actions/focus non comptés) ; le critère global reste à démontrer par le dashboard.
+  4. [Mineur] « Déblocage toujours < 10 s » faux à la lettre (10 s après la réponse + latence) → libellé corrigé
+     (store, AUDIT) : espacement de 10 s après réponse réussie.
+  5. [Mineur] Seuil « ~234 clients » extrapolé d'un seul échantillon → mesure à deux volumes (150 et 300 clients) dans
+     le test, seuil recalculé ~257 clients côté PostgREST.
+  6. [Mineur] Le test ne vérifiait pas les tailles citées dans l'AUDIT → garde-fous ajoutés (rechargement 10 Ko–100 Ko,
+     PostgREST ≥ HTTP, croissance avec le volume, 10 s > 5 Go) ; les chiffres exacts restent documentés ici et dans
+     l'AUDIT.
+  7. [Mineur] Commentaire `store.tsx` (~12 Go) incohérent avec l'AUDIT (9,61 Go) → harmonisé sur les chiffres corrigés
+     (9,11 Go à 10 s / 3,04 Go HTTP à 30 s, 3,50 Go PostgREST).
+  Aucun secret, aucun envoi réel introduit (confirmé par la revue).
+- **Tests : 1048 → 1051 (+3, `tests/egress-p1-p1.test.ts` : constante 30 s + événements + action, roue à 10 s,
+  mesure live)**, suite verte, typechecks inclus dans `npm test`. Aucun test existant modifié.
+- **Non vérifié.** Egress réel dashboard Supabase (voir ci-dessus) ; aucun test sur téléphone réel ; l'hypothèse
+  « onglet visible 12 h/j » est celle de l'AUDIT étape 0, non relevée.
+
 ## 11/11/2026 — P1-S12 « Garde 1 tampon/jour sur `visite` » (AUDIT.md §7, F-11)
 - **Décision (gardée, pas supprimée) :** la route historique `POST /commerces/:id/clients/:id/visite` reste — c'est le
   passage rapide sans achat des écrans FicheClient (« Valider une visite (+1 tampon) ») et Clients (« Valider une

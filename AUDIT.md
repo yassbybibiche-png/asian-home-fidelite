@@ -292,11 +292,18 @@ routeur) — une relecture handler par handler reste à faire dans un lot P0-S8 
   définition (gzip ? total ? initial ?). À figer dans `SCORES.md` avec une définition unique.
 - **Pas de compression dans le code** (aucun middleware gzip/br) — compression éventuelle par le proxy
   Render, **non vérifiable depuis ici**.
-- **Polling 10 s** : le front recharge tout l'état toutes les 10 s (page visible) + au retour au premier
-  plan + après chaque action (`src/store.tsx`). L'estimation de l'étape 0 (~8 Go/mois d'egress Supabase
-  pour une tablette 12 h/j, au-dessus des 5 Go gratuits) est **toujours non mesurée** et toujours plausible.
-  C'est le 2e risque de coût après l'absence de sauvegarde. (Lot P1-P1 : passer à un rechargement
-  différentiel ou allonger l'intervalle + mesurer l'egress réel dans le dashboard Supabase.)
+- **Polling 10 s → 30 s (P1-P1, LIVRÉ 11/11/2026)** : le front recharge tout l'état toutes les 30 s (page visible) + au retour au premier
+  plan + après chaque action (`src/store.tsx`, `INTERVALLE_RECHARGEMENT_MS = 30_000`). Mesure locale en vrais octets UTF-8
+  (`tests/egress-p1-p1.test.ts`, 150 clients / 100 visites / journal 100 entrées, 1 onglet visible 12 h/j, 30 j) : HTTP
+  `/etat` 69 210 o + `/commerces` 1 088 o = 70 298 o par rechargement → **9,11 Go/mois à 10 s, 3,04 Go/mois à 30 s** ;
+  côté PostgREST (lignes lues avec les colonnes sélectionnées : `id,version,donnees` pour clients, `donnees` pour tirages /
+  journal — proxy de l'egress Supabase, pas la mesure dashboard) : 81 037 o par rechargement → **3,50 Go/mois à 30 s**,
+  sous les 5 Go gratuits. Mesure à 300 clients : 4,68 Go HTTP / 5,60 Go PostgREST à 30 s — seuil 5 Go côté PostgREST vers
+  ~257 clients (pente mesurée sur deux volumes, 324 o/client) : un rechargement différentiel restera à prévoir à ce volume.
+  Exclusions : un 2e onglet double le rechargement périodique ; la minuterie caisse 15 s (`GET /caisse`, 240 o) ne pèse que
+  0,02 Go/mois. La roue garde sa propre vérification espacée de 10 s après chaque réponse (`INTERVALLE_VERIFICATION_MS`,
+  recul jusqu'à 60 s après échecs, hors latence) : déblocage inchangé par le lot. **Reste : l'egress réel dans le dashboard
+  Supabase** (pas d'accès navigateur sur cette VM).
 - Premier affichage : écran de chargement inline en CSS pur (`index.html`, `src/chargement.css`) + logo +
   message « Connexion lente » — P0-U1 **LIVRÉ**. Mais à froid (Render endormi), le JS met ~60 s à arriver :
   l'écran inline ne fait qu'attendre poliment. Voir § 2, écran « Toutes ».
@@ -462,12 +469,12 @@ L'étape 0 listait F-01 à F-16. **Statut re-vérifié :**
 | F-08 | Moyenne | Aucun en-tête de sécurité, CORS `*` | **LIVRÉ** — CSP/HSTS/X-Frame/X-CTO/Referrer ; CORS strict si `CORS_ORIGIN` posée (posée sur Render le 10/11 ~19h42 selon la mémoire — non vérifiable ici). |
 | F-09 | Moyenne | PIN envoyé à chaque requête, sans session | **LIVRÉ** — sessions HMAC 8 h/12 h + révocation. Le PIN en en-tête reste accepté en repli (si `SESSION_SECRET` absente → 503 sur `/sessions`). |
 | F-10 | Moyenne | Transactions Supabase non atomiques, `majCommerce` sans verrou, journal perdu si migration absente | **LIVRÉ par P0-S11 (11/11/2026)** — verrou optimiste sur `majCommerce` (PATCH réglages, logo), journal / traces programme jamais avalés + démarrage Supabase refusé sans 0003 / 0004, ordre métier-puis-journal rétabli (parrainage, caisse, rattrapage). **Nuance : compensation, pas transaction** — une suite d'écritures interrompue entre deux requêtes PostgREST n'est toujours pas annulée (voir `server/README.md` « Atomicité (P0-S11) »). |
-| F-11 | Moyenne | Route `visite` sans garde « 1 tampon/jour » | **TOUJOURS OUVERT**. Lot P1-S12. |
+| F-11 | Moyenne | Route `visite` sans garde « 1 tampon/jour » | **LIVRÉ (P1-S12, 11/11/2026)** — même garde que la caisse (`passageAvecProgramme`), route gardée (passage rapide sans achat), boutons désactivés côté front, jour calendaire explicite à Paris des deux côtés. |
 | F-12 | Moyenne | Oracles d'énumération (`existant`, 409 différenciés, 404 vs 409) | **TOUJOURS OUVERT** — les 409 différenciés (`sansVisite`/`dejaJoue`) sont un choix produit (message client utile) ; l'oracle `existant` sur `POST /clients` demeure. Lot P2-S13 (uniformiser les messages). |
 | F-13 | Moyenne | Code équipe 4 chiffres partagé → `GET /caisse` donne tous les clients + journal | **PARTIELLEMENT OUVERT** — le code est désormais scrypt + sessions équipe 12 h + anti-bruteforce persistant, mais `GET /caisse` renvoie toujours le commerce brut + tous les clients (tél/e-mail) + journal à n'importe quel membre. Lot P0-S14 (vue caisse minimale, promu P1 → P0, revue Codex point 1). |
 | F-14 | Faible | Fuite via `/sante` + 404-avant-401 | **TOUJOURS OUVERT, faible** — `/sante` expose version/mode/stockage/migrations/intégrations (fingerprinting assumé, utile au diagnostic). |
 | F-15 | Faible | Bug 503 au lieu de 401 si 0003 absente | **Non re-vérifié** (0003 appliquée en prod ; cas théorique). |
-| F-16 | Faible | Polling 10 s → ~8 Go/mois d'egress (estimation non mesurée) | **TOUJOURS OUVERT, non mesuré**. Lot P1-P1. |
+| F-16 | Faible | Polling 10 s → ~8 Go/mois d'egress (estimation non mesurée) | **LIVRÉ (P1-P1, 11/11/2026, mesuré localement, en octets UTF-8)** — intervalle 10 s → 30 s : HTTP `/etat` 69 210 o + `/commerces` 1 088 o = 70 298 o par rechargement (150 clients, 100 visites, journal 100 entrées, `tests/egress-p1-p1.test.ts`) → **9,11 Go/mois à 10 s, 3,04 Go/mois à 30 s** (1 onglet visible 12 h/j, 30 j) ; côté PostgREST (proxy : lignes lues, colonnes sélectionnées) 81 037 o → **3,50 Go/mois à 30 s**, sous les 5 Go gratuits ; à 300 clients 5,60 Go PostgREST — seuil 5 Go vers ~257 clients (pente sur deux volumes, 324 o/client : un rechargement différentiel restera à prévoir à ce volume). **Reste à mesurer : l'egress réel dans le dashboard Supabase** (pas d'accès navigateur sur cette VM). |
 
 **Nouveaux risques identifiés à l'étape 1 (OBSERVÉ) :**
 
@@ -568,7 +575,7 @@ tant qu'il n'est ni déployé ni configuré sur Render).
 | 3 | **Apple Wallet** | **En suspens** (décision utilisateur 09/11) ; code `.pkpass` réel prêt (`server/wallet-apple.ts`) mais **branché sur aucune route → 404** ; `/sante` : `en_suspens` ; jamais testé avec un vrai certificat | Décision explicite de l'utilisateur ; compte **Apple Developer Program 99 $/an** ; Team ID ; Pass Type ID ; certificat Pass Type + clé privée PEM ; certificat WWDR ; images icon/logo (+@2x) ; **route + service web de mise à jour (APNs) à écrire** |
 | 4 | **Google Business Profile (avis)** | Aucun appel à Google ; avis saisis à la main, réponses à copier sur Google ; `publier-reponse` → 501 ; `/sante` : `googleBusinessProfile: false` | Compte Google propriétaire/gestionnaire de la fiche ; projet Google Cloud **approuvé par Google** pour les API Business Profile (formulaire, examen, délai inconnu) ; OAuth 2.0 scope `business.manage` ; **CORRIGÉ (revue Codex, point 9) : import des avis + publication des réponses DÉJÀ DÉVELOPPÉS** — fonctions `listerAvisGoogle` / `publierReponseGoogle` (`server/google-business.ts:229,283`) et routes `google/*` existantes ; l'affirmation « non développés » de l'audit initial était fausse. Reste : configuration, approbation Google, recette réelle. (Le lien « écrire un avis » direct **est** configuré : `placeid=ChIJAV70Kqxt5kcRnhPY0L6yaf0`.) |
 | 5 | **SMS Twilio (repli)** | Adaptateur codé, jamais exécuté contre Twilio ; 501 si Brevo absent et Twilio absent | Compte Twilio + `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`. Coût à vérifier. |
-| 6 | **Consentement relance** | **Recueilli** (case non pré-cochée, consentement daté, retrait possible) — LIVRÉ. **CORRIGÉ (revue Codex, point 7) :** le texte de chaque SMS, `MENTION_STOP_SMS = 'STOP : répondez STOP'` (`src/lib/relances.ts:42`), est **trompeur** : avec l'expéditeur alphanumérique Brevo, le client ne peut pas répondre au SMS et Brevo ne reçoit aucun STOP (`server/notifications/brevo.ts:90-96`). Le code n'est donc pas « déjà fait » côté SMS : il manque un mécanisme de désinscription utilisable (lien dans chaque SMS). La route `stop-sms` répond 501 explicite quand les SMS partent via Brevo (webhook réservé à Twilio). E-mails : lien de désinscription existant (`#/desinscription/<client>/<jeton HMAC>` + en-têtes `List-Unsubscribe`). | **Lot P1-B9 (nouveau) :** mécanisme utilisable (lien) + correction du texte **avant toute activation SMS** |
+| 6 | **Consentement relance** | **Recueilli** (case non pré-cochée, consentement daté, retrait possible) — LIVRÉ. **CORRIGÉ (revue Codex, point 7) :** le texte de chaque SMS, `MENTION_STOP_SMS = 'STOP : répondez STOP'` (`src/lib/relances.ts:42`), est **trompeur** : avec l'expéditeur alphanumérique Brevo, le client ne peut pas répondre au SMS et Brevo ne reçoit aucun STOP (`server/notifications/brevo.ts:90-96`). Le code n'est donc pas « déjà fait » côté SMS : il manque un mécanisme de désinscription utilisable (lien dans chaque SMS). La route `stop-sms` répond 501 explicite quand les SMS partent via Brevo (webhook réservé à Twilio). E-mails : lien de désinscription existant (`#/desinscription/<client>/<jeton HMAC>` + en-têtes `List-Unsubscribe`). | **Lot P1-B9 : LIVRÉ (11/11/2026)** — lien court `/d/<client>/<jeton HMAC>` dans chaque SMS (`STOP : <lien>`), même jeton que les e-mails, désinscription de bout en bout testée ; textes visibles corrigés. |
 | 7 | **Suppression d'un client (RGPD)** | **LIVRÉ** — bouton « Supprimer ce client… » (fiche client) + demande depuis la carte (`POST /cartes/:id/suppression`), cascade journalisée, export CSV individuel | — |
 | 8 | **Mise à jour des passes Wallet à chaque tampon** | Non écrite (Google : objet non mis à jour ; Apple : service web + push APNs non écrits) | Développement au moment du branchement Wallet (lots 2–3) |
 | 9 | **Sauvegarde complète / import** | Pas de route de sauvegarde complète ni d'import ; seul l'export CSV clients existe | Lot P0-S5 (voir § 7) |
@@ -813,7 +820,10 @@ Q4, puis S13/S15/S17/Q5/Q6/S16).
    n'ai pas re-lus sont marqués « non re-vérifié » dans le § 2 (ex. : formulaires programme sur `#/carte`,
    recherche qui réinitialise la catégorie sur `#/menu`, badge 11 px, interrupteurs 32 px). Ils restent
    plausibles mais ne sont pas des observations de cette étape.
-8. **L'egress Supabase réel (~8 Go/mois estimés) : non mesuré.** Aucun accès au dashboard Supabase.
+8. **L'egress Supabase réel : mesuré localement (P1-P1, 11/11/2026), pas dans le dashboard.** Projections locales
+   (1 onglet, 12 h/j) : HTTP 3,04 Go/mois et PostgREST ~3,50 Go/mois à 30 s (150 clients,
+   `tests/egress-p1-p1.test.ts`) ; à 300 clients le proxy PostgREST passe à 5,60 Go/mois. Le chiffre dashboard
+   Supabase reste à lire (pas d'accès navigateur sur cette VM).
 9. **Les prix Render/Supabase/Brevo/Twilio/Google/Apple : non vérifiés sur les sites des prestataires.**
    Les chiffres cités (Render ~7 $/mois, Supabase Pro 25 $/mois, Brevo SMS ~0,045 €, Apple Developer
    99 $/an, domaine ~5,99 €) viennent du repo et de la mémoire — **à confirmer sur les pages tarifs
