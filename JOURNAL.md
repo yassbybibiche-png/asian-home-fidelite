@@ -1,5 +1,32 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — P1-G1 « RGPD : rappel de purge » (AUDIT.md §7)
+- **Rappel périodique** : le tableau de bord affiche le résumé de purge (`resumeRappelPurge`, `src/lib/rgpd.ts` —
+  `{ aPurger, bientot, proteges }`, compteurs disjoints, calculé depuis `listePurge` sur les clients déjà chargés,
+  sans appel serveur), en mode API seulement : alerte « N carte(s) à purger » (conservation dépassée) ou mention
+  discrète « N carte(s) à purger dans moins de 30 jours », avec le lien vers l'écran Clients. La liste de purge,
+  l'écran Clients et la route `GET …/purge` existaient déjà (P1-B6).
+- **Purge automatique refusée explicitement** : rien n'est jamais supprimé sans un geste du commerçant — ni tâche
+  planifiée, ni suppression à l'ouverture de l'état, ni minuteur côté front (documenté dans `src/lib/rgpd.ts` et
+  `server/README.md` ; la politique de confidentialité disait déjà que le commerce lance lui-même la suppression).
+- **Tests** (`tests/rappel-purge-p1-g1.test.ts`, 5 tests) : compteurs (dont protégée « bientôt » comptée
+  uniquement dans `proteges`), composition avec `listePurge` (1 due, 1 bientôt, 4 protégées, durée 12 mois),
+  présence du rappel dans `TableauDeBord.tsx`, absence de purge/minuteur dans le dashboard, refus documenté.
+- **Revue Codex (8 points, `/tmp/p1-g1-revue-codex.md`) — 2 fondés, corrigés :** 1. [Majeur] garantie absolue
+  (« une carte au-delà de la conservation sans rappel serait un bug ») non fondée : une carte protégée ne
+  produit pas de bannière → portée qualifiée dans `rgpd.ts` et `README.md` (rappel = cartes purgeables, mode
+  API, données chargées ; Clients = liste de référence) + test. 2. [Mineur] rappel calculé depuis le store
+  (données absentes/périmées = pas de bannière) → même qualification documentée. Points 3–6 (remarques :
+  compteurs disjoints, durée personnalisée, aucune purge depuis le dashboard, rappel récurrent à chaque
+  ouverture/rechargement du store) : rien à corriger. 7. [Mineur] tests d'interface par regex insuffisants
+  pour prouver le rendu → **ignoré avec raison** : aucun harnais de rendu React n'existe dans la suite
+  (ni jsdom, ni testing-library, ni renderToString) ; la convention du repo est la vérification des écrans
+  par regex source + logique pure testée, appliquée ici. Point 8 (remarque : contraintes respectées) : rien.
+- **Tests : 1066 → 1071 (+5)**, suite verte, `npx tsc -p .` propre, typecheck serveur inclus dans
+  `npm test`. Aucun test existant modifié, aucune fonction supprimée.
+- **Non vérifié :** rendu visuel de la bannière sur téléphone réel (vérifié par regex source + logique pure
+  seulement) ; aucune carte réelle n'est due aujourd'hui, le rappel n'a donc pas été vu avec de vraies données.
+
 ## 11/11/2026 — P1-B8 « Google Business (configuration + recette) » (AUDIT.md §7, revue Codex point 9)
 - **Ce lot ne crée ni projet Cloud, ni clé, ni publication réelle.** Les fonctions et routes existaient déjà
   (P1-B4) ; le lot ajoute des garde-fous côté code, vérifie le code contre un Google simulé et documente la

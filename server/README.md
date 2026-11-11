@@ -893,6 +893,12 @@ appelle `GET …/purge` à chaque ouverture et affiche l'avertissement (cartes d
 protection, bouton « Exclure ») ; la purge n'a lieu que quand le gérant clique « Purger N clients… » et tape `PURGER`
 (`POST …/purge`). Jamais purgés : client exclu, récompense en attente encore valable, plat en réserve valable, visite
 oubliée en attente de décision. Chaque purge est journalisée (auteur, date, durée, nombre de clients et de lignes).
+**Rappel périodique (P1-G1)** : le tableau de bord affiche le même résumé (`resumeRappelPurge`, `src/lib/rgpd.ts` —
+cartes à purger maintenant / dans moins de 30 jours, avec le lien vers Clients) à chaque ouverture, en mode API
+seulement — calculé depuis les clients chargés dans le navigateur. Une carte protégée au-delà de la conservation
+n'y apparaît pas (elle reste listée dans Clients avec sa protection) ; l'écran Clients (`GET …/purge`, relu à
+chaque ouverture) reste la liste de référence. **Purge automatique refusée explicitement (P1-G1)** : aucune suppression planifiée, à l'ouverture de l'état
+ou par minuteur — la suppression reste un geste du commerçant, avec la cascade ci-dessus.
 
 ## Limites honnêtes
 
