@@ -268,6 +268,31 @@ Preuve que le test est faux dans sa prémisse, pas dans son exigence :
 Séquence réelle : preuve documentée ici, puis revue Codex ciblée (validation
 demandée), puis correction appliquée.
 
+### Test épinglé par le tour 7 — preuve et validation Codex requise
+
+Le remplacement de la variante `hero-plats-petit.webp` (720×480, 75 588 o)
+par sa version recadrée au ratio d'affichage (720×180, 27 382 o) casse
+`tests/boucle-t6-banniere.test.ts` (« WebP 720 px de large valide, < 120 Ko » :
+`hauteur 480 attendue, lue : 180` ; taille 27 382 o < 120 000 o, passe).
+Preuve que le test n'est pas faux dans son exigence, mais que son assertion
+de dimensions épingle l'ancien actif :
+- l'exigence (« la variante est un WebP valide, aux dimensions attendues,
+  sous un plafond de poids ») est intacte : le fichier est le même
+  (`hero-plats-petit.webp`), le même rôle (bannière de la carte), la même
+  source (`hero-plats.jpg`) ; seul son recadrage change, délibérément
+  (boucle t7, candidat noté par la revue Codex t6 point 3) ;
+- le rendu est quasi identique : l'`object-cover` recadrait déjà la variante
+  720×480 au centre (bande 720×177) pour l'affichage 390×96 — vérifié
+  visuellement sur planche de comparaison (original + recadrage, lus avant
+  le changement) ;
+- la correction (dimensions 720×180, plafond < 60 Ko au lieu de < 120 Ko)
+  RESSERRE le test au lieu de l'assouplir : la borne de poids est divisée
+  par deux, et les dimensions épinglées sont celles du nouvel actif
+  délibéré — aucune assertion n'est retirée, aucune exigence affaiblie.
+Séquence réelle : preuve documentée ici, puis revue Codex du tour
+(validation demandée sur ce point précis), puis fusion seulement si la
+revue valide.
+
 ## Baseline t0 (11/11/2026 ~14:35 UTC, HEAD `7395522`, `autonome/integration`)
 
 Mesure de référence avant le tour 1 (même protocole que P2-Q2, 2 passes) —
@@ -632,4 +657,83 @@ dans le journal).
 **Décision : FUSIONNÉ** (gain transition réelle héros −~190 ms et bannière
 −~530 ms, LCP direct −~170 ms, 2/2 passes dans chaque run ; standard et
 Lighthouse plats ; bundle +0,04 % ; 0 erreur). Tours sans gain
+consécutifs : **0**.
+
+### Tour 7 — `autonome/boucle-t7-banniere-recadree` (fusionné)
+
+Sujet (candidat noté par la revue Codex t6, point 3) : la variante 720×480
+de la bannière est affichée 390×96 en `object-cover` — ~63 % de ses pixels
+sont jetés (bande visible 720×177). Changement : même fichier
+`public/visuels/hero-plats-petit.webp`, recadré au ratio d'affichage —
+720×480, 75 588 o → **720×180, 27 382 o** (recadrage centré 1024×256 de
+`hero-plats.jpg` puis redimensionnement 720×180, Pillow, WebP q75, −64 %).
+Aucun changement de code (le `<picture>` du tour 6 sert le même fichier) ;
+seuls changent l'actif, son commentaire dans `src/lib/visuels.ts`, sa ligne
+dans `public/visuels/SOURCES.md`, et le test `tests/boucle-t6-banniere.test.ts`
+(dimensions 720×480 → 720×180, plafond < 120 Ko → < 60 Ko).
+Vérification visuelle avant le changement (planche de comparaison original
++ recadrage, lue) : la bande centrale garde l'ardoise de sushis/makis, le
+dessert mangue à gauche, le plat à l'œuf à droite ; elle perd le haut (bol
+de riz, rose de tomate) et le bas (nouilles, brochettes, saumon) — le rendu
+est très proche, avec des différences de redimensionnement et de compression
+(l'identité stricte n'est pas revendiquée). À toute largeur ≥ 360 px, la
+bande visible est la même qu'avant (le ratio 4:1 du fichier couvre les
+ratios d'affichage 3,75:1 à 4,67:1).
+Mesure ponctuelle (`scripts/mesurer-carte-asian-home.mjs`) :
+**avant** (720×480, 2 passes) : transition — héros chargé 1 394 / 1 399 ms
+(moyenne 1 397 ms), bannière chargée 1 400 / 1 409 ms (moyenne 1 405 ms) ;
+LCP direct 3 124 / 3 200 ms (moyenne 3 162 ms) ; chargement direct
+2 415 / 2 413 ms.
+**Après** (720×180, 4 passes, 2 runs) : transition — héros chargé 1 164 /
+1 201 ms puis 1 153 / 1 120 ms (moyenne 1 160 ms, **−237 ms**), bannière
+chargée 1 172 / 1 208 ms puis 1 160 / 1 125 ms (moyenne 1 166 ms,
+**−239 ms**) ; LCP direct 3 004 / 2 884 ms puis 3 116 / 3 004 ms (moyenne
+3 002 ms, **−160 ms**) ; chargement direct 2 422 / 2 303 ms puis
+2 593 / 2 571 ms (plat). Les 4 passes après sont sous les 2 passes avant
+sur les deux métriques de transition (après max 1 201 ms < avant min
+1 394 ms pour le héros ; après max 1 208 ms < avant min 1 400 ms pour la
+bannière) — séparation nette. Les 48 206 o économisés valent ~230 ms au
+débit configuré (1,6 Mibit/s) : les gains observés sont plausibles.
+Réserve : gain observé à froid, sans garantie statistique (deux séries
+successives, trois métriques corrélées).
+Mesures standard (2 passes) : premier affichage `#/jouer` 1 820 / 1 825 ms ;
+LCP 1 808 / 1 804 ms ; parcours 6 512 / 6 457 ms ; ouverture carte 640 / 688 ms ;
+menu direct 1 522 / 1 683 ms ; 0 erreur console, 0 requête échouée.
+Lighthouse t7 : 80 / 81 (TBT 710 / 670 ms, LCP 2,6 / 2,5 s) contre 78/79 à t6
+— plat, dans le bruit. Bundle : IDENTIQUE à t6 (JS initial 453 667 o, total
+524 433 o, 24 chunks, mêmes noms de chunks — build frais vérifié).
+Tests : suite complète **1184/1184** (inchangés — le tour ne crée ni ne
+retire de test, il met à jour les dimensions épinglées par le test t6) ;
+E2E 3/3. Incident mineur en cours de tour : la mise à jour de la ligne
+SOURCES.md a supprimé la phrase « bannière de la carte » que le test
+`boucle-t6-banniere` recherche (`sources.includes`) — corrigée en
+remettant la phrase exacte (le test ne porte pas sur le fond, mais la
+formulation de la documentation doit rester stable).
+Revue Codex t7 (5 points) : 1. modification du test **approuvée** —
+l'assertion `480` figeait une caractéristique de l'ancien actif, sans
+exigence fonctionnelle de conserver cette hauteur ; le plafond de poids
+est renforcé — **correction documentaire appliquée** : la validation est
+intervenue après la modification du test, avant la fusion (l'ordre strict
+« avant toute touche » n'a pas été respecté — consigné honnêtement ici,
+cela ne justifie pas d'annuler le tour) ; 2. recadrage centré fondé —
+**corrigé** : « ~80 % » → « ~63 % » (bande visible 720×177) dans
+`visuels.ts`, le test et SOURCES.md (« quasi identique » → « très proche ») ;
+largeur mobile étroite vérifiée (ratio 4:1 couvre 3,75:1 à 4,67:1) ;
+3. gain cohérent, précision causale limitée — **appliqué** : gain présenté
+comme observé à froid, sans garantie statistique ; « affichée » → « chargée »
+(clés du script renommées `herosChargeApresClicMs` /
+`banniereChargeeApresClicMs`, en-tête corrigé ; le libellé « affichée » des
+docs du tour 6 désignait déjà cette même mesure `img.complete`) ;
+4. risque de cache réel fondé (SW : cache à la demande + fraîcheur HTTP 1 h —
+un habitué peut conserver l'ancienne variante temporairement, sans
+régression visuelle significative) — **noté, non corrigé** : une URL
+versionnée serait nécessaire pour une adoption immédiate (hors périmètre
+du tour) ; les mesures ne sont pas biaisées (SW bloqués, cache désactivé) ;
+5. fusion justifiée après corrections documentaires — prochain tour :
+**profiler les longues tâches du TBT**, puis différer les dépendances
+coûteuses identifiées (créer des chunks partagés supplémentaires sans
+réduire le travail initial ne garantit aucun gain).
+**Décision : FUSIONNÉ** (gains transition −237/−239 ms et LCP direct −160 ms,
+séparation nette sur les deux métriques de transition ; standard et
+Lighthouse plats ; bundle inchangé ; 0 erreur). Tours sans gain
 consécutifs : **0**.

@@ -17,9 +17,12 @@ export const VISUELS = {
   logo: '/visuels/logo.png',
   /** Plateau de plats vu de dessus (sushis, makis, saumon, nouilles, riz, mangue). */
   heroPlats: '/visuels/hero-plats.jpg',
-  /** Même plateau, 720 px de large (WebP q75, ~76 Ko) pour la bannière de la carte —
-      le JPEG 1024×683 (177 Ko) reste le repli (boucle t6 : il est affiché 390×96 et
-      partage le tuyau 4G avec le héros de la carte, élément LCP). */
+  /** Même plateau, recadré au ratio de la bannière (720×180, WebP q75, ~27 Ko) —
+      le JPEG 1024×683 (177 Ko) reste le repli (boucle t6 : variante 720×480 ;
+      boucle t7 : recadrage centré au ratio d'affichage 390×96 — l'object-cover
+      jetait ~63 % des pixels de la variante 720×480 (bande visible 720×177),
+      le rendu est très proche, avec des différences de redimensionnement et
+      de compression). */
   heroPlatsPetit: '/visuels/hero-plats-petit.webp',
   /** Table dressée : bao buns, plateau de sushis, cocktails. */
   tableSushis: '/visuels/table-sushis.jpg',

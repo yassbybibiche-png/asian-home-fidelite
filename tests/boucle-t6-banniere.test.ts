@@ -1,12 +1,14 @@
 /**
  * Boucle t6 — bannière de la carte (CarteFidelite) : la variante WebP légère du
- * plateau de plats (hero-plats-petit.webp, 720×480, ~76 Ko) est servie en premier
+ * plateau de plats (hero-plats-petit.webp, 720×180, ~27 Ko) est servie en premier
  * via <picture>, le JPEG 1024×683 (177 Ko) restant le repli. La bannière est
  * affichée 390×96 (h-24) en haut de la carte ; elle partage le tuyau 4G avec le
  * héros de la carte (table-sushis-petit.webp, élément LCP de #/carte) — la
  * variante allège la concurrence réseau. Seule la bannière par défaut est
  * concernée : une bannière configurée par le commerçant garde sa balise <img>
- * simple (le <picture> reste, sans <source>).
+ * simple (le <picture> reste, sans <source>). Boucle t7 : la variante est
+ * recadrée au ratio d'affichage (720×180 au lieu de 720×480 — l'object-cover
+ * jetait ~63 % des pixels (bande visible 720×177), le rendu est très proche).
  */
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync, statSync } from 'node:fs'
@@ -16,7 +18,7 @@ const lire = (chemin: string) => readFileSync(new URL(`../${chemin}`, import.met
 const octets = (chemin: string) => readFileSync(new URL(`../${chemin}`, import.meta.url))
 
 describe('Boucle t6 — bannière de la carte en WebP léger (CarteFidelite)', () => {
-  test('hero-plats-petit.webp : WebP 720 px de large valide, < 120 Ko (dérivé du vrai plateau)', () => {
+  test('hero-plats-petit.webp : WebP 720×180 valide, < 60 Ko (dérivé du vrai plateau, recadré au ratio de la bannière)', () => {
     const fichier = 'public/visuels/hero-plats-petit.webp'
     assert.ok(existsSync(new URL(`../${fichier}`, import.meta.url)))
     const o = octets(fichier)
@@ -26,8 +28,8 @@ describe('Boucle t6 — bannière de la carte en WebP léger (CarteFidelite)', (
     const largeur = o.readUInt16LE(26) & 0x3fff
     const hauteur = o.readUInt16LE(28) & 0x3fff
     assert.equal(largeur, 720)
-    assert.equal(hauteur, 480)
-    assert.ok(statSync(new URL(`../${fichier}`, import.meta.url)).size < 120_000, 'variante < 120 Ko')
+    assert.equal(hauteur, 180)
+    assert.ok(statSync(new URL(`../${fichier}`, import.meta.url)).size < 60_000, 'variante < 60 Ko')
   })
 
   test('CarteFidelite : <picture> WebP d’abord, <img> JPEG inchangée en repli — bannière par défaut seulement', () => {

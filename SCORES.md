@@ -152,7 +152,9 @@ figés ; elle ne doit pas être modifiée.
   524251 o, JS total 803736 o (+322 o), 24 chunks, plus gros 354861 o. Boucle t6 (bannière
   de la carte en WebP) : JS initial 453667 o (+182 o, +0,04 % vs t5 — enrobage
   `<picture>` dans `CarteFidelite` + constante `VISUELS.heroPlatsPetit`),
-  total 524433 o, JS total 803918 o (+182 o), 24 chunks, plus gros 354995 o. Le bundle documenté ici provient d'un build frais
+  total 524433 o, JS total 803918 o (+182 o), 24 chunks, plus gros 354995 o. Boucle t7 (bannière
+  recadrée) : bundle IDENTIQUE à t6 (JS initial 453667 o, total 524433 o, 24 chunks,
+  mêmes noms de chunks — actif seul, aucun JS ; build frais vérifié). Le bundle documenté ici provient d'un build frais
   distinct de celui servi aux deux passes Playwright (le serveur E2E construit
   son propre bundle).
 - Avertissements de build : 0 (aucun « chunk > 500 kB », aucune erreur).
@@ -340,6 +342,18 @@ chargement direct (LCP 1 604 / 1 672 ms). La bannière de la
 carte n'apparaît pas dans ces passes (commerce générique, sans bannière) :
 son gain est mesuré par la mesure ponctuelle (voir § Temps de premier
 affichage, « Re-mesure boucle t6 — carte Asian Home »). Captures : 9 écrans,
+passe 2 (la passe 1 n'a gardé que son JSON).
+
+**Re-mesure boucle t7 (11/11/2026 ~17:00–17:05 UTC, 2 passes, `node_modules/.cache/mesure-boucle-t7/`,
+`resultats-passe<N>.json`) : 0 erreur console, 0 requête échouée, sur les 2 passes.**
+Temps des 2 passes : premier affichage `#/jouer` 1 820 / 1 825 ms (LCP
+1 808 / 1 804 ms, élément `p.titre-carte`) ; parcours scan → lot 6 512 /
+6 457 ms d'étapes (taps identiques) ; ouverture de la carte 640 / 688 ms ;
+premier affichage `#/menu` 914 / 907 ms par hash, 1 522 / 1 683 ms en
+chargement direct (LCP 1 528 / 1 596 ms). La bannière de la carte
+n'apparaît pas dans ces passes (commerce générique, sans bannière) : son
+gain est mesuré par la mesure ponctuelle (voir § Temps de premier
+affichage, « Re-mesure boucle t7 — carte Asian Home »). Captures : 9 écrans,
 passe 2 (la passe 1 n'a gardé que son JSON).
 
 ## npm audit
@@ -538,6 +552,23 @@ Re-tenté le 11/11/2026 (P1-U1) : même 403, inchangé.
   au-delà du bruit. Le gain du tour est sur la carte Asian Home (mesure
   ponctuelle ci-dessous).
 
+### Re-mesure boucle t7 (11/11/2026 ~17:00–17:05 UTC, 2 passes)
+
+| Page | Passe 1 | Passe 2 |
+| --- | --- | --- |
+| `#/jouer` — premier affichage (titre visible) | 1820 ms | 1825 ms |
+| `#/jouer` — navigation : réponse / DOM prêt / chargé | 152 / 1328 / 1330 ms | 152 / 1309 / 1310 ms |
+| `#/jouer` — LCP | 1808 ms (`p.titre-carte`) | 1804 ms (`p.titre-carte`) |
+| `#/menu` — premier affichage (par hash) | 914 ms | 907 ms |
+| `#/menu` — premier affichage (chargement direct) | 1522 ms | 1683 ms |
+| `#/menu` — LCP (chargement direct) | 1528 ms (`p.text-center`) | 1596 ms (`p.text-center`) |
+
+- Premier affichage `#/jouer` : 1 820–1 825 ms — **plat vs t6** (1 817–1 881 ms) ;
+  LCP `#/jouer` : 1 804–1 808 ms (t6 : 1 800–1 868 ms) ; menu direct
+  1 522 / 1 683 ms (t6 : 1 618 / 1 681 ms) ; menu hash 914 / 907 ms (t6 :
+  916 / 902 ms). Le tour ne touche à aucun JS (bundle identique) : aucune
+  régression attendue, aucune observée au-delà du bruit.
+
 ### Re-mesure boucle t4 — menu Asian Home (mesure ponctuelle, 11/11/2026 ~15:45–16:30 UTC)
 
 Le protocole standard utilise un commerce générique, sans visuels : le héros
@@ -598,6 +629,34 @@ carte 2 503 / 2 284 ms puis 2 425 / 2 409 ms puis 2 416 / 2 487 ms (était
 parcours réel (transition par hash), pas seulement au chargement direct —
 c'est le point que la revue Codex t6 demandait de démontrer. 0 erreur
 console (écouteurs aussi sur la page carte), 0 requête échouée.
+
+### Re-mesure boucle t7 — carte Asian Home (mesure ponctuelle, 11/11/2026 ~16:50–17:10 UTC)
+
+Même script (`scripts/mesurer-carte-asian-home.mjs`, clés renommées
+`herosChargeApresClicMs` / `banniereChargeeApresClicMs` — la mesure attend
+`img.complete`, donc « chargée », pas « affichée » ; le libellé « affichée »
+des docs du tour 6 désignait déjà cette même mesure).
+**Avant** (variante 720×480, 2 passes) : transition — héros chargé
+1 394 / 1 399 ms (moyenne 1 397 ms), bannière chargée 1 400 / 1 409 ms
+(moyenne 1 405 ms) ; LCP direct 3 124 / 3 200 ms (moyenne 3 162 ms) ;
+chargement direct 2 415 / 2 413 ms.
+**Après** (variante 720×180, 4 passes, 2 runs) : transition — héros chargé
+1 164 / 1 201 ms puis 1 153 / 1 120 ms (moyenne 1 160 ms, **−237 ms**),
+bannière chargée 1 172 / 1 208 ms puis 1 160 / 1 125 ms (moyenne 1 166 ms,
+**−239 ms**) ; LCP direct 3 004 / 2 884 ms puis 3 116 / 3 004 ms (moyenne
+3 002 ms, **−160 ms**) ; chargement direct 2 422 / 2 303 ms puis
+2 593 / 2 571 ms (plat). Les 4 passes après sont sous les 2 passes avant
+sur les deux métriques de transition (après max 1 201 ms < avant min
+1 394 ms pour le héros ; après max 1 208 ms < avant min 1 400 ms pour la
+bannière) — séparation nette. Les 48 206 o économisés valent ~230 ms au
+débit configuré (1,6 Mibit/s) : les gains observés sont plausibles.
+Réserve : gain observé à froid, sans garantie statistique (deux séries
+successives, trois métriques corrélées) ; le cache n'a pas biaisé la
+mesure (SW bloqués, cache désactivé) mais un habitué peut conserver
+l'ancienne variante temporairement (SW : cache à la demande + fraîcheur
+HTTP 1 h — sans régression visuelle significative, le rendu est très
+proche ; une URL versionnée serait nécessaire pour une adoption immédiate).
+0 erreur console, 0 requête échouée.
 
 ## Lighthouse (mobile, local, `#/jouer`, 11/11/2026)
 
@@ -774,6 +833,21 @@ chemin `#/jouer` du commerce générique. Le TBT reste le levier n° 1.
 
 **Plat vs t5** (2 passes, dans le bruit) — attendu : le tour ne touche pas au
 chemin `#/jouer` du commerce générique. Le TBT reste le levier n° 1.
+
+### Re-mesure boucle t7 (11/11/2026, 2 passes)
+
+- **Score performance : 80 / 81** (était 78 / 79 à t6 ; 14 à 15 points sous le
+  seuil ≥ 95)
+- First Contentful Paint : 0,8 s (2 passes)
+- Largest Contentful Paint : 2,6 / 2,5 s (était 2,7 / 2,4 s à t6)
+- Total Blocking Time : 710 / 670 ms (était 740 / 770 ms à t6 — plat, dans
+  le bruit ± ~150 ms)
+- Cumulative Layout Shift : 0 (2 passes)
+- Speed Index : 1,2 / 1,1 s
+- Time to Interactive : 2,8 / 2,6 s (était 2,9 / 2,8 s à t6)
+
+**Plat vs t6** (2 passes, dans le bruit) — attendu : le tour ne touche à
+aucun JS. Le TBT reste le levier n° 1.
 
 ## Parcours scan → lot (à chaud, 4G simulée)
 
@@ -993,6 +1067,32 @@ validation en caisse — le vrai temps humain est plus long) :
 - La validation en caisse (4 459–4 828 ms) est dans la plage historique
   (4 331–5 123 ms depuis t1) ; le tour ne touche pas au parcours.
 - **Parcours < 30 s à chaud : étapes scriptées sous 30 s, vérifié** (6,4–6,6 s) ;
+  le critère complet avec gestes et attente humains **n'est pas vérifié**
+  (pas de téléphone réel — protocole documenté plus haut). Le temps humain réel
+  (le client attend que la caisse valide) s'ajoute : **non mesuré**.
+  À froid (Render en veille ~60 s + cache vide) : **non mesuré**,
+  estimation seulement.
+
+### Re-mesure boucle t7 (11/11/2026 ~17:00–17:05 UTC, 2 passes, même protocole)
+
+| Étape | Passe 1 | Passe 2 |
+| --- | --- | --- |
+| Inscription (saisie téléphone + « C'est parti ») | 1005 ms | 1032 ms |
+| Validation en caisse (code équipe + recherche + passage) | 4706 ms | 4560 ms |
+| Vérification côté client (« C'est validé ? ») | 300 ms | 327 ms |
+| Tirage (clic roue → gain affiché) | 501 ms | 538 ms |
+| **Total des étapes** | **6512 ms** | **6457 ms** |
+
+- Arithmétique : passe 1, 1 005 + 4 706 + 300 + 501 = 6 512 ms ; passe 2,
+  1 032 + 4 560 + 327 + 538 = 6 457 ms.
+- **Taps identiques** aux passes précédentes : client **4 clics + 1 saisie** ;
+  caisse **3 clics + 2 saisies**.
+- Ouverture de la carte après le gain : 640 / 688 ms (était 513 / 602 ms à t6 —
+  dans la plage observée 427–786 ms depuis t0 ; la mesure ponctuelle t7 donne
+  427–535 ms sur la transition réelle, cohérent).
+- La validation en caisse (4 560–4 706 ms) est dans la plage historique
+  (4 331–5 123 ms depuis t1) ; le tour ne touche pas au parcours.
+- **Parcours < 30 s à chaud : étapes scriptées sous 30 s, vérifié** (6,5–6,5 s) ;
   le critère complet avec gestes et attente humains **n'est pas vérifié**
   (pas de téléphone réel — protocole documenté plus haut). Le temps humain réel
   (le client attend que la caisse valide) s'ajoute : **non mesuré**.
