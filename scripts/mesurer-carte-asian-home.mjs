@@ -6,10 +6,10 @@
 // en caisse → tirage → gain → carte), même protocole par ailleurs : Pixel 7, Slow 4G +
 // CPU ×4, serveur E2E local, service workers bloqués, cache désactivé, navigateur relancé
 // par passe. Deux mesures de la carte : (1) la transition réelle (clic « Voir ma carte »
-// depuis #/jouer → héros et bannière chargés/décodés/affichés) ; (2) le chargement direct
-// (nouvelle page du même contexte — le jeton client est dans le localStorage partagé —
-// pour le LCP classique, le LCP d'une navigation par hash n'étant pas mesurable).
-// 2 passes.
+// depuis #/jouer → héros et bannière chargés — img.complete, pas décodage + peinture) ;
+// (2) le chargement direct (nouvelle page du même contexte — le jeton client est dans le
+// localStorage partagé — pour le LCP classique, le LCP d'une navigation par hash n'étant
+// pas mesurable). 2 passes.
 // Usage : node scripts/mesurer-carte-asian-home.mjs [--port 4371]
 import { spawn } from 'node:child_process'
 import { parseArgs } from 'node:util'
@@ -104,7 +104,8 @@ try {
     await client.getByRole('button', { name: /Tourner la roue/ }).click()
     await client.locator('[data-resultat="gain"]').waitFor()
     // (1) Transition réelle : clic « Voir ma carte » depuis #/jouer → héros et bannière
-    // chargés/décodés/affichés (le LCP d'une navigation par hash n'est pas mesurable).
+    // chargés (img.complete — le décodage puis la peinture ne sont pas attendus
+    // explicitement ; « chargée » est plus exact que « affichée », revue Codex t7).
     // Le href est lu AVANT le clic : après la navigation, le lien n'existe plus.
     const hrefCarte = await client.getByRole('link', { name: 'Voir ma carte de fidélité' }).last().getAttribute('href')
     const tClic = Date.now()
@@ -113,9 +114,9 @@ try {
     const ouvertureCarteMs = Date.now() - tClic
     const imgComplete = (sel) => client.waitForFunction((s) => { const i = document.querySelector(s); return i && i.complete && i.naturalWidth > 0 }, sel, { timeout: 15000 })
     await imgComplete('img.h-80')
-    const herosAfficheApresClicMs = Date.now() - tClic
+    const herosChargeApresClicMs = Date.now() - tClic
     await imgComplete('img.h-24')
-    const banniereAfficheeApresClicMs = Date.now() - tClic
+    const banniereChargeeApresClicMs = Date.now() - tClic
     const srcReels = await client.evaluate(() => [...document.querySelectorAll('img.h-80, img.h-24')].map((i) => i.currentSrc.split('/').pop()))
     // (2) Chargement direct (nouvelle page du même contexte) pour le LCP classique.
     const pageCarte = await contexte.newPage()
@@ -155,7 +156,7 @@ try {
     const visuels = await pageCarte.evaluate(() => performance.getEntriesByType('resource')
       .filter((r) => r.name.includes('/visuels/'))
       .map((r) => ({ nom: r.name.split('/visuels/')[1], debut: Math.round(r.startTime), fin: Math.round(r.responseEnd), taille: r.transferSize })))
-    console.log(`passe ${passe} carte :`, JSON.stringify({ transitionReelle: { ouvertureCarteMs, herosAfficheApresClicMs, banniereAfficheeApresClicMs, srcReels }, chargementCarteMs, lcpCarte, dureeTotaleMs: Date.now() - t0, visuels, erreurs: [...erreurs, ...erreursCarte] }))
+    console.log(`passe ${passe} carte :`, JSON.stringify({ transitionReelle: { ouvertureCarteMs, herosChargeApresClicMs, banniereChargeeApresClicMs, srcReels }, chargementCarteMs, lcpCarte, dureeTotaleMs: Date.now() - t0, visuels, erreurs: [...erreurs, ...erreursCarte] }))
     await pageCarte.close()
     await contexte.close()
     await navigateur.close()

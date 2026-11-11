@@ -19,6 +19,42 @@ bundle 601,7 → 450,2 Ko (JS initial), dashboard enrichi + entonnoir, SEO/OG.
 
 ## Boucle d'amélioration continue
 
+### t7 — Bannière de la carte recadrée au ratio d'affichage (11/11/2026, fusionné)
+
+Même fichier `public/visuels/hero-plats-petit.webp`, recadré : 720×480,
+75 588 o → **720×180, 27 382 o** (recadrage centré 1024×256 de
+`hero-plats.jpg` puis redimensionnement 720×180, Pillow, WebP q75, −64 %) —
+l'`object-cover` jetait ~63 % des pixels de la variante 720×480 (bande
+visible 720×177) pour l'affichage 390×96 ; le rendu est très proche, avec
+des différences de redimensionnement et de compression (vérifié visuellement
+sur planche de comparaison avant le changement). Aucun changement de code
+(le `<picture>` du tour 6 sert le même fichier) ; seuls changent l'actif,
+son commentaire dans `src/lib/visuels.ts`, sa ligne dans
+`public/visuels/SOURCES.md`, et le test `tests/boucle-t6-banniere.test.ts`
+(dimensions 720×480 → 720×180, plafond < 120 Ko → < 60 Ko — mise à jour
+validée par la revue Codex t7, preuve dans `BOUCLE.md` ; la validation est
+intervenue après la modification du test, avant la fusion — l'ordre strict
+« avant toute touche » n'a pas été respecté, consigné honnêtement ici).
+Mesures (ponctuelle, `scripts/mesurer-carte-asian-home.mjs` — clés renommées
+`herosChargeApresClicMs` / `banniereChargeeApresClicMs`, la mesure attend
+`img.complete`, donc « chargée ») : transition — héros chargé 1 394/1 399 →
+1 164/1 201 ms puis 1 153/1 120 ms (moyenne 1 397 → 1 160 ms, **−237 ms**),
+bannière chargée 1 400/1 409 → 1 172/1 208 ms puis 1 160/1 125 ms (moyenne
+1 405 → 1 166 ms, **−239 ms**) ; LCP direct 3 124/3 200 → 3 004/2 884 ms
+puis 3 116/3 004 ms (moyenne 3 162 → 3 002 ms, **−160 ms**) ; les 4 passes
+après sont sous les 2 passes avant sur les deux métriques de transition
+(séparation nette) ; les 48 206 o économisés valent ~230 ms à 1,6 Mibit/s.
+Mesures standard (2 passes) : premier affichage 1 820/1 825 ms, LCP
+1 808/1 804 ms, parcours 6 512/6 457 ms (plats) ; Lighthouse 80/81
+(TBT 710/670 ms) contre 78/79 à t6 (plat). Bundle : IDENTIQUE à t6
+(453 667 o — actif seul, aucun JS) ; 0 erreur console. Tests 1184/1184
+(inchangés), E2E 3/3. Revue Codex t7 (5 points) : fusion justifiée après
+corrections documentaires (« ~80 % » → « ~63 % », « affichée » → « chargée »,
+validation du test consignée honnêtement) ; un habitué peut conserver
+l'ancienne variante temporairement (SW + fraîcheur HTTP 1 h — sans
+régression visuelle significative) ; prochain tour : profiler les longues
+tâches du TBT. Compteur de tours sans gain : **0**.
+
 ### t6 — Bannière de la carte en WebP léger (11/11/2026, fusionné)
 
 Nouveau `public/visuels/hero-plats-petit.webp` (720×480, WebP q75,
