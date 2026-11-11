@@ -1,5 +1,23 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — Boucle d'amélioration continue : mise en place (BOUCLE.md, CHANGELOG.md, baseline t0)
+- **Cadre créé** : `BOUCLE.md` (règles exactes, méthode de mesure, journal des
+  tours, leviers écartés), `CHANGELOG.md` (bilan lots P0/P1/P2 + tours de boucle),
+  baseline t0 mesurée et consignée dans `SCORES.md` (§ « Re-mesure boucle t0 »).
+- **Baseline t0 (HEAD `7395522`, 2 passes, même protocole que P2-Q2)** : premier
+  affichage `#/jouer` 2 261 / 2 197 ms, LCP 2 248 / 2 148 ms, parcours scan → lot
+  6 664 / 7 343 ms, Lighthouse 77 / 81 (TBT 910 / 630 ms), bundle initial
+  JS 481 332 o + CSS 70 766 o = 552 098 o, 0 erreur console, tests 1163/1163.
+- **Analyse t0** : le TBT domine ; `unused-javascript` : `index-*.js` gaspille
+  62 KiB sur 102 KiB transférés sur `#/jouer` ; `qrcode-generator` (52 Ko de
+  sources, minifié 21 233 o) est dans le bundle initial via `components/ui.tsx`,
+  consommé dans le graphe initial par la seule `CarteFidelite` — levier retenu
+  pour le tour 1 (différé, sans toucher aux pages épinglées par P2-Q2).
+- **Leviers écartés et documentés dans BOUCLE.md** : Caisse/CartePublique en
+  `React.lazy` (test P2-Q2 épingle les imports statiques + caisse hors ligne —
+  décision produit, pas un test faux) ; logo PNG → WebP (fixture de tests,
+  chemin épinglé dans l'écran de chargement).
+
 ## 11/11/2026 — P2-Q6 « Logs structurés + alertes » (AUDIT.md §7) — livraison partielle : logs + procédure, alerte non branchée
 - **Nouveau `server/logs.ts`** : une ligne JSON par réponse terminée (`console.info`, comme `[securite]` et
   `[lecture-sensible]`) — `{"type":"requete","niveau":"info"|"avertissement"|"erreur","horodatage":"ISO",
