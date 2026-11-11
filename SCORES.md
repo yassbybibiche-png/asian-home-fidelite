@@ -36,6 +36,19 @@ premier affichage 4 043–4 241 ms, parcours scan → lot 8 727–9 155 ms d'ét
 Lighthouse 79/79, 0 erreur console, DA moyenne 8,0/10 inchangée. Le détail chiffré
 est dans les sections ci-dessous (« Re-mesure P1-U1 » sous chaque métrique).
 
+**Re-mesure P2-Q2 (11/11/2026 ~11:36 UTC, 2 passes)** : compression gzip/brotli
+côté serveur (`server/app.ts`, `envoyerCorps`) + bundle initial sous le seuil de 80 %
+(bouché en P2-Q1) — même protocole que P1-U1 (script `scripts/mesurer-scores.mjs`,
+Pixel 7, Slow 4G + CPU ×4, serveur local), sortie
+`--sortie node_modules/.cache/mesure-p2-q2/resultats-passe<N>.json` (captures dans le
+même dossier, 9 écrans, écrasées par la passe 2) ; Lighthouse 2 passes
+(`lighthouse-passe1.json`, `lighthouse-passe2.json`). **Premier affichage `#/jouer`
+2 285–2 428 ms et LCP 2 272–2 368 ms : les deux seuils sont atteints pour la première
+fois** (voir § Temps de premier affichage et § Lighthouse). Aucun changement visuel
+dans ce lot : notes DA inchangées (8,0/10), 0 erreur console, 0 requête échouée.
+Le détail chiffré est dans les sections ci-dessous (« Re-mesure P2-Q2 » sous chaque
+métrique).
+
 ## Protocole
 
 - **Appareil simulé** : Pixel 7 (Playwright), `reducedMotion: reduce`, service workers bloqués.
@@ -121,10 +134,32 @@ ses imports statiques (méthode `fichiersInitiaux` de
   son propre bundle).
 - Avertissements de build : 0 (aucun « chunk > 500 kB », aucune erreur).
 
+### Après P2-Q2 (build frais, 11/11/2026 ~11:36 UTC)
+
+- JS initial non gzipé : 480934 o (470,0 Ko) — `index-r19-LNJr.js` 352857 o +
+  `ui-Ch5rodkR.js` 127478 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
+- CSS non gzipé : 70722 o (69,1 Ko) — `index-CQ6c7ax-.css`.
+- Total initial : 551656 o (538,7 Ko).
+- JS total (tous chunks) : 797175 o (778,5 Ko) ; 22 chunks ; plus gros chunk : 352857 o
+  (limite test : 500 000 o — respectée).
+- **Compressé (serveur, P2-Q2)** : JS initial 480 934 o → brotli 143 901 o (29,9 %),
+  gzip 152 485 o (31,7 %) ; CSS 70 722 o → brotli 10 857 o ; total initial 551 656 o →
+  brotli 154 758 o (28,0 %). Tous les assets JS+CSS du build : 867 897 o → brotli
+  253 375 o (29,2 %), gzip 274 049 o (31,6 %). Le chunk initial (352 857 o) → brotli
+  102 097 o ; `index.html` (6 097 o) → brotli 2 032 o.
+- Évolution vs P1-U1 : JS initial 480934 o (+8 189 o, dont +1 828 o entre P1-U1 et la
+  base P2-Q1 — lots P0-S11, P1-M2, P1-M3 — et +6 361 o nets pour P2-Q1 : dictionnaire
+  EN + code, après les déplacements hors bundle initial qui ont économisé 2 241 o) ;
+  CSS 70722 o (+58 o) ; JS total 797175 o (+15 011 o vs P1-U1 : 782164 o — les chunks
+  différés portent la même croissance, cause non isolée par lot). Le bundle documenté
+  ici provient d'un build frais distinct de celui servi aux deux passes Playwright
+  (le serveur E2E construit son propre bundle).
+- Avertissements de build : 0 (aucun « chunk > 500 kB », aucune erreur).
+
 ## Couverture de tests
 
-Suite verte : **1044/1044** (`npm test`, typechecks inclus — 1032 avant P1-C7, +12 tests
-`tests/ecrans-commercant-p1-c7.test.ts`).
+Suite verte : **1090/1090** (`npm test`, typechecks inclus — 1085 après P2-Q1, +5 tests
+`tests/compression-p2-q2.test.ts`).
 
 - Couverture globale : 97,90 % lignes / 91,49 % branches / 93,06 % fonctions
   (`node --test --experimental-test-coverage`, suite verte, 11/11/2026 —
@@ -190,6 +225,15 @@ en chargement direct (LCP 1 368 / 1 388 ms). Temps proches de P1-D2 (1 passe,
 relever de la variabilité de mesure. Captures : 9 écrans, passe 2 (la passe 1 n'a gardé
 que son JSON).
 
+**Re-mesure P2-Q2 (11/11/2026 ~11:36 UTC, 2 passes, `node_modules/.cache/mesure-p2-q2/`,
+`resultats-passe1.json` + `resultats-passe2.json`) : 0 erreur console, 0 requête
+échouée, sur les 2 passes.** Temps des 2 passes : premier affichage `#/jouer`
+2 428 / 2 285 ms (LCP 2 368 / 2 272 ms, élément `p.titre-carte`) ; parcours
+scan → lot 6 988 / 6 954 ms d'étapes (taps identiques) ; ouverture de la carte
+710 / 622 ms ; premier affichage `#/menu` 930 / 1 092 ms par hash, 1 764 / 1 765 ms
+en chargement direct (LCP 1 684 / 1 780 ms). Captures : 9 écrans, passe 2 (la passe 1
+n'a gardé que son JSON).
+
 ## npm audit
 
 **Non mesurable sur cette VM** : `npm audit` retourne 403 `policy_denied` sur
@@ -240,6 +284,34 @@ Re-tenté le 11/11/2026 (P1-U1) : même 403, inchangé.
   téléphone réel : **non mesuré** (pas de téléphone sur cette VM — protocole
   documenté plus haut, à exécuter sur staging).
 
+### Re-mesure P2-Q2 (11/11/2026 ~11:36 UTC, 2 passes)
+
+| Page | Passe 1 | Passe 2 |
+| --- | --- | --- |
+| `#/jouer` — premier affichage (titre visible) | 2428 ms | 2285 ms |
+| `#/jouer` — navigation : réponse / DOM prêt / chargé | 159 / 1777 / 1778 ms | 155 / 1711 / 1712 ms |
+| `#/jouer` — LCP | 2368 ms (`p.titre-carte`) | 2272 ms (`p.titre-carte`) |
+| `#/menu` — premier affichage (par hash) | 930 ms | 1092 ms |
+| `#/menu` — premier affichage (chargement direct) | 1764 ms | 1765 ms |
+| `#/menu` — LCP (chargement direct) | 1684 ms (`p.text-center`) | 1780 ms (`p.text-center`) |
+
+- Premier affichage `#/jouer` : 2 285–2 428 ms — **seuil < 4 s ATTEINT pour la
+  première fois** (4 043–4 241 ms à P1-U1) ; le gain vient de la compression : le
+  JS initial (480 934 o) arrive en brotli à 143 901 o, soit ~1,7 s de moins à
+  télécharger en Slow 4G (1,6 Mbps). LCP `#/jouer` : 2 272–2 368 ms — **seuil
+  < 2,5 s ATTEINT** (4 016–4 224 ms à P1-U1). Les deux passes sont cohérentes
+  (écart 143 ms / 96 ms) ; le gain est attribué à la compression, pas à la
+  variabilité — l'écart avec P1-U1 (~1,8 s) dépasse largement la variabilité
+  observée entre passes (~0,2 s).
+- Menu par hash : LCP sans nouvelle entrée (0, comme avant) ; par chargement
+  direct : 1 684–1 780 ms (était 1 368–1 388 ms à P1-U1 — en hausse de ~0,4 s,
+  cause non établie : le menu direct charge le chunk MenuPublic + menu-reel,
+  échantillon de 2 passes insuffisant pour conclure ; le premier affichage direct
+  est lui aussi en hausse : 1 764–1 765 ms contre 1 379–1 382 ms).
+- Délai à froid Render (~60 s) : **toujours non mesuré** (estimation) ; à froid
+  téléphone réel : **non mesuré** (pas de téléphone sur cette VM — protocole
+  documenté plus haut, à exécuter sur staging).
+
 ## Lighthouse (mobile, local, `#/jouer`, 11/11/2026)
 
 - **Score performance : 81** (2e passe, script versionné ; 76 à la 1re passe —
@@ -270,6 +342,31 @@ mesure Lighthouse sur téléphone réel.
 
 Cohérent avec les mesures Playwright P1-U1 (premier affichage 4,0–4,2 s,
 LCP 4,0–4,2 s). Le point faible reste le LCP (~4,6 s). Seuil ≥ 95 toujours loin.
+
+### Re-mesure P2-Q2 (11/11/2026, 2 passes)
+
+- **Score performance : 73 / 81** (était 79/79 à P1-U1, 81/76 à P0-U0 ; écart de
+  8 points entre les deux passes — variabilité de mesure sur cette VM partagée,
+  voir l'avertissement Lighthouse « slower CPU than expected » ; 14 à 22 points
+  sous le seuil ≥ 95)
+- First Contentful Paint : 0,8 s (2 passes, était 1,1 s)
+- Largest Contentful Paint : 3,2 / 2,6 s (était 4,6 s)
+- Total Blocking Time : 840 / 660 ms (était 240 / 270 ms — **en hausse**)
+- Cumulative Layout Shift : 0 (2 passes)
+- Speed Index : 1,4 / 1,1 s (était 1,1 s)
+- Time to Interactive : 3,3 / 3,0 s (était 4,7 / 4,8 s)
+
+Cohérent avec les mesures Playwright P2-Q2 pour le LCP (2,3 s en Slow 4G CDP,
+2,6–3,2 s en throttling simulé Lighthouse — les deux méthodes ne sont pas
+interchangeables, voir § Protocole). **Le score ≥ 95 n'est toujours pas atteint** :
+le LCP et le TTI s'améliorent nettement (LCP 4,6 → 2,6–3,2 s, TTI 4,7/4,8 →
+3,0/3,3 s) mais le TBT augmente (240/270 → 660/840 ms) et plafonne le score.
+Cause du TBT non établie : le JS arrive plus tôt (compression), donc le travail
+de la file principale se concentre dans la fenêtre mesurée au lieu d'être étalé
+par les attentes réseau — hypothèse, non vérifiée ; la calibration CPU de
+Lighthouse sur cette VM partagée (1,5 CPU) est aussi mise en cause par
+l'avertissement de l'outil. Le TBT est le prochain levier (découpage du JS
+initial, report du travail hors du chemin critique), hors périmètre P2-Q2.
 
 ## Parcours scan → lot (à chaud, 4G simulée)
 
@@ -313,6 +410,31 @@ validation en caisse — le vrai temps humain est plus long) :
 - Tirage 587 → 923 ms entre les 2 passes (+57 %) : variabilité de mesure, échantillon
   trop petit pour conclure à une amélioration ou une régression.
 - **Parcours < 30 s à chaud : étapes scriptées sous 30 s, vérifié** (8,7–9,2 s) ;
+  le critère complet avec gestes et attente humains **n'est pas vérifié**
+  (pas de téléphone réel — protocole documenté plus haut). Le temps humain réel
+  (le client attend que la caisse valide) s'ajoute : **non mesuré**.
+  À froid (Render en veille ~60 s + cache vide) : **non mesuré**,
+  estimation seulement.
+
+### Re-mesure P2-Q2 (11/11/2026 ~11:36 UTC, 2 passes, même protocole)
+
+| Étape | Passe 1 | Passe 2 | Écart vs P1-U1 (passe 1 / passe 2) |
+| --- | --- | --- | --- |
+| Inscription (saisie téléphone + « C'est parti ») | 1056 ms | 1035 ms | +2 / +41 ms |
+| Validation en caisse (code équipe + recherche + passage) | 4985 ms | 5033 ms | −1 735 / −1 893 ms |
+| Vérification côté client (« C'est validé ? ») | 388 ms | 305 ms | +22 / −7 ms |
+| Tirage (clic roue → gain affiché) | 559 ms | 581 ms | −28 / −342 ms |
+| **Total des étapes** | **6988 ms** | **6954 ms** | **−1 739 / −2 201 ms** |
+
+- Arithmétique : passe 1, 1 056 + 4 985 + 388 + 559 = 6 988 ms ; passe 2,
+  1 035 + 5 033 + 305 + 581 = 6 954 ms.
+- **Taps identiques** aux passes précédentes : client **4 clics + 1 saisie** ;
+  caisse **3 clics + 2 saisies**. La validation en caisse domine toujours le parcours
+  (5,0 s, caisse en Slow 4G + CPU ×4 comme le client) mais descend de 6,7–6,9 s à
+  5,0 s — la caisse charge le même bundle initial, comprimé.
+- Ouverture de la carte après le gain : 710 / 622 ms (était 559 / 515 ms — en hausse
+  de ~0,15 s, cause non établie, échantillon insuffisant).
+- **Parcours < 30 s à chaud : étapes scriptées sous 30 s, vérifié** (6,9–7,0 s) ;
   le critère complet avec gestes et attente humains **n'est pas vérifié**
   (pas de téléphone réel — protocole documenté plus haut). Le temps humain réel
   (le client attend que la caisse valide) s'ajoute : **non mesuré**.
@@ -420,19 +542,21 @@ commerçant) est le prochain levier, sans toucher aux corps sombres côté clien
 
 ## Seuils de réussite (définis avant la refonte)
 
-| Parcours / métrique | Seuil | Référence antérieure (lot précisé par métrique) | Après P1-U1 (11/11/2026, 2 passes) |
-| --- | --- | --- | --- |
-| Scan → lot, à chaud (gestes humains inclus) | < 30 s (critère AUDIT P1-U1) | P0-U0 : ~9,0–10,3 s d'étapes scriptées (hors attente humaine) | Étapes scriptées : 8,7–9,2 s, sous 30 s ; critère avec gestes et attente humains : non vérifié |
-| Premier affichage `#/jouer` en Slow 4G | < 4 s | P0-U0 : 4,02–4,24 s (seuil non atteint) | 4,04–4,24 s (seuil non atteint) |
-| LCP `#/jouer` | < 2,5 s | P0-U0 : 4,06–4,18 s | 4,02–4,22 s |
-| Lighthouse mobile `#/jouer` | ≥ 95 (critère d'arrêt de la boucle) | P0-U0 : 81 (76 à la 1re passe) | 79 (score identique sur les deux passes) |
-| Erreurs console | 0 | P0-D1 : 0 erreur, 0 requête échouée — seuil atteint | 0 erreur, 0 requête échouée (2 passes — seuil atteint) |
-| Bundle initial (JS + CSS, non gzipé) | pas de régression vs 535857 o | P1-D2 : 542738 o (+1,28 % vs 535857 o — seuil strict dépassé : +4 750 o de CSS, ce sont les règles P1-D2 elles-mêmes ; JS initial +184 o (+0,04 %) ; écart accepté et documenté, voir § DA après P1-D2) | 543409 o (+1,41 % vs 535857 o ; +671 o vs P1-D2, cause non établie ; écart accepté et documenté, voir § Bundle) |
-| Note DA moyenne | ≥ 9/10 | P1-D2 : 8,0/10 (était 7,6/10 après P0-D1, 6,1/10 à P0-U0 — écrans client 9/10, écrans commerçant 7–8/10 inchangés, voir § DA après P1-D2) | 8,0/10 (inchangée — écrans client 9/10, écrans commerçant 7–8/10, voir § DA après P1-U1) |
+| Parcours / métrique | Seuil | Référence antérieure (lot précisé par métrique) | Après P1-U1 (11/11/2026, 2 passes) | Après P2-Q2 (11/11/2026, 2 passes) |
+| --- | --- | --- | --- | --- |
+| Scan → lot, à chaud (gestes humains inclus) | < 30 s (critère AUDIT P1-U1) | P0-U0 : ~9,0–10,3 s d'étapes scriptées (hors attente humaine) | Étapes scriptées : 8,7–9,2 s, sous 30 s ; critère avec gestes et attente humains : non vérifié | Étapes scriptées : 6,9–7,0 s, sous 30 s ; critère avec gestes et attente humains : non vérifié |
+| Premier affichage `#/jouer` en Slow 4G | < 4 s | P0-U0 : 4,02–4,24 s (seuil non atteint) | 4,04–4,24 s (seuil non atteint) | **2,29–2,43 s (seuil atteint)** |
+| LCP `#/jouer` | < 2,5 s | P0-U0 : 4,06–4,18 s | 4,02–4,22 s | **2,27–2,37 s (seuil atteint, méthode Playwright Slow 4G)** ; 2,6–3,2 s en Lighthouse (throttling simulé, non interchangeable) |
+| Lighthouse mobile `#/jouer` | ≥ 95 (critère d'arrêt de la boucle) | P0-U0 : 81 (76 à la 1re passe) | 79 (score identique sur les deux passes) | 73 / 81 (seuil non atteint ; LCP 2,6–3,2 s, TBT 660–840 ms en hausse) |
+| Erreurs console | 0 | P0-D1 : 0 erreur, 0 requête échouée — seuil atteint | 0 erreur, 0 requête échouée (2 passes — seuil atteint) | 0 erreur, 0 requête échouée (2 passes — seuil atteint) |
+| Bundle initial (JS + CSS, non gzipé) | pas de régression vs 535857 o | P1-D2 : 542738 o (+1,28 % vs 535857 o — seuil strict dépassé : +4 750 o de CSS, ce sont les règles P1-D2 elles-mêmes ; JS initial +184 o (+0,04 %) ; écart accepté et documenté, voir § DA après P1-D2) | 543409 o (+1,41 % vs 535857 o ; +671 o vs P1-D2, cause non établie ; écart accepté et documenté, voir § Bundle) | 551656 o (+2,95 % vs 535857 o ; +8 247 o vs P1-U1 : JS initial +8 189 o — dont +6 361 o nets P2-Q1, dictionnaire EN + code, et +1 828 o des lots P0-S11/P1-M2/P1-M3 — et CSS +58 o ; le non-gzipé croît mais le servi compressé chute : total initial brotli 154 758 o ; écart accepté et documenté, voir § Bundle) |
+| Note DA moyenne | ≥ 9/10 | P1-D2 : 8,0/10 (était 7,6/10 après P0-D1, 6,1/10 à P0-U0 — écrans client 9/10, écrans commerçant 7–8/10 inchangés, voir § DA après P1-D2) | 8,0/10 (inchangée — écrans client 9/10, écrans commerçant 7–8/10, voir § DA après P1-U1) | 8,0/10 (inchangée — aucun changement visuel dans ce lot) |
 
-Ce lot (P1-U1) documente une re-mesure : il ne démontre pas une amélioration et ne
-valide pas encore le critère P1-U1 sur téléphone réel. La règle ci-dessous concerne
-les lots de modification issus de la boucle.
+Ce lot (P2-Q2) démontre une amélioration réelle sur les temps (premier affichage et
+LCP sous leurs seuils en Slow 4G Playwright, parcours 8,7–9,2 → 6,9–7,0 s) mais ne
+valide pas encore le critère d'arrêt de la boucle (Lighthouse 73/81 < 95, TBT en
+hausse) ni le critère P1-U1 sur téléphone réel. La règle ci-dessous concerne les
+lots de modification issus de la boucle.
 
 Un tour de la boucle d'amélioration ne fusionne que s'il améliore au moins une
 de ces métriques sans régresser les autres (AUDIT.md §7, boucle continue).

@@ -3,6 +3,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createHash, createHmac, randomBytes, randomInt, randomUUID, scrypt, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
 import type { Apparence, Avis, Client, Commerce, CommerceCaisse, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement } from '../src/types.ts'
@@ -991,6 +992,111 @@ function etagCorrespond(entete: string | undefined, valeur: string): boolean {
   return entete.split(',').some((e) => e.trim() === '*' || sansFaible(e) === sansFaible(valeur))
 }
 
+// ---------- Compression des réponses (P2-Q2) ----------
+
+/** Seuil : en dessous, la compression coûte plus qu'elle ne rapporte (en-têtes + CPU). */
+const SEUIL_COMPRESSION_OCTETS = 1024
+/** Types compressibles (texte) : les images et polices sont déjà compressées, les recompresser serait inutile. */
+const TYPES_COMPRESSIBLES = /^(text\/|application\/(json|manifest\+json|xml)|image\/svg\+xml)/
+/** Garde-fou : le cache des variantes compressées ne grandit pas sans limite (un déploiement = ~25 fichiers). */
+const CACHE_COMPRESSION_MAX = 128
+/** Variantes compressées des fichiers statiques, par chemin absolu + ETag (le fichier change → l'ETag
+ *  change ; deux fichiers différents ne partagent jamais une variante, revue Codex P2-Q2). */
+const cacheCompression = new Map<string, { br?: Buffer; gzip?: Buffer }>()
+
+/** Qualité d'un codage dans Accept-Encoding (RFC 9110 §12.5.3) : l'explicite prime sur le joker `*`
+ *  (un `br;q=0` explicite n'est pas ressuscité par `*`), la casse est ignorée, une qualité mal
+ *  formée (`q=oops`, `q=-1`) vaut 0 (codage non accepté), `q>1` est ramené à 1. */
+function qualiteCodage(parties: string[], nom: string): number {
+  const qualite = (p: string): number => {
+    const m = /;\s*q=([^;,\s]+)/.exec(p)
+    if (!m) return 1
+    const q = Number(m[1])
+    if (!Number.isFinite(q) || q < 0) return 0
+    return q > 1 ? 1 : q
+  }
+  for (const p of parties) {
+    if (p === nom || p.startsWith(`${nom};`)) return qualite(p)
+  }
+  for (const p of parties) {
+    if (p === '*' || p.startsWith('*;')) return qualite(p)
+  }
+  return 0
+}
+
+/** Codage accepté par le client : la plus forte qualité, brotli préféré à égalité. */
+function codageAccepte(req: IncomingMessage): 'br' | 'gzip' | null {
+  const ae = req.headers['accept-encoding']
+  if (!ae) return null
+  const parties = ae.toLowerCase().split(',').map((p) => p.trim()).filter(Boolean)
+  const qBr = qualiteCodage(parties, 'br')
+  const qGzip = qualiteCodage(parties, 'gzip')
+  if (qBr <= 0 && qGzip <= 0) return null
+  return qGzip > qBr ? 'gzip' : 'br'
+}
+
+/** Ajoute `Accept-Encoding` au `Vary` existant (fusionné avec `Vary: Origin` du CORS, jamais remplacé). */
+function avecVary(entetes: Record<string, string>): Record<string, string> {
+  const vary = entetes.Vary
+  if (!vary) return { ...entetes, Vary: 'Accept-Encoding' }
+  if (/(^|,)\s*Accept-Encoding(\s|,|$)/i.test(vary)) return entetes
+  return { ...entetes, Vary: `${vary}, Accept-Encoding` }
+}
+
+/** Calcule les en-têtes et le corps à envoyer (compressé ou non) — sans rien écrire.
+ *  `cleCache` : clé des variantes compressées (fichiers statiques, chemin absolu + ETag : deux
+ *  fichiers différents ne partagent jamais une variante, même à taille et mtime égales) ;
+ *  sans clé, la compression est refaite à chaque fois (réponses JSON/CSV, corps différents à
+ *  chaque requête). Sans `Accept-Encoding` (service worker hors ligne, `fetchFaux` des tests) :
+ *  réponse d'identité, comme avant. */
+function preparerCorps(
+  req: IncomingMessage,
+  entetes: Record<string, string>,
+  type: string,
+  corps: Buffer,
+  cleCache?: string,
+): { entetes: Record<string, string>; corps: Buffer } {
+  const base = { ...entetes, 'Content-Type': type }
+  if (!TYPES_COMPRESSIBLES.test(type) || corps.length < SEUIL_COMPRESSION_OCTETS) {
+    return { entetes: { ...base, 'Content-Length': String(corps.length) }, corps }
+  }
+  const entetesVary = avecVary(base)
+  const codage = codageAccepte(req)
+  if (!codage) {
+    return { entetes: { ...entetesVary, 'Content-Length': String(corps.length) }, corps }
+  }
+  let variantes = cleCache ? cacheCompression.get(cleCache) : undefined
+  if (cleCache && !variantes) {
+    variantes = {}
+    if (cacheCompression.size >= CACHE_COMPRESSION_MAX) cacheCompression.clear()
+    cacheCompression.set(cleCache, variantes)
+  }
+  let comprime = variantes?.[codage]
+  if (!comprime) {
+    comprime =
+      codage === 'br'
+        ? brotliCompressSync(corps, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } })
+        : gzipSync(corps, { level: 6 })
+    if (variantes) variantes[codage] = comprime
+  }
+  return { entetes: { ...entetesVary, 'Content-Encoding': codage, 'Content-Length': String(comprime.length) }, corps: comprime }
+}
+
+/** Envoie un corps en le compressant si le client l'accepte et que le type s'y prête ; sinon, identité. */
+function envoyerCorps(
+  req: IncomingMessage,
+  res: ServerResponse,
+  statut: number,
+  entetes: Record<string, string>,
+  type: string,
+  corps: Buffer,
+  cleCache?: string,
+): void {
+  const prep = preparerCorps(req, entetes, type, corps, cleCache)
+  res.writeHead(statut, prep.entetes)
+  res.end(prep.corps)
+}
+
 function servirStatique(dossier: string, chemin: string, req: IncomingMessage, res: ServerResponse, entetes: Record<string, string>): boolean {
   const racine = resolve(dossier)
   let decode: string
@@ -1019,12 +1125,23 @@ function servirStatique(dossier: string, chemin: string, req: IncomingMessage, r
         ? CACHE_IMMUABLE
         : CACHE_VISUELS
   const communs = { ...entetes, 'Cache-Control': cache, ETag: balise }
+  const type = TYPES_MIME[extname(fichier)] ?? 'application/octet-stream'
+  // La 304 porte le même Vary que la 200 (le client qui négocie doit savoir que la réponse varie).
+  const communsVary = TYPES_COMPRESSIBLES.test(type) ? avecVary(communs) : communs
   if (etagCorrespond(req.headers['if-none-match'], balise)) {
-    res.writeHead(304, communs).end()
+    res.writeHead(304, communsVary).end()
     return true
   }
-  res.writeHead(200, { ...communs, 'Content-Type': TYPES_MIME[extname(fichier)] ?? 'application/octet-stream' })
-  res.end(readFileSync(fichier))
+  const corps = readFileSync(fichier)
+  if (req.method === 'HEAD') {
+    // HEAD : exactement les mêmes en-têtes que GET (dont Content-Encoding et Content-Length
+    // compressé, revue Codex P2-Q2), sans corps.
+    const prep = preparerCorps(req, communsVary, type, corps, `${fichier}:${balise}`)
+    res.writeHead(200, prep.entetes)
+    res.end()
+    return true
+  }
+  envoyerCorps(req, res, 200, communsVary, type, corps, `${fichier}:${balise}`)
   return true
 }
 
@@ -3503,13 +3620,19 @@ export async function creerServeur(o: OptionsServeur) {
         return
       }
       if (r.csv) {
-        res.writeHead(200, {
-          ...entetes,
-          'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="${r.csv.nom.replace(/[^\w.-]/g, '_')}"`,
-          'Cache-Control': 'no-store',
-        })
-        res.end(r.csv.contenu)
+        // Export téléchargeable, comme le JSON : compressé si le client l'accepte (revue Codex P2-Q2).
+        envoyerCorps(
+          req,
+          res,
+          200,
+          {
+            ...entetes,
+            'Content-Disposition': `attachment; filename="${r.csv.nom.replace(/[^\w.-]/g, '_')}"`,
+            'Cache-Control': 'no-store',
+          },
+          'text/csv; charset=utf-8',
+          Buffer.from(r.csv.contenu),
+        )
         return
       }
       if (r.image) {
@@ -3523,12 +3646,10 @@ export async function creerServeur(o: OptionsServeur) {
         return
       }
       if (r.xml != null) {
-        res.writeHead(r.statut ?? 200, { ...entetes, 'Content-Type': 'text/xml; charset=utf-8', 'Cache-Control': 'no-store' })
-        res.end(r.xml)
+        envoyerCorps(req, res, r.statut ?? 200, { ...entetes, 'Cache-Control': 'no-store' }, 'text/xml; charset=utf-8', Buffer.from(r.xml))
         return
       }
-      res.writeHead(r.statut ?? 200, { ...entetes, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-      res.end(JSON.stringify(r.json))
+      envoyerCorps(req, res, r.statut ?? 200, { ...entetes, 'Cache-Control': 'no-store' }, 'application/json; charset=utf-8', Buffer.from(JSON.stringify(r.json)))
     } catch (erreur) {
       // Conflit d'écriture (doublon refusé par la base, ligne modifiée entre-temps) : 409, l'utilisateur peut réessayer.
       const e =
@@ -3542,8 +3663,14 @@ export async function creerServeur(o: OptionsServeur) {
       const http = e instanceof ErreurHttp
       if (!http) console.error(`[serveur] ${req.method} ${url.pathname} :`, e)
       const statut = http ? e.statut : 500
-      res.writeHead(statut, { ...entetes, ...(http ? e.entetes : {}), 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-      res.end(JSON.stringify({ erreur: http ? e.message : 'Erreur interne du serveur.' }))
+      envoyerCorps(
+        req,
+        res,
+        statut,
+        { ...entetes, ...(http ? e.entetes : {}), 'Cache-Control': 'no-store' },
+        'application/json; charset=utf-8',
+        Buffer.from(JSON.stringify({ erreur: http ? e.message : 'Erreur interne du serveur.' })),
+      )
     }
   })
 
