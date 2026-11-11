@@ -591,8 +591,9 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
   inactivité, on veut des **sauvegardes quotidiennes** (7 jours gardés — le gratuit n'en a **aucune**), ou l'usage approche
   500 Mo de base / 5 Go d'egress (page Usage du dashboard). Le Pro enlève la mise en pause, ajoute les sauvegardes,
   8 Go de disque, 250 Go d'egress, support e-mail, 10 $ de crédits de calcul inclus. **Dépense à valider par vous.**
-- Sans Pro, sauvegarde = **export CSV régulier** (Clients → Exporter), et pour une sauvegarde complète
-  `pg_dump` ou `supabase db dump` (CLI Supabase) avec le mot de passe de base de l'étape a.
+- Sans Pro, sauvegarde complète = **`npm run sauvegarde`** (P0-S5, les 14 tables via l'API, chiffrée) : voir
+  « Sauvegarde / export » et `docs/SAUVEGARDE.md`. En complément possible : `pg_dump` ou `supabase db dump` (CLI
+  Supabase) avec le mot de passe de base de l'étape a.
 
 **g. Données SQLite existantes**
 - **Rien à migrer pour le vrai restaurant** : Asian Home Paris n'a jamais été en production ; sa base réelle est vide
@@ -608,10 +609,17 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
 ### Sauvegarde / export
 
 - `GET /api/v1/commerces/:id/export.csv` (PIN) : liste des clients, à télécharger régulièrement (ouvrable dans Excel).
-- Supabase Free : **aucune sauvegarde automatique** → CSV régulier + `pg_dump` / `supabase db dump` si besoin (voir f).
+- Supabase Free : **aucune sauvegarde automatique** côté Supabase. **Sauvegarde complète (P0-S5)** :
+  `node --env-file=.env scripts/sauvegarde-base.mjs` (ou `npm run sauvegarde`, variables déjà exportées) exporte les 14 tables (toutes lignes, toutes
+  colonnes) via PostgREST + clé service_role, en `sauvegardes/asian-home-<horodatage>.json.gz` (gitignoré), chiffré
+  AES-256-GCM si `SAUVEGARDE_CLE_CHIFFREMENT` est définie, rétention 30 jours / 30 fichiers ; échec → `ERREUR SAUVEGARDE`,
+  sortie 1, aucun fichier. Vérification : `npm run restaurer -- <fichier> --cible pglite --verifier` (base locale
+  jetable ; Supabase refusé). Procédure complète, RPO 24 h / RTO 1–2 h, copie hors VM, restauration manuelle vers
+  Supabase et limites : **`docs/SAUVEGARDE.md`**.
 - SQLite (dev / Render Starter + disque) : copier le fichier `data/fidelite.db` serveur arrêté (ou
-  `sqlite3 fidelite.db ".backup copie.db"`).
-- Pas encore de route de sauvegarde complète ni d'import (tirages, avis, historique) : voir « Limites ».
+  `sqlite3 fidelite.db ".backup copie.db"`) — le script ci-dessus ne lit que Supabase.
+- Toujours **pas de route HTTP** de sauvegarde ni d'import, et pas de restauration automatique vers Supabase (manuelle,
+  `docs/SAUVEGARDE.md` § 8).
 
 ## RGPD (P1-B6)
 

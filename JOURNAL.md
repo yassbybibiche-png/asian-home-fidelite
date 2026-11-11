@@ -843,3 +843,36 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   (il tourne avant les tests, ~1 s, et fait échouer `npm test` en cas d'erreur de type serveur) ; [P3] ligne
   obsolète de `server/README.md` (§ Limites honnêtes) affirmant que le serveur n'était pas vérifié par `tsc` →
   corrigée. Le `build` Render n'est pas touché (choix explicite, voir ci-dessus).
+
+## 11/11/2026 — P0-S5 : sauvegarde complète de la base (Supabase Free n'en fait aucune)
+- **Constat** : Supabase Free = aucune sauvegarde ; une perte de base = perte de tous les clients / tampons / tirages.
+  Accès disponibles : `SUPABASE_URL` + clé service_role (PostgREST) ; pas de mot de passe Postgres, pas de `pg_dump`,
+  pas d'accès réseau à la production depuis la VM.
+- **Fait** : `server/sauvegarde.ts` (logique pure : 14 tables dans l'ordre des clés étrangères avec clé de conflit,
+  export qui ÉCHOUE si une table manque, validation, restauration qui refuse un fichier incomplet, adaptateurs SQL
+  lecture / upsert via `jsonb_populate_recordset`, AES-256-GCM avec clé de fichier HKDF + sel + IV aléatoires,
+  rétention pure) ; `scripts/sauvegarde-base.mjs` (PostgREST paginé par 1 000, gzip, chiffrement si clé, écriture
+  `.tmp` puis renommage, rétention, `SAUVEGARDE OK` / `ERREUR SAUVEGARDE` + sortie 1, aucun secret affiché) ;
+  `scripts/restaurer-base.mjs` (PGlite seulement, migrations 0001–0008 sans `.down.sql`, une transaction, base cible
+  vide exigée, `--verifier` ; toute cible Supabase / Postgres refusée sans afficher le DSN). Le `.mjs` importe
+  directement le `.ts` (type-stripping Node 24) : vérifié, pas de duplication. `npm run sauvegarde` / `npm run restaurer`.
+- **Choix RLS** : rôles Supabase recréés avant les migrations (comme `tests/migration-pglite.test.ts`), restauration en
+  propriétaire des tables (non filtré par la RLS, aucune table en FORCE) → rien à désactiver. Colonnes `ordre` (identity)
+  réinsérées telles quelles (OVERRIDING SYSTEM VALUE) puis séquence recalée.
+- **Tests** : `tests/sauvegarde-p0-s5.test.ts`, **21 tests** — export depuis une PGlite remplie (≥ 1 ligne dans les
+  14 tables) → restauration dans une 2e PGlite → compteurs égaux, client / tirage / avis identiques, relecture
+  complète identique ligne à ligne ; base restaurée fonctionnelle (ordre, 1 tirage/jour) ; table absente → erreur nommée
+  (export et restauration) ; chiffrement (aller-retour, mauvaise clé, altération, clé invalide) ; rétention (limites) ;
+  CLI de bout en bout contre un faux PostgREST local (1 501 lignes de journal → pagination, chiffré, puis
+  `restaurer-base.mjs --verifier`), `--aide`, variables absentes, table absente → aucun fichier, rétention sur disque.
+  `npm test` **827/827** (806 avant, +21), typecheck serveur inclus, `npm run build` OK.
+- **RPO / RTO** : RPO 24 h si sauvegarde quotidienne (lancée par l'opérateur : rien n'est planifié par ce lot) ;
+  RTO estimé 1–2 h (restauration manuelle vers Supabase, `docs/SAUVEGARDE.md` § 8). Rétention 30 jours / 30 fichiers.
+- **Limites** : jamais exécuté contre la vraie base (consigne + pas d'accès réseau) ; PostgREST ne donne pas
+  d'instantané cohérent entre tables (sauvegarder restaurant fermé ; une incohérence fait échouer la restauration
+  bruyamment) ; schéma / RLS / config Supabase non sauvegardés (source = migrations) ; restauration validée sur PGlite
+  seulement, pas sur un projet Supabase ; pas d'alerte automatique d'échec ; copie hors VM à faire par l'opérateur.
+- **Décisions en attente (utilisateur)** : Supabase Pro 25 $/mois (sauvegardes quotidiennes 7 j) non acheté ;
+  mot de passe Postgres pour un `pg_dump` en complément ; planification + copie hors VM ; exercice de restauration
+  réelle sur un projet Supabase de test. Docs : `docs/SAUVEGARDE.md`, `server/README.md` § Sauvegarde / export,
+  `.env.example` (variables `SAUVEGARDE_*` commentées : `tests/supabase.test.ts` n'y autorise que 2 variables actives).

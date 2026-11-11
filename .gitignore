@@ -7,3 +7,5 @@ dist/
 .env.local
 # Base SQLite du serveur (à la racine seulement : src/data/ contient du code)
 /data/
+# Sauvegardes de la base (P0-S5, docs/SAUVEGARDE.md) : données clients + hash des PIN, jamais dans le dépôt
+/sauvegardes/
