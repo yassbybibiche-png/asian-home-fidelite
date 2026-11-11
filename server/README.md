@@ -188,6 +188,19 @@ constante) ou fermer l'écran commerçant quand il ne sert pas.
 **Taille de base** : quelques centaines d'octets par client, tirage ou avis → 500 Mo représentent des centaines de milliers
 d'enregistrements ; pas un sujet pour un restaurant.
 
+**Plafond PostgREST — pagination serveur (P0-S18).** PostgREST plafonne une réponse à **1 000 lignes** par défaut : une
+lecture de liste sans `.range()` s'arrête silencieusement à 1 000 lignes. Toutes les lectures de listes passent donc par
+`lirePages` (`server/stockage-supabase.ts`, pages de 1 000 lignes, tri déterministe obligatoire sinon une ligne peut être
+lue deux fois ou jamais) : `commerces()`, `clients()`, `tirages()`, `tiragesClient()`, `tiragesParCode()`, `avis()`,
+`membres()` (et déjà `compteursEvenements()`). Les lectures d'une seule ligne et celles à limite explicite (`journal`,
+`envois`) ne paginent pas. Conséquence : `GET …/etat`, l'export CSV et les statistiques (`src/lib/stats.ts`) sont complets
+au-delà de 1 000 clients / tirages / avis — l'écran Clients affiche déjà la liste par pages de 50 (« Charger plus »).
+Résiduel : le bilan de `supprimerClient` compte les lignes supprimées renvoyées par PostgREST (plafonné à 1 000 par
+table) — la suppression elle-même n'est pas plafonnée, seul le chiffre du journal peut être un minimum si un client
+avait plus de 1 000 tirages. Les lectures ne sont pas « snapshot » : une écriture concurrente pendant une lecture
+paginée (fenêtre < 1 s) peut dupliquer ou omettre une ligne — les stats et l'export tolèrent une ligne de plus ou de
+moins, et la pagination par curseur n'a pas été jugée utile (revue Codex P0-S18 point 2).
+
 ### Validation de la migration (S2) — exécutée sur Postgres local, PAS sur Supabase
 
 Pas de Postgres installé dans l'environnement de développement (ni `psql`, ni `postgres`, ni `pg_ctl`). Solution trouvée :

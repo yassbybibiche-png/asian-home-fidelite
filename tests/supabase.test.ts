@@ -14,6 +14,7 @@ import { ErreurConflit, ErreurMigrationManquante } from '../server/stockage.ts'
 import { configSupabaseDepuisEnv, ouvrirStockageSupabase } from '../server/stockage-supabase.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import { cleContact, nouveauClient, offrirRecompense, validerVisite } from '../src/lib/fidelite.ts'
+import { calculerChiffresCartes } from '../src/lib/stats.ts'
 import { soldePoints } from '../src/lib/points.ts'
 import type { Client, Commerce, Tirage } from '../src/types.ts'
 
@@ -145,7 +146,10 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
     }
     const debut = Number(params.get('offset') ?? 0)
     const limite = params.get('limit')
-    return limite ? lignes.slice(debut, debut + Number(limite)) : lignes.slice(debut)
+    // P0-S18 (revue Codex point 4) : PostgREST plafonne une réponse à 1 000 lignes même sans `limit` (max-rows par
+    // défaut) ; le faux le reproduit, sinon un test HTTP ne verrait jamais une lecture non paginée. Une lecture
+    // sans `limit` qui attend plus de 1 000 lignes est donc un bug du code testé, pas du faux.
+    return lignes.slice(debut, debut + (limite ? Number(limite) : 1000))
   }
 
   const projeter = (lignes: Ligne[], select: string | null) =>
@@ -374,7 +378,7 @@ describe('Supabase : adaptateur de stockage (faux PostgREST)', () => {
     assert.deepEqual(f.requetes.at(-1)!.corps, { id: 'ti-1', commerce_id: commerce.id, client_id: lina.id, date: t1.date, donnees: t1 })
     await st.ajouterTirage(t2)
     assert.deepEqual(await st.tirages(commerce.id), [t2, t1])
-    assert.equal(f.requetes.at(-1)!.params.get('order'), 'date.desc')
+    assert.equal(f.requetes.at(-1)!.params.get('order'), 'date.desc,id.asc')
     assert.deepEqual(await st.tiragesClient(commerce.id, lina.id), [t1, t2])
     assert.equal(f.requetes.at(-1)!.params.get('client_id'), `eq.${lina.id}`)
 
@@ -1326,6 +1330,149 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       assert.deepEqual(r.contenu.bilan, { client: true, tirages: 0, journal: 0, parrainages: 0, rattrapages: 0, envois: 0 })
       assert.equal(f.tables.clients.length, 0)
       assert.equal((await api('GET', `/commerces/${AH}/purge`, undefined, PIN)).statut, 200)
+    } finally {
+      await app.fermer()
+    }
+  })
+})
+
+// ---------- P0-S18 : pagination serveur Supabase (plafond PostgREST de 1 000 lignes) ----------
+
+describe('P0-S18 : pagination serveur Supabase (plafond PostgREST de 1 000 lignes)', () => {
+  const commerce: Commerce = { ...nouveauCommerce('Chez Lin', 'restaurant', ''), id: 'c-chez-lin' }
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-s18-'))
+  after(() => rmSync(dossier, { recursive: true, force: true }))
+  const horloge = new Date(2026, 10, 9, 12, 0)
+
+  // Serveur HTTP sur le faux PostgREST (copie locale du `demarrer` du describe serveur, qui lui est local).
+  async function demarrer(f: ReturnType<typeof fauxPostgrest>) {
+    const app = await creerServeur({
+      fichierDb: join(dossier, 'ne-doit-pas-exister.db'),
+      supabase: { url: URL_SB, cleServiceRole: CLE, fetch: f.fetch },
+      adminPin: ADMIN,
+      pinInitial: '1234',
+      version: 'test',
+      maintenant: () => horloge,
+    })
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = {}) {
+      const r = await fetch(base + chemin, { method: methode, headers: { 'Content-Type': 'application/json', ...entetes }, body: corps === undefined ? undefined : JSON.stringify(corps) })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    return { app, api }
+  }
+
+  /** `n` clients / tirages / avis semés directement dans les tables du faux PostgREST (la lecture, elle, passe par
+   * le client officiel). Lignes complètes, comme un POST les écrirait (ordre, version) ; chaque client a 1 visite. */
+  function semer(f: ReturnType<typeof fauxPostgrest>, n: number, commerceId: string) {
+    for (let i = 0; i < n; i++) {
+      const id = `cl-s18-${String(i).padStart(4, '0')}`
+      const date = new Date(Date.UTC(2020, 0, 1) + i * 86_400_000).toISOString()
+      const c = { ...nouveauClient(commerceId, `Client ${String(i).padStart(4, '0')}`, { telephone: `06${String(10000000 + i)}` }), id, visites: [date], derniereVisite: date }
+      f.tables.clients.push({ id, commerce_id: commerceId, cle_contact: cleContact(c), donnees: c, ordre: i + 1, version: 1 })
+      const t: Tirage = { id: `ti-s18-${i}`, commerceId, clientId: id, lot: 'Nems', date }
+      f.tables.tirages.push({ id: t.id, commerce_id: commerceId, client_id: id, date, donnees: t })
+      const avis = { id: `av-s18-${i}`, commerceId, auteur: `Client ${i}`, note: 5, texte: 'Top', date }
+      f.tables.avis.push({ id: avis.id, commerce_id: commerceId, date, donnees: avis, version: 1 })
+    }
+  }
+
+  test('clients, tirages et avis lus en entier au-delà du plafond (1 200 lignes, pages de 1 000)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    semer(f, 1200, commerce.id)
+    const clients = await st.clients(commerce.id)
+    assert.equal(clients.length, 1200)
+    assert.equal(clients.at(-1)?.prenom, 'Client 1199')
+    assert.equal((await st.tirages(commerce.id)).length, 1200)
+    assert.equal((await st.avis(commerce.id)).length, 1200)
+    // Preuve que la lecture a bien paginé : sans `.range()`, le faux renverrait tout (pas de plafond simulé)
+    // et ce test passerait à tort — les offsets prouvent les deux pages.
+    for (const table of ['clients', 'tirages', 'avis']) {
+      const lectures = f.requetes.filter((r) => r.table === table && r.methode === 'GET')
+      assert.deepEqual(lectures.map((r) => r.params.get('offset')), ['0', '1000'], table)
+      assert.ok(lectures.every((r) => r.params.get('limit') === '1000'), table)
+    }
+  })
+
+  test('tirages d’un seul client : lus en entier au-delà du plafond (1 050 tirages, ordre stable)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    const c = { ...nouveauClient(commerce.id, 'Fidèle', { telephone: '0612345678' }), id: 'cl-s18-fidele' }
+    f.tables.clients.push({ id: c.id, commerce_id: commerce.id, cle_contact: cleContact(c), donnees: c, ordre: 1, version: 1 })
+    // Lignes semées dans l'ordre inverse de leur date : sans le tri par date, le faux renverrait l'ordre
+    // d'insertion et le test échouerait (revue Codex point 3).
+    for (let i = 1049; i >= 0; i--) {
+      const date = new Date(Date.UTC(2020, 0, 1) + i * 86_400_000).toISOString()
+      const t: Tirage = { id: `ti-f-${i}`, commerceId: commerce.id, clientId: c.id, lot: 'Nems', date }
+      f.tables.tirages.push({ id: t.id, commerce_id: commerce.id, client_id: c.id, date, donnees: t })
+    }
+    const lus = await st.tiragesClient(commerce.id, c.id)
+    assert.equal(lus.length, 1050)
+    assert.deepEqual(
+      lus.map((t) => t.id),
+      Array.from({ length: 1050 }, (_, i) => `ti-f-${i}`),
+      'séquence complète, triée par date croissante (pas seulement les extrémités)',
+    )
+    assert.deepEqual(
+      f.requetes.filter((r) => r.table === 'tirages' && r.methode === 'GET').map((r) => r.params.get('offset')),
+      ['0', '1000'],
+    )
+  })
+
+  test('dates identiques à la frontière des pages : aucune ligne perdue ni lue deux fois (1 001 tirages, même date)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce(commerce, { hash: 'h', sel: 's' })
+    // 1 001 clients, un tirage chacun, tous à la même milliseconde, semés dans l'ordre inverse des ids : sans le
+    // départage par `id`, l'ordre des lignes de même date à cheval sur la frontière n'est pas garanti d'une
+    // requête à l'autre (le tri Postgres n'est pas stable) — le test échouerait. Ids à 4 chiffres pour que l'ordre
+    // lexicographique soit l'ordre numérique.
+    const date = '2026-11-08T12:00:00.000Z'
+    for (let i = 1000; i >= 0; i--) {
+      const id = String(i).padStart(4, '0')
+      const c = { ...nouveauClient(commerce.id, `Client ${i}`, { telephone: `06${10000000 + i}` }), id: `cl-eg-${id}` }
+      f.tables.clients.push({ id: c.id, commerce_id: commerce.id, cle_contact: cleContact(c), donnees: c, ordre: i + 1, version: 1 })
+      const t: Tirage = { id: `ti-eg-${id}`, commerceId: commerce.id, clientId: c.id, lot: 'Nems', date }
+      f.tables.tirages.push({ id: t.id, commerce_id: commerce.id, client_id: c.id, date, donnees: t })
+    }
+    const lus = await st.tirages(commerce.id)
+    assert.equal(lus.length, 1001)
+    assert.equal(new Set(lus.map((t) => t.id)).size, 1001, 'aucun doublon')
+    assert.deepEqual(
+      lus.map((t) => t.id),
+      Array.from({ length: 1001 }, (_, i) => `ti-eg-${String(i).padStart(4, '0')}`),
+      'départage par id croissant',
+    )
+    assert.deepEqual(
+      f.requetes.filter((r) => r.table === 'tirages' && r.methode === 'GET').map((r) => r.params.get('offset')),
+      ['0', '1000'],
+    )
+  })
+
+  test('/etat, statistiques et export CSV complets au-delà du plafond (1 050 clients)', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      semer(f, 1050, AH)
+      const etat = await api('GET', `/commerces/${AH}/etat`, undefined, PIN)
+      assert.equal(etat.statut, 200)
+      assert.equal(etat.contenu.clients.length, 1050)
+      assert.equal(etat.contenu.tirages.length, 1050)
+      // Statistiques (TableauDeBord, src/lib/stats.ts) calculées sur la liste complète, pas sur 1 000 lignes.
+      const cartes = calculerChiffresCartes(etat.contenu.clients)
+      assert.equal(cartes.cartesEmises, 1050)
+      assert.equal(cartes.passagesTotal, 1050)
+      // Export CSV : une ligne par client, y compris le 1 050e.
+      const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+      const csv = await fetch(`${base}/commerces/${AH}/export.csv`, { headers: PIN })
+      assert.equal(csv.status, 200)
+      const texte = await csv.text()
+      assert.equal(texte.split('\r\n').filter(Boolean).length, 1051, 'en-tête + 1 050 clients')
+      assert.ok(texte.includes('Client 1049'), 'le dernier client est dans l’export')
     } finally {
       await app.fermer()
     }

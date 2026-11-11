@@ -38,7 +38,10 @@ const TABLES_0006 = ['tentatives_auth']
 const TABLES_0007 = ['envois']
 /** 0008_mesure.sql : la table et la fonction d'incrément (appelée par `rpc`, rangée sous le nom de la table). */
 const TABLES_0008 = ['evenements_jour']
-/** Lignes lues par requête : PostgREST (Supabase) plafonne une réponse à 1 000 lignes par défaut. */
+/** Lignes lues par requête (P0-S18) : PostgREST (Supabase) plafonne une réponse à 1 000 lignes par défaut — toute
+ * lecture de liste passe donc par `lirePages` (boucle `.range()`), sinon listes, exports et statistiques seraient
+ * silencieusement incomplets au-delà du plafond. Les lectures d'une seule ligne (`eq('id', …)`, `clientParContact`,
+ * `journal` / `envois` à limite explicite) gardent `lire` (une requête). */
 const PAGE = 1000
 
 /** Lecture d'une table de la migration 0003 : vide tant que la migration n'est pas appliquée (l'existant continue de marcher). */
@@ -115,6 +118,28 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     return lignes.map((l) => l.donnees as T)
   }
 
+  /**
+   * Lecture COMPLÈTE d'une liste, par pages de `PAGE` lignes (P0-S18) : la dernière page (< `PAGE` lignes) arrête
+   * la boucle ; une liste d'exactement N × `PAGE` lignes coûte une requête vide de plus. `construire` refait une
+   * requête neuve par page (mêmes filtres et même tri, seule la fenêtre `.range()` change) : le tri doit donc être
+   * déterministe, sinon une ligne pourrait être lue deux fois ou jamais. Versions mémorisées comme dans `lire`.
+   */
+  async function lireLignesPages<T extends Ligne = Ligne>(table: string, construire: (debut: number, fin: number) => PromiseLike<Resultat>): Promise<T[]> {
+    const tout: T[] = []
+    for (let debut = 0; ; debut += PAGE) {
+      const lignes = (await ok<Ligne[]>(table, construire(debut, debut + PAGE - 1))) as T[]
+      const carte = versions.getStore()
+      if (carte) for (const l of lignes) if (l.id && l.version != null) carte.set(`${table}:${l.id}`, l.version)
+      tout.push(...lignes)
+      if (lignes.length < PAGE) return tout
+    }
+  }
+
+  /** Comme `lire`, mais sur toute la liste (toutes les pages). */
+  async function lirePages<T>(table: string, construire: (debut: number, fin: number) => PromiseLike<Resultat>): Promise<T[]> {
+    return (await lireLignesPages(table, construire)).map((l) => l.donnees as T)
+  }
+
   /** UPDATE de `donnees`, conditionné à la version lue dans la transaction en cours (verrou optimiste). */
   async function majVersionnee(table: 'commerces' | 'clients' | 'avis', id: string, donnees: unknown) {
     const lue = versions.getStore()?.get(`${table}:${id}`)
@@ -136,7 +161,7 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     majMeta: async (cle, valeur) => void (await ok('meta', sb.from('meta').upsert({ cle, valeur }, { onConflict: 'cle' }))),
     supprimerMeta: async (cle) => void (await ok('meta', sb.from('meta').delete().eq('cle', cle))),
 
-    commerces: () => lire<Commerce>('commerces', sb.from('commerces').select(AVEC_VERSION).order('ordre')),
+    commerces: () => lirePages<Commerce>('commerces', (debut, fin) => sb.from('commerces').select(AVEC_VERSION).order('ordre').range(debut, fin)),
     commerce: async (id) => (await lire<Commerce>('commerces', sb.from('commerces').select(AVEC_VERSION).eq('id', id)))[0],
     pin: async (id) => {
       const [l] = await ok<{ pin_hash: string; pin_sel: string }[]>('commerces', sb.from('commerces').select('pin_hash,pin_sel').eq('id', id))
@@ -148,7 +173,8 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     majCommerce: (c) => majVersionnee('commerces', c.id, c),
     majPin: async (id, pin) => void (await ok('commerces', sb.from('commerces').update({ pin_hash: pin.hash, pin_sel: pin.sel }).eq('id', id))),
 
-    clients: (commerceId) => lire<Client>('clients', sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).order('ordre')),
+    clients: (commerceId) =>
+      lirePages<Client>('clients', (debut, fin) => sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).order('ordre').range(debut, fin)),
     client: async (commerceId, id) =>
       (await lire<Client>('clients', sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).eq('id', id)))[0],
     /** Déduplication : même règle que le front (`cleContact` : 0033 / +33 / 06…, e-mail en minuscules). */
@@ -158,20 +184,30 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       void (await ok('clients', sb.from('clients').insert({ id: c.id, commerce_id: c.commerceId, cle_contact: cleContact(c), donnees: c }))),
     majClient: (c) => majVersionnee('clients', c.id, c),
 
-    tirages: (commerceId) => lire<Tirage>('tirages', sb.from('tirages').select('donnees').eq('commerce_id', commerceId).order('date', { ascending: false })),
+    tirages: (commerceId) =>
+      lirePages<Tirage>('tirages', (debut, fin) => sb.from('tirages').select('donnees').eq('commerce_id', commerceId).order('date', { ascending: false }).order('id').range(debut, fin)),
     tiragesClient: (commerceId, clientId) =>
-      lire<Tirage>('tirages', sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('client_id', clientId)),
+      // Tri explicite (date croissante) : sans lui, l'ordre des pages ne serait pas stable d'une requête à l'autre.
+      // Même ordre que l'ancienne lecture sans tri (insertion = dates croissantes dans les tests et en pratique).
+      // Départage par `id` (P0-S18, revue Codex point 1) : sans lui, deux lignes de même date à cheval sur une
+      // frontière de page pourraient être ordonnées différemment d'une requête à l'autre et lues deux fois ou jamais.
+      lirePages<Tirage>('tirages', (debut, fin) =>
+        sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('client_id', clientId).order('date', { ascending: true }).order('id').range(debut, fin),
+      ),
     ajouterTirage: async (t) =>
       void (await ok('tirages', sb.from('tirages').insert({ id: t.id, commerce_id: t.commerceId, client_id: t.clientId, date: t.date, donnees: t }))),
     // Code gagnant et remise (P0-U3) : dans le JSONB `donnees`, sans migration. La table `tirages` n'a pas de colonne
     // `version` : la garde est la condition « donnees->remis IS NULL » de l'UPDATE lui-même. Postgres verrouille la ligne,
     // et une 2e requête simultanée réévalue la condition après la 1re → 0 ligne → false (jamais deux remises).
     tiragesParCode: (commerceId, code) =>
-      lire<Tirage>('tirages', sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('donnees->>code', code).order('date', { ascending: false })),
+      lirePages<Tirage>('tirages', (debut, fin) =>
+        sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('donnees->>code', code).order('date', { ascending: false }).order('id').range(debut, fin),
+      ),
     marquerTirageRemis: async (t) =>
       (await ok<unknown[]>('tirages', sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->remis', null).select('id'))).length > 0,
 
-    avis: (commerceId) => lire<Avis>('avis', sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).order('date', { ascending: false })),
+    avis: (commerceId) =>
+      lirePages<Avis>('avis', (debut, fin) => sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).order('date', { ascending: false }).order('id').range(debut, fin)),
     unAvis: async (commerceId, id) => (await lire<Avis>('avis', sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).eq('id', id)))[0],
     ajouterAvis: async (a) => void (await ok('avis', sb.from('avis').insert({ id: a.id, commerce_id: a.commerceId, date: a.date, donnees: a }))),
     majAvis: (a) => majVersionnee('avis', a.id, a),
@@ -179,9 +215,9 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     // ---- Cartiz (0003_cartiz.sql) ----
     membres: async (commerceId) => {
       const lignes = await ouVide(
-        ok<{ donnees: MembreEquipe; code_hash: string; code_sel: string }[]>(
+        lireLignesPages<{ donnees: MembreEquipe; code_hash: string; code_sel: string }>(
           'equipe',
-          sb.from('equipe').select('donnees,code_hash,code_sel').eq('commerce_id', commerceId).order('ordre'),
+          (debut, fin) => sb.from('equipe').select('donnees,code_hash,code_sel').eq('commerce_id', commerceId).order('ordre').range(debut, fin),
         ),
         [],
       )
