@@ -324,7 +324,7 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     inscrirePublic: (commerceId: string, prenom: string, contact: string, parrain?: string, consentementRelance = false) =>
       requete('POST', `/commerces/${enc(commerceId)}/clients`, {
         corps: { prenom, contact, ...(parrain ? { parrain } : {}), ...(consentementRelance ? { consentementRelance: true } : {}) },
-      }) as Promise<{ client: CartePublique; existant: boolean; /** P0-S7 : nouvelle carte seulement. */ jeton?: string; expireLe?: string }>,
+      }) as Promise<{ client: CartePublique; /** P2-S13 : plus de champ `existant` en public (oracle) — la réponse est identique, création ou reprise ; seule la présence du jeton distingue (amorçage). */ jeton?: string; expireLe?: string }>,
     /** Désinscription des relances depuis le lien d'un e-mail (page #/desinscription/…). */
     desinscrire: (clientId: string, jeton: string) =>
       requete('POST', `/desinscription/${enc(clientId)}/${enc(jeton)}`) as Promise<{ ok: boolean; commerce: string }>,

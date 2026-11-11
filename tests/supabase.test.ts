@@ -634,7 +634,12 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       const id = ins.contenu.client.id as string
       assert.equal(ins.contenu.client.telephone, undefined, 'réponse publique sans téléphone')
       const bis = await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '+33 6 12 34 56 78' })
-      assert.deepEqual([bis.statut, bis.contenu.existant, bis.contenu.client.id], [200, true, id])
+      // P2-S13 — oracle fermé (changement de contrat) : même statut 201 et même forme que la création,
+      // sans `existant` et sans jeton ; seule la carte (même id) est renvoyée.
+      assert.equal(bis.statut, 201)
+      assert.equal('existant' in bis.contenu, false)
+      assert.equal(bis.contenu.jeton, undefined)
+      assert.equal(bis.contenu.client.id, id)
 
       const sansVisite = await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })
       assert.equal(sansVisite.statut, 409)
@@ -688,7 +693,8 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
         api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }),
         api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '+33612345678' }),
       ])
-      assert.deepEqual([a.statut, b.statut].sort(), [200, 201])
+      // P2-S13 — oracle fermé (changement de contrat) : les deux réponses sont 201, création ou reprise.
+      assert.deepEqual([a.statut, b.statut].sort(), [201, 201])
       assert.equal(a.contenu.client.id, b.contenu.client.id)
       assert.equal(f.tables.clients.length, 1)
       assert.deepEqual(f.rejets, ['clients:23505'], 'c’est la contrainte de la base qui a tranché')

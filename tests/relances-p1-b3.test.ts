@@ -265,8 +265,11 @@ describe('Consentement explicite aux relances', () => {
     try {
       const c = (await s.api('POST', `/commerces/${AH}/clients`, { contact: '0611111111' })).contenu.client as Client
       const encore = await s.api('POST', `/commerces/${AH}/clients`, { contact: '06 11 11 11 11', consentementRelance: true })
-      assert.equal(encore.statut, 200)
-      assert.equal(encore.contenu.existant, true)
+      // P2-S13 — oracle fermé (changement de contrat) : même statut 201 et même forme que la création,
+      // sans `existant` et sans jeton.
+      assert.equal(encore.statut, 201)
+      assert.equal('existant' in encore.contenu, false)
+      assert.equal(encore.contenu.jeton, undefined)
       assert.equal((await s.client(c.id)).consentementRelance, undefined)
     } finally {
       await s.app.fermer()

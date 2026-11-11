@@ -90,9 +90,14 @@ describe('P0-S2 : routes publiques limitées (F-04)', () => {
     const { app, api } = await demarrer(join(dossier, 'contact.db'), { derriereProxy: true })
     try {
       const formats = ['0612345678', '+33612345678', '06 12 34 56 78', '0033612345678', '06.12.34.56.78']
+      let premierId: string | undefined
       for (const [i, contact] of formats.entries()) {
         const r = await api('POST', `/commerces/${AH}/clients`, { contact }, { 'X-Forwarded-For': `10.0.0.${i}` })
-        assert.equal(r.statut, i === 0 ? 201 : 200, contact)
+        // P2-S13 — oracle fermé (changement de contrat) : la reprise publique répond 201 comme la création.
+        assert.equal(r.statut, 201, contact)
+        // Revue Codex P2-S13, point 6 : les statuts seuls ne prouvent plus la déduplication — l'id, si.
+        if (i === 0) premierId = r.contenu.client.id as string
+        else assert.equal(r.contenu.client.id, premierId, contact)
       }
       const r = await api('POST', `/commerces/${AH}/clients`, { contact: '0612345678' }, { 'X-Forwarded-For': '10.0.0.9' })
       assert.equal(r.statut, 429)
