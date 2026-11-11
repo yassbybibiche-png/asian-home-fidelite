@@ -2088,6 +2088,11 @@ export async function creerServeur(o: OptionsServeur) {
           stockage: st.type,
           demo: !!o.demo,
           integrations: integrations(),
+          // P0-S9 : SQLite en production ne devrait plus arriver (server/index.ts refuse de démarrer sans
+          // Supabase) — si c'est le cas (démarrage par un autre chemin), l'alerte est visible ici.
+          ...(st.type === 'sqlite' && o.production
+            ? { alerteStockage: 'Base SQLite en production : les données sont dans un fichier local éphémère (perdu à chaque redéploiement ou réveil). Définir SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY — le serveur refuse désormais de démarrer sans elles en production.' }
+            : {}),
           // Migration 0003 (équipe, journal, menu) appliquée sur la base ?
           // Migration 0004 (parrainages, demandes de rattrapage) appliquée sur la base ?
           // Migration 0007 (journal des envois de relances) appliquée ? Sans elle, aucun envoi réel ne part.

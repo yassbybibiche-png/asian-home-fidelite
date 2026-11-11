@@ -1353,3 +1353,44 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   l'avertissement dès le démarrage. Le repli mémoire sans migration et le parcours de redémarrage ne sont prouvés que
   par tests automatisés (pas de navigateur sur la VM) : vérifier les logs Render après application de la 0010
   (disparition de l'avertissement).
+
+## 11/11/2026 — P0-S9 : Refuser SQLite en production (AUDIT.md §7)
+
+- **Garde dans `server/index.ts` seulement** (le seul lanceur de production, `npm run serveur`) : après
+  `configSupabaseDepuisEnv(env)`, si production (`NODE_ENV=production` ou `RENDER`) et pas de Supabase →
+  `arreter('En production, Supabase est obligatoire : SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY doivent être définies
+  (refus de démarrer sur SQLite vide).')` (sortie 1, message explicite). Une seule des deux variables reste refusée
+  comme avant (demi-configuration). Hors production, SQLite reste le défaut (développement local, tests). La garde est
+  placée avant `creerServeur` : aucune ouverture SQLite n'a lieu en production.
+- **`/sante` (`server/app.ts`)** : clé conditionnelle `alerteStockage` (message explicite en français) uniquement quand
+  `stockage === 'sqlite'` ET `o.production` — elle n'apparaît jamais en dev, donc le test figé des clés de `/sante`
+  (`tests/securite-s1.test.ts:291`) reste vert. La garde rend ce cas quasi impossible (démarrage refusé avant) ; l'alerte
+  est une défense en profondeur pour un démarrage par un autre chemin.
+- **4 tests spawn existants adaptés (vrai changement de contrat, pas un affaiblissement — cf. précédent P0-S19).**
+  Ils lançaient `server/index.ts` en production (RENDER=1) sans Supabase et attendaient un démarrage : la garde les
+  aurait fait échouer sur le refus Supabase avant leur assertion. Ils fournissent désormais un faux Supabase HTTP
+  (`tests/faux-supabase-http.ts`, nouveau helper partagé — lectures → `[]`, écritures → ligne écrite, juste de quoi
+  laisser `initialiser` et `exigerMigrationsAudit` passer ; il ne simule pas une base, limite explicite) et gardent
+  leurs assertions d'origine : S1 « SESSION_SECRET absente en production → démarrage QUAND MÊME, avec avertissement »
+  (renommé « … (Supabase configuré, P0-S9) »), S4 « CORS_ORIGIN absente / valide / invalide » (`lancer` devenu asynchrone,
+  faux fermé dans chaque `finally`).
+- **Tests : 917 → 924 (+7), `npm test` vert, `npx tsc -p.` vert, `npm run build` vert.** Nouveaux
+  (`tests/refus-sqlite-p0-s9.test.ts`) : spawn production sans Supabase → refus code 1 + message (NODE_ENV et RENDER) ;
+  production AVEC Supabase (faux HTTP) → démarre ; développement sans Supabase → démarre ; une seule variable Supabase
+  → refus demi-configuration ; `/sante` unitaire : SQLite + production → `alerteStockage` ; SQLite + développement →
+  pas de clé, clés de `/sante` inchangées. Contrôle négatif vérifié : sans la garde, les 2 tests de refus échouent
+  (5 passent). Point d'attention : la ligne `mode …` du `listen` arrive après la ligne `/api/v1/sante` qui déclenche
+  la fin d'attente — les tests de démarrage positif attendent le motif par polling (`attendre`, 5 s) au lieu d'une
+  lecture immédiate (course corrigée pendant le lot, pas un flaky de suite).
+- **Docs.** `server/README.md` : § « Choix du stockage » (refus P0-S9 + `alerteStockage`) et § « Limites honnêtes »
+  (la mention « limitation des routes publiques : en mémoire, remise à zéro au redémarrage » était périmée depuis P0-S20
+  — compteurs chauds persistés et rechargés, fenêtres d'une minute).
+- **Revue Codex** (`/tmp/codex-revue-p0-s9.txt`, diff `/tmp/codex-p0-s9.diff`) : **0 point** — garde bien placée et
+  couvrant les deux cas de production, message actionnable, `alerteStockage` conditionnelle correcte, tests S1/S4 non
+  affaiblis, faux HTTP suffisant pour le démarrage, aucun secret ni changement hors production. Revue statique
+  uniquement (tests non exécutés dans sa sandbox).
+- **Résiduels.** La garde ne protège que le lanceur `server/index.ts` : un démarrage direct de `creerServeur` avec
+  SQLite en production reste possible par code (c'est le cas couvert par `alerteStockage`). Le déploiement Render
+  actuel n'est pas touché par ce lot (aucun redéploiement) : si les variables Supabase venaient à manquer sur Render,
+  le prochain déploiement refuserait de démarrer au lieu de servir une base vide — c'est le comportement voulu, à
+  vérifier côté opérateur (variables présentes depuis le 10/11).

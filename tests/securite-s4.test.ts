@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 
 import { creerServeur, CSP, ENTETES_SECURITE, lireOrigineCors, type OptionsServeur } from '../server/app.ts'
+import { demarrerFauxSupabaseHttp } from './faux-supabase-http.ts'
 
 const RACINE = join(import.meta.dirname, '..')
 const ADMIN = '98765432'
@@ -235,13 +236,18 @@ describe('P0-S4 : CORS', () => {
 })
 
 describe('P0-S4 : server/index.ts et CORS_ORIGIN en production', () => {
-  function lancer(variables: Record<string, string>) {
+  // P0-S9 : la production exige désormais Supabase — le faux HTTP suffit pour le démarrage (ces tests portent sur
+  // CORS_ORIGIN, pas sur la base) ; sans ces deux variables, le refus P0-S9 partirait avant le test CORS.
+  async function lancer(variables: Record<string, string>) {
+    const faux = await demarrerFauxSupabaseHttp()
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? '',
       RENDER: '1',
       ADMIN_PIN: '24681357',
       PIN_ASIAN_HOME: '1357',
       SESSION_SECRET: 'x'.repeat(40),
+      SUPABASE_URL: faux.url,
+      SUPABASE_SERVICE_ROLE_KEY: 'cle-service-factice-test',
       DB_FILE: join(dossier, `prod-${Object.keys(variables).length}-${Math.random().toString(36).slice(2)}.db`),
       STATIC_DIR: join(dossier, 'pas-de-front'),
       PORT: '0',
@@ -264,31 +270,33 @@ describe('P0-S4 : server/index.ts et CORS_ORIGIN en production', () => {
         ok({ demarre: false, code })
       })
     })
-    return { enfant, resultat, sortie: () => sortie }
+    return { enfant, resultat, sortie: () => sortie, fermer: () => faux.fermer() }
   }
 
   test('absente → démarre QUAND MÊME, avec avertissement', async () => {
-    const l = lancer({})
+    const l = await lancer({})
     try {
       assert.equal((await l.resultat).demarre, true, l.sortie())
       assert.match(l.sortie(), /CORS_ORIGIN absente : CORS ouvert à tous les sites/)
     } finally {
       l.enfant.kill()
+      await l.fermer()
     }
   })
 
   test('définie et valide → démarre sans avertissement CORS', async () => {
-    const l = lancer({ CORS_ORIGIN: FRONT })
+    const l = await lancer({ CORS_ORIGIN: FRONT })
     try {
       assert.equal((await l.resultat).demarre, true, l.sortie())
       assert.doesNotMatch(l.sortie(), /CORS_ORIGIN/)
     } finally {
       l.enfant.kill()
+      await l.fermer()
     }
   })
 
   test('invalide → refus de démarrer, message explicite', async () => {
-    const l = lancer({ CORS_ORIGIN: `${FRONT}/api/v1` })
+    const l = await lancer({ CORS_ORIGIN: `${FRONT}/api/v1` })
     try {
       const r = await l.resultat
       assert.equal(r.demarre, false)
@@ -296,6 +304,7 @@ describe('P0-S4 : server/index.ts et CORS_ORIGIN en production', () => {
       assert.match(l.sortie(), /CORS_ORIGIN invalide/)
     } finally {
       l.enfant.kill()
+      await l.fermer()
     }
   })
 })
