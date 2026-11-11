@@ -72,8 +72,8 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `PORT` | `3001` | Port HTTP. |
 | `ADMIN_PIN` | dev : `000000` ; **production : obligatoire** | PIN admin (création de commerces, accès à tous les commerces, réinitialisation d'un PIN). En production : 8 à 12 chiffres, pas tous identiques, sinon refus de démarrer. |
 | `PIN_ASIAN_HOME` | dev : `1234` ; **production : obligatoire au 1er démarrage** | PIN commerçant (4 à 6 chiffres) donné à Asian Home Paris lors de la création de la base. Ignoré ensuite (le changer via `PUT /pin`). |
-| `SESSION_SECRET` | dev : secret éphémère (avertissement) ; **production : à créer** | **P0-S1.** Secret de signature (HMAC-SHA256) des jetons de session, 32 caractères minimum (ex. `openssl rand -base64 48`). Absente en production : le serveur **démarre quand même** (avertissement dans les journaux), `POST /sessions` répond 503 et le front reste sur le PIN en en-tête. Trop courte en production : refus de démarrer. La changer ferme toutes les sessions ouvertes. |
-| `AUTH_CLIENT` | production : `stricte` si `SESSION_SECRET` existe, sinon `transition` (avertissement) ; dev : `transition` | **P0-S7.** Accès des clients à leur carte (voir « Accès client aux cartes »). `stricte` = jeton client exigé pour la carte complète, le tirage, le profil, les messages, le rattrapage, les droits RGPD ; `transition` = jetons émis et vérifiés, mais l'accès d'avant P0-S7 (lien ou contact seuls) reste admis. `stricte` sans `SESSION_SECRET` → refus de démarrer ; autre valeur → refus de démarrer. |
+| `SESSION_SECRET` | dev : secret éphémère (avertissement) ; **production : obligatoire** | **P0-S1.** Secret de signature (HMAC-SHA256) des jetons de session et des jetons client (P0-S7), 32 caractères minimum (ex. `openssl rand -base64 48`). Absente ou trop courte en production : **refus de démarrer** (correction Codex point 1 ; avant, le serveur démarrait sans jetons). La changer ferme toutes les sessions ouvertes. |
+| `AUTH_CLIENT` | production : `stricte` (imposé) ; dev : `transition` | **P0-S7.** Accès des clients à leur carte (voir « Accès client aux cartes »). `stricte` = jeton client exigé pour la carte complète, le tirage, le profil, les messages, le rattrapage, les droits RGPD ; `transition` = jetons émis et vérifiés, mais l'accès d'avant P0-S7 (lien ou contact seuls) reste admis — **refusé en production** (refus de démarrer, correction Codex point 1). `stricte` sans `SESSION_SECRET` → refus de démarrer ; autre valeur → refus de démarrer. |
 | `NODE_ENV` | — | `production` active le mode production. Sur Render, la variable `RENDER` (posée par Render) l'active aussi. |
 | `DB_FILE` | `data/fidelite.db` | Chemin du fichier SQLite. |
 | `DEMO` | `0` | `1` = ajoute aussi les 2 commerces de démo (Atelier Coiff' Camille, Maison Lila) avec leurs données fictives, marqués `demo: true`. |
@@ -401,15 +401,15 @@ et à tirer la roue à la place du client. Désormais :
   rechargeant la page.
 - **Liens courts** `/c/<id>` (SMS de relance) : redirection inchangée vers `#/carte/<id>` (vue limitée sans jeton) ;
   `/c/<id>?a=<lien d'accès>` (SMS « Retrouver ma carte ») → `#/carte/<id>?acces=<lien>`, échangé puis retiré de l'adresse.
-- **Modes** (`AUTH_CLIENT`) : `stricte` en production ; `transition` = tout ce qui précède est émis et un jeton présent
+- **Modes** (`AUTH_CLIENT`) : `stricte` en production (imposé : `transition` y est refusé au démarrage) ; `transition` = tout ce qui précède est émis et un jeton présent
   est toujours vérifié, mais l'accès d'avant P0-S7 reste admis (lien seul = vue complète, contact seul = tirage, contact
   existant = carte renvoyée **sans** jeton). Utile le temps d'un déploiement (anciens fronts en cache) ; les appels sans
   jeton sont comptés : `GET /api/v1/sante/acces-client` → `{ mode, jetons, migration, graceAnciensLiensJusquAu,
   accesSansJeton }` (route à part : le contenu de `/sante` est figé). Les tests historiques tournent dans ce mode.
   **Résiduel P0-S19 (revue Codex, points 1–2) :** en transition, un contact seul suffit encore à obtenir des codes —
   `POST …/tirages` renvoie le code du tirage qu'il vient de faire, et `POST /cartes/:id/donnees` (export RGPD, contact
-  seul) liste les codes de tous les tirages du client. En production le mode est `stricte` par défaut (dès que
-  `SESSION_SECRET` existe) : ces deux routes y exigent alors le jeton, et aucun code ne sort sans authentification.
+  seul) liste les codes de tous les tirages du client. En production le mode est toujours `stricte` (`SESSION_SECRET`
+  obligatoire) : ces deux routes y exigent le jeton, et aucun code ne sort sans authentification.
 
 ### Migration 0009 (portée « client » de l'anti-bruteforce, P0-S7) — à appliquer en production
 
@@ -940,7 +940,7 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
    - `PIN_ASIAN_HOME` = le PIN **4 à 6 chiffres** que vous donnerez au restaurant (lu au **premier** démarrage seulement ;
      ensuite on le change dans l'app)
    - `SESSION_SECRET` (P0-S1, 5e secret) = une chaîne aléatoire d'au moins 32 caractères (`openssl rand -base64 48`).
-     Service **déjà créé** : Render ne la demande pas — l'ajouter à la main dans **Environment** (voir ⚠️ ci-dessous).
+     Service **déjà créé** : Render ne la demande pas — l'ajouter à la main dans **Environment** (voir ⚠️ ci-dessous) ; sans elle, le serveur refuse de démarrer.
    Puis **Deploy Blueprint** (libellé de la doc Render du 09/11/2026 ; le brief disait « Apply » — prendre le bouton de
    validation affiché). Rien d'autre à saisir : `PORT`, `RENDER` et `NODE_ENV=production` (au démarrage seulement, pas au
    build — donc `npm ci` installe bien TypeScript et Vite) sont posés par Render ; `TZ`, `TRUST_PROXY` et le mode production

@@ -327,9 +327,9 @@ describe('P0-S1 : anti-bruteforce et serveur sans SESSION_SECRET', () => {
     }
   })
 
-  test('server/index.ts : SESSION_SECRET absente en production (Supabase configuré, P0-S9) → démarrage QUAND MÊME, avec avertissement', async () => {
-    // P0-S9 : la production exige désormais Supabase — le faux HTTP suffit pour le démarrage (le test porte sur
-    // SESSION_SECRET, pas sur la base) ; sans ces deux variables, le refus P0-S9 partirait avant l'avertissement.
+  test('server/index.ts : SESSION_SECRET absente en production (Supabase configuré, P0-S9) → refus de démarrer (code 1, correction Codex point 1)', async () => {
+    // Supabase configuré (faux HTTP) pour isoler le motif du refus : le test porte sur SESSION_SECRET, pas sur la base
+    // (P0-S9 refuse aussi la production sans Supabase).
     const faux = await demarrerFauxSupabaseHttp()
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? '',
@@ -346,22 +346,19 @@ describe('P0-S1 : anti-bruteforce et serveur sans SESSION_SECRET', () => {
     let sortie = ''
     let erreurs = ''
     enfant.stderr.on('data', (d) => (erreurs += d))
+    enfant.stdout.on('data', (d) => (sortie += d))
     try {
-      await new Promise<void>((ok, ko) => {
-        const minuterie = setTimeout(() => ko(new Error(`pas démarré : ${erreurs}`)), 20_000)
-        enfant.stdout.on('data', (d) => {
-          sortie += d
-          if (sortie.includes('/api/v1/sante')) {
-            clearTimeout(minuterie)
-            ok()
-          }
-        })
-        enfant.on('exit', (code) => {
+      const code = await new Promise<number | null>((ok, ko) => {
+        const minuterie = setTimeout(() => ko(new Error(`pas arrêté : ${sortie}${erreurs}`)), 20_000)
+        // `close` (et non `exit`) : la sortie standard / d'erreur est entièrement lue avant les assertions.
+        enfant.on('close', (c) => {
           clearTimeout(minuterie)
-          ko(new Error(`arrêté (code ${code}) : ${erreurs}`))
+          ok(c)
         })
       })
-      assert.match(sortie + erreurs, /SESSION_SECRET absente : jetons de session DÉSACTIVÉS/)
+      assert.equal(code, 1, sortie + erreurs)
+      assert.doesNotMatch(sortie, /\/api\/v1\/sante/)
+      assert.match(sortie + erreurs, /SESSION_SECRET est obligatoire en production/)
     } finally {
       enfant.kill()
       await faux.fermer()
