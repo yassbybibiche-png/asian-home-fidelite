@@ -198,8 +198,8 @@ ses imports statiques (méthode `fichiersInitiaux` de
 
 ## Couverture de tests
 
-Suite verte : **1166/1166** (`npm test`, typechecks inclus — 1090 après P2-Q2, +73 tests
-P2-Q3 à P2-Q6, +3 tests boucle t1 ; voir `JOURNAL.md`).
+Suite verte : **1171/1171** (`npm test`, typechecks inclus — 1090 après P2-Q2, +73 tests
+P2-Q3 à P2-Q6, +3 tests boucle t1, +4 tests boucle t2, +1 test SW boucle t2 ; voir `JOURNAL.md`).
 
 - Couverture globale : 97,90 % lignes / 91,49 % branches / 93,06 % fonctions
   (`node --test --experimental-test-coverage`, suite verte, 11/11/2026 —
@@ -285,6 +285,17 @@ Temps des 3 passes : premier affichage `#/jouer` 2 355 / 2 232 / 2 235 ms (LCP
 (journal des requêtes des 3 passes) — le QR s'affiche, avec le repli
 « Chargement du QR code… » pendant le chargement. Captures : 9 écrans, passe 3
 (les passes 1–2 n'ont gardé que leur JSON).
+
+**Re-mesure boucle t2 (11/11/2026 ~15:15–15:17 UTC, 2 passes, `node_modules/.cache/mesure-boucle-t2/`,
+`resultats-passe<N>.json`) : 0 erreur console, 0 requête échouée, sur les 2 passes.**
+Temps des 2 passes : premier affichage `#/jouer` 2 078 / 1 861 ms (LCP
+2 028 / 1 812 ms, élément `p.titre-carte`) ; parcours scan → lot 6 141 /
+6 277 ms d'étapes (taps identiques) ; ouverture de la carte 581 / 520 ms ;
+premier affichage `#/menu` 898 / 902 ms par hash, 1 565 / 1 503 ms en
+chargement direct (LCP 1 512 / 1 568 ms). Le journal des requêtes des 2 passes
+montre `GET /visuels/logo-petit.webp` (HTTP 200) et plus aucun `logo.png` sur
+`#/jouer` — le logo léger est bien celui qui est servi. Captures : 9 écrans,
+passe 2 (la passe 1 n'a gardé que son JSON).
 
 ## npm audit
 
@@ -405,6 +416,28 @@ Re-tenté le 11/11/2026 (P1-U1) : même 403, inchangé.
   téléphone réel : **non mesuré** (pas de téléphone sur cette VM — protocole
   documenté plus haut, à exécuter sur staging).
 
+### Re-mesure boucle t2 (11/11/2026 ~15:15–15:17 UTC, 2 passes)
+
+| Page | Passe 1 | Passe 2 |
+| --- | --- | --- |
+| `#/jouer` — premier affichage (titre visible) | 2078 ms | 1861 ms |
+| `#/jouer` — navigation : réponse / DOM prêt / chargé | 159 / 1434 / 1436 ms | 154 / 1311 / 1313 ms |
+| `#/jouer` — LCP | 2028 ms (`p.titre-carte`) | 1812 ms (`p.titre-carte`) |
+| `#/menu` — premier affichage (par hash) | 898 ms | 902 ms |
+| `#/menu` — premier affichage (chargement direct) | 1565 ms | 1503 ms |
+| `#/menu` — LCP (chargement direct) | 1512 ms (`p.text-center`) | 1568 ms (`p.text-center`) |
+
+- Premier affichage `#/jouer` : 1 861–2 078 ms — **gain −154 à −494 ms sur
+  les 2 passes** vs t1 (2 232–2 355 ms), moyenne 1 970 ms contre 2 274 ms
+  (−304 ms) : au-delà du bruit (± ~0,2 s). LCP `#/jouer` : 1 812–2 028 ms
+  (−192 à −528 ms, moyenne −341 ms). Le logo léger pèse 4,9 Ko contre
+  74,5 Ko : −69,5 Ko sur le chemin critique, en concurrence avec le JS sur
+  la 4G lente — le gain est cohérent avec l'hypothèse du tour.
+- La validation en caisse gagne aussi (4 331 / 4 421 ms contre 4 731–5 123 ms
+  à t1) : chaque chargement de page affiche l'écran de chargement, donc le
+  logo léger profite aussi à la caisse — le gain du parcours (−~860 ms) est
+  cohérent, pas un artefact.
+
 ## Lighthouse (mobile, local, `#/jouer`, 11/11/2026)
 
 - **Score performance : 81** (2e passe, script versionné ; 76 à la 1re passe —
@@ -507,6 +540,24 @@ caisse et de la carte, épinglé statique par P2-Q2, pas le QR). Le TBT baisse
 mais reste le levier n° 1 : le prochain tour devra attaquer le travail de la
 file principale elle-même (Style & Layout 469–556 ms, Other 757–763 ms),
 pas seulement le poids du JS.
+
+### Re-mesure boucle t2 (11/11/2026, 2 passes)
+
+- **Score performance : 84 / 81** (était 80 / 85 à t1 — plat, dans le bruit
+  inter-passes (± 5) ; 11 à 14 points sous le seuil ≥ 95)
+- First Contentful Paint : 0,8 s (2 passes)
+- Largest Contentful Paint : 2,3 / 2,2 s (était 2,9 / 2,8 s à t1 — en baisse
+  de ~0,6 s sur les 2 passes, cohérent avec le LCP Playwright)
+- Total Blocking Time : 590 / 720 ms (était 620 / 450 ms à t1 — mixte :
+  −30 ms passe 1, +270 ms passe 2, dans la plage observée 450–910 ms ;
+  aucun gain établi)
+- Cumulative Layout Shift : 0 (2 passes)
+- Speed Index : 1,1 / 1,1 s
+- Time to Interactive : 2,6 / 2,8 s (était 2,9 s à t1)
+
+Détail : le tour ne touche pas au JS (bundle inchangé) — le score Lighthouse
+plat est attendu ; le gain est sur les octets transférés avant le premier
+affichage, visible sur le LCP des deux outils. Le TBT reste le levier n° 1.
 
 ## Parcours scan → lot (à chaud, 4G simulée)
 
@@ -625,6 +676,29 @@ validation en caisse — le vrai temps humain est plus long) :
   à t0 — **sans régression** : le chunk `QrCode-*.js` (21 Ko) se charge en
   parallèle de l'appel API de la carte, le QR apparaît sans délai mesurable).
 - **Parcours < 30 s à chaud : étapes scriptées sous 30 s, vérifié** (7,0–7,2 s) ;
+  le critère complet avec gestes et attente humains **n'est pas vérifié**
+  (pas de téléphone réel — protocole documenté plus haut). Le temps humain réel
+  (le client attend que la caisse valide) s'ajoute : **non mesuré**.
+  À froid (Render en veille ~60 s + cache vide) : **non mesuré**,
+  estimation seulement.
+
+### Re-mesure boucle t2 (11/11/2026 ~15:15–15:17 UTC, 2 passes, même protocole)
+
+| Étape | Passe 1 | Passe 2 |
+| --- | --- | --- |
+| Inscription (saisie téléphone + « C'est parti ») | 1016 ms | 995 ms |
+| Validation en caisse (code équipe + recherche + passage) | 4331 ms | 4421 ms |
+| Vérification côté client (« C'est validé ? ») | 302 ms | 302 ms |
+| Tirage (clic roue → gain affiché) | 492 ms | 559 ms |
+| **Total des étapes** | **6141 ms** | **6277 ms** |
+
+- Arithmétique : passe 1, 1 016 + 4 331 + 302 + 492 = 6 141 ms ; passe 2,
+  995 + 4 421 + 302 + 559 = 6 277 ms.
+- **Taps identiques** aux passes précédentes : client **4 clics + 1 saisie** ;
+  caisse **3 clics + 2 saisies**.
+- Ouverture de la carte après le gain : 581 / 520 ms (était 600 / 622 / 691 ms
+  à t1 — **sans régression**).
+- **Parcours < 30 s à chaud : étapes scriptées sous 30 s, vérifié** (6,1–6,3 s) ;
   le critère complet avec gestes et attente humains **n'est pas vérifié**
   (pas de téléphone réel — protocole documenté plus haut). Le temps humain réel
   (le client attend que la caisse valide) s'ajoute : **non mesuré**.

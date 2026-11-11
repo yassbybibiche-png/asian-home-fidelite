@@ -45,6 +45,32 @@ inchangée, preuve dans `BOUCLE.md`), 1 fondé documenté (QR hors ligne :
 règle des pages différées), 1 fondé corrigé (libellés anticipés).
 Détail : `BOUCLE.md`, `SCORES.md` (§ « Re-mesure boucle t1 »).
 
+### t2 — Logo de chargement optimisé (11/11/2026, fusionné)
+
+Nouveau `public/visuels/logo-petit.webp` (192×192, WebP q80, 4 900 o, dérivé
+du vrai logo par Pillow) servi en premier via `<picture>` dans `index.html`
+(repli `logo.png` inchangé, navigateurs sans WebP) ; ajouté au préchargement
+du service worker — avec correctif : `fichier()` ne consultait que
+`CACHE_FICHIERS`, les fichiers préchargés (`CACHE_APP`) n'étaient pas servis
+hors ligne (repli `caches.match` ajouté, test de régression dans
+`performance-bundle-p2-q2.test.ts`, vérifié : échoue sans le correctif) ;
+documenté dans `public/visuels/SOURCES.md`. Justification : le logo PNG
+(74 451 o, affiché à 96×96) pesait 31 % des octets du premier affichage, en
+concurrence avec le JS sur la 4G lente.
+Avant → après (2 passes Playwright + 2 Lighthouse, même protocole) : premier
+affichage 2 355/2 232/2 235 → 2 078/1 861 ms (moyenne −304 ms), LCP
+2 340/2 220/2 224 → 2 028/1 812 ms (moyenne −341 ms), parcours
+7 213/6 971/6 987 → 6 141/6 277 ms, ouverture carte 600/622/691 → 581/520 ms ;
+Lighthouse 80/85 → 84/81 (plat), LCP Lighthouse 2,9/2,8 → 2,3/2,2 s, TBT
+620/450 → 590/720 ms (mixte) ; bundle inchangé ; 0 erreur console,
+0 requête échouée. Tests 1166 → 1171/1171 (+4 `tests/boucle-t2-logo.test.ts`,
++1 test SW), E2E 3/3. Revue Codex 5 points : 4 fondés corrigés (repli SW hors
+ligne, commentaire de repli, dimensions WebP, mentions anticipées) + 1 fondé
+validant la correction du test épinglé `photos-menu.test.ts:68` ; second test
+épinglé `mesure-p1-u1.test.ts:27` corrigé après preuve et revue Codex ciblée
+(extraction bornée à la sous-section, exigence inchangée).
+Détail : `BOUCLE.md`, `SCORES.md` (§ « Re-mesure boucle t2 »).
+
 ### t0 — Baseline (11/11/2026, HEAD `7395522`)
 
 Pas un changement : re-mesure de référence avant le tour 1 (2 passes

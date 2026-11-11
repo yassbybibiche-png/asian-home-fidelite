@@ -14,7 +14,7 @@ const VERSION = 'fideliz-v1'
 const CACHE_APP = `${VERSION}-app`
 const CACHE_FICHIERS = `${VERSION}-fichiers`
 const PAGE_HORS_LIGNE = '/hors-ligne.html'
-const A_PRECHARGER = ['/', PAGE_HORS_LIGNE, '/hors-ligne.css', '/manifest.webmanifest', '/icones/icone-192.png', '/visuels/logo.png']
+const A_PRECHARGER = ['/', PAGE_HORS_LIGNE, '/hors-ligne.css', '/manifest.webmanifest', '/icones/icone-192.png', '/visuels/logo.png', '/visuels/logo-petit.webp']
 /** Au-delà, les plus anciens fichiers en cache sont retirés (anciens déploiements). */
 const MAX_FICHIERS = 120
 
@@ -60,7 +60,10 @@ async function page(requete) {
 
 async function fichier(requete, immuable) {
   const cache = await caches.open(CACHE_FICHIERS)
-  const enCache = await cache.match(requete)
+  // Repli : les fichiers préchargés à l'installation vivent dans CACHE_APP (boucle t2 — avant,
+  // un fichier préchargé mais jamais demandé en ligne n'était pas servi hors ligne : `fichier()`
+  // ne consultait que CACHE_FICHIERS, alors que `caches.match` cherche dans tous les caches).
+  const enCache = (await cache.match(requete)) || (await caches.match(requete))
   if (enCache && immuable) return enCache
   const reseau = fetch(requete).then(async (r) => {
     if (r.ok && r.type === 'basic') {
