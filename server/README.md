@@ -677,6 +677,10 @@ Tous les fichiers statiques ont un `ETag` faible (taille + date de modification)
 
 ## Mise en production : Supabase (base) + Render Free (serveur) — aucun déploiement n'a été fait
 
+**Staging et retour arrière : voir `docs/DEPLOIEMENT.md` (P0-S10)** — 2e service `asian-home-fidelite-staging`
+(branche `autonome/integration`, base Supabase de test séparée), retour arrière en une commande
+(`scripts/rollback-render.mjs`), compatibilité des migrations 0001–0010, procédure après écritures partielles.
+
 **Pourquoi deux services.** Supabase héberge la **base** (Postgres), pas le serveur Node `server/` (routes, PIN, tirage).
 Il faut donc aussi un hébergeur pour `server/`. Retenu : **Render « Free Web Service »** (0 €). Depuis que les données sont
 chez Supabase, le gros défaut de Render Free (disque effacé à chaque mise en veille) **ne fait plus rien perdre** : le serveur

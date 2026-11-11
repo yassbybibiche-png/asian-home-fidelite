@@ -1394,3 +1394,70 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   actuel n'est pas touché par ce lot (aucun redéploiement) : si les variables Supabase venaient à manquer sur Render,
   le prochain déploiement refuserait de démarrer au lieu de servir une base vide — c'est le comportement voulu, à
   vérifier côté opérateur (variables présentes depuis le 10/11).
+
+## 11/11/2026 — P0-S10 : Staging + rollback (AUDIT.md §7, revue Codex point 12)
+
+- **`render.yaml` : 2e service `asian-home-fidelite-staging`** (branche `autonome/integration`, mêmes
+  build/start/santé/variables que la production, valeurs différentes au dashboard). La production ne suit
+  que `master`. Base Supabase de TEST séparée obligatoire (jamais la production) ; PINs de test et
+  `SESSION_SECRET` différents de la production.
+- **`docs/DEPLOIEMENT.md` (nouveau)** : création du staging (§ 2), retour arrière en une commande (§ 3),
+  compatibilité des migrations 0001–0010 vérifiée une par une (§ 5), procédure après écritures partielles
+  (§ 4). Endpoint vérifié dans la doc officielle Render (`api-docs.render.com/reference/create-deploy`,
+  lu le 11/11/2026) : `POST /v1/services/{serviceId}/deploys` avec `{ "commitId": "<sha-40>" }`.
+- **`scripts/rollback-render.mjs` (nouveau)** : simulation par défaut (affiche la commande curl exacte),
+  `--executer` pour envoyer ; valide `--service` (staging/production), `--service-id` (`srv-…`) et SHA-40 ;
+  vérifie que le commit existe localement ; **ne touche jamais à la base**. La clé API (`RENDER_API_KEY`)
+  n'est jamais affichée.
+- **Compatibilité des migrations** : chaque migration « up » est additive seulement (aucun `DROP TABLE` /
+  `DROP COLUMN` / renommage / `DELETE` — testé) ; ancien code sur nouveau schéma (nouvelles tables
+  ignorées, CHECK 0009 élargi) et nouveau code sur ancien schéma (dégradation `ErreurMigrationManquante`,
+  sauf 0003/0004 exigées au démarrage par `exigerMigrationsAudit`). `.down.sql` pour 0005–0010 seulement
+  (0001–0004 : retour = restauration de sauvegarde). Corrigé en cours de lot : la base à 10 migrations a
+  **15 tables**, pas 14 (la sauvegarde en couvre 15 dont `compteurs_publics` en optionnelle).
+- **Tests : 924 → 941 (+17), `npm test` vert, `npx tsc -p .` vert, `npm run build` vert.** Nouveaux
+  (`tests/deploiement-p0-s10.test.ts`, 19 tests) : 2 services, commande de retour arrière (URL, corps,
+  curl, refus des valeurs ambigües, simulation, garde-fou cible contre un faux serveur Render),
+  migrations additives + `.down.sql` + tolérance aux migrations absentes, contenu de la doc.
+  `tests/render-yaml.test.ts` adapté — **changement de contrat, pas un affaiblissement** (comme P0-S9) :
+  1 → 2 services, toutes les assertions de la production gardées, nouvelles assertions pour le staging.
+  Contrôle négatif : le test de la doc échouait `ENOENT` avant sa création ; le test du garde-fou cible
+  refuse bien un identifiant de production avec le libellé staging.
+- **Revue Codex** (`/tmp/codex-revue-p0-s10.txt`, diff `/tmp/codex-p0-s10.diff`) : **verdict initial
+  « bloquant », 8 points, tous corrigés** (commit de correction sur la branche du lot) :
+  1. [P1, fondé] Le libellé `--service` ne protégeait pas la cible → le script relit désormais le
+     service chez Render (`GET /v1/services/{id}`) avant tout POST et refuse si son nom ne correspond
+     pas au libellé ; testé contre un faux serveur Render (concordant → POST envoyé, discordant → refusé
+     sans POST). Incident de test trouvé et corrigé : `spawnSync` + serveur dans le même processus =
+     interblocage (la boucle d'événements bloquée ne peut pas répondre) → `spawn` asynchrone ; et
+     `fetch` (undici) garde des sockets en keep-alive → `process.exit()` explicite en fin de script.
+  2. [P1, fondé] La sauvegarde ne « fige » pas les écritures → le § 4 commence désormais par suspendre
+     le service (Suspend Service) et note que l'export PostgREST n'est pas un instantané transactionnel.
+  3. [P1, fondé] La restauration proposée reprenait les données corrompues + `restaurer-base.mjs` ne
+     restaure que vers PGlite → distinction sauvegarde de conservation (après incident, preuve) /
+     sauvegarde saine (avant déploiement, à restaurer), procédure manuelle Supabase (docs/SAUVEGARDE.md
+     § 8).
+  4. [P1, fondé] Débloquer une relance `en_cours` pouvait doubler un envoi (message accepté par le
+     prestataire, statut final non écrit — cas prévu par `server/app.ts`) → vérification des traces du
+     prestataire d'abord, blocage gardé si livraison incertaine, déblocage seulement si non-livraison
+     confirmée, avec `statut` + `donnees` (statut + raison) mis à jour ensemble.
+  5. [P1, fondé] Quota Free : Render suspend **tous** les services Free si les 750 h sont épuisées
+     (`render.com/docs/free`, vérifié le 11/11/2026) → garantie « le quota tient » retirée ; suspension
+     préventive du staging, surveillance Billing, ou Starter.
+  6. [P2, fondé] La variante dashboard n'a pas le « même effet » → voies API (reconstruction, config
+     actuelle, auto-déploiements maintenus) et dashboard (artefact réutilisé, réglages du déploiement
+     cible pour le rollback seulement, auto-déploiements désactivés, Free : 2 déploiements les plus
+     récents seulement) documentées séparément (`render.com/docs/rollbacks`, vérifié le 11/11/2026).
+  7. [P2, fondé] « Ancien code » non défini → portée écrite au § 5 (retours entre commits récents
+     seulement ; contrôles statiques, pas une preuve d'exécution — la preuve, c'est staging + `/sante`).
+  8. [P2, fondé] `/sante.migrations` n'expose que `{ cartiz, programme, relances, mesure }` → 0009 via
+     `GET /api/v1/sante/acces-client` (`migration`), 0010 via SQL direct ; corrigé aussi au § 2 et à
+     l'ordre de déploiement. Au passage : `/sante.version` est la version du paquet, pas le SHA — le
+     commit déployé se vérifie dans le dashboard (Deploys), pas via `/sante`.
+  La sandbox Codex n'a pas pu exécuter la suite P0-S10 (`spawnSync git` → EPERM) : ce n'est pas un défaut
+  imputé au diff — la suite est verte ici (941/941).
+- **Résiduels / non vérifié.** Le service de staging n'est **pas créé** (pas de navigateur sur cette VM) :
+  création + première vérification « Live » + parcours de base à faire par l'opérateur (docs/DEPLOIEMENT.md
+  § 2). Rien ne prouve que le service existe tant que le `GET /api/v1/sante` du § 2, étape 4, n'a pas été
+  fait. La commande de retour arrière n'a jamais été exécutée pour de vrai (simulation + faux serveur
+  local seulement) : le premier vrai retour arrière devra être fait sur le staging d'abord.
