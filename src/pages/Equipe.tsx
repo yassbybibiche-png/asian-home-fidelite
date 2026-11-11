@@ -3,7 +3,8 @@ import { MESSAGE_MODE_SERVEUR, useAction, useDonneesCommerce, useStore } from '.
 import { urlAbsolue } from '../router'
 import type { MembreEquipe } from '../types'
 import { dateRelative } from '../lib/format'
-import { BoutonCopier, EnTete, MessageErreur, QrCode, Vide } from '../components/ui'
+import { BoutonCopier, EnTete, MessageErreur, Vide } from '../components/ui'
+import { QrCode } from '../components/QrCode'
 import { Confirmation } from '../components/Confirmation'
 import type { Recapitulatif } from '../lib/ecransCommercant'
 

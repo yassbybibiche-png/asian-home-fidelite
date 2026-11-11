@@ -1,5 +1,28 @@
 # JOURNAL — Fideliz
 
+## 11/11/2026 — Boucle t1 « QR code différé » (fusionné dans `autonome/integration`)
+- **Changement** : `QrCode` déménage de `components/ui.tsx` vers
+  `components/QrCode.tsx` ; `CarteFidelite` le charge en différé (`React.lazy`
+  + `Suspense`, repli « Chargement du QR code… » `role="status"`, frontière
+  locale `ErreurQr`) ; pages différées (Equipe, MenuCarte, FicheClient,
+  QrVitrine, Roulette) importent le nouveau module. Jouer/CartePublique/Caisse
+  restent statiques (P2-Q2 : caisse hors ligne).
+- **Mesures (3 passes Playwright + 2 Lighthouse)** : JS initial 481 332 →
+  453 028 o (−5,9 %), Lighthouse 77/81 → 80/85, TBT 910/630 → 620/450 ms ;
+  premier affichage, LCP, parcours plats (bruit) ; ouverture carte sans
+  régression (600/622/691 ms) ; 0 erreur console. Détail dans `SCORES.md`.
+- **Tests : 1163 → 1166/1166** (+3 `tests/boucle-t1-qrcode.test.ts`), E2E 3/3,
+  `tsc` + `typecheck:server` propres. **Test épinglé corrigé après preuve et
+  validation Codex** : `corps-sombres-p1-d2.test.ts:44` lisait `ui.tsx` pour le
+  `bg-white` du QR — une ligne mise à jour vers `QrCode.tsx` (exigence
+  inchangée, voir `BOUCLE.md`). **Revue Codex 5 points** : frontière locale,
+  repli annoncé, test épinglé (corrigés), QR hors ligne (règle des pages
+  différées, documenté), libellés anticipés (corrigés). **SCORES.md restructuré** :
+  chiffres courants en premier (§ Bundle « boucle t1 »), section P1-U1
+  conservée verbatim après (le test `mesure-p1-u1` y lit ses chiffres figés).
+- **Non vérifié.** Téléphone réel, à froid Render, `npm audit` (403 VM) —
+  inchangé.
+
 ## 11/11/2026 — Boucle d'amélioration continue : mise en place (BOUCLE.md, CHANGELOG.md, baseline t0)
 - **Cadre créé** : `BOUCLE.md` (règles exactes, méthode de mesure, journal des
   tours, leviers écartés), `CHANGELOG.md` (bilan lots P0/P1/P2 + tours de boucle),

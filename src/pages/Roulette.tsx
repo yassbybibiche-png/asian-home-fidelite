@@ -2,7 +2,8 @@ import { useDonneesCommerce } from '../store'
 import { urlQrJeu } from '../router'
 import { dateRelative } from '../lib/format'
 import { lotsJouables, totalProbabilites } from '../lib/roulette'
-import { BoutonCopier, EnTete, QrCode, Vide } from '../components/ui'
+import { BoutonCopier, EnTete, Vide } from '../components/ui'
+import { QrCode } from '../components/QrCode'
 
 export default function Roulette() {
   const { commerce, tirages, clients } = useDonneesCommerce()

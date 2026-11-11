@@ -7,10 +7,39 @@ import { banniereCommerce, VISUELS } from '../lib/visuels'
 import { dateRelative } from '../lib/format'
 import { urlAbsolue } from '../router'
 import { cleTamponsVus, lotsEnAttente, tamponsNouveaux, texteExpiration, texteProgression, type GainDuJour } from '../lib/carte'
-import { LogoCommerce, QrCode } from './ui'
+import { LogoCommerce } from './ui'
 import { useLangue } from './Langue'
 import { JOURS_SEMAINE_EN, localeDate, texteProgressionLangue, type Langue } from '../lib/langue'
-import { useEffect, useState } from 'react'
+import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+
+/** QR personnel : `qrcode-generator` (~21 Ko minifiés) est chargé en différé (boucle t1) —
+  il ne pèse pas sur le bundle initial, et le carré blanc du repli évite tout saut de mise en page. */
+const QrCode = lazy(() => import('./QrCode').then((m) => ({ default: m.QrCode })))
+
+/**
+ * Frontière locale au QR (revue Codex boucle t1, point 1) : `Suspense` ne traite pas un
+ * import rejeté (fichier différé absent — hors ligne avant toute ouverture de la carte,
+ * ou onglet ouvert avant un déploiement). Sans elle, la frontière d'`App.tsx` remplacerait
+ * toute la page par son message d'erreur ; ici seule la case du QR affiche un repli, la
+ * carte (tampons, points) reste visible. Le QR suit la règle des pages différées (P2-Q2) :
+ * disponible hors ligne après une première ouverture en ligne, pas avant.
+ */
+class ErreurQr extends Component<{ children: ReactNode; message: string }, { erreur: boolean }> {
+  state = { erreur: false }
+  static getDerivedStateFromError() {
+    return { erreur: true }
+  }
+  render() {
+    if (this.state.erreur) {
+      return (
+        <div className="flex h-40 w-40 items-center justify-center bg-white px-2 text-center text-sm text-gray-600" role="alert">
+          {this.props.message}
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 /**
  * Tampons gagnés depuis la dernière ouverture de la carte sur ce téléphone (P1-C3), à animer. La valeur vue est
@@ -339,7 +368,17 @@ export function CarteFidelite({
         {!sansQr && (
           <div className="mt-5 flex flex-col items-center border-t border-dashed border-gray-200 pt-5">
             <div className="rounded-2xl bg-white p-2 ring-1 ring-gray-200">
-              <QrCode texte={urlAbsolue('carte', client.id)} className="h-40 w-40" titre={`QR code personnel de ${client.prenom}`} />
+              <ErreurQr message={t('QR code indisponible pour le moment. Rechargez la page pour réessayer.')}>
+                <Suspense
+                  fallback={
+                    <div className="flex h-40 w-40 items-center justify-center bg-white px-2 text-center text-sm text-gray-600" role="status">
+                      {t('Chargement du QR code…')}
+                    </div>
+                  }
+                >
+                  <QrCode texte={urlAbsolue('carte', client.id)} className="h-40 w-40" titre={`QR code personnel de ${client.prenom}`} />
+                </Suspense>
+              </ErreurQr>
             </div>
             <p className="mt-2 text-center text-sm text-gray-600">{t('À présenter en caisse pour valider votre visite')}</p>
             <p className="mt-1 text-sm text-gray-600">
