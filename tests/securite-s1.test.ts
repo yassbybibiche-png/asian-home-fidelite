@@ -12,6 +12,7 @@ import type { AddressInfo } from 'node:net'
 import { creerServeur, emettreJeton, hacherPin, hacherPinAncien, lireJeton, pinCorrect, type OptionsServeur } from '../server/app.ts'
 import { accesDeSession, creerClientApi, echangerContreSession, ErreurApi, type ClientApi } from '../src/data/api.ts'
 import { creerCoffrePin, type RangementCle } from '../src/data/coffrePin.ts'
+import { demarrerFauxSupabaseHttp } from './faux-supabase-http.ts'
 import type { Client } from '../src/types.ts'
 
 const ADMIN = '98765432'
@@ -326,12 +327,17 @@ describe('P0-S1 : anti-bruteforce et serveur sans SESSION_SECRET', () => {
     }
   })
 
-  test('server/index.ts : SESSION_SECRET absente en production → démarrage QUAND MÊME, avec avertissement', async () => {
+  test('server/index.ts : SESSION_SECRET absente en production (Supabase configuré, P0-S9) → démarrage QUAND MÊME, avec avertissement', async () => {
+    // P0-S9 : la production exige désormais Supabase — le faux HTTP suffit pour le démarrage (le test porte sur
+    // SESSION_SECRET, pas sur la base) ; sans ces deux variables, le refus P0-S9 partirait avant l'avertissement.
+    const faux = await demarrerFauxSupabaseHttp()
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? '',
       RENDER: '1',
       ADMIN_PIN: '24681357',
       PIN_ASIAN_HOME: '1357',
+      SUPABASE_URL: faux.url,
+      SUPABASE_SERVICE_ROLE_KEY: 'cle-service-factice-test',
       DB_FILE: join(dossier, 'prod.db'),
       STATIC_DIR: join(dossier, 'pas-de-front'),
       PORT: '0',
@@ -358,6 +364,7 @@ describe('P0-S1 : anti-bruteforce et serveur sans SESSION_SECRET', () => {
       assert.match(sortie + erreurs, /SESSION_SECRET absente : jetons de session DÉSACTIVÉS/)
     } finally {
       enfant.kill()
+      await faux.fermer()
     }
   })
 })

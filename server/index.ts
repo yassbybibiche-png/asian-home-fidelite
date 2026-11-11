@@ -91,6 +91,12 @@ let app
 try {
   // Supabase (S1) seulement si SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY sont définies ; sinon SQLite (DB_FILE).
   supabase = configSupabaseDepuisEnv(env)
+  // P0-S9 : en production, démarrer sans Supabase = erreur, pas une bascule silencieuse vers un SQLite vide et
+  // éphémère (sur Render, le fichier est perdu à chaque redéploiement ou réveil — clients et tirages avec).
+  // Hors production, SQLite reste le défaut (développement local, tests).
+  if (production && !supabase) {
+    arreter('En production, Supabase est obligatoire : SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY doivent être définies (refus de démarrer sur SQLite vide).')
+  }
   app = await creerServeur({
     fichierDb,
     supabase,

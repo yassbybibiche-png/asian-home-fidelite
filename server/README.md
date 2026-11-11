@@ -102,8 +102,12 @@ clé n'existe encore : rien n'a été testé contre un vrai Supabase. Ce qui a �
 
 **Choix du stockage** (au démarrage) : `SUPABASE_URL` **et** `SUPABASE_SERVICE_ROLE_KEY` définies → Supabase ; aucune des deux →
 SQLite (`DB_FILE`), exactement comme avant ; une seule des deux → refus de démarrer (pour ne jamais écrire par erreur dans un
-SQLite éphémère). `GET /api/v1/sante` indique `"stockage": "sqlite"` ou `"supabase"`. `npm run serveur` lit aussi un fichier
-`.env` s'il existe (modèle : `.env.example` à la racine ; `.env` est ignoré par git).
+SQLite éphémère). **En production (`NODE_ENV=production` ou `RENDER`), aucune des deux → refus de démarrer aussi (P0-S9) :**
+`[serveur] En production, Supabase est obligatoire…` — plus de bascule silencieuse vers un SQLite vide (sur Render, le
+fichier est perdu à chaque redéploiement ou réveil). Hors production, SQLite reste le défaut. `GET /api/v1/sante` indique
+`"stockage": "sqlite"` ou `"supabase"` — et, si SQLite en production (démarrage par un autre chemin),
+`"alerteStockage"` avec le message explicite. `npm run serveur` lit aussi un fichier `.env` s'il existe (modèle :
+`.env.example` à la racine ; `.env` est ignoré par git).
 
 **Variables** (modèle `.env.example`, placeholders seulement) :
 
@@ -890,7 +894,8 @@ oubliée en attente de décision. Chaque purge est journalisée (auteur, date, d
 
 - SQLite : 1 seule instance (fichier local). Sous Supabase, plusieurs instances partagent la base ; l'anti-bruteforce
   y est relu au premier usage de chaque clé puis gardé en cache par instance (prévu pour 1 instance Render).
-- Limitation des routes publiques : en mémoire, remise à zéro au redémarrage (fenêtres d'une minute). Pas de CAPTCHA.
+- Limitation des routes publiques : en mémoire, compteurs chauds ou bloqués persistés en base (P0-S20, migration 0010)
+  et rechargés au redémarrage ; fenêtres d'une minute. Pas de CAPTCHA.
 - Pas de comptes utilisateurs : un PIN par commerce, partagé par l'équipe ; pas de journal « qui a fait quoi ».
 - Le client se reconnaît par son téléphone / e-mail sans vérification (pas de SMS de confirmation) : quelqu'un qui
   connaît le numéro d'un client voit son prénom et ses tampons, et peut jouer à sa place s'il a une visite validée ce jour-là.
