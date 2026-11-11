@@ -14,6 +14,7 @@ import { ErreurConflit, ErreurMigrationManquante } from '../server/stockage.ts'
 import { configSupabaseDepuisEnv, ouvrirStockageSupabase } from '../server/stockage-supabase.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import { cleContact, nouveauClient, offrirRecompense, validerVisite } from '../src/lib/fidelite.ts'
+import { soldePoints } from '../src/lib/points.ts'
 import type { Client, Commerce, Tirage } from '../src/types.ts'
 
 const URL_SB = 'https://projet-factice.supabase.co'
@@ -734,6 +735,7 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
     try {
       const png = readFileSync(join(import.meta.dirname, '..', 'public', 'visuels', 'logo.png')) // vrai PNG 600×600
       const port = (app.serveur.address() as AddressInfo).port
+      assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/commerces/${AH}/logo`)).status, 404, 'aucun logo téléversé avant la course')
       f.barriere('PATCH', 'commerces')
       const [reglages, logo] = await Promise.all([
         api('PATCH', `/commerces/${AH}`, { seuilTampons: 6 }, PIN),
@@ -744,6 +746,43 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
       // Jamais un mélange silencieux : soit les réglages, soit le logo — l'autre a reçu 409 et peut réessayer.
       assert.equal(reglages.statut === 200, d.seuilTampons === 6)
       assert.equal(logo.statut === 200, /\/logo\?v=/.test(d.logo ?? ''))
+      // L'image publique suit l'adresse retenue : un envoi refusé (409) ne remplace pas les octets servis (revue Codex).
+      const servi = await fetch(`http://127.0.0.1:${port}/api/v1/commerces/${AH}/logo`)
+      if (logo.statut === 200) {
+        assert.equal(servi.status, 200)
+        assert.ok(Buffer.from(await servi.arrayBuffer()).equals(png), 'octets identiques au PNG envoyé')
+      } else {
+        assert.equal(servi.status, 404, 'aucun logo téléversé avant la course : toujours aucun après le refus')
+        assert.equal(f.tables.meta.find((m) => m.cle === `logo:${AH}`)?.valeur ?? '', '')
+      }
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('P0-S11 : premières visites simultanées de deux filleuls du même parrain → parrain crédité deux fois (reprise sur conflit)', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const bob = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Bob', contact: '0611111111' }, PIN)).contenu.client as Client
+      const filleuls = [
+        (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Alice', contact: '0622222222', parrain: bob.codeParrainage }, PIN)).contenu.client as Client,
+        (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Chloé', contact: '0633333333', parrain: bob.codeParrainage }, PIN)).contenu.client as Client,
+      ]
+      const donnees = (id: string) => f.tables.clients.find((l) => l.id === id)!.donnees as Client
+      assert.equal(soldePoints(donnees(bob.id)), 50, 'bienvenue')
+      // Les deux filleuls sont écrits ensemble (barrière sur leurs PATCH) : chaque requête a relu le parrain à la même
+      // version, donc le 1er crédit passe et le 2e fait 409. Sans reprise, le 2e filleul resterait payé sans crédit parrain.
+      f.barriere('PATCH', 'clients')
+      const visites = await Promise.all(filleuls.map((c) => api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)))
+      assert.deepEqual(visites.map((v) => v.statut), [200, 200], JSON.stringify(visites.map((v) => v.contenu)))
+      assert.equal(soldePoints(donnees(bob.id)), 50 + 50 + 50, 'bienvenue + 2 parrainages')
+      assert.equal(donnees(bob.id).parrainagesGagnes?.length, 2)
+      for (const c of filleuls) assert.equal(donnees(c.id).parrainagePaye, true)
+      const traces = f.tables.parrainages.filter((l) => l.parrain_id === bob.id)
+      assert.deepEqual(traces.map((l) => l.filleul_id).sort(), filleuls.map((c) => c.id).sort())
+      assert.ok(traces.every((l) => (l.donnees as { pointsParrain: number }).pointsParrain === 50), JSON.stringify(traces))
+      assert.equal(f.tables.journal.filter((l) => (l.donnees as { action?: string; clientId?: string }).action === 'parrainage' && (l.donnees as { clientId?: string }).clientId === bob.id).length, 2, 'un seul journal par crédit')
     } finally {
       await app.fermer()
     }

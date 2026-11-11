@@ -1733,9 +1733,28 @@ export async function creerServeur(o: OptionsServeur) {
       ? `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) et +${pointsParrain} points pour ${parrain.prenom} (parrain)`
       : `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) — parrain au plafond annuel, rien pour ${parrain.prenom}`
     const ecrire = async () => {
-      if (r.parrain) {
-        await st.majClient(r.parrain)
-        await journaliser(commerce.id, { type: 'gerant', nom: 'Gérant' }, 'parrainage', texte, r.parrain, quand)
+      let parrainCredite = r.parrain
+      let points = pointsParrain
+      let texteJournal = texte
+      if (parrainCredite) {
+        try {
+          await st.majClient(parrainCredite)
+        } catch (e) {
+          // Le filleul est déjà marqué payé : sans reprise, le crédit du parrain serait perdu pour de bon (un nouvel essai
+          // ne règle plus rien). Parrain modifié entre-temps (2 filleuls du même parrain en même temps, ou une caisse) :
+          // relu frais (st.client mémorise sa nouvelle version), recalculé, réécrit UNE fois. Un 2e conflit remonte.
+          if (!(e instanceof ErreurConflit)) throw e
+          const frais = await st.client(commerce.id, parrain.id)
+          const r2 = frais ? parrainageDu(filleulApres, frais, commerce, quand) : null
+          if (!frais || !r2) throw e
+          parrainCredite = r2.parrain
+          points = r2.parrain ? soldePoints(r2.parrain) - soldePoints(frais) : 0
+          texteJournal = r2.parrain
+            ? `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) et +${points} points pour ${frais.prenom} (parrain)`
+            : `Parrainage : +${pointsFilleul} points pour ${filleulApres.prenom} (filleul) — parrain au plafond annuel, rien pour ${frais.prenom}`
+          if (parrainCredite) await st.majClient(parrainCredite)
+        }
+        if (parrainCredite) await journaliser(commerce.id, { type: 'gerant', nom: 'Gérant' }, 'parrainage', texteJournal, parrainCredite, quand)
       }
       const trace: Parrainage = {
         id: `pr-${randomUUID()}`,
@@ -1743,7 +1762,7 @@ export async function creerServeur(o: OptionsServeur) {
         parrainId: parrain.id,
         filleulId: filleulApres.id,
         date: quand.toISOString(),
-        pointsParrain,
+        pointsParrain: points,
         pointsFilleul,
       }
       await st.ajouterParrainage(trace)
@@ -2186,13 +2205,26 @@ export async function creerServeur(o: OptionsServeur) {
         }
         const version = createHash('sha256').update(octets).digest('hex').slice(0, 16)
         // Fichier d'abord, adresse ensuite : un échec entre les deux laisse l'ancien logo affiché, jamais une image cassée.
+        const ancien = await lireLogo(id)
         await ecrireLogo(id, { type: infos.type, version, octets })
-        // Relecture dans la transaction (P0-S11) : verrou optimiste, ne réécrit pas des réglages enregistrés entre-temps.
-        const maj = await st.transaction(async () => {
-          const maj: Commerce = { ...(await commerceOu404(id)), logo: urlLogo(id, version) }
-          await st.majCommerce(maj)
-          return maj
-        })
+        let maj: Commerce
+        try {
+          // Relecture dans la transaction (P0-S11) : verrou optimiste, ne réécrit pas des réglages enregistrés entre-temps.
+          maj = await st.transaction(async () => {
+            const maj: Commerce = { ...(await commerceOu404(id)), logo: urlLogo(id, version) }
+            await st.majCommerce(maj)
+            return maj
+          })
+        } catch (e) {
+          // Envoi refusé (409 du verrou ou autre) : l'ancienne adresse doit resservir l'ancienne image. Restauration au
+          // mieux, seulement si le fichier est encore celui de cet envoi (un autre envoi simultané a pu gagner entre-temps).
+          try {
+            if ((await lireLogo(id))?.version === version) await ecrireLogo(id, ancien)
+          } catch {
+            // L'erreur d'origine reste celle renvoyée.
+          }
+          throw e
+        }
         return { json: { commerce: maj, logo: { ...infos, octets: octets.length } } }
       }
       if (m === 'DELETE') {

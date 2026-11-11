@@ -443,6 +443,25 @@ les trois routes qui ne le respectaient pas : le parrainage (parrain + journal +
 un conflit sur le filleul laissait le parrain crédité, et un nouvel essai pouvait le créditer une 2e fois), la caisse
 (journal « parrainage ») et la décision de rattrapage (journal écrit avant le client).
 
+**Reprise du crédit parrain (revue Codex P0-S11).** Le filleul étant écrit d'abord (`parrainagePaye: true`), un 409 sur
+le parrain ne pouvait plus être réparé par un nouvel essai (la caisse répond `dejaTraite`, le rattrapage est déjà
+traité) : deux premières visites simultanées de deux filleuls du même parrain perdaient un crédit. `ecrire()` réessaie
+donc **une fois** le crédit du parrain sur `ErreurConflit` : parrain relu frais dans la même transaction, parrainage
+recalculé (plafond annuel compris), puis crédit + journal + trace réécrits. Seul le 409 du crédit parrain est repris ;
+journal et trace ne sont jamais rejoués après un crédit réussi. Parrain disparu entre-temps → erreur d'origine ; plafond
+atteint entre-temps → pas de crédit, trace écrite avec `pointsParrain: 0`. Le texte du journal du **passage** (côté
+filleul) garde le calcul initial. **Fenêtre résiduelle** : deux conflits successifs sur la ligne du parrain dans la
+même requête → l'erreur remonte : filleul marqué payé, crédit parrain perdu, visible par le 409 renvoyé à l'opérateur
+(à corriger à la main sur la fiche du parrain).
+
+**Logo refusé : image restaurée (revue Codex P0-S11).** Le PUT écrit le fichier (`meta` + cache mémoire) avant
+l'adresse : si l'UPDATE du commerce échoue (409 du verrou ou autre), l'ancienne adresse servait la nouvelle image. Le
+PUT prend un instantané du logo avant d'écrire et, en cas d'échec, le restaure au mieux — seulement si le fichier stocké
+est encore celui de cet envoi (même `version`), pour ne pas écraser un autre envoi gagnant ; l'erreur d'origine est
+toujours celle renvoyée. **Fenêtre résiduelle** : deux envois simultanés d'images différentes restent en course — un
+seul gagne l'adresse ; les octets suivent l'envoi gagnant, sauf entrelacement extrême entre la vérification de version
+et la restauration.
+
 **Garde au démarrage.** Sous Supabase, `creerServeur` refuse de démarrer si la migration `0003_cartiz.sql` (journal)
 ou `0004_programme.sql` (parrainages, demandes de rattrapage) manque — erreur explicite nommant la migration et la
 sauvegarde. `ajouterJournal`, `ajouterParrainage` et `ajouterDemandeRattrapage` ne masquent plus leur absence

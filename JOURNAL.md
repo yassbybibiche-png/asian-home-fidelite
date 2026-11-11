@@ -1051,3 +1051,30 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   ne bloquera pas le déploiement.
 - **Non vérifié** : contre un vrai Postgres / Supabase (faux PostgREST seulement) ; le comportement de Render si un
   démarrage est refusé.
+
+## 11/11/2026 — P0-S11 : correctif revue Codex (crédit parrain repris sur conflit, logo refusé restauré)
+- **Point 1 [P1] — parrainage définitivement incomplet.** Depuis P0-S11 le filleul (`parrainagePaye: true`) est écrit
+  avant le parrain. Deux premières visites simultanées de deux filleuls du même parrain : les deux filleuls passaient,
+  un seul crédit parrain aussi — l'autre `majClient(parrain)` faisait 409, et aucun nouvel essai ne pouvait le réparer
+  (`parrainageDu` renvoie null pour un filleul payé ; caisse `dejaTraite` ; rattrapage déjà traité). Correctif dans
+  `reglerParrainage().ecrire()` : sur `ErreurConflit` du seul crédit parrain, une reprise — parrain relu frais
+  (`st.client`, nouvelle version mémorisée dans la transaction), `parrainageDu` recalculé, texte + trace reconstruits,
+  crédit + journal + trace réécrits. Toute autre erreur remonte sans reprise ; un crédit réussi n'est jamais rejoué.
+  Parrain disparu → erreur d'origine ; plafond atteint entre-temps → pas de crédit, trace `pointsParrain: 0`. Ordre
+  filleul-puis-parrain inchangé. Le texte du journal du passage (côté filleul, déjà calculé) n'est pas recalculé.
+- **Point 2 [P2] — logo refusé mais image remplacée.** `ecrireLogo` remplaçait les octets avant l'UPDATE conditionnel :
+  un PUT en 409 laissait la nouvelle image derrière l'ancienne adresse. Correctif (PUT seulement) : instantané
+  `lireLogo` avant l'écriture ; en cas d'échec de la transaction, restauration au mieux si le logo stocké a encore la
+  `version` de cet envoi (try/catch interne qui ne masque jamais l'erreur d'origine), puis l'erreur remonte.
+- **Tests** : avant **875/875**, après **876/876** (`npm test`), `npm run build` et `npx tsc -p .` OK. `+1` test
+  (`tests/supabase.test.ts`) : deux filleuls du même parrain, premières visites simultanées (barrière PATCH `clients`)
+  → [200, 200], parrain à 50 + 50 + 50, 2 `parrainagesGagnes`, 2 traces `parrainages` à 50, 2 journaux « parrainage »
+  du parrain, filleuls `parrainagePaye`. Test de course PATCH + PUT logo renforcé : 404 avant la course ; après, GET
+  brut du logo → 200 + octets identiques si le PUT a gagné, 404 et `meta` vide s'il a reçu 409. Vérifié : reprise
+  retirée → le nouveau test échoue ([200, 409]) ; restauration retirée → le test logo échoue (6/6 exécutions, le PUT
+  perd la course de façon stable avec la barrière).
+- **Résiduels** (documentés dans `server/README.md` § Atomicité) : deux conflits successifs sur le parrain dans la même
+  requête → 409, filleul payé, crédit parrain perdu (à corriger à la main) ; deux envois de logo simultanés d'images
+  différentes → un seul gagne l'adresse, octets cohérents sauf entrelacement extrême entre vérification et restauration.
+  Non couverts par un test : le cas « plafond atteint pendant la reprise », « parrain supprimé pendant la reprise » et
+  le double conflit.
