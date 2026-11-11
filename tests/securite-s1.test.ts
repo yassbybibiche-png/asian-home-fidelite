@@ -135,7 +135,9 @@ describe('P0-S1 : serveur (SQLite) — migration des hash et sessions', () => {
     assert.equal(c.contenu.commerceId, AH)
     assert.equal(Date.parse(c.contenu.expireLe) - t0, 8 * 3600_000)
     const charge = JSON.parse(Buffer.from(c.contenu.jeton.split('.')[1], 'base64url').toString())
-    assert.deepEqual(Object.keys(charge).sort(), ['commerceId', 'exp', 'jti', 'role'])
+    assert.deepEqual(Object.keys(charge).sort(), ['commerceId', 'exp', 'jti', 'role', 'vp'])
+    // Correction Codex point 3 : `vp` = version du PIN commerce (0 tant qu'il n'a jamais changé), pas un secret.
+    assert.equal(charge.vp, 0)
     assert.match(charge.jti, /^[0-9a-f-]{36}$/)
     assert.doesNotMatch(JSON.stringify(c.contenu), /1234/)
 

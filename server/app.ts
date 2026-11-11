@@ -237,6 +237,8 @@ export interface ChargeSession {
   commerceId?: string
   membreId?: string
   nom?: string
+  /** Rôle `commerce` : version du PIN du commerce à l'émission (absente = 0, jetons émis avant son introduction). */
+  vp?: number
   /** Expiration, en secondes unix. */
   exp: number
 }
@@ -273,6 +275,7 @@ export function lireJeton(secret: string, jeton: string): ChargeSession | null {
   if (!c) return null
   const roleOk = c.role === 'admin' || ((c.role === 'commerce' || c.role === 'equipe') && typeof c.commerceId === 'string')
   if (!roleOk || typeof c.jti !== 'string' || !Number.isInteger(c.exp) || (c.role === 'equipe' && typeof c.membreId !== 'string')) return null
+  if (c.vp !== undefined && !Number.isInteger(c.vp)) return null
   return c
 }
 
@@ -1436,7 +1439,28 @@ export async function creerServeur(o: OptionsServeur) {
     }
   }
 
-  /** Session de l'en-tête X-Session (absente → undefined). Jeton falsifié, expiré ou révoqué → 401. */
+  // Version du PIN par commerce, dans `meta` (clé `version_pin:<commerce>`, absente = 0) ; gardée en mémoire après la
+  // 1re lecture (même principe que `versionAcces`). Seul PUT /commerces/:id/pin l'incrémente : les sessions `commerce`
+  // émises avant (champ `vp` du jeton) sont alors refusées. Sessions admin et équipe non concernées.
+  const cleVersionPin = (commerceId: string) => `version_pin:${commerceId}`
+  const versionsPin = new Map<string, number>()
+  async function versionPin(commerceId: string): Promise<number> {
+    const cle = cleVersionPin(commerceId)
+    const connue = versionsPin.get(cle)
+    if (connue !== undefined) return connue
+    const v = Number(await st.meta(cle)) || 0
+    versionsPin.set(cle, v)
+    return v
+  }
+  /** Changement du PIN commerce : version + 1 (relue en base), toutes les sessions `commerce` antérieures tombent. */
+  async function incrementerVersionPin(commerceId: string) {
+    const cle = cleVersionPin(commerceId)
+    const v = (Number(await st.meta(cle)) || 0) + 1
+    await st.majMeta(cle, String(v))
+    versionsPin.set(cle, v)
+  }
+
+  /** Session de l'en-tête X-Session (absente → undefined). Jeton falsifié, expiré, révoqué ou PIN changé depuis → 401. */
   async function session(req: IncomingMessage): Promise<ChargeSession | undefined> {
     const jeton = enTete(req, 'x-session')
     if (!jeton) return undefined
@@ -1444,6 +1468,9 @@ export async function creerServeur(o: OptionsServeur) {
     if (!c) throw err(401, 'Session invalide : déverrouillez à nouveau.')
     if (c.exp * 1000 <= maintenant().getTime()) throw err(401, 'Session expirée : déverrouillez à nouveau.')
     if (await estRevoquee(c)) throw err(401, 'Session fermée : déverrouillez à nouveau.')
+    if (c.role === 'commerce' && c.commerceId && (c.vp ?? 0) !== (await versionPin(c.commerceId))) {
+      throw err(401, 'Session fermée : le code du commerce a changé, déverrouillez à nouveau.')
+    }
     return c
   }
 
@@ -1522,8 +1549,10 @@ export async function creerServeur(o: OptionsServeur) {
       await commerceOu404(commerceId)
       c.role = corps.role
       c.commerceId = commerceId
-      if (corps.role === 'commerce') await verifierPinCommerce(ip, commerceId, secret(corps.pin, 'pin'))
-      else {
+      if (corps.role === 'commerce') {
+        await verifierPinCommerce(ip, commerceId, secret(corps.pin, 'pin'))
+        c.vp = await versionPin(commerceId)
+      } else {
         const membre = await verifierCodeEquipe(ip, commerceId, secret(corps.code, 'code'))
         c.membreId = membre.id
         c.nom = membre.nom
@@ -2933,6 +2962,7 @@ export async function creerServeur(o: OptionsServeur) {
       await exigerCommercant(req, id)
       const corps = await lireCorps(req)
       await st.majPin(id, await hacherPin(pinNeuf(corps.pin)))
+      await incrementerVersionPin(id)
       return { json: { ok: true } }
     }
 

@@ -2,9 +2,10 @@
 // - SESSION_SECRET : même base rouverte avec un nouveau secret — ancien jeton de session → 401,
 //   ancien jeton client → 401, nouvelle session avec le PIN (inchangé) → 201, état métier conservé
 //   (même commerce, même client, mêmes champs), retour arrière vérifié.
-// - PIN commerce (PUT /pin) : ancien PIN → 401, nouveau PIN → 201, ET la session ouverte AVANT le
-//   changement reste valable — la rotation du PIN ne révoque pas les sessions (docs/SECURITE.md § 4 :
-//   seule une rotation de SESSION_SECRET les invalide toutes).
+// - PIN commerce (PUT /pin) : ancien PIN → 401, nouveau PIN → 201, ET la session commerce ouverte
+//   AVANT le changement est refusée (401) — changer le PIN invalide les sessions commerce de ce
+//   commerce (docs/SECURITE.md § 4, correction Codex point 3 ; une rotation de SESSION_SECRET reste
+//   le moyen de tout révoquer d'un coup).
 // Aucune rotation réelle : secrets de test seulement, aucune variable Render touchée, aucune clé
 // Supabase / Brevo / Google manipulée. La rotation de SUPABASE_SERVICE_ROLE_KEY contre le vrai
 // Supabase reste à tester sur staging (inexistant — docs/SECURITE.md § 8).
@@ -100,17 +101,18 @@ describe('P2-S17 : rotation des secrets (test local)', async () => {
     }
   })
 
-  test('rotation PIN commerce : ancien PIN mort, nouveau PIN OK, session d’avant toujours valable', async () => {
+  test('rotation PIN commerce : ancien PIN mort, nouveau PIN OK, session d’avant refusée', async () => {
     const s = await demarrer('rotation-pin.db', SECRET_A)
     try {
       const session = (await s.api('POST', '/sessions', { role: 'commerce', commerceId: AH, pin: '1234' })).contenu.jeton as string
       assert.equal((await s.api('PUT', `/commerces/${AH}/pin`, { pin: '5678' }, { 'X-Session': session })).statut, 200)
       assert.equal((await s.api('POST', '/sessions', { role: 'commerce', commerceId: AH, pin: '1234' })).statut, 401, 'ancien PIN mort')
-      assert.equal((await s.api('POST', '/sessions', { role: 'commerce', commerceId: AH, pin: '5678' })).statut, 201, 'nouveau PIN OK')
-      assert.equal((await s.api('PUT', `/commerces/${AH}/pin`, { pin: '12' }, { 'X-Session': session })).statut, 400, 'PIN trop court refusé')
-      // Nuance documentée (docs/SECURITE.md § 4) : la session ouverte AVANT le changement reste valable —
-      // changer le PIN ne révoque pas les sessions, seule une rotation de SESSION_SECRET le fait.
-      assert.equal((await s.api('GET', `/commerces/${AH}/etat`, undefined, { 'X-Session': session })).statut, 200)
+      const nouvelle = await s.api('POST', '/sessions', { role: 'commerce', commerceId: AH, pin: '5678' })
+      assert.equal(nouvelle.statut, 201, 'nouveau PIN OK')
+      assert.equal((await s.api('PUT', `/commerces/${AH}/pin`, { pin: '12' }, { 'X-Session': nouvelle.contenu.jeton })).statut, 400, 'PIN trop court refusé')
+      // docs/SECURITE.md § 4 : la session ouverte AVANT le changement est refusée — changer le PIN invalide
+      // les sessions commerce de ce commerce (version du PIN, correction Codex point 3).
+      assert.equal((await s.api('GET', `/commerces/${AH}/etat`, undefined, { 'X-Session': session })).statut, 401)
     } finally {
       await s.app.fermer()
     }
