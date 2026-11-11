@@ -17,7 +17,8 @@ import {
 import { estAsianHome } from '../lib/visuels'
 import { attributsChamp, avecPrenom, etatSaisieContact, virgulePrenom, type ModeContact } from '../lib/inscriptionJeu'
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ReponseCarte, type ResultatTirage } from '../data/api'
-import { lancerTirage, memoireJoueur, signalerScan, type JoueurMemorise } from '../data/jeuApi'
+import { assurerJetonClient, avecJetonClient, lancerTirage, memoireJoueur, signalerScan, type JoueurMemorise } from '../data/jeuApi'
+import { memoireJetons } from '../lib/jetonCarte'
 import { accrocheJeu, jourParis } from '../lib/mesure'
 import {
   delaiResultat,
@@ -223,6 +224,22 @@ function MessageDejaJoue({ prenom, lot, code, remis }: { prenom: string; lot: st
   )
 }
 
+/** Tirage refusé en 401 (P0-S7) : l'accès de ce téléphone à la carte a expiré ou a été révoqué. */
+export function AccesCartePerdu({ lienCarte }: { lienCarte: string }) {
+  const { t } = useLangue()
+  return (
+    <section className="carte space-y-3 text-center" role="alert" data-acces="perdu">
+      <p className="titre-carte">{t('Votre carte n’est plus ouverte sur ce téléphone')}</p>
+      <p className="text-gray-700">
+        {t('Pour des raisons de sécurité, l’accès a expiré ou a été retiré. Retrouvez votre carte avec votre téléphone ou votre e-mail, ou demandez au comptoir le QR d’accès à votre carte : vous pourrez ensuite tourner la roue.')}
+      </p>
+      <a href={lienCarte} className="bouton w-full">
+        {t('Retrouver ma carte')}
+      </a>
+    </section>
+  )
+}
+
 /** Client déjà connu sur ce téléphone : zéro saisie, un seul bouton (avec ou sans prénom sur la carte). */
 function Continuer({ prenom, onContinuer, onOublier }: { prenom: string; onContinuer(): void; onOublier(): void }) {
   const p = prenom.trim()
@@ -413,11 +430,18 @@ function JouerApi({ api }: { api: ClientApi }) {
   return verifierCommerce(commerce) ?? <PartieApi key={commerce.id} api={api} commerce={commerce} />
 }
 
-function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic }) {
+function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: CommercePublic }) {
   const memoire = useMemo(() => memoireJoueur(stockageLocal(), commerce.id), [commerce.id])
+  // P0-S7 : jeton client du joueur, rangé sur ce téléphone ; chaque appel « carte » de la page (lecture, tirage, prénom,
+  // message privé) le porte, via cette API.
+  const jetons = useMemo(() => memoireJetons(stockageLocal()), [])
+  const joueurActif = useRef<string | null>(null)
+  const api = useMemo(() => avecJetonClient(apiServeur, jetons, () => joueurActif.current), [apiServeur, jetons])
+  const essaisJeton = useRef(new Set<string>())
   // Code de parrainage dans le lien partagé (#/jouer/<id>?parrain=AH-XXXXXX) : attaché à l'inscription.
   const parrain = useMemo(() => /[?&]parrain=([A-Za-z0-9-]+)/.exec(window.location.hash)?.[1], [])
   const [joueur, setJoueur] = useState<JoueurMemorise | null>(null)
+  useEffect(() => void (joueurActif.current = joueur?.clientId ?? null), [joueur])
   const [memorise, setMemorise] = useState(() => memoire.joueur())
   const [jeu, setJeu] = useState<ReponseCarte['jeu'] | null>(null)
   const [etape, setEtape] = useState<Etape>('pret')
@@ -425,6 +449,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
   const [gain, setGain] = useState<ResultatTirage | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [enCours, setEnCours] = useState(false)
+  const [accesPerdu, setAccesPerdu] = useState(false)
   const [horsLigne, setHorsLigne] = useState(false)
   const [menuDisponible, setMenuDisponible] = useState(() => estAsianHome(commerce))
   const minuterie = useRef<number | undefined>(undefined)
@@ -440,7 +465,16 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
   const majStatut = useCallback(
     async (j: JoueurMemorise): Promise<StatutJeu | null> => {
       try {
-        const r = await api.carte(j.clientId)
+        await assurerJetonClient(api, jetons, j.clientId, { dejaEssaye: essaisJeton.current })
+        let r: ReponseCarte
+        try {
+          r = await api.carte(j.clientId)
+        } catch (e) {
+          // Jeton refusé (révoqué entre-temps) : oublié ; la carte se relit sans (vue limitée, qui garde le jeu du jour).
+          if (!(e instanceof ErreurApi && e.statut === 401 && jetons.lire(j.clientId))) throw e
+          jetons.ecrire(j.clientId, null)
+          r = await api.carte(j.clientId)
+        }
         setJeu(r.jeu)
         setMenuDisponible((m) => m || !!r.menuDisponible)
         setMessage(null)
@@ -460,7 +494,7 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
         return null
       }
     },
-    [api, memoire],
+    [api, memoire, jetons],
   )
 
   useEffect(() => {
@@ -519,6 +553,13 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
     setMessage(null)
     const issue = await lancerTirage(api, commerce, joueur.contact, joueur.prenom)
     setEnCours(false)
+    if (!issue.ok && issue.accesRefuse) {
+      // P0-S7 : jeton expiré (30 jours) ou révoqué — ce téléphone ne peut plus jouer pour cette carte. Plutôt qu'une
+      // erreur sèche : le chemin pour la retrouver (carte → « Retrouver ma carte », ou QR du comptoir).
+      jetons.ecrire(joueur.clientId, null)
+      setAccesPerdu(true)
+      return
+    }
     if (!issue.ok) {
       // Refusé par le serveur ou serveur injoignable : la roue ne tourne pas, aucun lot n'est affiché.
       setMessage(issue.message)
@@ -557,7 +598,8 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
             commerceId={commerce.id}
             nomCommerce={commerce.nom}
             onEnvoyer={async (contactSaisi, consentementRelance) => {
-              const { client } = await api.inscrirePublic(commerce.id, '', contactSaisi, parrain, consentementRelance)
+              const { client, jeton, expireLe } = await api.inscrirePublic(commerce.id, '', contactSaisi, parrain, consentementRelance)
+              if (jeton && expireLe) jetons.ecrire(client.id, { jeton, expireLe })
               choisirJoueur({ clientId: client.id, prenom: client.prenom, contact: contactSaisi.trim() })
             }}
           />
@@ -601,6 +643,8 @@ function PartieApi({ api, commerce }: { api: ClientApi; commerce: CommercePublic
           />
           {!horsLigne && <MessageErreur>{message}</MessageErreur>}
         </>
+      ) : accesPerdu ? (
+        <AccesCartePerdu lienCarte={`#/carte/${joueur.clientId}`} />
       ) : (
         <>
           {visiteValidee && <VisiteValidee />}

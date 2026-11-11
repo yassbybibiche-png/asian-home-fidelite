@@ -12,7 +12,7 @@ import { analyserAnniversaire, anniversaireAffiche } from '../lib/messages'
 import { nouvelIdAction } from '../lib/fileCaisse'
 import { dateCourte, dateRelative } from '../lib/format'
 import { CarteFidelite } from '../components/CarteFidelite'
-import { EncartWallet, EnTete, MessageErreur, telecharger, Vide } from '../components/ui'
+import { EncartWallet, EnTete, MessageErreur, QrCode, telecharger, Vide } from '../components/ui'
 import { datePurge, dureeConservationMois, libelleDuree, nomFichierExportClient, protectionPurge } from '../lib/rgpd'
 
 /** Mode serveur : points (échange contre le catalogue), historique des échanges, anniversaire, plat préféré. */
@@ -329,6 +329,85 @@ function DonneesPersonnelles({ client, commerce }: { client: Client; commerce: C
   )
 }
 
+/**
+ * Accès du client à sa carte (P0-S7). QR d'accès : à montrer au client PRÉSENT au comptoir (téléphone changé, carte
+ * effacée) — il le scanne et retrouve sa carte complète sur son téléphone (15 min, une seule fois, journalisé).
+ * Révocation : tous ses téléphones perdent l'accès complet (téléphone perdu, carte ouverte par quelqu'un d'autre).
+ */
+function AccesCarteClient({ client, commerce }: { client: Client; commerce: Commerce }) {
+  const { avecPin } = useStore()
+  const { executer, enCours, erreur } = useAction()
+  const [lien, setLien] = useState<{ lien: string; expireLe: string } | null>(null)
+  const [confirmer, setConfirmer] = useState(false)
+  const [annonce, setAnnonce] = useState('')
+
+  async function afficherQr() {
+    setAnnonce('')
+    const r = await executer(() => avecPin((a, api) => api.lienAccesCarte(commerce.id, a, client.id)))
+    if (r.ok) setLien(r.valeur)
+  }
+
+  async function revoquer() {
+    const r = await executer(() => avecPin((a, api) => api.revoquerAccesCarte(commerce.id, a, client.id)))
+    if (!r.ok) return
+    setLien(null)
+    setConfirmer(false)
+    setAnnonce('✓ Accès révoqué : plus aucun téléphone n’ouvre la carte complète. Remettez un QR d’accès au client quand il se présente.')
+  }
+
+  return (
+    <section className="carte space-y-3">
+      <h2 className="titre-carte">Accès du client à sa carte</h2>
+      <p className="text-sm text-gray-600">
+        Nouveau téléphone, carte effacée ? Montrez ce QR au client présent au comptoir : il le scanne et retrouve sa carte complète (valable 15 min, une seule
+        fois).
+      </p>
+      {lien ? (
+        <div className="flex flex-col items-center gap-2">
+          <QrCode texte={lien.lien} titre="QR d’accès à la carte du client" />
+          <p className="text-sm text-gray-600">Valable jusqu’à {new Date(lien.expireLe).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}, une seule fois.</p>
+          {/* Expiré ou déjà scanné : un nouveau lien remplace ce QR à l'écran. L'ancien n'est pas révoqué (le serveur
+              ne le permet pas sans révoquer toute la carte) : il reste à usage unique et tombe à son expiration (15 min),
+              sans avoir quitté cet écran du comptoir. */}
+          <button type="button" className="bouton-secondaire min-h-11 w-full" disabled={enCours} onClick={() => void afficherQr()}>
+            Générer un nouveau lien d’accès
+          </button>
+        </div>
+      ) : (
+        <button type="button" className="bouton-secondaire min-h-11 w-full" disabled={enCours} onClick={() => void afficherQr()}>
+          Afficher le QR d’accès à sa carte
+        </button>
+      )}
+      {!confirmer ? (
+        <button type="button" className="bouton-secondaire min-h-11 w-full text-red-700" disabled={enCours} onClick={() => setConfirmer(true)}>
+          Révoquer tous ses accès…
+        </button>
+      ) : (
+        <div className="space-y-2 rounded-xl bg-red-50 p-3 ring-1 ring-red-200">
+          <p className="text-sm text-red-900">
+            Tous les téléphones de ce client perdent l’accès complet à sa carte (ses tampons et points ne changent pas). Pour la rouvrir, il faudra un nouveau
+            QR d’accès.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" className="bouton-secondaire min-h-11" disabled={enCours} onClick={() => setConfirmer(false)}>
+              Annuler
+            </button>
+            <button type="button" className="bouton min-h-11 bg-red-700 hover:bg-red-800 active:bg-red-900" disabled={enCours} onClick={() => void revoquer()}>
+              Révoquer
+            </button>
+          </div>
+        </div>
+      )}
+      <MessageErreur>{erreur && `Rien n’a été modifié : ${erreur}`}</MessageErreur>
+      {annonce && (
+        <p className="alerte-succes" role="status">
+          {annonce}
+        </p>
+      )}
+    </section>
+  )
+}
+
 /** Fiche client côté commerçant : la carte + les actions de caisse. */
 export default function FicheClient() {
   const { param } = useRoute()
@@ -419,6 +498,7 @@ export default function FicheClient() {
       {mode === 'api' && <PointsEtAnniversaire client={client} commerce={commerce} />}
       {mode === 'api' && <Rattrapages client={client} commerce={commerce} />}
       {mode === 'api' && <Relances client={client} commerce={commerce} />}
+      {mode === 'api' && <AccesCarteClient client={client} commerce={commerce} />}
       {mode === 'api' && <DonneesPersonnelles client={client} commerce={commerce} />}
 
       <EncartWallet demo={estDemo} lienCarte={`#/carte/${client.id}`} />

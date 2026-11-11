@@ -92,7 +92,7 @@ describe('P0-S5 : export complet puis restauration sur Postgres (PGlite)', () =>
       'menus', 'parrainages', 'demandes_rattrapage', 'sessions_revoquees', 'tentatives_auth', 'envois', 'evenements_jour'])
     const { rows } = await source.query<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' order by 1`)
     assert.deepEqual(rows.map((r) => r.relname), TABLES_SAUVEGARDE.map((t) => t.nom).sort())
-    assert.deepEqual(migrationsARejouer(readdirSync(MIGRATIONS)).map((f) => f.slice(0, 4)), ['0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008'])
+    assert.deepEqual(migrationsARejouer(readdirSync(MIGRATIONS)).map((f) => f.slice(0, 4)), ['0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009'])
   })
 
   test('format de l’export : en-tête, 14 tables, compteurs = lignes, toutes les colonnes (hash des PIN inclus)', () => {

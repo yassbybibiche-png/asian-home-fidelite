@@ -97,15 +97,49 @@ export interface ResultatImportGoogle {
 /** Carte publique : jamais de téléphone ni d'e-mail. */
 export type CartePublique = Omit<Client, 'telephone' | 'email'>
 
-export interface ReponseCarte {
-  client: CartePublique
+/** Vue limitée d'une carte (P0-S7, sans jeton client) : compteur de tampons seulement, ni prénom, ni messages, ni historique. */
+export type CarteLimitee = Pick<Client, 'id' | 'commerceId' | 'tampons'>
+
+/** Niveau d'accès de la réponse (P0-S7 ; absent sur un serveur plus ancien = vue complète). */
+export interface AccesCarte {
+  vue: 'complete' | 'limitee'
+  /** Le jeton client envoyé a été accepté. */
+  jeton: boolean
+  /** Carte à ancien identifiant : son lien seul cessera d'ouvrir la carte après `graceJusquAu`. */
+  ancienLien?: boolean
+  graceJusquAu?: string
+}
+
+interface ReponseCarteCommune {
   /** Vue publique (sans probabilités, règles d'avis, taux de points ni réglages internes du programme). */
   commerce: CommercePublic
   /** codeDuJour / remisDuJour : absents sur un serveur d'avant P0-U3. */
   jeu: { statut: StatutJeu; lotDuJour: string | null; codeDuJour?: string | null; remisDuJour?: boolean }
   menuDisponible?: boolean
+}
+
+export type ReponseCarteComplete = ReponseCarteCommune & {
+  client: CartePublique
   /** P1-C3 : lots gagnés à la roue (sans code), pour l'historique de la carte. Absent sur un serveur plus ancien. */
   historiqueLots?: LotHistorique[]
+  acces?: AccesCarte & { vue: 'complete' }
+}
+
+export type ReponseCarteLimitee = ReponseCarteCommune & { client: CarteLimitee; historiqueLots?: undefined; acces: AccesCarte & { vue: 'limitee' } }
+
+export type ReponseCarte = ReponseCarteComplete | ReponseCarteLimitee
+
+/** Vue limitée (P0-S7) : servie sans jeton client de cette carte, sur un serveur en mode strict. */
+export function estVueLimitee(r: ReponseCarte): r is ReponseCarteLimitee {
+  return r.acces?.vue === 'limitee'
+}
+
+/** Jeton client d'une carte (P0-S7) : à ranger sur ce téléphone (src/lib/jetonCarte.ts). */
+export interface JetonClient {
+  jeton: string
+  expireLe: string
+  clientId: string
+  commerceId: string
 }
 
 /** Gain de la roue vu en caisse (GET / POST …/caisse/gains/:code). */
@@ -199,8 +233,14 @@ export function signalDelai(ms: number): AbortSignal | undefined {
 }
 
 export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(...a), delaiMs = 10_000) {
-  async function requete(methode: string, chemin: string, options: { acces?: AccesCaisse | null; corps?: unknown; fichier?: Blob; texte?: boolean; delaiMs?: number } = {}) {
+  async function requete(
+    methode: string,
+    chemin: string,
+    options: { acces?: AccesCaisse | null; corps?: unknown; fichier?: Blob; texte?: boolean; delaiMs?: number; jetonClient?: string | null } = {},
+  ) {
     const entetes: Record<string, string> = { ...entetesAcces(options.acces) }
+    // Jeton client de la carte (P0-S7) : prouve que ce téléphone est celui du titulaire.
+    if (options.jetonClient) entetes.Authorization = `Bearer ${options.jetonClient}`
     if (options.corps !== undefined) entetes['Content-Type'] = 'application/json'
     // Fichier brut (logo) : envoyé tel quel ; le serveur lit le format dans les octets, pas dans cet en-tête.
     if (options.fichier) entetes['Content-Type'] = options.fichier.type || 'application/octet-stream'
@@ -255,7 +295,16 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     // Fiches publiques seulement : le commerce complet (réglages) vient de `etat`, avec PIN ou session.
     commerces: async () => ((await requete('GET', '/commerces')) as { commerces: CommercePublic[] }).commerces,
     commerce: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}`)) as { commerce: CommercePublic }).commerce,
-    carte: (clientId: string) => requete('GET', `/cartes/${enc(clientId)}`) as Promise<ReponseCarte>,
+    /** Vue complète avec le jeton client de cette carte, vue limitée sans (P0-S7). */
+    carte: (clientId: string, jeton?: string | null) => requete('GET', `/cartes/${enc(clientId)}`, { jetonClient: jeton }) as Promise<ReponseCarte>,
+    /**
+     * Jeton client (P0-S7) : renouvelle `jeton` encore valable, ou échange un lien d'accès à usage unique (`lien`), ou —
+     * sans rien — l'obtient pour une carte à ancien identifiant pendant la période de grâce. 401 sinon.
+     */
+    jetonCarte: (clientId: string, preuve: { jeton?: string | null; lien?: string } = {}) =>
+      requete('POST', `/cartes/${enc(clientId)}/jeton`, { jetonClient: preuve.jeton, corps: preuve.lien ? { lien: preuve.lien } : {} }) as Promise<JetonClient>,
+    /** « Déconnecter tous mes appareils » : révoque tous les jetons de la carte, celui-ci compris. */
+    revoquerCarte: (clientId: string, jeton: string) => requete('POST', `/cartes/${enc(clientId)}/revocation`, { jetonClient: jeton }) as Promise<{ ok: boolean }>,
     /**
      * « Carte introuvable » (P1-C3, audit F-12) : réponse identique que le contact ait une carte ou non. `envoi` dit
      * seulement si le serveur sait envoyer un lien sur ce canal (prestataire SMS / e-mail configuré).
@@ -266,22 +315,23 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     inscrirePublic: (commerceId: string, prenom: string, contact: string, parrain?: string, consentementRelance = false) =>
       requete('POST', `/commerces/${enc(commerceId)}/clients`, {
         corps: { prenom, contact, ...(parrain ? { parrain } : {}), ...(consentementRelance ? { consentementRelance: true } : {}) },
-      }) as Promise<{ client: CartePublique; existant: boolean }>,
+      }) as Promise<{ client: CartePublique; existant: boolean; /** P0-S7 : nouvelle carte seulement. */ jeton?: string; expireLe?: string }>,
     /** Désinscription des relances depuis le lien d'un e-mail (page #/desinscription/…). */
     desinscrire: (clientId: string, jeton: string) =>
       requete('POST', `/desinscription/${enc(clientId)}/${enc(jeton)}`) as Promise<{ ok: boolean; commerce: string }>,
     // RGPD (P1-B6), depuis la carte : identité = lien de la carte + téléphone ou e-mail donné à l'inscription (403 sinon).
     /** « Recevoir mes données » : CSV de toutes les données du client. */
-    donneesCarte: (clientId: string, contact: string) => requete('POST', `/cartes/${enc(clientId)}/donnees`, { corps: { contact }, texte: true }) as Promise<string>,
+    donneesCarte: (clientId: string, contact: string, jeton?: string | null) =>
+      requete('POST', `/cartes/${enc(clientId)}/donnees`, { corps: { contact }, texte: true, jetonClient: jeton }) as Promise<string>,
     /** « Demander la suppression » : demande enregistrée, la suppression est faite par le commerce. */
-    demanderSuppression: (clientId: string, contact: string) =>
-      requete('POST', `/cartes/${enc(clientId)}/suppression`, { corps: { contact } }) as Promise<{ ok: boolean; demandeSuppressionLe: string; commerce: string }>,
+    demanderSuppression: (clientId: string, contact: string, jeton?: string | null) =>
+      requete('POST', `/cartes/${enc(clientId)}/suppression`, { corps: { contact }, jetonClient: jeton }) as Promise<{ ok: boolean; demandeSuppressionLe: string; commerce: string }>,
     /** Prénom donné après le tirage (P1-C1) : seulement si la carte n'en a pas ; identité = carte + contact (403 sinon). */
-    prenomCarte: (commerceId: string, clientId: string, contact: string, prenom: string) =>
-      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/prenom`, { corps: { contact, prenom } }) as Promise<{ client: CartePublique }>,
+    prenomCarte: (commerceId: string, clientId: string, contact: string, prenom: string, jeton?: string | null) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/prenom`, { corps: { contact, prenom }, jetonClient: jeton }) as Promise<{ client: CartePublique }>,
     /** Message privé au restaurant après le jeu (P1-C4) : stocké, jamais expédié ; identité = carte + contact (403 sinon). */
-    messagePrive: (commerceId: string, clientId: string, contact: string, note: number, texte: string) =>
-      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/message-prive`, { corps: { contact, note, texte } }) as Promise<{
+    messagePrive: (commerceId: string, clientId: string, contact: string, note: number, texte: string, jeton?: string | null) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/message-prive`, { corps: { contact, note, texte }, jetonClient: jeton }) as Promise<{
         ok: boolean
         message: { id: string; creeLe: string }
       }>,
@@ -292,14 +342,18 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     signalerEvenement: (commerceId: string, type: 'scan' | 'clicGoogle') =>
       requete('POST', `/commerces/${enc(commerceId)}/evenements`, { corps: { type }, delaiMs: 5_000 }) as Promise<{ ok: boolean; compte: boolean }>,
     /** Le navigateur n'envoie qu'un contact : la visite du jour, le tirage du jour et le lot sont décidés par le serveur. */
-    tirer: (commerceId: string, contact: string, prenom?: string, parrain?: string) =>
-      requete('POST', `/commerces/${enc(commerceId)}/tirages`, { corps: { contact, ...(prenom ? { prenom } : {}), ...(parrain ? { parrain } : {}) } }) as Promise<ResultatTirage>,
+    /** P0-S7 : `jeton` = jeton client du joueur (exigé par un serveur en mode strict ; le joueur est alors sa carte). */
+    tirer: (commerceId: string, contact: string, prenom?: string, parrain?: string, jeton?: string | null) =>
+      requete('POST', `/commerces/${enc(commerceId)}/tirages`, {
+        corps: { contact, ...(prenom ? { prenom } : {}), ...(parrain ? { parrain } : {}) },
+        jetonClient: jeton,
+      }) as Promise<ResultatTirage>,
     /** Profil progressif (client, après sa 2e visite) : anniversaire « JJ/MM » et/ou plat préféré. */
-    profil: (commerceId: string, clientId: string, champs: { anniversaire?: string; platPrefere?: string }) =>
-      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/profil`, { corps: champs }) as Promise<{ client: CartePublique }>,
+    profil: (commerceId: string, clientId: string, champs: { anniversaire?: string; platPrefere?: string }, jeton?: string | null) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/profil`, { corps: champs, jetonClient: jeton }) as Promise<{ client: CartePublique }>,
     /** Visite oubliée signalée par le client (date ISO + montant en centimes + ticket éventuel). */
-    declarerRattrapage: (commerceId: string, clientId: string, champs: { date: string; montantCentimes: number; ticket?: string }) =>
-      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/rattrapage`, { corps: champs }) as Promise<{ demande: import('../types').DemandeRattrapage; client: CartePublique }>,
+    declarerRattrapage: (commerceId: string, clientId: string, champs: { date: string; montantCentimes: number; ticket?: string }, jeton?: string | null) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/rattrapage`, { corps: champs, jetonClient: jeton }) as Promise<{ demande: import('../types').DemandeRattrapage; client: CartePublique }>,
 
     // ---- Commerçant (PIN du commerce ou PIN admin) ----
     etat: (commerceId: string, acces: Acces) => requete('GET', `/commerces/${enc(commerceId)}/etat`, { acces }) as Promise<EtatCommerce>,
@@ -361,6 +415,12 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     relancer: (commerceId: string, acces: Acces, clientId: string, demande: { modele: ModeleRelance; canal?: 'sms' | 'email' }) =>
       requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/relance`, { acces, corps: demande }) as Promise<{ envoye: boolean; test?: boolean; canal: 'sms' | 'email'; envoi: EnvoiRelance }>,
     /** Décision du commerçant sur une visite oubliée : validation = 1 visite + points ; refus = demande classée. */
+    /** Lien d'accès à la carte (P0-S7), montré en QR au client présent au comptoir : 15 min, usage unique. */
+    lienAccesCarte: (commerceId: string, acces: AccesCaisse, clientId: string) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/lien-acces`, { acces }) as Promise<{ lien: string; expireLe: string }>,
+    /** Révoque tous les jetons et liens d'accès de la carte (téléphone perdu, carte reprise). */
+    revoquerAccesCarte: (commerceId: string, acces: Acces, clientId: string) =>
+      requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/revocation-acces`, { acces }) as Promise<{ ok: boolean }>,
     deciderRattrapage: async (commerceId: string, acces: Acces, clientId: string, demandeId: string, decision: 'valider' | 'refuser') =>
       ((await requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/rattrapage/${enc(demandeId)}`, { acces, corps: { decision } })) as { client: Client }).client,
 
@@ -395,8 +455,8 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     menu: (commerceId: string) => requete('GET', `/commerces/${enc(commerceId)}/menu`) as Promise<{ menu: Menu; commerce: CommercePublic }>,
     majMenu: async (commerceId: string, acces: Acces, menu: Pick<Menu, 'categories'>) =>
       ((await requete('PUT', `/commerces/${enc(commerceId)}/menu`, { acces, corps: menu })) as { menu: Menu }).menu,
-    /** Public : le client marque ses messages comme lus. */
-    marquerLus: (clientId: string) => requete('POST', `/cartes/${enc(clientId)}/lus`),
+    /** Public : le client marque ses messages comme lus (P0-S7 : avec son jeton). */
+    marquerLus: (clientId: string, jeton?: string | null) => requete('POST', `/cartes/${enc(clientId)}/lus`, { jetonClient: jeton }),
 
     // ---- Admin ----
     /** `admin` : accès admin (PIN ou session), ou le PIN admin seul. */

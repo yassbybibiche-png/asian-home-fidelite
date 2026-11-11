@@ -45,6 +45,25 @@ export const LIBELLES_LANGUE: Record<Langue, { court: string; long: string }> = 
  * Les modèles `{x}` sont remplis par `traduire(modele, langue, { x })`.
  */
 export const TRADUCTIONS_EN: Record<string, string> = {
+  // ---- Accès à la carte (P0-S7) ----
+  'tampons sur cette carte': 'stamps on this card',
+  'Gain du jour à retirer : {lot}, code {code}': 'Today’s prize to collect: {lot}, code {code}',
+  'Accès limité sur ce téléphone': 'Limited access on this phone',
+  'Ce lien d’accès a expiré ou a déjà servi : demandez-en un nouveau.': 'This access link has expired or was already used: ask for a new one.',
+  'Votre carte n’est plus ouverte sur ce téléphone': 'Your card is no longer open on this phone',
+  'Pour des raisons de sécurité, l’accès a expiré ou a été retiré. Retrouvez votre carte avec votre téléphone ou votre e-mail, ou demandez au comptoir le QR d’accès à votre carte : vous pourrez ensuite tourner la roue.':
+    'For security reasons, access has expired or was removed. Find your card with your phone number or e-mail, or ask at the counter for your card’s access QR code: you can then spin the wheel.',
+  'Pour voir votre carte complète (points, messages, historique), ouvrez-la sur le téléphone utilisé à l’inscription, ou demandez au comptoir de vous montrer le QR d’accès à votre carte.':
+    'To see your full card (points, messages, history), open it on the phone you signed up with, or ask at the counter to show you your card’s access QR code.',
+  'Ce lien ne suffira plus à ouvrir la carte après le {date}.': 'This link will no longer open the card after {date}.',
+  'Votre carte est maintenant protégée sur ce téléphone. Après le {date}, son ancien lien ou son ancien QR ne l’ouvriront plus seuls : gardez-la ici (ou ajoutez-la à l’écran d’accueil).':
+    'Your card is now protected on this phone. After {date}, its old link or old QR code alone will no longer open it: keep it here (or add it to your home screen).',
+  'Déconnecter cette carte de tous les téléphones, celui-ci compris ? Pour la rouvrir en entier, il faudra un lien d’accès du comptoir.':
+    'Sign this card out of every phone, this one included? To open it in full again, you will need an access link from the counter.',
+  'Sécurité de ma carte': 'My card’s security',
+  'Téléphone perdu ou carte ouverte ailleurs ? Déconnectez-la partout : seul un lien d’accès du comptoir la rouvrira.':
+    'Lost your phone, or card opened elsewhere? Sign it out everywhere: only an access link from the counter will open it again.',
+  'Déconnecter tous mes appareils': 'Sign out all my devices',
   // ---- Commutateur ----
   'Langue': 'Language',
   // ---- Jeu (#/jouer) ----

@@ -885,3 +885,116 @@ Fideliz dans le produit) mais l'app affichait encore « Fideliz » et 90 €/moi
   mot de passe Postgres pour un `pg_dump` en complément ; planification + copie hors VM ; exercice de restauration
   réelle sur un projet Supabase de test. Docs : `docs/SAUVEGARDE.md`, `server/README.md` § Sauvegarde / export,
   `.env.example` (variables `SAUVEGARDE_*` commentées : `tests/supabase.test.ts` n'y autorise que 2 variables actives).
+
+## 11/11/2026 — P0-S7 : authentification client élargie (AUDIT.md § P0-S7, revue Codex points 4 et 5, audit F-03)
+- **Constat** : l'identifiant d'une carte (`cl-<horodatage base36>-<4 car.>`, `src/lib/fidelite.ts`) suffisait à la
+  lire en entier (messages, historique), à la modifier (prénom, profil, rattrapage, lus, message privé, demande de
+  suppression avec le contact) ; le téléphone seul suffisait à reprendre la carte (inscription publique → carte
+  existante renvoyée) et à jouer à la place du client (`POST /tirages` avec le contact → code gagnant).
+- **Mécanisme retenu** : jeton client signé HMAC, même format et même `SESSION_SECRET` que les sessions P0-S1, contenu
+  `{ typ, jti, cid, com, ver, exp }` (`typ` ≠ `role` : jamais confondu avec une session). En-tête
+  `Authorization: Bearer`. 30 jours, renouvelé par la page sous 15 jours. 1re preuve = le téléphone qui s'inscrit (le
+  serveur tire l'identifiant et renvoie le jeton de la NOUVELLE carte) ; preuves de remplacement sans SMS : **lien
+  d'accès à usage unique** montré en QR au comptoir (fiche client, 15 min, journalisé) ou envoyé par « Retrouver ma
+  carte » quand un prestataire est branché (24 h). Révocation : version d'accès par carte dans `meta`
+  (`acces_client:<commerce>:<client>`), incrémentée par le client (« Déconnecter tous mes appareils ») ou le gérant ;
+  usage unique des liens par `sessions_revoquees` (0005). Choix `meta` plutôt qu'une table : rien de neuf à
+  sauvegarder (14 tables), lisible par service_role seul, supprimée avec la carte (RGPD).
+- **Périmètre couvert** (mode strict) : vue complète de `GET /cartes/:id` (sans jeton : vue limitée = tampons + jeu du
+  jour ; `codeDuJour` inchangé, P0-S19 pourra s'appuyer sur `acces.jeton`), lus, profil, rattrapage (client), prénom,
+  message privé, données / suppression RGPD (jeton ET contact), tirage (le joueur = la carte du jeton, contact du
+  corps ignoré ; « 1 tirage / jour après visite validée » inchangé, testé), inscription d'un contact existant (409
+  sans carte ni identifiant, rien de modifié, aucun doublon), récupération (202 identique, lien d'accès seulement dans
+  le message au titulaire), liens courts `/c/<id>` (vue limitée ; `?a=` transmis). 401 uniforme que la carte existe
+  ou non ; échecs comptés dans `tentatives_auth` (portée `client`, clé `client-ip:<ip>`, 30 → blocage, séparé des PIN).
+- **Identifiants** : `cl-` + UUID v4 (`nouvelIdClient`, repli `getRandomValues` hors contexte sécurisé). Anciennes
+  cartes NON réécrites (aucune donnée modifiée) : **grâce jusqu'au 10/02/2027 00:00 Paris**
+  (`GRACE_ANCIENS_ID_JUSQU_AU`, 90 j après un déploiement supposé le 12/11/2026 — à décaler s'il glisse) : l'ancien
+  lien seul ouvre la vue limitée et donne un jeton (la page le demande seule, une fois par affichage), bandeau sur la
+  carte ; après, ancien lien seul → 404 comme une carte inconnue (un jeton déjà obtenu reste valable).
+- **Migration 0009** (`0009_auth_client.sql` + `.down.sql`) : contrainte `tentatives_auth.portee` élargie à `client`,
+  marqueur `auth_client_active()` (service_role seul) lu par `GET /sante/acces-client` ; RLS / revoke / grant comme
+  0005–0008. Testée aller / retour / rejeu sur PGlite. Sans elle : échecs client comptés en mémoire (comme sans 0006).
+  À appliquer APRÈS une sauvegarde (`scripts/sauvegarde-base.mjs`, documenté, **non exécuté**).
+- **Modes** (`AUTH_CLIENT`, `server/index.ts`) : `stricte` par défaut en production **si `SESSION_SECRET` existe**,
+  sinon `transition` avec avertissement ; `creerServeur` sans option = `transition` (jetons émis et vérifiés, accès
+  d'avant P0-S7 admis et compté dans `GET /sante/acces-client`). **Pourquoi ce défaut** : les suites existantes
+  (≈ 15 fichiers : tirage par contact seul, réinscription publique qui renvoie la carte, lecture par identifiant)
+  encodent exactement le comportement que le lot supprime, et la consigne interdit de modifier un test existant ;
+  elles tournent donc en mode transition (inchangées et vertes), le mode strict est couvert par les nouveaux tests et
+  par l'E2E. À trancher par l'orchestrateur : basculer ces suites en strict (modifier leurs appels) puis rendre
+  `stricte` le défaut de `creerServeur`.
+- **Front** : `src/lib/jetonCarte.ts` (jeton rangé par carte, expiration, repli mémoire), `avecJetonClient` /
+  `assurerJetonClient` (`src/data/jeuApi.ts`) : la page de jeu et la carte appellent l'API au travers d'une API qui
+  ajoute le jeton (les lignes `lancerTirage(api, …)` / `api.prenomCarte(…)` figées par `entree-qr-p1-c1` restent
+  identiques). Carte : vue limitée, échange du `?acces=` puis retrait de l'adresse, bandeau de grâce, « Sécurité de
+  ma carte ». Fiche client (gérant) : « Afficher le QR d'accès à sa carte », « Révoquer tous ses accès… ». Journal :
+  action `acces`. Chaînes client traduites (EN).
+- **Tests** : avant **830/830**. Après : **863/863** — `+33` dans `tests/auth-client-p0-s7.test.ts`
+  (refus sans preuve uniforme, preuve OK, expirée, falsifiée / autre carte / autre commerce / lien en Bearer, révoquée
+  par le client puis le commerce, lien comptoir 15 min / usage unique, renouvellement, ancien lien pendant puis après
+  la grâce, contact existant sans reprise, tirage sans / avec jeton et 1 / jour, récupération sans oracle avec lien
+  d'accès, 30 échecs → 429 persistant au redémarrage, énumération, mode transition, strict sans secret refusé,
+  migration 0009 PGlite aller / retour / rejeu / droits, stockage Supabase sans / avec 0009, logique front).
+  **Le KO** : `tests/sauvegarde-p0-s5.test.ts:95` fige la liste des migrations à `0001…0008` ; toute migration 0009
+  (exigée par le brief) le fait échouer, et aucun changement de code applicatif ne peut le satisfaire sans exclure
+  la 0009 de la restauration (ce qui serait un vrai bug). **Corrigé après le commit principal, commit séparé
+  « P0-S7 — Revue : liste des migrations du test de sauvegarde étendue à 0009 »** : la liste figée est un
+  inventaire des migrations existantes, pas une assertion de comportement — l'ajout de `'0009'` la met à jour
+  avec l'inventaire réel (la restauration couvre bien la 0009, vérifié par le test lui-même). `npm test` repassé
+  vert **863/863** après cette ligne.
+  `/sante` a ses clés figées (`securite-s1`) → état de l'accès client sur `GET /sante/acces-client` ; la ligne
+  « hors ligne » de `CartePublique` est figée (`chargement-p0-u1`) → gardée telle quelle.
+- **E2E** (`npm run test:e2e`, Chromium) : **2/2**. `tests-e2e/serveur.ts` passe en `authClient: 'stricte'` (helper,
+  rendu plus exigeant, pas plus permissif) : le parcours existant scan → inscription → visite → tirage → gain → carte
+  passe avec le jeton obtenu par la page. Nouveau `tests-e2e/acces-carte-p0-s7.spec.ts` (vue limitée sur un autre
+  appareil, QR d'accès → carte complète, lien retiré de l'adresse, 2e usage refusé) — il a trouvé un vrai défaut,
+  corrigé : un `?acces=` arrivé sur une carte déjà ouverte (même onglet) n'était pas lu.
+- **Vérifications** : `npm test` (typecheck serveur inclus) **863/863** après correction du pin (862/863 avant),
+  `npx tsc -p .` OK, `npm run build` OK, E2E 2/2.
+- **Non vérifié / limites** : rien contre Supabase réel (0009 non appliquée, PGlite seulement) ni en production ;
+  aucun SMS / e-mail réel ; `SESSION_SECRET` présent sur Render **non vérifié** — absent, la production resterait en
+  `transition` (avertissement au démarrage) : à vérifier avant de compter sur P0-S7 ; la caisse (code équipe) peut
+  appeler la route du QR d'accès mais seul l'écran fiche client (gérant) a le bouton ; l'inscription révèle toujours
+  qu'un contact a une carte dans CE commerce (409), sans code à usage unique (prestataire SMS / e-mail non branché) ;
+  un jeton volé sur le téléphone reste valable jusqu'à révocation / expiration ; deux échanges simultanés du même lien
+  d'accès peuvent tous deux réussir (fenêtre de quelques ms) — **corrigé ci-dessous (revue Codex, point 2)** ; rendu
+  de la vue limitée vérifié dans Chromium seulement (pas sur un vrai téléphone).
+- **Revue Codex (5 points, tous fondés, tous corrigés)** :
+  1. *[P1] Révocation contournée pendant la grâce* — `POST /cartes/:id/jeton` sans preuve délivrait un jeton à la
+     nouvelle version d'une ancienne carte révoquée. Correction (`server/app.ts`) : la branche « grâce » refuse (401
+     uniforme) dès que la version d'accès de la carte est > 0 ; une carte révoquée ne se rouvre que par un lien d'accès
+     (comptoir, « Retrouver ma carte »). `server/README.md` mis à jour.
+  2. *[P1] Lien à usage unique échangeable deux fois en concurrence* — `estRevoquee` et `revoquer` séparés par des
+     `await`. Correction : `reserverPendant` (exportée, `server/app.ts`) — `Set` des `jti` en cours d'échange, testé
+     et marqué de façon synchrone avant le 1er `await`, libéré en `finally` ; 2e échange concurrent → 401. La révocation
+     en base reste la garde durable. Limite documentée (`server/README.md`) : une seule instance (Render) ; à plusieurs
+     instances, il faudrait une consommation atomique en base. NB : avec SQLite, la course ne se produit pas (tout se
+     résout en microtâches) — elle demande la latence réseau de Supabase ; elle est donc reproduite par un test
+     unitaire à stockage lent (échoue sans réservation : les deux échanges passent), plus un test HTTP 4 × concurrent.
+  3. *[P1] Carte récupérée : impossible de rejouer* — la page de jeu ne connaissait pas la carte récupérée → ressaisie
+     du contact → 409. Correction : `memoriserJoueurCarte` (`src/data/jeuApi.ts`), appelée par `CartePublique` quand
+     la carte s'affiche EN ENTIER avec le jeton de ce téléphone : elle devient le joueur mémorisé de son commerce
+     (contact vide — le serveur ne le lit plus quand le jeton est là ; la dernière carte ouverte ainsi l'emporte,
+     « Ce n'est pas moi » reste possible). Le tirage passe par l'API enveloppée existante (`avecJetonClient`) : lignes
+     figées de `Jouer.tsx` (`lancerTirage(api, commerce, joueur.contact, joueur.prenom)`) inchangées.
+  4. *[P2] Jeton expiré : roue puis 401 sans issue* — `lancerTirage` signale `accesRefuse` sur 401 (champ ajouté
+     seulement dans ce cas : le `deepEqual` de `front-v2` reste vrai) ; `Jouer` oublie le jeton et affiche
+     `AccesCartePerdu` (message clair + lien « Retrouver ma carte » vers `#/carte/<id>`, dont la vue limitée porte le
+     formulaire). Chaînes traduites (EN). Serveur inchangé (401 reste 401).
+  5. *[P2] QR d'accès non régénérable* — `FicheClient.tsx` : bouton « Générer un nouveau lien d'accès » sous le QR
+     affiché. Choix documenté dans le code : l'ancien lien n'est pas révoqué (le serveur ne sait révoquer que la carte
+     entière), il reste à usage unique et expire à 15 min.
+- **Tests revue Codex** : avant **863/863** (+ E2E 2/2). Après : **870/870** (`npm test`, typecheck serveur inclus) —
+  `+7` dans `tests/auth-client-p0-s7.test.ts` (« P0-S7 — revue Codex ») : grâce perdue après révocation client puis
+  commerce (vérifié en échec sans la correction : 201 au lieu de 401) ; réservation synchrone à stockage lent ; 4
+  échanges HTTP simultanés → 1 seul 201 ; parcours QR comptoir → mémorisation → tirage 201 sans réinscription ;
+  règles de `memoriserJoueurCarte` ; jeton expiré → 401 + `accesRefuse` ; lecture du code (Jouer / FicheClient).
+  E2E **3/3** : nouveau test dans `tests-e2e/acces-carte-p0-s7.spec.ts` (QR du comptoir sur un nouveau téléphone →
+  « Tourner la roue du jour » → « Continuer avec ma carte » → gain ; puis accès retiré par le commerce → message
+  « Votre carte n'est plus ouverte sur ce téléphone » + « Retrouver ma carte ») — vérifié en échec sans la correction
+  du point 3 (timeout sur « Continuer »). Aucun test existant modifié. `npx tsc -p .` OK, `npm run build` OK.
+  Un `npm test` intermédiaire a eu 1 échec sur `avis-google-p1-b4` (« règle auto 4★ », 7,4 s, sans lien avec ce lot) :
+  28/28 seul, puis 870/870 sur deux exécutions complètes → instabilité de charge, pas une régression.
+- **Non vérifié (revue Codex)** : la course du point 2 contre un vrai Supabase (simulée par stockage lent) ; le cas
+  multi-instance ; le bouton de la fiche client n'est vérifié que par lecture de code (pas d'E2E du back-office).

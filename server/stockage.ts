@@ -23,8 +23,11 @@ export interface DemandeRattrapageTrace extends DemandeRattrapage {
   clientId: string
 }
 
-/** Secret visé par le dernier échec enregistré sur un compteur (P0-S2) : PIN admin, PIN commerce ou code équipe. */
-export type PorteeAuth = 'admin' | 'commerce' | 'equipe'
+/**
+ * Secret visé par le dernier échec enregistré sur un compteur (P0-S2) : PIN admin, PIN commerce ou code équipe ;
+ * `client` (P0-S7, migration 0009) : preuve d'accès à une carte de fidélité (jeton client, lien d'accès).
+ */
+export type PorteeAuth = 'admin' | 'commerce' | 'equipe' | 'client'
 
 /**
  * Compteur d'échecs d'authentification (migration 0006 : `tentatives_auth`). `cle` = `ip:<ip>` (tous secrets
@@ -62,6 +65,8 @@ export interface Stockage {
   readonly type: 'sqlite' | 'supabase'
   meta(cle: string): P<string | undefined>
   majMeta(cle: string, valeur: string): P<void>
+  /** Supprime une clé de `meta` (P0-S7 : version d'accès d'une carte supprimée) ; absente : rien. */
+  supprimerMeta(cle: string): P<void>
   commerces(): P<Commerce[]>
   commerce(id: string): P<Commerce | undefined>
   pin(id: string): P<Pin | undefined>
@@ -122,6 +127,11 @@ export interface Stockage {
   tentativesAuth(cle: string): P<TentativesAuth | undefined>
   enregistrerTentativesAuth(t: TentativesAuth, purgerAvant: string): P<void>
   effacerTentativesAuth(cle: string): P<void>
+  /**
+   * Migration 0009 (P0-S7) appliquée : `tentatives_auth` accepte la portée `client`. Toujours vrai sous SQLite.
+   * Supabase sans elle : les échecs d'accès client sont comptés en mémoire seulement (comme sans la 0006).
+   */
+  schemaAuthClient(): P<boolean>
   /**
    * Journal des envois de relances (migration 0007 : `envois`). Index unique (commerce, client, modèle, jour) sur les
    * lignes `en_cours` / `envoye` : une 2e réservation de la même relance le même jour lève ErreurConflit.
@@ -245,6 +255,7 @@ export function ouvrirStockage(fichier: string) {
   const q = {
     meta: db.prepare('SELECT valeur FROM meta WHERE cle = ?'),
     majMeta: db.prepare('INSERT INTO meta (cle, valeur) VALUES (?, ?) ON CONFLICT (cle) DO UPDATE SET valeur = excluded.valeur'),
+    supprimerMeta: db.prepare('DELETE FROM meta WHERE cle = ?'),
     commerces: db.prepare('SELECT donnees FROM commerces ORDER BY rowid'),
     commerce: db.prepare('SELECT donnees FROM commerces WHERE id = ?'),
     pin: db.prepare('SELECT pin_hash AS hash, pin_sel AS sel FROM commerces WHERE id = ?'),
@@ -313,6 +324,7 @@ export function ouvrirStockage(fichier: string) {
     type: 'sqlite' as const,
     meta: (cle: string) => (q.meta.get(cle) as { valeur: string } | undefined)?.valeur,
     majMeta: (cle: string, valeur: string) => void q.majMeta.run(cle, valeur),
+    supprimerMeta: (cle: string) => void q.supprimerMeta.run(cle),
 
     commerces: () => lire<Commerce>(q.commerces.all()),
     commerce: (id: string) => lire<Commerce>(q.commerce.all(id))[0],
@@ -374,6 +386,7 @@ export function ouvrirStockage(fichier: string) {
       q.majTentativesAuth.run(t.cle, t.portee, t.echecs, t.bloqueJusqua, t.derniereTentative)
     },
     effacerTentativesAuth: (cle: string) => void q.effacerTentativesAuth.run(cle),
+    schemaAuthClient: () => true,
     ajouterEnvoi: (e: EnvoiRelance) => inserer(q.ajoutEnvoi, e.id, e.commerceId, e.clientId, e.modele, e.canal, e.statut, e.jour, e.date, JSON.stringify(e)),
     majEnvoi: (e: EnvoiRelance) => inserer(q.majEnvoi, e.statut, JSON.stringify(e), e.id, e.commerceId),
     envois: (commerceId: string, limite: number, clientId?: string) =>

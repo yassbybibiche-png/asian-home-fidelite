@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, CommercePublic, MessageClient } from '../types'
-import { ErreurApi, type ClientApi } from '../data/api'
+import { ErreurApi, estVueLimitee, type AccesCarte, type ClientApi, type ReponseCarte } from '../data/api'
+import { assurerJetonClient, avecJetonClient, memoireJoueur, memoriserJoueurCarte } from '../data/jeuApi'
+import { hashSansLienAcces, idCarteDuParam, lienAccesDuHash, memoireJetons } from '../lib/jetonCarte'
 import { CarteFidelite } from '../components/CarteFidelite'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteCarte } from '../components/Squelette'
-import { BadgeDemo, BoutonCopier, EncartWallet, LienConfidentialite, MessageErreur, PiedPublic, telecharger } from '../components/ui'
+import { BadgeDemo, BoutonCopier, EncartWallet, LienConfidentialite, LogoCommerce, MessageErreur, PiedPublic, telecharger } from '../components/ui'
 import { dateRelative } from '../lib/format'
 import { historiqueCarte, messageRechercheCarte, type GainDuJour, type LotHistorique } from '../lib/carte'
 import { lienCourtCarte } from '../lib/relances'
@@ -191,34 +193,82 @@ function CarteLocale() {
   )
 }
 
+function stockageLocal(): Storage | null {
+  try {
+    return localStorage
+  } catch {
+    return null
+  }
+}
+
 /** Mode API : la carte vient du serveur (sans téléphone ni e-mail), rafraîchie au retour sur la page. */
-function CarteApi({ api }: { api: ClientApi }) {
+function CarteApi({ api: apiServeur }: { api: ClientApi }) {
   const { param } = useRoute()
-  const [donnees, setDonnees] = useState<{ client: Client; commerce: CommercePublic; menu: boolean; gainDuJour: GainDuJour | null; lots: LotHistorique[] } | null>(null)
+  // `#/carte/<id>?acces=<lien>` (P0-S7) : l'identifiant, et le lien d'accès à usage unique à échanger une fois.
+  const id = idCarteDuParam(param)
+  const jetons = useMemo(() => memoireJetons(stockageLocal()), [])
+  const api = useMemo(() => avecJetonClient(apiServeur, jetons), [apiServeur, jetons])
+  const essaisJeton = useRef(new Set<string>())
+  const [lienRefuse, setLienRefuse] = useState(false)
+  const [donnees, setDonnees] = useState<{
+    client: Client
+    commerce: CommercePublic
+    menu: boolean
+    gainDuJour: GainDuJour | null
+    lots: LotHistorique[]
+    acces?: AccesCarte
+  } | null>(null)
+  const [limitee, setLimitee] = useState<{ tampons: number; commerce: CommercePublic; gainDuJour: GainDuJour | null; acces: AccesCarte } | null>(null)
   const [erreur, setErreur] = useState<'introuvable' | 'inactif' | 'horsLigne' | null>(null)
   const { t } = useLangue()
 
   const charger = useCallback(() => {
-    if (!param) return setErreur('introuvable')
-    api.carte(param).then(
-      (r) => {
-        // Asian Home : le menu public affiche la vraie carte en repli tant que le
-        // commerçant n'a pas enregistré son propre menu — le lien est donc visible.
-        setDonnees({
-          client: r.client,
-          commerce: r.commerce,
-          menu: !!r.menuDisponible || estAsianHome(r.commerce),
-          // Gain de la roue du jour pas encore retiré (P1-C3) : rappelé sur la carte avec son code, valable aujourd'hui.
-          gainDuJour: r.jeu.codeDuJour && r.jeu.lotDuJour && !r.jeu.remisDuJour ? { lot: r.jeu.lotDuJour, code: r.jeu.codeDuJour } : null,
-          lots: r.historiqueLots ?? [],
-        })
-        setErreur(null)
-        // Messages affichés = lus (le badge « nouveau » reste visible pendant cette ouverture).
-        if (r.client.messages?.some((m) => !m.lu)) api.marquerLus(param).catch(() => {})
-      },
-      (e) => setErreur(e instanceof ErreurApi && e.statut === 404 ? 'introuvable' : e instanceof ErreurApi && e.statut === 409 ? 'inactif' : 'horsLigne'),
-    )
-  }, [api, param])
+    if (!id) return setErreur('introuvable')
+    // Relu à chaque chargement : le QR d'accès peut arriver sur une carte déjà ouverte (même onglet, nouveau fragment).
+    const lien = lienAccesDuHash(window.location.hash)
+    if (lien) {
+      // Usage unique : retiré de l'adresse avant même l'échange (ni historique, ni favori, ni partage).
+      window.history.replaceState(window.history.state, '', hashSansLienAcces(window.location.href))
+      setLienRefuse(false)
+    }
+    void (async () => {
+      const { lienRefuse: refuse } = await assurerJetonClient(api, jetons, id, { lien, dejaEssaye: essaisJeton.current })
+      if (refuse) setLienRefuse(true)
+      let r: ReponseCarte
+      try {
+        r = await api.carte(id)
+      } catch (e) {
+        // Jeton refusé (révoqué depuis un autre appareil, ou par le commerce) : oublié, la carte se relit sans.
+        if (!(e instanceof ErreurApi && e.statut === 401 && jetons.lire(id))) throw e
+        jetons.ecrire(id, null)
+        r = await api.carte(id)
+      }
+      // Gain de la roue du jour pas encore retiré (P1-C3) : rappelé sur la carte avec son code, valable aujourd'hui.
+      const gainDuJour = r.jeu.codeDuJour && r.jeu.lotDuJour && !r.jeu.remisDuJour ? { lot: r.jeu.lotDuJour, code: r.jeu.codeDuJour } : null
+      setErreur(null)
+      if (estVueLimitee(r)) {
+        setDonnees(null)
+        setLimitee({ tampons: r.client.tampons, commerce: r.commerce, gainDuJour, acces: r.acces })
+        return
+      }
+      setLimitee(null)
+      // Carte ouverte avec le jeton de ce téléphone (P0-S7, ex. récupérée au comptoir) : la page de jeu la reprend.
+      if (r.acces?.jeton) memoriserJoueurCarte(memoireJoueur(stockageLocal(), r.commerce.id), jetons, r.client)
+      // Asian Home : le menu public affiche la vraie carte en repli tant que le
+      // commerçant n'a pas enregistré son propre menu — le lien est donc visible.
+      setDonnees({
+        client: r.client,
+        commerce: r.commerce,
+        menu: !!r.menuDisponible || estAsianHome(r.commerce),
+        gainDuJour,
+        lots: r.historiqueLots ?? [],
+        acces: r.acces,
+      })
+      // Messages affichés = lus (le badge « nouveau » reste visible pendant cette ouverture).
+      if (r.client.messages?.some((m) => !m.lu)) api.marquerLus(id).catch(() => {})
+    })().catch((e) => setErreur(e instanceof ErreurApi && e.statut === 404 ? 'introuvable' : e instanceof ErreurApi && e.statut === 409 ? 'inactif' : 'horsLigne'))
+    // `param` (et non `id` seul) : `#/carte/<id>?acces=…` sur la même carte doit relancer le chargement.
+  }, [api, id, jetons, param])
 
   useEffect(() => {
     charger()
@@ -240,6 +290,8 @@ function CarteApi({ api }: { api: ClientApi }) {
     )
   if (erreur === 'inactif') return <MessagePublic titre="Carte indisponible">La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
   // Hors ligne sans carte déjà affichée : message clair (une carte déjà affichée reste visible).
+  // Vue limitée (P0-S7) déjà affichée : elle reste affichée hors ligne, comme une carte complète.
+  if (limitee) return <VueLimitee api={api} {...limitee} lienRefuse={lienRefuse} />
   if (erreur === 'horsLigne' && !donnees) return <HorsLignePublic onReessayer={charger} />
   if (!donnees) return <SqueletteCarte libelle={t('Un instant, votre carte arrive.')} />
   return (
@@ -253,8 +305,10 @@ function CarteApi({ api }: { api: ClientApi }) {
       lienCourt={lienCourtCarte(window.location.origin, donnees.client.id)}
       actions={
         <>
+          {donnees.acces?.ancienLien && donnees.acces.graceJusquAu && <BandeauGrace jusquAu={donnees.acces.graceJusquAu} />}
           <FormulairesProgramme api={api} client={donnees.client} commerce={donnees.commerce} onMaj={charger} />
           <MesDonnees api={api} client={donnees.client} commerce={donnees.commerce} onMaj={charger} />
+          {donnees.acces?.jeton && <DeconnecterAppareils api={api} clientId={donnees.client.id} jeton={jetons.lire(donnees.client.id)?.jeton ?? null} onFait={() => (jetons.ecrire(donnees.client.id, null), charger())} />}
         </>
       }
       pied={
@@ -449,6 +503,115 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
           </button>
         </div>
         {message && <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">{message}</p>}
+        {erreur && <MessageErreur>{erreur}</MessageErreur>}
+      </div>
+    </details>
+  )
+}
+
+/**
+ * Vue limitée (P0-S7) : carte ouverte SANS preuve d'accès sur ce téléphone (lien seul, lien court d'un SMS de relance,
+ * autre téléphone) — le compteur de tampons et le gain du jour seulement. Le reste (prénom, points, messages,
+ * historique, formulaires) demande le jeton de ce téléphone : lien d'accès du comptoir ou « Retrouver ma carte ».
+ */
+function VueLimitee({
+  api,
+  tampons,
+  commerce,
+  gainDuJour,
+  acces,
+  lienRefuse,
+}: {
+  api: ClientApi
+  tampons: number
+  commerce: CommercePublic
+  gainDuJour: GainDuJour | null
+  acces: AccesCarte
+  lienRefuse: boolean
+}) {
+  const { t } = useLangue()
+  if (!commerce.actif) return <MessagePublic titre={commerce.nom}>La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
+  const affiches = Math.min(tampons, commerce.seuilTampons)
+  const date = acces.graceJusquAu ? new Date(acces.graceJusquAu).toLocaleDateString('fr-FR') : ''
+  return (
+    <>
+      <div className="mx-auto max-w-md space-y-4 px-4 pt-2 pb-12">
+        <CommutateurLangue />
+        <section className="carte space-y-2 text-center" data-vue="limitee">
+          <div className="flex justify-center">
+            <LogoCommerce commerce={commerce} taille="md" />
+          </div>
+          <h1 className="titre-carte">{commerce.nom}</h1>
+          <p className="text-3xl font-bold text-gray-900" data-tampons aria-label={`Tampons : ${affiches} sur ${commerce.seuilTampons}`}>
+            {affiches} / {commerce.seuilTampons}
+          </p>
+          <p className="text-sm text-gray-600">{t('tampons sur cette carte')}</p>
+          {gainDuJour && (
+            <p className="alerte-succes">
+              {t('Gain du jour à retirer : {lot}, code {code}', { lot: gainDuJour.lot, code: gainDuJour.code })}
+            </p>
+          )}
+        </section>
+        <section className="carte space-y-2" data-acces="limite">
+          <h2 className="titre-carte">{t('Accès limité sur ce téléphone')}</h2>
+          {lienRefuse && (
+            <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="alert">
+              {t('Ce lien d’accès a expiré ou a déjà servi : demandez-en un nouveau.')}
+            </p>
+          )}
+          <p className="text-sm text-gray-700">
+            {t('Pour voir votre carte complète (points, messages, historique), ouvrez-la sur le téléphone utilisé à l’inscription, ou demandez au comptoir de vous montrer le QR d’accès à votre carte.')}
+          </p>
+          {acces.ancienLien && date && <p className="text-sm text-gray-700">{t('Ce lien ne suffira plus à ouvrir la carte après le {date}.', { date })}</p>}
+        </section>
+        <PiedPublic commerceId={commerce.id} />
+      </div>
+      <RetrouverCarte api={api} />
+    </>
+  )
+}
+
+/** Carte à ancien identifiant (P0-S7) : protégée sur ce téléphone ; son ancien lien seul n'ouvrira plus rien après la grâce. */
+function BandeauGrace({ jusquAu }: { jusquAu: string }) {
+  const { t } = useLangue()
+  return (
+    <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="note" data-grace>
+      {t('Votre carte est maintenant protégée sur ce téléphone. Après le {date}, son ancien lien ou son ancien QR ne l’ouvriront plus seuls : gardez-la ici (ou ajoutez-la à l’écran d’accueil).', {
+        date: new Date(jusquAu).toLocaleDateString('fr-FR'),
+      })}
+    </p>
+  )
+}
+
+/** « Déconnecter tous mes appareils » (P0-S7) : révoque tous les jetons de la carte, celui de ce téléphone compris. */
+function DeconnecterAppareils({ api, clientId, jeton, onFait }: { api: ClientApi; clientId: string; jeton: string | null; onFait(): void }) {
+  const [enCours, setEnCours] = useState(false)
+  const [erreur, setErreur] = useState('')
+  const { t } = useLangue()
+
+  async function agir() {
+    if (!jeton || enCours) return
+    if (!window.confirm(t('Déconnecter cette carte de tous les téléphones, celui-ci compris ? Pour la rouvrir en entier, il faudra un lien d’accès du comptoir.'))) return
+    setEnCours(true)
+    setErreur('')
+    try {
+      await api.revoquerCarte(clientId, jeton)
+      onFait()
+    } catch (err) {
+      setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
+    } finally {
+      setEnCours(false)
+    }
+  }
+
+  return (
+    <details className="carte">
+      <summary className="titre-carte min-h-11 cursor-pointer">{t('Sécurité de ma carte')}</summary>
+      <div className="mt-3 space-y-3">
+        <p className="text-sm text-gray-600">{t('Téléphone perdu ou carte ouverte ailleurs ? Déconnectez-la partout : seul un lien d’accès du comptoir la rouvrira.')}</p>
+        <button type="button" className="bouton-secondaire min-h-11 w-full" disabled={enCours || !jeton} onClick={() => void agir()}>
+          {t('Déconnecter tous mes appareils')}
+        </button>
         {erreur && <MessageErreur>{erreur}</MessageErreur>}
       </div>
     </details>
