@@ -131,9 +131,10 @@ export type ModeleRelance = 'bienvenue' | 'proche' | 'inactif' | 'anniversaire'
 /**
  * Statut d'une tentative de relance : `en_cours` (réservée, envoi en cours), `envoye` (accepté par le prestataire),
  * `refuse` (rien envoyé : pas de consentement, pas de contact, déjà envoyée aujourd'hui), `erreur` (le prestataire a
- * refusé ou ne répond pas), `non_branche` (aucun prestataire configuré : 501, rien envoyé).
+ * refusé ou ne répond pas), `non_branche` (aucun prestataire configuré : 501, rien envoyé), `incertain` (délai
+ * dépassé / appel abandonné : le message a PEUT-ÊTRE été envoyé — jamais renvoyé automatiquement, point Codex 10).
  */
-export type StatutEnvoi = 'en_cours' | 'envoye' | 'refuse' | 'erreur' | 'non_branche' | 'test'
+export type StatutEnvoi = 'en_cours' | 'envoye' | 'refuse' | 'erreur' | 'non_branche' | 'test' | 'incertain'
 
 /** Journal des envois (migration 0007 : table `envois`). Jamais le téléphone ni l'e-mail, jamais le texte complet. */
 export interface EnvoiRelance {
@@ -358,6 +359,17 @@ export interface Menu {
   majLe: string
 }
 
+/** Règlement de parrainage décidé à la 1re visite du filleul (revue Codex finale) : montants, plafond et date figés. */
+export interface DecisionParrainage {
+  parrainId: string
+  pointsFilleul: number
+  /** Points effectivement dus au parrain (0 s'il était au plafond annuel). */
+  pointsParrain: number
+  auPlafond: boolean
+  /** Date (ISO) du passage du filleul : date du crédit, de `parrainagesGagnes` et de la trace d'audit. */
+  date: string
+}
+
 export interface Client {
   id: string
   commerceId: string
@@ -405,6 +417,18 @@ export interface Client {
   parrainagePaye?: boolean
   /** Dates (ISO) des parrainages réussis de ce client (plafond annuel). */
   parrainagesGagnes?: string[]
+  /**
+   * Côté parrain (point Codex 2) : ids des filleuls dont le crédit a été versé, écrits dans le MÊME objet que les
+   * points (une seule ligne, donc atomique). Absent sur les parrains crédités avant ce marqueur.
+   */
+  filleulsRegles?: string[]
+  /**
+   * Côté filleul (revue Codex finale) : décision de règlement prise à sa 1re visite, écrite avec ses points de
+   * parrainage. Une reprise (panne après l'écriture du filleul) exécute CETTE décision — jamais la configuration ni la
+   * date du jour du rejeu. Effacée au passage suivant une fois la trace d'audit écrite. Interne : ni carte publique
+   * ni caisse.
+   */
+  parrainageEnAttente?: DecisionParrainage
   /** Paliers déjà remis au comptoir (seuils). */
   paliersOfferts?: number[]
   /** Récompenses gagnées, à retirer au comptoir. */

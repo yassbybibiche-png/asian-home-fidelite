@@ -31,8 +31,8 @@ if (!adminPin) {
 if (!/^\d{4,12}$/.test(adminPin)) arreter('ADMIN_PIN doit contenir 4 à 12 chiffres.')
 if (production && (adminPin.length < 8 || /^(\d)\1+$/.test(adminPin))) arreter('ADMIN_PIN trop simple pour la production : 8 chiffres minimum, pas tous identiques.')
 
-// Jetons de session (P0-S1). Absent en production : on démarre QUAND MÊME (sinon le déploiement casserait avant que
-// la variable soit créée sur Render) — POST /api/v1/sessions répond 503 et le front reste sur le PIN en en-tête.
+// Jetons de session (P0-S1) et jetons client (P0-S7) : tous deux signés avec SESSION_SECRET. Obligatoire en production
+// (correction Codex point 1) : sans elle, l'authentification client serait dégradée. Hors production : secret éphémère.
 let secretSession = env.SESSION_SECRET?.trim() || undefined
 if (secretSession && secretSession.length < 32) {
   if (production) arreter('SESSION_SECRET trop court : 32 caractères minimum (ex. `openssl rand -base64 48`).')
@@ -40,26 +40,26 @@ if (secretSession && secretSession.length < 32) {
 }
 if (!secretSession) {
   if (production) {
-    console.warn('[serveur] SESSION_SECRET absente : jetons de session DÉSACTIVÉS (POST /api/v1/sessions → 503), le PIN en en-tête reste utilisé. Créez la variable sur Render.')
-  } else {
-    secretSession = randomBytes(32).toString('base64url')
-    console.warn('[serveur] SESSION_SECRET absente : secret de session ÉPHÉMÈRE de développement (les sessions tombent à chaque redémarrage).')
+    arreter(
+      'SESSION_SECRET est obligatoire en production : elle signe les jetons de session (commerçant, équipe, admin) et les jetons client des cartes ; sans elle, l’authentification client serait dégradée (lien ou contact seuls). Créez-la (32 caractères minimum, ex. `openssl rand -base64 48`) dans les variables d’environnement du service sur Render, puis redéployez.',
+    )
   }
+  secretSession = randomBytes(32).toString('base64url')
+  console.warn('[serveur] SESSION_SECRET absente : secret de session ÉPHÉMÈRE de développement (les sessions tombent à chaque redémarrage).')
 }
 
 // Accès client aux cartes (P0-S7, server/README.md « Accès client ») : `stricte` = jeton client exigé ; `transition` =
-// jetons émis et vérifiés, mais l'accès d'avant P0-S7 (lien ou contact seuls) reste admis. Défaut : `stricte` en
-// production quand SESSION_SECRET existe (les jetons en dépendent), `transition` sinon.
+// jetons émis et vérifiés, mais l'accès d'avant P0-S7 (lien ou contact seuls) reste admis. Production : `stricte`
+// imposé (transition refusée, correction Codex point 1). Hors production : `transition` par défaut.
 const authClientDemande = env.AUTH_CLIENT?.trim()
 if (authClientDemande && authClientDemande !== 'stricte' && authClientDemande !== 'transition') arreter('AUTH_CLIENT doit valoir « stricte » ou « transition ».')
+if (authClientDemande === 'transition' && production) {
+  arreter('AUTH_CLIENT=transition est refusé en production : le mode transition laisserait le lien ou le contact seuls ouvrir une carte. Retirez AUTH_CLIENT (défaut : stricte) ou mettez AUTH_CLIENT=stricte.')
+}
 if (authClientDemande === 'stricte' && !secretSession) arreter('AUTH_CLIENT=stricte exige SESSION_SECRET (signature des jetons client).')
-const authClient: 'stricte' | 'transition' = (authClientDemande as 'stricte' | 'transition' | undefined) ?? (production && secretSession ? 'stricte' : 'transition')
+const authClient: 'stricte' | 'transition' = (authClientDemande as 'stricte' | 'transition' | undefined) ?? (production ? 'stricte' : 'transition')
 if (authClient === 'transition') {
-  console.warn(
-    production
-      ? '[serveur] ACCÈS CLIENT EN MODE TRANSITION : le lien ou le contact seuls ouvrent encore une carte (comportement d’avant P0-S7). Passer en mode strict dès que /api/v1/sante → authClient.accesSansJeton reste à 0.'
-      : '[serveur] Accès client en mode transition (développement) : AUTH_CLIENT=stricte pour essayer le mode de production.',
-  )
+  console.warn('[serveur] Accès client en mode transition (développement) : AUTH_CLIENT=stricte pour essayer le mode de production.')
 }
 
 // CORS strict (P0-S4) : seule l'origine CORS_ORIGIN peut appeler l'API depuis un autre site. Absente : '*' comme avant,

@@ -19,6 +19,7 @@ const COULEUR_STATUT: Record<EnvoiRelance['statut'], string> = {
   erreur: 'bg-red-100 text-red-900',
   non_branche: 'bg-gray-200 text-gray-800',
   test: 'bg-violet-100 text-violet-900',
+  incertain: 'bg-orange-100 text-orange-900',
 }
 
 /** Journal des envois de relances (qui, quand, modèle, canal, statut) — partagé avec la fiche client. */

@@ -17,17 +17,25 @@ const RACINE = join(import.meta.dirname, '..')
 const dossier = mkdtempSync(join(tmpdir(), 'fidelite-p0s9-'))
 after(() => rmSync(dossier, { recursive: true, force: true }))
 
-/** Lance `node server/index.ts` en enfant, avec l'environnement donné (sans rien hériter : insensible à un `.env`). */
-function lancer(variables: Record<string, string>) {
-  const env: Record<string, string> = {
+/** Valeur à passer dans `variables` pour RETIRER une variable par défaut de l'environnement enfant. */
+const RETIREE = Symbol('retirée')
+
+/** Lance `node server/index.ts` en enfant, avec l'environnement donné (sans rien hériter : insensible à un `.env`).
+ *  SESSION_SECRET est fourni par défaut (obligatoire en production depuis la correction Codex point 1) : le refus
+ *  Supabase reste ainsi le premier échec atteint ; `SESSION_SECRET: RETIREE` le retire. */
+function lancer(variables: Record<string, string | typeof RETIREE>) {
+  const complet: Record<string, string | typeof RETIREE> = {
     PATH: process.env.PATH ?? '',
     ADMIN_PIN: '12345678',
     PIN_ASIAN_HOME: '1234',
+    SESSION_SECRET: 'secret-de-test-p0-s9'.padEnd(40, 'x'),
     DB_FILE: join(dossier, `db-${Math.random().toString(36).slice(2)}.db`),
     STATIC_DIR: join(dossier, 'pas-de-front'),
     PORT: '0',
     ...variables,
   }
+  const env: Record<string, string> = {}
+  for (const [cle, valeur] of Object.entries(complet)) if (valeur !== RETIREE) env[cle] = valeur
   const enfant = spawn(process.execPath, [join(RACINE, 'server', 'index.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   let sortie = ''
   enfant.stdout.on('data', (d) => (sortie += d))
@@ -92,6 +100,35 @@ describe('P0-S9 : server/index.ts refuse SQLite en production', () => {
       assert.equal((await l.resultat).demarre, true, l.sortie())
       const sortie = await attendre(l, /mode production/)
       assert.doesNotMatch(sortie, /Supabase est obligatoire/)
+      assert.doesNotMatch(sortie, /MODE TRANSITION/i)
+    } finally {
+      l.enfant.kill()
+      await faux.fermer()
+    }
+  })
+
+  test('production AVEC Supabase mais SANS SESSION_SECRET → refus de démarrer (correction Codex point 1)', async () => {
+    const faux = await demarrerFauxSupabaseHttp()
+    const l = lancer({ NODE_ENV: 'production', SUPABASE_URL: faux.url, SUPABASE_SERVICE_ROLE_KEY: 'cle-service-factice-test', SESSION_SECRET: RETIREE })
+    try {
+      const r = await l.resultat
+      assert.equal(r.demarre, false, l.sortie())
+      assert.equal(r.code, 1)
+      assert.match(l.sortie(), /SESSION_SECRET est obligatoire en production/)
+    } finally {
+      l.enfant.kill()
+      await faux.fermer()
+    }
+  })
+
+  test('production + Supabase + SESSION_SECRET + AUTH_CLIENT=transition → refus de démarrer (correction Codex point 1)', async () => {
+    const faux = await demarrerFauxSupabaseHttp()
+    const l = lancer({ NODE_ENV: 'production', SUPABASE_URL: faux.url, SUPABASE_SERVICE_ROLE_KEY: 'cle-service-factice-test', AUTH_CLIENT: 'transition' })
+    try {
+      const r = await l.resultat
+      assert.equal(r.demarre, false, l.sortie())
+      assert.equal(r.code, 1)
+      assert.match(l.sortie(), /AUTH_CLIENT=transition est refusé en production/)
     } finally {
       l.enfant.kill()
       await faux.fermer()

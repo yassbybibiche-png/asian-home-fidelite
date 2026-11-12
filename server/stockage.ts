@@ -76,6 +76,11 @@ export interface Stockage {
   readonly type: 'sqlite' | 'supabase'
   meta(cle: string): P<string | undefined>
   majMeta(cle: string, valeur: string): P<void>
+  /**
+   * Écriture conditionnelle (revue Codex, rotation du PIN) : écrit `valeur` seulement si la valeur actuelle est encore
+   * `attendue` (undefined = clé absente). Une seule requête, atomique pour la base ; false = changée entre-temps.
+   */
+  majMetaSi(cle: string, attendue: string | undefined, valeur: string): P<boolean>
   /** Supprime une clé de `meta` (P0-S7 : version d'accès d'une carte supprimée) ; absente : rien. */
   supprimerMeta(cle: string): P<void>
   commerces(): P<Commerce[]>
@@ -89,9 +94,23 @@ export interface Stockage {
    */
   majCommerce(c: Commerce): P<void>
   majPin(id: string, pin: Pin): P<void>
+  /**
+   * Remplace le PIN seulement si le hash et le sel stockés sont encore `attendu` (revue Codex : rotation, re-hachage).
+   * Une seule requête, atomique pour la base ; false = PIN changé entre-temps (ou commerce absent), rien n'est écrit.
+   */
+  majPinSi(id: string, attendu: Pin, pin: Pin): P<boolean>
   clients(commerceId: string): P<Client[]>
   client(commerceId: string, id: string): P<Client | undefined>
   clientParContact(commerceId: string, contact: { telephone?: string; email?: string }): P<Client | undefined>
+  /**
+   * Recherche caisse par numéro (point Codex 8) : filtrée en base sur `cle_contact`, sans lire tous les clients.
+   * Renvoie, dans l'ordre de `clients()`, un SUR-ENSEMBLE des clients que `correspondRecherche(c, saisie)` accepte
+   * quand `chiffresRecherche(saisie) === chiffres` (`texte` = saisie sans espaces autour, en minuscules) : clé qui
+   * contient `chiffres` (téléphone) ou `texte` (e-mail : la clé d'un client e-mail est son e-mail en minuscules),
+   * prénom contenant un chiffre, et client ayant à la fois téléphone et e-mail (sa clé est l'e-mail : son numéro
+   * n'est pas dans la colonne). L'appelant refiltre avec `correspondRecherche` : résultats, ordre et total identiques.
+   */
+  clientsCandidatsNumero(commerceId: string, chiffres: string, texte: string): P<Client[]>
   ajouterClient(c: Client): P<void>
   majClient(c: Client): P<void>
   tirages(commerceId: string): P<Tirage[]>
@@ -113,6 +132,8 @@ export interface Stockage {
   membres(commerceId: string): P<MembreStocke[]>
   ajouterMembre(m: MembreEquipe, code: Pin): P<void>
   majMembre(m: MembreEquipe, code?: Pin): P<void>
+  /** Comme `majPinSi`, pour le code d'un membre (re-hachage) : `donnees` n'est pas touché. false = code changé entre-temps. */
+  majCodeMembreSi(commerceId: string, id: string, attendu: Pin, code: Pin): P<boolean>
   supprimerMembre(commerceId: string, id: string): P<void>
   /** Journal d'audit, du plus récent au plus ancien. */
   journal(commerceId: string, limite: number): P<EntreeJournal[]>
@@ -130,6 +151,8 @@ export interface Stockage {
    * Supabase sans les tables lève ErreurMigrationManquante ; le serveur refuse de démarrer en Supabase sans la 0004.
    */
   ajouterParrainage(p: Parrainage): P<void>
+  /** Trace de parrainage de ce filleul, s'il y en a une (point Codex 2 : trace présente = règlement terminé). */
+  parrainageDuFilleul(commerceId: string, filleulId: string): P<Parrainage | undefined>
   ajouterDemandeRattrapage(d: DemandeRattrapageTrace): P<void>
   /** Tables de la migration 0004 présentes (toujours vrai sous SQLite). */
   schemaProgramme(): P<boolean>
@@ -295,6 +318,8 @@ export function ouvrirStockage(fichier: string) {
   const q = {
     meta: db.prepare('SELECT valeur FROM meta WHERE cle = ?'),
     majMeta: db.prepare('INSERT INTO meta (cle, valeur) VALUES (?, ?) ON CONFLICT (cle) DO UPDATE SET valeur = excluded.valeur'),
+    insererMetaSiAbsente: db.prepare('INSERT INTO meta (cle, valeur) VALUES (?, ?) ON CONFLICT (cle) DO NOTHING'),
+    majMetaSi: db.prepare('UPDATE meta SET valeur = ? WHERE cle = ? AND valeur = ?'),
     supprimerMeta: db.prepare('DELETE FROM meta WHERE cle = ?'),
     commerces: db.prepare('SELECT donnees FROM commerces ORDER BY rowid'),
     commerce: db.prepare('SELECT donnees FROM commerces WHERE id = ?'),
@@ -302,9 +327,17 @@ export function ouvrirStockage(fichier: string) {
     ajoutCommerce: db.prepare('INSERT INTO commerces (id, donnees, pin_hash, pin_sel) VALUES (?, ?, ?, ?)'),
     majCommerce: db.prepare('UPDATE commerces SET donnees = ? WHERE id = ?'),
     majPin: db.prepare('UPDATE commerces SET pin_hash = ?, pin_sel = ? WHERE id = ?'),
+    majPinSi: db.prepare('UPDATE commerces SET pin_hash = ?, pin_sel = ? WHERE id = ? AND pin_hash = ? AND pin_sel = ?'),
     clients: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? ORDER BY rowid'),
     client: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? AND id = ?'),
     clientParCle: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? AND cle_contact = ?'),
+    // `instr` (et non LIKE) : sous-chaîne exacte, sensible à la casse comme `includes` (clés déjà en minuscules).
+    candidatsNumero: db.prepare(
+      `SELECT donnees FROM clients WHERE commerce_id = ? AND (instr(cle_contact, ?) > 0 OR instr(cle_contact, ?) > 0
+        OR json_extract(donnees, '$.prenom') GLOB '*[0-9]*'
+        OR (json_extract(donnees, '$.telephone') IS NOT NULL AND json_extract(donnees, '$.email') IS NOT NULL))
+       ORDER BY rowid`,
+    ),
     ajoutClient: db.prepare('INSERT INTO clients (id, commerce_id, cle_contact, donnees) VALUES (?, ?, ?, ?)'),
     majClient: db.prepare('UPDATE clients SET donnees = ? WHERE id = ?'),
     tirages: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? ORDER BY date DESC'),
@@ -320,12 +353,14 @@ export function ouvrirStockage(fichier: string) {
     ajoutMembre: db.prepare('INSERT INTO equipe (id, commerce_id, donnees, code_hash, code_sel) VALUES (?, ?, ?, ?, ?)'),
     majMembre: db.prepare('UPDATE equipe SET donnees = ? WHERE id = ? AND commerce_id = ?'),
     majCodeMembre: db.prepare('UPDATE equipe SET code_hash = ?, code_sel = ? WHERE id = ? AND commerce_id = ?'),
+    majCodeMembreSi: db.prepare('UPDATE equipe SET code_hash = ?, code_sel = ? WHERE id = ? AND commerce_id = ? AND code_hash = ? AND code_sel = ?'),
     supprimerMembre: db.prepare('DELETE FROM equipe WHERE commerce_id = ? AND id = ?'),
     journal: db.prepare('SELECT donnees FROM journal WHERE commerce_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
     ajoutJournal: db.prepare('INSERT INTO journal (id, commerce_id, date, donnees) VALUES (?, ?, ?, ?)'),
     menu: db.prepare('SELECT donnees FROM menus WHERE commerce_id = ?'),
     majMenu: db.prepare('INSERT INTO menus (commerce_id, donnees) VALUES (?, ?) ON CONFLICT (commerce_id) DO UPDATE SET donnees = excluded.donnees'),
     ajoutParrainage: db.prepare('INSERT INTO parrainages (id, commerce_id, parrain_id, filleul_id, date, donnees) VALUES (?, ?, ?, ?, ?, ?)'),
+    parrainageFilleul: db.prepare('SELECT donnees FROM parrainages WHERE commerce_id = ? AND filleul_id = ? LIMIT 1'),
     ajoutRattrapage: db.prepare('INSERT INTO demandes_rattrapage (id, commerce_id, client_id, date, donnees) VALUES (?, ?, ?, ?, ?)'),
     revoquerSession: db.prepare('INSERT INTO sessions_revoquees (jti, expire_le) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING'),
     purgerRevocations: db.prepare('DELETE FROM sessions_revoquees WHERE expire_le < ?'),
@@ -372,6 +407,8 @@ export function ouvrirStockage(fichier: string) {
     type: 'sqlite' as const,
     meta: (cle: string) => (q.meta.get(cle) as { valeur: string } | undefined)?.valeur,
     majMeta: (cle: string, valeur: string) => void q.majMeta.run(cle, valeur),
+    majMetaSi: (cle: string, attendue: string | undefined, valeur: string) =>
+      Number((attendue === undefined ? q.insererMetaSiAbsente.run(cle, valeur) : q.majMetaSi.run(valeur, cle, attendue)).changes) > 0,
     supprimerMeta: (cle: string) => void q.supprimerMeta.run(cle),
 
     commerces: () => lire<Commerce>(q.commerces.all()),
@@ -380,12 +417,14 @@ export function ouvrirStockage(fichier: string) {
     ajouterCommerce: (c: Commerce, pin: Pin) => inserer(q.ajoutCommerce, c.id, JSON.stringify(c), pin.hash, pin.sel),
     majCommerce: (c: Commerce) => void q.majCommerce.run(JSON.stringify(c), c.id),
     majPin: (id: string, pin: Pin) => void q.majPin.run(pin.hash, pin.sel, id),
+    majPinSi: (id: string, attendu: Pin, pin: Pin) => Number(q.majPinSi.run(pin.hash, pin.sel, id, attendu.hash, attendu.sel).changes) > 0,
 
     clients: (commerceId: string) => lire<Client>(q.clients.all(commerceId)),
     client: (commerceId: string, id: string) => lire<Client>(q.client.all(commerceId, id))[0],
     /** Déduplication : même règle que le front (`cleContact` : 0033 / +33 / 06…, e-mail en minuscules). */
     clientParContact: (commerceId: string, contact: { telephone?: string; email?: string }) =>
       lire<Client>(q.clientParCle.all(commerceId, cleContact(contact)))[0],
+    clientsCandidatsNumero: (commerceId: string, chiffres: string, texte: string) => lire<Client>(q.candidatsNumero.all(commerceId, chiffres, texte)),
     ajouterClient: (c: Client) => inserer(q.ajoutClient, c.id, c.commerceId, cleContact(c), JSON.stringify(c)),
     majClient: (c: Client) => void q.majClient.run(JSON.stringify(c), c.id),
 
@@ -410,6 +449,8 @@ export function ouvrirStockage(fichier: string) {
       q.majMembre.run(JSON.stringify(m), m.id, m.commerceId)
       if (code) q.majCodeMembre.run(code.hash, code.sel, m.id, m.commerceId)
     },
+    majCodeMembreSi: (commerceId: string, id: string, attendu: Pin, code: Pin) =>
+      Number(q.majCodeMembreSi.run(code.hash, code.sel, id, commerceId, attendu.hash, attendu.sel).changes) > 0,
     supprimerMembre: (commerceId: string, id: string) => void q.supprimerMembre.run(commerceId, id),
     journal: (commerceId: string, limite: number) => lire<EntreeJournal>(q.journal.all(commerceId, limite)),
     ajouterJournal: (e: EntreeJournal) => inserer(q.ajoutJournal, e.id, e.commerceId, e.date, JSON.stringify(e)),
@@ -417,6 +458,7 @@ export function ouvrirStockage(fichier: string) {
     majMenu: (m: Menu) => void q.majMenu.run(m.commerceId, JSON.stringify(m)),
     schemaCartiz: () => true,
     ajouterParrainage: (p: Parrainage) => inserer(q.ajoutParrainage, p.id, p.commerceId, p.parrainId, p.filleulId, p.date, JSON.stringify(p)),
+    parrainageDuFilleul: (commerceId: string, filleulId: string) => lire<Parrainage>(q.parrainageFilleul.all(commerceId, filleulId))[0],
     ajouterDemandeRattrapage: (d: DemandeRattrapageTrace) => inserer(q.ajoutRattrapage, d.id, d.commerceId, d.clientId, d.date, JSON.stringify(d)),
     schemaProgramme: () => true,
     // Dates ISO UTC (`toISOString`) : l'ordre alphabétique est l'ordre chronologique.
