@@ -14,7 +14,7 @@ voient enfin **les mêmes données**. Une seule instance Node pour tous les comm
 | `server/index.ts` | Point d'entrée (`npm run serveur`) : variables d'environnement, fuseau, démarrage. |
 | `server/app.ts` | Routes `/api/v1`, PIN, anti-bruteforce, validation, service du front compilé (CSV : `src/lib/csv.ts`, partagé avec le front depuis la V2). |
 | `server/logs.ts` | **P2-Q6** : logs structurés JSON — une ligne par réponse terminée (niveau, horodatage, route masquée, statut, durée) ; jamais de secret, PIN, jeton, téléphone/e-mail brut ni identifiant de carte ou de client brut (empreinte SHA-256). Voir « Logs structurés et alertes ». |
-| `server/alertes.ts` | **Item E** : alerte e-mail sur rafale de 5xx (> 10 en 15 min, 1 par heure max), inactive sans `ALERTE_EMAIL`. Voir « Logs structurés et alertes ». |
+| `server/alertes.ts` | **Item E** : alerte e-mail sur rafale de 5xx (> 10 en 15 min, 1 livrée par heure max, reprise 5 min après un échec), inactive sans `ALERTE_EMAIL`. Voir « Logs structurés et alertes ». |
 | `server/stockage.ts` | Base SQLite (schéma + requêtes) et contrat `Stockage` commun aux deux bases. |
 | `server/stockage-supabase.ts` | **S1** : même contrat sur Supabase (API REST PostgREST, clé service_role). |
 | `supabase/migrations/` | **S1** : schéma Postgres (`0001_schema_initial.sql`) et RLS (`0002_rls.sql`). |
@@ -90,7 +90,7 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | — | **P1-B3, non configuré.** SMS via Twilio (`TWILIO_FROM` = numéro expéditeur `+33…` ou identifiant de Messaging Service `MG…`). Les trois sont nécessaires, sinon 501. **Depuis le lot « Brancher Brevo » : Twilio n'est plus que le repli SMS** (utilisé seulement si Brevo SMS n'est pas configuré). |
 | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `BREVO_SMS_SENDER` | — | **P1-B3 + lot « Brancher Brevo », non configuré.** E-mail via Brevo (adresse expéditrice à valider chez Brevo ; nom optionnel) **et SMS via Brevo** (`BREVO_SMS_SENDER` = nom d'expéditeur alphanumérique, 11 caractères max, ex. `ASIANHOME`). Clé + adresse nécessaires pour l'e-mail, clé + expéditeur SMS pour le SMS, sinon 501. Procédure complète : `docs/BREVO.md`. |
 | `BREVO_MODE_TEST` | `0` | **Lot « Brancher Brevo », consigne du 10/11/2026 : aucun envoi réel pendant le développement.** `1` = mode test : e-mail en sandbox Brevo (`X-Sib-Sandbox: drop`, rien livré), SMS simulé (aucun appel réseau, Twilio aussi simulé), journal des envois avec le statut `test` (« Test — rien envoyé »), `/sante` → `integrations.modeTest: true`. **À retirer pour envoyer pour de vrai** (plus tard, avec accord explicite — voir `docs/BREVO.md` §5). |
-| `ALERTE_EMAIL` | — (alerte désactivée) | **Item E.** Adresse de l'exploitant qui reçoit l'alerte e-mail sur rafale de 5xx : plus de 10 réponses 5xx en 15 minutes glissantes → 1 e-mail, au plus 1 par heure, via l'adaptateur e-mail Brevo (suit `BREVO_MODE_TEST`). Absente ou vide = aucun compteur, aucun envoi. Voir « Alerte e-mail sur rafale de 5xx ». |
+| `ALERTE_EMAIL` | — (alerte désactivée) | **Item E.** Adresse de l'exploitant qui reçoit l'alerte e-mail sur rafale de 5xx : plus de 10 réponses 5xx en 15 minutes glissantes → 1 e-mail, au plus 1 livré par heure (nouvelle tentative 5 min après un échec), via l'adaptateur e-mail Brevo (suit `BREVO_MODE_TEST`). Absente ou vide = aucun compteur, aucun envoi. Voir « Alerte e-mail sur rafale de 5xx ». |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | **P1-B4, non configuré. `GOOGLE_CLIENT_SECRET` = secret serveur.** Identifiants OAuth 2.0 (application Web) du projet Google Cloud approuvé pour les API Business Profile. Les deux sont nécessaires, sinon les routes Google répondent 501. Voir `docs/GOOGLE-BUSINESS.md`. |
 | `GOOGLE_REDIRECT_URI` | `PUBLIC_URL` (ou adresse du serveur) + `/api/v1/commerces/<id>/google/callback` | **P1-B4.** URI de redirection déclarée chez Google, à l'identique. |
 | `GOOGLE_BUSINESS_LOCATION` | — (fiche trouvée à l'import) | **P1-B4, facultatif.** `accounts/<n°>/locations/<n°>` si le compte gère plusieurs fiches et que l'app ne trouve pas la bonne. |
@@ -750,8 +750,13 @@ de staging (`docs/DEPLOIEMENT.md` §6) et Brevo en mode test.
 **Alerte e-mail sur rafale de 5xx (item E, `server/alertes.ts`).** Alimentée au même point d'accroche que
 les logs JSON (`res.on('finish')`, juste après `journaliserRequete`, sans changer le format des lignes).
 - **Seuil** : plus de 10 réponses 5xx (donc à la 11e) dans une **fenêtre glissante de 15 minutes**.
-- **Plafond** : au plus **1 alerte par heure** ; le compteur continue, seul l'envoi est plafonné. Après
+- **Plafond** : au plus **1 alerte livrée par heure** (livrée = envoi accepté par le prestataire, y compris
+  en mode test), compté à partir de la livraison ; le compteur continue, seul l'envoi est plafonné. Après
   une heure, une rafale toujours au-dessus du seuil redéclenche une alerte.
+- **Reprise après échec** : un envoi refusé par le prestataire (ou délai dépassé), ou impossible faute de
+  prestataire, ne consomme pas le plafond : nouvelle tentative possible **5 minutes** plus tard
+  (`DELAI_REPRISE_ALERTE_5XX_MS`) si le seuil est toujours dépassé. Une seule tentative à la fois ; une
+  ligne `[alerte-5xx]` par tentative (une rafale instantanée n'en produit donc qu'une).
 - **Destinataire** : `ALERTE_EMAIL`. Absente ou vide = module inactif (aucun compteur, aucun envoi).
 - **Envoi** : adaptateur e-mail existant (Brevo, expéditeur `BREVO_SENDER_EMAIL` / `BREVO_SENDER_NAME`,
   délai 10 s de `server/notifications/delai.ts`), en tâche de fond : la réponse HTTP en cours n'attend
@@ -767,7 +772,7 @@ les logs JSON (`res.on('finish')`, juste après `journaliserRequete`, sans chang
   jamais écrite dans les logs.
 - **Limites** : compteur en mémoire, par instance (remis à zéro au redémarrage / réveil Render) ; borné à
   5 000 erreurs mémorisées.
-- Tests : `tests/alertes-5xx-ameliorations.test.ts`.
+- Tests : `tests/alertes-5xx-ameliorations.test.ts`, `tests/revue-codex-nov12-alertes.test.ts` (reprise).
 
 | Signal | Ce que ça veut dire | Que faire |
 |---|---|---|

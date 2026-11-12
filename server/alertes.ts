@@ -3,7 +3,10 @@
 // le format des lignes de log.
 // - Compteur glissant des réponses 5xx sur 15 minutes ; au-delà de 10 (à partir de la 11e) → UN e-mail à
 //   l'exploitant (`ALERTE_EMAIL`), via l'adaptateur e-mail existant (Brevo, même délai `DELAI_PRESTATAIRE_MS`).
-// - Au plus 1 alerte par heure : le compteur continue, l'envoi est plafonné.
+// - Au plus 1 alerte LIVRÉE par heure (y compris livrée en mode test) : le compteur continue, l'envoi est
+//   plafonné à partir de l'horodatage de la livraison. Un envoi échoué (rejet du prestataire) ou impossible
+//   (aucun prestataire) ne consomme pas ce plafond : nouvelle tentative possible 5 minutes plus tard
+//   (`DELAI_REPRISE_ALERTE_5XX_MS`), tant que le seuil reste dépassé. Une seule tentative à la fois.
 // - `ALERTE_EMAIL` absente ou vide : module inactif (aucun compteur, aucun envoi, aucune ligne).
 // - Mode test Brevo (`BREVO_MODE_TEST=1`) : même chemin que les relances (e-mail en sandbox Brevo, rien livré),
 //   et une ligne `[alerte-5xx]` le dit. Aucun prestataire e-mail : ligne « non envoyée », jamais d'exception.
@@ -15,7 +18,10 @@ import type { Notifications } from './notifications/index.ts'
 export const FENETRE_ALERTE_5XX_MS = 15 * 60_000
 /** Alerte au-delà de ce nombre de 5xx dans la fenêtre (> 10, donc à la 11e). */
 export const SEUIL_ALERTE_5XX = 10
+/** Plafond : au plus 1 alerte livrée par intervalle. */
 export const INTERVALLE_ALERTES_5XX_MS = 3600_000
+/** Après un échec d'envoi (ou sans prestataire), délai avant une nouvelle tentative. */
+export const DELAI_REPRISE_ALERTE_5XX_MS = 5 * 60_000
 /** Routes citées dans l'e-mail (les plus fréquentes). */
 const ROUTES_CITEES = 5
 /** Borne mémoire : au-delà, les plus anciennes erreurs sont oubliées (le seuil reste largement dépassé). */
@@ -35,7 +41,11 @@ export function creerAlertes5xx(o: {
   const destinataire = o.destinataire?.trim()
   if (!destinataire) return { actif: false, enregistrer: () => {} }
   const erreurs: { t: number; route: string }[] = []
-  let derniereAlerte = -Infinity
+  /** Horodatage de la dernière alerte livrée (point de départ du plafond d'une heure). */
+  let derniereLivraison = -Infinity
+  /** Pas de nouvelle tentative avant cet instant (posé après un échec). */
+  let repriseApres = -Infinity
+  let enCours = false
 
   function envoyer(t: number) {
     const nb = erreurs.length
@@ -57,17 +67,26 @@ export function creerAlertes5xx(o: {
     ].join('\n')
     const resume = `${nb} réponses 5xx en 15 min`
     if (!o.notifications.statut().email) {
+      repriseApres = t + DELAI_REPRISE_ALERTE_5XX_MS
       console.warn(`[alerte-5xx] alerte non envoyée (aucun prestataire e-mail configuré) : ${resume}`)
       return
     }
     // Fire-and-forget : jamais attendu par la requête en cours, toute erreur est capturée.
+    enCours = true
     Promise.resolve()
       .then(() => o.notifications.envoyer('email', { destinataire: destinataire!, sujet: `[Alerte] ${nb} erreurs serveur (5xx) en 15 min`, texte }))
       .then(
-        (r) => console.info(r.test ? `[alerte-5xx] mode test : alerte simulée, rien envoyé (${resume})` : `[alerte-5xx] alerte envoyée (${resume})`),
-        (e) => console.warn(`[alerte-5xx] alerte non envoyée : ${e instanceof Error ? e.message : e} (${resume})`),
+        (r) => {
+          derniereLivraison = o.maintenant().getTime()
+          console.info(r.test ? `[alerte-5xx] mode test : alerte simulée, rien envoyé (${resume})` : `[alerte-5xx] alerte envoyée (${resume})`)
+        },
+        (e) => {
+          repriseApres = o.maintenant().getTime() + DELAI_REPRISE_ALERTE_5XX_MS
+          console.warn(`[alerte-5xx] alerte non envoyée : ${e instanceof Error ? e.message : e} (${resume})`)
+        },
       )
       .catch(() => {})
+      .finally(() => (enCours = false))
   }
 
   return {
@@ -78,8 +97,7 @@ export function creerAlertes5xx(o: {
         const t = o.maintenant().getTime()
         erreurs.push({ t, route: route() })
         while (erreurs.length && (erreurs[0].t <= t - FENETRE_ALERTE_5XX_MS || erreurs.length > ERREURS_MAX)) erreurs.shift()
-        if (erreurs.length > SEUIL_ALERTE_5XX && t - derniereAlerte >= INTERVALLE_ALERTES_5XX_MS) {
-          derniereAlerte = t
+        if (erreurs.length > SEUIL_ALERTE_5XX && !enCours && t >= repriseApres && t - derniereLivraison >= INTERVALLE_ALERTES_5XX_MS) {
           envoyer(t)
         }
       } catch {
