@@ -11,7 +11,8 @@ import { COULEUR_DEFAUT, FOND_DEFAUT, problemesApparence } from '../lib/apparenc
 import { JOURS_SEMAINE, PALIERS_DEFAUT } from '../lib/programme'
 import { compteurLibelle, MAX_CARACTERES_ROUE } from '../lib/roue'
 import { CONSERVATION_DEFAUT_MOIS, CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, libelleDuree } from '../lib/rgpd'
-import { basculerAccroche, coutLotValide, jourParis } from '../lib/mesure'
+import { basculerAccroche, coutLotValide, formaterEuros, jourParis } from '../lib/mesure'
+import { formaterParJour, JOURS_MOYENNE_TIRAGES, JOURS_PROJECTION, simulerCout, type SimulationCout } from '../lib/coutRoue'
 import { libellesEnDouble, normaliserLots, nouvelIdLot } from '../lib/lots'
 import { LIMITE_GAINS_MOIS_DEFAUT, LIMITE_GAINS_MOIS_MAX, modeAccesRoue } from '../lib/roulette'
 import { CHOIX_TYPE_LOT, lotPourEnvoi, problemeLot } from '../lib/reglagesRoue'
@@ -65,6 +66,42 @@ function CompteurLibelle({ id, libelle }: { id: string; libelle: string }) {
   )
 }
 
+/**
+ * Simulateur de coût (D3, maquettes §5) : coût attendu par tirage, tirages/jour récents, projection mensuelle et pire
+ * cas borné par les plafonds. Un lot physique sans coût → « coût partiel » + la liste des lots concernés.
+ */
+function SimulateurCout({ simulation: s }: { simulation: SimulationCout }) {
+  const euros = (c: number) => formaterEuros(Math.round(c))
+  return (
+    <section className="carte space-y-2" aria-labelledby="simulateur-cout-titre" aria-live="polite">
+      <h2 id="simulateur-cout-titre" className="titre-carte">Simulateur de coût</h2>
+      <p>
+        Coût attendu par tirage : <strong className="tabular-nums">{euros(s.centimes)}</strong>
+        {s.partiel && <span className="font-medium text-amber-800"> (coût partiel)</span>}
+      </p>
+      <p>
+        Tirages/jour ({JOURS_MOYENNE_TIRAGES} derniers jours) : <strong className="tabular-nums">{formaterParJour(s.tiragesParJour)}</strong> → projection mensuelle ≈{' '}
+        <strong className="tabular-nums">{euros(s.projectionMois)}</strong>
+      </p>
+      <p className="text-sm text-gray-700">
+        {s.pireCasJour !== null
+          ? `Pire cas permis par les plafonds : ${euros(s.pireCasJour)} par jour (≈ ${euros(s.pireCasJour * JOURS_PROJECTION)} sur ${JOURS_PROJECTION} jours)${s.bornePlafonds ? ' — vos plafonds bornent la projection.' : '.'}`
+          : s.sansPlafond.length
+            ? `Pas de pire cas : sans plafond par jour, le coût n’est pas borné (${s.sansPlafond.join(', ')}).`
+            : 'Pas de pire cas tant qu’un lot physique n’a pas de coût renseigné.'}
+      </p>
+      {s.partiel && (
+        <p className="text-sm font-medium text-amber-800">
+          Coût non renseigné pour : {s.lotsSansCout.join(', ')}. Le coût affiché est un minimum : rien n’est estimé à leur place.
+        </p>
+      )}
+      <p className="text-sm text-gray-600">
+        Coût par tirage = somme des chances (ramenées à 100 %) × coût unitaire des lots physiques ; points et « perdu » ne coûtent rien. Recalculé à chaque modification, avant l’enregistrement.
+      </p>
+    </section>
+  )
+}
+
 type OngletReglages = 'commerce' | 'fidelite' | 'roulette' | 'messages' | 'carte' | 'donnees'
 
 /** Découpe P1-C7 : 6 onglets, un seul formulaire — aucun réglage supprimé, 2 fieldsets déplacés pour des onglets thématiques contigus (« Points » après « Programme », « Réponses aux avis » après « Messages automatiques »). */
@@ -84,7 +121,7 @@ export default function Reglages() {
 }
 
 function FormulaireReglages({ commerce }: { commerce: Commerce }) {
-  const { majCommerce, estDemo } = useStore()
+  const { majCommerce, estDemo, etat } = useStore()
   const { executer, enCours, erreur } = useAction()
   const [brouillon, setBrouillon] = useState<Commerce>(commerce)
   // R1 : lots normalisés dès l'ouverture (id + type résolus) → toujours écrits, et un lot renommé garde son id.
@@ -805,6 +842,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           onChange={(v) => maj('testsAB', { ...brouillon.testsAB, accroche: basculerAccroche(brouillon.testsAB?.accroche, v, jourParis(new Date())) })}
         />
       </fieldset>
+      {/* Simulateur de coût (D3) : recalculé à chaque frappe sur le brouillon des lots, avant tout enregistrement. */}
+      <SimulateurCout simulation={simulerCout(lots, etat.tirages.filter((t) => t.commerceId === commerce.id))} />
       {/* Règles du jeu (R6) : section du même formulaire, sans fieldset — les radios forment leur propre groupe nommé. */}
       <section className="carte space-y-4" aria-labelledby="regles-jeu-titre">
         <h2 id="regles-jeu-titre" className="titre-carte">Règles du jeu</h2>

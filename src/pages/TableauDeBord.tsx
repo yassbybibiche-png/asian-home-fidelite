@@ -6,6 +6,8 @@ import { dateRelative } from '../lib/format'
 import { Etoiles, Vide } from '../components/ui'
 import { Mesure } from '../components/Mesure'
 import { InstantsGagnants } from '../components/InstantsGagnants'
+import { DEFINITION_TAUX_UTILISATION, JOURS_KPI_GAINS, kpiGains, type KpiGains } from '../lib/gainsRoue'
+import { formaterEuros } from '../lib/mesure'
 import type { ActionJournal } from '../types'
 
 const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
@@ -35,6 +37,25 @@ function Chiffre({ valeur, libelle, aide }: { valeur: string | number; libelle: 
       <div className="mt-1 text-3xl font-extrabold tracking-tight text-gray-900 tabular-nums">{valeur}</div>
       <div className="mt-0.5 text-sm text-gray-600">{aide}</div>
     </div>
+  )
+}
+
+/** Carte « Gains de la roue » (D3, maquettes §6) : utilisation des lots gagnés sur 30 jours (définitions : `gainsRoue.ts`). */
+function GainsRoue({ kpi: k }: { kpi: KpiGains }) {
+  const valeur = k.expires === 0 ? '' : k.expiresSansCout === k.expires ? ' (valeur : non renseigné)' : ` (valeur ≈ ${formaterEuros(k.valeurExpires)}${k.expiresSansCout ? ` + ${k.expiresSansCout} sans coût renseigné` : ''})`
+  return (
+    <section className="carte space-y-1" aria-labelledby="gains-roue-titre">
+      <h2 id="gains-roue-titre" className="titre-carte">Gains de la roue</h2>
+      <p>
+        Taux d’utilisation : <strong className="tabular-nums">{k.tauxUtilisation === null ? '—' : `${k.tauxUtilisation} %`}</strong>
+        <span className="text-gray-600"> (remis ÷ (remis + expirés), {JOURS_KPI_GAINS} jours)</span>
+      </p>
+      <p className="tabular-nums">
+        Gagnés : {k.gagnes} • Remis : {k.remis} • En attente d’utilisation : {k.enAttente} • Expirés : {k.expires}
+        {valeur}
+      </p>
+      <p className="text-sm text-gray-600">{DEFINITION_TAUX_UTILISATION} En attente : gains encore utilisables aujourd’hui ou dès demain.</p>
+    </section>
   )
 }
 
@@ -133,6 +154,8 @@ export default function TableauDeBord() {
           aide="3 visites en 14 jours"
         />
       </section>
+
+      <GainsRoue kpi={kpiGains(tirages, commerce.lots)} />
 
       <Mesure />
 
