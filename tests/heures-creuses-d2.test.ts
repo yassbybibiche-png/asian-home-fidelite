@@ -14,6 +14,7 @@ import { CRENEAUX_MAX, creneauActif, lotsDuCreneau, momentParis, nettoyerCreneau
 import { instantParis } from '../src/lib/roulette.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
+import { traduire } from '../src/lib/langue.ts'
 import type { Commerce, CreneauCreux, Tirage } from '../src/types.ts'
 
 const AH = 'c-asian-home-paris'
@@ -246,5 +247,15 @@ describe('D2 : Réglages, store et bundle initial', () => {
     for (const f of ['src/pages/Jouer.tsx', 'src/pages/CartePublique.tsx', 'src/pages/Caisse.tsx', 'src/App.tsx', 'src/store.tsx', 'src/lib/vuePublique.ts', 'src/lib/roulette.ts', 'src/lib/lots.ts']) {
       assert.doesNotMatch(lire(f), /lib\/creneaux/, f)
     }
+  })
+
+  test('page de jeu : badge « Bonus heures creuses actif » dans InfosJeu, rendu seulement si la fiche porte bonusCreux', () => {
+    const jouer = lire('src/pages/Jouer.tsx')
+    const debut = jouer.search(/function InfosJeu\b/)
+    assert.ok(debut >= 0, 'InfosJeu introuvable')
+    const fin = jouer.slice(debut + 1).search(/\n(?:export )?function /)
+    const infos = jouer.slice(debut, debut + 1 + fin)
+    assert.match(infos, /\{'bonusCreux' in commerce && commerce\.bonusCreux && \(\n\s*<p [^>]*>\n\s*<span aria-hidden>⏰<\/span> \{t\('Bonus heures creuses actif'\)\}\n\s*<\/p>\n\s*\)\}/)
+    assert.equal(traduire('Bonus heures creuses actif', 'en'), 'Off-peak bonus active')
   })
 })

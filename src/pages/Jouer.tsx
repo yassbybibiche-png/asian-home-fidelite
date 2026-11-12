@@ -190,6 +190,11 @@ export function InfosJeu({ commerce }: { commerce: CommerceJeu }) {
       <h2 id="a-gagner-titre" className="titre-carte">
         {t('À gagner aujourd’hui')}
       </h2>
+      {'bonusCreux' in commerce && commerce.bonusCreux && (
+        <p className="inline-block rounded-full bg-green-50 px-3 py-1 text-sm font-semibold text-green-900 ring-1 ring-green-200" data-bonus-creux>
+          <span aria-hidden>⏰</span> {t('Bonus heures creuses actif')}
+        </p>
+      )}
       {lots.length > 0 && (
         <ul className="space-y-1">
           {lots.map((l, i) => (
