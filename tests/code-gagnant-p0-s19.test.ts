@@ -15,6 +15,7 @@ import type { AddressInfo } from 'node:net'
 
 import { creerServeur, emettreJetonClient, type OptionsServeur } from '../server/app.ts'
 import type { Client } from '../src/types.ts'
+import { codeEnBase } from './code-en-base.ts'
 
 const AH = 'c-asian-home-paris'
 const PIN = { 'X-Commerce-PIN': '1234' }
@@ -76,7 +77,8 @@ async function demarrer(nom: string, options: Partial<OptionsServeur> = {}) {
   const visite = async (clientId: string) => assert.equal((await api('POST', `/commerces/${AH}/clients/${clientId}/visite`, undefined, PIN)).statut, 200)
   /**
    * Client inscrit, visite validée, roue tournée avec son jeton : le client, son jeton et le tirage. R3 : la réponse du
-   * tirage ne porte plus de code — `tirage.code` est lu côté commerçant (GET /etat), pour vérifier qu'il ne fuit nulle part.
+   * tirage ne porte plus de code ; revue Codex R3 (F1) : l'état commerçant non plus — `tirage.code` est lu en base, pour
+   * vérifier qu'il ne fuit nulle part.
    */
   async function joueur(contact: string) {
     const { client, jeton } = await inscrire(contact)
@@ -87,7 +89,9 @@ async function demarrer(nom: string, options: Partial<OptionsServeur> = {}) {
     assert.ok(!t.texte.includes('"code"'))
     const r = t.contenu as { tirageId: string; lot: string; date: string; perdant: boolean }
     const etat = await api('GET', `/commerces/${AH}/etat`, undefined, PIN)
-    const code = (etat.contenu.tirages as { id: string; code: string }[]).find((x) => x.id === r.tirageId)!.code
+    // Tirage perdant : aucun code en base ; le texte de remplacement ne peut apparaître dans aucune réponse.
+    const code = codeEnBase(join(dossier, nom), r.tirageId) ?? '(aucun code)'
+    assert.ok(!etat.texte.includes(code), 'revue Codex R3 (F1) : pas de code dans l’état commerçant')
     return { client, jeton, tirage: { ...r, code } }
   }
   /** « Utiliser mon gain » (R3). */
@@ -222,7 +226,10 @@ describe('P0-S19 : code gagnant servi au titulaire authentifié seulement', () =
     assert.ok(!encore.texte.includes(tirage.code))
   })
 
-  test('sans jeton (mode strict) : tirage et export RGPD refusés sans révéler de code ; l’export du titulaire contient son code', async () => {
+  // Revue Codex R3 (F1), modèle décidé le 12/11 : le code ne circule QUE par l'activation (fenêtre de 10 min). L'export
+  // du titulaire, qui le contenait (lecture P0-S19 « ses propres données »), donnait un code réutilisable hors fenêtre et
+  // hors burn-on-reveal : il porte désormais le statut du gain à la place.
+  test('sans jeton (mode strict) : tirage et export RGPD refusés sans révéler de code ; l’export du titulaire donne le statut, jamais le code', async () => {
     const { client, jeton, tirage } = await s.joueur('0610101010')
     // Revue Codex points 1–2 : en transition, ces deux routes par contact seul renvoient encore des codes ; en strict
     // (production par défaut), le jeton y est exigé — c'est ce que ce test verrouille.
@@ -234,7 +241,12 @@ describe('P0-S19 : code gagnant servi au titulaire authentifié seulement', () =
     assert.ok(!donnees.texte.includes(tirage.code))
     const exportTitulaire = await s.api('POST', `/cartes/${client.id}/donnees`, { contact: '0610101010' }, s.bearer(jeton))
     assert.equal(exportTitulaire.statut, 200, exportTitulaire.texte)
-    assert.ok(exportTitulaire.texte.includes(tirage.code), 'export RGPD du titulaire : ses propres données, code compris')
+    assert.ok(!exportTitulaire.texte.includes(tirage.code), 'export RGPD du titulaire : pas de code (seule l’activation le sert)')
+    assert.match(exportTitulaire.texte, /Roue du jour;Nems offerts \(gain utilisable à partir de demain\)/)
+    const exportCommercant = await s.api('GET', `/commerces/${AH}/clients/${client.id}/export.csv`, undefined, PIN)
+    assert.equal(exportCommercant.statut, 200, exportCommercant.texte)
+    assert.ok(!exportCommercant.texte.includes(tirage.code), 'export RGPD côté commerçant : pas de code non plus')
+    assert.match(exportCommercant.texte, /Nems offerts \(gain utilisable à partir de demain\)/)
   })
 })
 

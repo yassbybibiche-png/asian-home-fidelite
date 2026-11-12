@@ -101,13 +101,38 @@ function decalageParis(instant: number): number {
   return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - (instant - (instant % 1000))
 }
 
+/**
+ * Instant où il est cette heure-là à Paris (`mois` de 1 à 12). Deux passes : le décalage à prendre est celui de
+ * l'instant visé, pas celui de la même heure en UTC. Heures inexistantes / doublées d'un changement d'heure (2 h–3 h) :
+ * non garanties — les bornes des gains sont toujours à minuit, jamais touché par un changement d'heure.
+ */
+export function instantParis(annee: number, mois: number, jour: number, heure = 0, minute = 0): Date {
+  const mural = Date.UTC(annee, mois - 1, jour, heure, minute)
+  const approche = mural - decalageParis(mural)
+  return new Date(mural - decalageParis(approche))
+}
+
 /** Minuit à Paris du jour parisien de `maintenant`, en ISO : borne de lecture des tirages du jour pour les plafonds. */
 export function debutDuJourParis(maintenant: Date): string {
   const [a, m, j] = jourParis(maintenant).split('-').map(Number)
-  const minuitUtc = Date.UTC(a, m - 1, j)
-  // Deux passes : le décalage à prendre est celui de minuit à Paris (un changement d'heure a lieu à 2 h / 3 h, jamais à minuit).
-  const approche = minuitUtc - decalageParis(minuitUtc)
-  return new Date(minuitUtc - decalageParis(approche)).toISOString()
+  return instantParis(a, m, j).toISOString()
+}
+
+const MS_JOUR = 24 * 3600 * 1000
+
+/**
+ * Numéro du jour calendaire de Paris contenant `d` (jours écoulés depuis le 1/1/1970) : la différence de deux numéros
+ * compte des jours parisiens entiers, quel que soit le fuseau du processus (UTC sur Render) et les changements d'heure.
+ */
+export function numeroJourParis(d: Date): number {
+  const [a, m, j] = jourParis(d).split('-').map(Number)
+  return Date.UTC(a, m - 1, j) / MS_JOUR
+}
+
+/** Minuit à Paris du jour parisien numéro `n` (`numeroJourParis`). */
+export function minuitParis(n: number): Date {
+  const d = new Date(n * MS_JOUR)
+  return instantParis(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate())
 }
 
 type LotType = Pick<Lot, 'libelle' | 'plafondJour'> & { id: string; type: TypeLot }
@@ -219,24 +244,39 @@ export const DUREE_GAIN_JOURS = 30
 /** Durée de validité du code après chaque activation par le client (« Utiliser mon gain »). */
 export const FENETRE_ACTIVATION_MS = 10 * 60 * 1000
 
-/** Minuit (jour calendaire local, comme `memeJour`) du jour de `d` décalé de `n` jours — changements d'heure compris. */
-export function ajouterJours(d: Date, n: number): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+/**
+ * Tirage d'avant la roue v2 (revue Codex R3, F2) : sans type figé au tirage — ou type posé après coup par le rattachement
+ * R1 (`typeDeduit`). Il reste sous l'ANCIENNE règle : valable le jour du tirage seulement, remis directement en caisse
+ * (l'ancien modèle n'avait pas d'activation), expiré ensuite, jamais activable. Les tirages créés avec leur type suivent
+ * le cycle v2.
+ */
+export function tirageHerite(t: Pick<Tirage, 'typeLot' | 'typeDeduit'>): boolean {
+  return !estTypeLot(t.typeLot) || t.typeDeduit === true
 }
 
-/** Premier instant où le gain s'utilise : minuit au début de J+1. */
-export function utilisableLe(t: Pick<Tirage, 'date'>): Date {
-  return ajouterJours(new Date(t.date), 1)
+/** Jours parisiens écoulés depuis le jour du tirage : 0 le jour J, 1 à J+1… (négatif : tirage daté dans le futur). */
+export function joursDepuisTirage(t: Pick<Tirage, 'date'>, maintenant: Date): number {
+  return numeroJourParis(maintenant) - numeroJourParis(new Date(t.date))
 }
 
-/** Dernier jour d'utilisation (J+30), à minuit : le gain expire à la fin de ce jour-là. */
-export function dernierJourGain(t: Pick<Tirage, 'date'>): Date {
-  return ajouterJours(new Date(t.date), DUREE_GAIN_JOURS)
+type DateTirage = Pick<Tirage, 'date' | 'typeLot' | 'typeDeduit'>
+/** Dernier jour d'utilisation, en jours après J : 30 (v2), 0 (tirage hérité : le jour même). */
+const dernierJourRelatif = (t: DateTirage) => (tirageHerite(t) ? 0 : DUREE_GAIN_JOURS)
+const minuitApresTirage = (t: Pick<Tirage, 'date'>, n: number) => minuitParis(numeroJourParis(new Date(t.date)) + n)
+
+/** Premier instant où le gain s'utilise : minuit (Paris) au début de J+1 — J lui-même pour un tirage hérité. */
+export function utilisableLe(t: DateTirage): Date {
+  return minuitApresTirage(t, tirageHerite(t) ? 0 : 1)
 }
 
-/** Premier instant où le gain est expiré : minuit à la fin de J+30. */
-export function finGain(t: Pick<Tirage, 'date'>): Date {
-  return ajouterJours(new Date(t.date), DUREE_GAIN_JOURS + 1)
+/** Dernier jour d'utilisation (J+30 ; J pour un tirage hérité), à minuit (Paris) : le gain expire à la fin de ce jour-là. */
+export function dernierJourGain(t: DateTirage): Date {
+  return minuitApresTirage(t, dernierJourRelatif(t))
+}
+
+/** Premier instant où le gain est expiré : minuit (Paris) à la fin du dernier jour. */
+export function finGain(t: DateTirage): Date {
+  return minuitApresTirage(t, dernierJourRelatif(t) + 1)
 }
 
 /** Fin de la fenêtre d'activation en cours (ISO), ou null si le code n'a jamais été activé. */
@@ -252,9 +292,10 @@ export function fenetreActive(t: Pick<Tirage, 'activeLe'>, maintenant = new Date
 }
 
 /**
- * Cycle de vie d'un tirage (R3) — enAttente : le jour du tirage ; utilisable : de J+1 à J+30 inclus ; remis : remis en
- * caisse (terminal) ; expire : après J+30 sans remise. perdant / consolation (lot « points ») : rien à remettre. Le
- * type vient du tirage (`typeTirage`). S'applique à tous les tirages, ceux d'avant R3 compris.
+ * Cycle de vie d'un tirage (R3), compté en jours calendaires de PARIS (`joursDepuisTirage`, revue Codex F3) — enAttente :
+ * le jour du tirage (écart 0) ; utilisable : de J+1 à J+30 inclus (écart 1 à 30) ; expire : au-delà ; remis : remis en
+ * caisse (terminal). perdant / consolation (lot « points ») : rien à remettre. Le type vient du tirage (`typeTirage`).
+ * Tirage hérité (`tirageHerite`) : ancienne règle — utilisable le jour J seulement, expiré ensuite.
  */
 export type CycleGain = 'enAttente' | 'utilisable' | 'remis' | 'expire' | 'perdant' | 'consolation'
 
@@ -263,20 +304,23 @@ export function cycleGain(t: Tirage, maintenant = new Date()): CycleGain {
   if (type === 'perdant') return 'perdant'
   if (type === 'points') return 'consolation'
   if (t.remis) return 'remis'
-  if (maintenant < utilisableLe(t)) return 'enAttente'
-  return maintenant < finGain(t) ? 'utilisable' : 'expire'
+  const ecart = joursDepuisTirage(t, maintenant)
+  if (tirageHerite(t)) return ecart <= 0 ? 'utilisable' : 'expire'
+  if (ecart <= 0) return 'enAttente'
+  return ecart <= DUREE_GAIN_JOURS ? 'utilisable' : 'expire'
 }
 
 /**
  * Statut v2 d'un gain, vu par la caisse ET par la carte : le cycle de vie, où « utilisable » exige en plus une fenêtre
  * d'activation en cours — sinon `inactif` (gain utilisable, mais code pas activé ou activé il y a 10 minutes ou plus :
- * le client doit appuyer sur « Utiliser mon gain »). Seul `utilisable` se remet en caisse.
+ * le client doit appuyer sur « Utiliser mon gain »). Seul `utilisable` se remet en caisse. Exception : un tirage hérité
+ * du jour même est `utilisable` sans activation (l'ancienne règle n'en avait pas).
  */
 export type StatutGain = CycleGain | 'inactif'
 
 export function statutGain(t: Tirage, maintenant = new Date()): StatutGain {
   const cycle = cycleGain(t, maintenant)
-  return cycle === 'utilisable' && !fenetreActive(t, maintenant) ? 'inactif' : cycle
+  return cycle === 'utilisable' && !tirageHerite(t) && !fenetreActive(t, maintenant) ? 'inactif' : cycle
 }
 
 /** Gain encore en jeu (rien de terminal) : à afficher sur la carte du client. */
@@ -299,18 +343,28 @@ export function tirageDuCode(tirages: Tirage[], maintenant = new Date()): Tirage
 
 /** « mar. 10 nov. 2026 » : jour en clair des messages du gain. */
 export function jourEnClair(d: Date): string {
-  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+  // Jour de Paris (revue Codex R3, F3) : les bornes des gains sont des minuits parisiens, affichés le bon jour même
+  // sur un processus en UTC.
+  return d.toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 export const MESSAGE_ACTIVATION =
   'Demandez au client d’appuyer sur « Utiliser mon gain » dans son application : le code n’est valable que 10 minutes après activation.'
 
-/** Message de la caisse pour un code vérifié, v2 (maquettes R3 §4 ; `remis.par` = nom de qui l'a remis). */
-export function messageGain(g: { statut: StatutGain; lot: string; date: string; remis: { le: string; par: string } | null }): string {
+export const MESSAGE_ANCIENNE_REGLE = 'gain d’avant la nouvelle roue, valable le jour du tirage seulement'
+
+/**
+ * Message de la caisse pour un code vérifié, v2 (maquettes R3 §4 ; `remis.par` = nom de qui l'a remis). `ancienneRegle` :
+ * tirage hérité (`tirageHerite`, revue Codex F2), ses dates suivent l'ancienne règle.
+ */
+export function messageGain(g: { statut: StatutGain; lot: string; date: string; remis: { le: string; par: string } | null; ancienneRegle?: boolean }): string {
   const gagneLe = jourEnClair(new Date(g.date))
+  const dates: DateTirage = { date: g.date, typeLot: g.ancienneRegle ? undefined : 'lot' }
   if (g.statut === 'perdant' || g.statut === 'consolation') return `Ce tirage n’a pas de lot à remettre (${g.lot}).`
-  if (g.statut === 'enAttente') return `Pas encore utilisable : ce gain gagné le ${gagneLe} s’utilise à partir du ${jourEnClair(utilisableLe(g))}.`
-  if (g.statut === 'expire') return `Gain expiré le ${jourEnClair(dernierJourGain(g))} : rien à remettre.`
+  if (g.statut === 'enAttente') return `Pas encore utilisable : ce gain gagné le ${gagneLe} s’utilise à partir du ${jourEnClair(utilisableLe(dates))}.`
+  if (g.statut === 'expire') {
+    return `Gain expiré le ${jourEnClair(dernierJourGain(dates))} : rien à remettre${g.ancienneRegle ? ` (${MESSAGE_ANCIENNE_REGLE})` : ''}.`
+  }
   if (g.statut === 'inactif') return MESSAGE_ACTIVATION
   if (g.statut === 'remis') {
     const le = g.remis ? new Date(g.remis.le) : null
@@ -323,6 +377,13 @@ export function messageGain(g: { statut: StatutGain; lot: string; date: string; 
 /** Refus d'activation vu par le CLIENT (route …/activer) : null = le gain peut être activé maintenant. */
 export function refusActivation(t: Tirage, maintenant = new Date()): { statut: 409 | 410; message: string } | null {
   const cycle = cycleGain(t, maintenant)
+  // Tirage hérité (revue Codex F2) : jamais activable — l'ancienne règle n'avait pas d'activation, il se remet
+  // directement au comptoir le jour même, et il est expiré ensuite.
+  if (tirageHerite(t) && (cycle === 'utilisable' || cycle === 'expire')) {
+    return cycle === 'expire'
+      ? { statut: 410, message: `Gain expiré le ${jourEnClair(dernierJourGain(t))} (${MESSAGE_ANCIENNE_REGLE}).` }
+      : { statut: 409, message: `Ce gain (${MESSAGE_ANCIENNE_REGLE}) se retire directement au comptoir aujourd’hui, sans activation.` }
+  }
   if (cycle === 'utilisable' && t.code) return null
   if (cycle === 'enAttente') return { statut: 409, message: `Votre gain sera utilisable dès demain, ${jourEnClair(utilisableLe(t))}, et jusqu’au ${jourEnClair(dernierJourGain(t))}.` }
   if (cycle === 'expire') return { statut: 410, message: `Gain expiré le ${jourEnClair(dernierJourGain(t))} : il n’est plus utilisable.` }

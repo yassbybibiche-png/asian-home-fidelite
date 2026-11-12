@@ -506,6 +506,11 @@ export interface Tirage {
   lotId?: string
   /** Type du lot figé au tirage (R1) ; absent des tirages d'avant R1 (déduit alors du libellé : `typeTirage`). */
   typeLot?: TypeLot
+  /**
+   * `typeLot` posé après coup par le rattachement des tirages d'avant R1 (`rattachementsTirages`), pas au tirage : le
+   * tirage reste sous l'ancienne règle de validité (`tirageHerite`, revue Codex R3 F2).
+   */
+  typeDeduit?: true
   /** Points crédités au client par ce tirage (R2, lot de type 'points' tiré par le serveur) ; absent sinon. */
   points?: number
   date: string

@@ -80,10 +80,11 @@ export function nouvelIdLot(): string {
 /**
  * Rattrapage des tirages d'avant R1 (revue Codex R2 point 4) : pour chaque tirage SANS `lotId` dont le libellé
  * correspond EXACTEMENT (espaces de bord et casse ignorés) à UN SEUL lot de `lots`, le même tirage avec `lotId` (et
- * `typeLot` s'il manquait) posés. Libellé ambigu (plusieurs lots) ou sans correspondance : tirage ignoré. Renvoie
- * seulement les tirages à réécrire.
+ * `typeLot` s'il manquait, marqué alors `typeDeduit` : le tirage reste sous l'ancienne règle de validité, revue Codex R3
+ * F2) posés. Libellé ambigu (plusieurs lots) ou sans correspondance : tirage ignoré. Renvoie seulement les tirages à
+ * réécrire.
  */
-export function rattachementsTirages<T extends Pick<Tirage, 'lot' | 'lotId' | 'typeLot'>>(lots: Pick<Lot, 'libelle' | 'id' | 'type'>[], tirages: T[]): T[] {
+export function rattachementsTirages<T extends Pick<Tirage, 'lot' | 'lotId' | 'typeLot' | 'typeDeduit'>>(lots: Pick<Lot, 'libelle' | 'id' | 'type'>[], tirages: T[]): T[] {
   const cle = (s: string) => s.trim().toLocaleLowerCase('fr-FR')
   const parLibelle = new Map<string, LotNormalise<Pick<Lot, 'libelle' | 'id' | 'type'>>[]>()
   for (const l of normaliserLots(lots)) {
@@ -94,7 +95,7 @@ export function rattachementsTirages<T extends Pick<Tirage, 'lot' | 'lotId' | 't
   for (const t of tirages) {
     if (t.lotId) continue
     const candidats = parLibelle.get(cle(t.lot ?? '')) ?? []
-    if (candidats.length === 1) rattaches.push({ ...t, lotId: candidats[0].id, typeLot: t.typeLot ?? candidats[0].type })
+    if (candidats.length === 1) rattaches.push({ ...t, lotId: candidats[0].id, ...(t.typeLot ? {} : { typeLot: candidats[0].type, typeDeduit: true }) })
   }
   return rattaches
 }

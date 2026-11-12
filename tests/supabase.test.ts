@@ -16,6 +16,7 @@ import { nouveauCommerce } from '../src/data/defaults.ts'
 import { cleContact, nouveauClient, offrirRecompense, validerVisite } from '../src/lib/fidelite.ts'
 import { calculerChiffresCartes } from '../src/lib/stats.ts'
 import { soldePoints } from '../src/lib/points.ts'
+import { MESSAGE_ACTIVATION } from '../src/lib/roulette.ts'
 import type { Client, Commerce, Tirage } from '../src/types.ts'
 
 const URL_SB = 'https://projet-factice.supabase.co'
@@ -121,6 +122,11 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
       if (v.startsWith('gte.')) {
         // Seul usage : jours AAAA-MM-JJ (compteurs de la mesure, P2-Q3) — l'ordre alphabétique est l'ordre chronologique.
         lignes = lignes.filter((l) => l[col] != null && String(l[col]) >= v.slice(4))
+        continue
+      }
+      if (v.startsWith('gt.')) {
+        // Seul usage : `donnees->>activeLe` (revue Codex R3 F4), texte ISO comparé comme texte, comme Postgres ; NULL : faux.
+        lignes = lignes.filter((l) => valeur(l, col) != null && String(valeur(l, col)) > v.slice(3))
         continue
       }
       if (v.startsWith('lt.')) {
@@ -1863,6 +1869,107 @@ describe('Revue Codex R2 : tirages de la roue sous Supabase (plafonds sous concu
     assert.equal((f.tables.tirages.find((l) => l.id === 't1')!.donnees as Tirage).lotId, 'lot-nems')
     await st.supprimerTirage('c-lin', 't1')
     assert.deepEqual(f.tables.tirages.map((l) => l.id).sort(), ['t2', 't3'])
+  })
+})
+
+describe('Revue Codex R3 (F4) : remise d’un gain — l’heure de vérité est celle de l’écriture (stockage lent)', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-sb-r3-'))
+  after(() => rmSync(dossier, { recursive: true, force: true }))
+  const ACTIVE = new Date('2026-11-12T17:00:00.000Z')
+  const horloge = { t: ACTIVE }
+  /** Lecture du tirage par son code (route de remise) : `GET tirages?donnees->>code=eq.…`. */
+  const lectureParCode = (methode: string, table: string, params: URLSearchParams) => methode === 'GET' && table === 'tirages' && params.has('donnees->>code')
+
+  async function demarrer(f: ReturnType<typeof fauxPostgrest>) {
+    const app = await creerServeur({
+      fichierDb: join(dossier, 'ne-doit-pas-exister.db'),
+      supabase: { url: URL_SB, cleServiceRole: CLE, fetch: f.fetch },
+      adminPin: ADMIN,
+      pinInitial: '1234',
+      version: 'test',
+      maintenant: () => horloge.t,
+    })
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    const remettre = async (code: string) => {
+      const r = await fetch(`${base}/commerces/${AH}/caisse/gains/${code}/remise`, { method: 'POST', headers: PIN })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    // Gain v2 gagné hier, code activé par le client à 17 h 00 UTC : fenêtre jusqu'à 17 h 10.
+    const st = ouvrir(f)
+    await st.ajouterClient({ ...nouveauClient(AH, 'Lina', { telephone: '0612345678' }), id: 'cl-r3' })
+    await st.ajouterTirage({
+      id: 'ti-r3', commerceId: AH, clientId: 'cl-r3', lot: 'Nems offerts', lotId: 'lot-nems', typeLot: 'lot',
+      date: '2026-11-11T12:00:00.000Z', code: 'LENT23', activeLe: ACTIVE.toISOString(),
+    })
+    return { app, remettre }
+  }
+  const tirage = (f: ReturnType<typeof fauxPostgrest>) => f.tables.tirages.find((l) => l.id === 'ti-r3')!.donnees as Tirage
+
+  test('lecture lente : la fenêtre se ferme entre la lecture du tirage et l’écriture → remise refusée (409, message d’activation), rien écrit', async () => {
+    const f = fauxPostgrest()
+    horloge.t = new Date(ACTIVE.getTime() + 9 * 60_000 + 50_000) // 17 h 09 min 50 s : encore dans la fenêtre
+    const { app, remettre } = await demarrer(f)
+    try {
+      // La lecture par code est servie à 17 h 09 min 50 s (fenêtre ouverte) mais sa réponse met « 20 s » à revenir :
+      // l'horloge avance pendant le trajet, l'écriture arrive à 17 h 10 min 10 s.
+      f.ralentir({
+        ms: 20,
+        vise: (m, t, p) => {
+          if (!lectureParCode(m, t, p)) return false
+          horloge.t = new Date(ACTIVE.getTime() + 10 * 60_000 + 10_000)
+          return true
+        },
+      })
+      const r = await remettre('LENT23')
+      assert.equal(r.statut, 409, JSON.stringify(r.contenu))
+      assert.equal(r.contenu.erreur, MESSAGE_ACTIVATION, 'statut à jour : « inactif »')
+      assert.equal(tirage(f).remis, undefined, 'rien écrit')
+    } finally {
+      f.ralentir()
+      await app.fermer()
+    }
+  })
+
+  test('témoin : même lecture lente, fenêtre encore ouverte à l’écriture → remise 200 ; la condition de la fenêtre part bien à la base', async () => {
+    const f = fauxPostgrest()
+    horloge.t = new Date(ACTIVE.getTime() + 5 * 60_000)
+    const { app, remettre } = await demarrer(f)
+    try {
+      f.ralentir({
+        ms: 20,
+        vise: (m, t, p) => {
+          if (!lectureParCode(m, t, p)) return false
+          horloge.t = new Date(ACTIVE.getTime() + 9 * 60_000)
+          return true
+        },
+      })
+      const r = await remettre('LENT23')
+      assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+      assert.equal(tirage(f).remis?.le, new Date(ACTIVE.getTime() + 9 * 60_000).toISOString(), 'heure de remise = heure de l’écriture')
+      const ecriture = f.requetes.find((q) => q.methode === 'PATCH' && q.table === 'tirages')!
+      assert.equal(ecriture.params.get('donnees->>activeLe'), `gt.${new Date(ACTIVE.getTime() - 60_000).toISOString()}`, 'activeLe > écriture − 10 min')
+      assert.equal(ecriture.params.get('donnees->remis'), 'is.null')
+    } finally {
+      f.ralentir()
+      await app.fermer()
+    }
+  })
+
+  test('stockage seul : UPDATE conditionnel — fenêtre échue en base → false, rien écrit ; ouverte → true', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce({ ...nouveauCommerce('Asian Home', 'restaurant', ''), id: AH }, { hash: 'h', sel: 's' })
+    await st.ajouterClient({ ...nouveauClient(AH, 'Lina', { telephone: '0612345678' }), id: 'c' })
+    await st.ajouterTirage({ id: 'ti-st', commerceId: AH, clientId: 'c', lot: 'Nems', typeLot: 'lot', date: '2026-11-11T12:00:00.000Z', code: 'STOK23', activeLe: ACTIVE.toISOString() })
+    const remis: Tirage = {
+      id: 'ti-st', commerceId: AH, clientId: 'c', lot: 'Nems', typeLot: 'lot', date: '2026-11-11T12:00:00.000Z', code: 'STOK23', activeLe: ACTIVE.toISOString(),
+      remis: { le: '2026-11-12T17:10:00.000Z', par: { type: 'gerant', nom: 'Gérant' } },
+    }
+    assert.equal(await st.marquerTirageRemis(remis, ACTIVE.toISOString()), false, 'activé à 17 h 00, écriture à 17 h 10 : échue')
+    assert.equal((f.tables.tirages.find((l) => l.id === 'ti-st')!.donnees as Tirage).remis, undefined)
+    assert.equal(await st.marquerTirageRemis(remis, new Date(ACTIVE.getTime() - 1).toISOString()), true)
+    assert.equal(await st.marquerTirageRemis(remis, new Date(ACTIVE.getTime() - 1).toISOString()), false, 'déjà remis')
   })
 })
 

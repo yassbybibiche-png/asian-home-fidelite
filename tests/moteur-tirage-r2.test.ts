@@ -26,6 +26,7 @@ import {
 } from '../src/lib/roulette.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
 import type { Client, Commerce, CommercePublic, Lot, Tirage } from '../src/types.ts'
+import { codeEnBase } from './code-en-base.ts'
 
 const AH = 'c-asian-home-paris'
 const PIN = { 'X-Commerce-PIN': '1234' }
@@ -349,10 +350,10 @@ describe('R2 : serveur (SQLite) — accès libre, plafonds, limite mensuelle, co
     const r3 = await tirer(a3.contact)
     assert.equal(r3.contenu.lotId, 'lot-nems', '3 gains sur 30 jours : un lot est encore possible')
     // R3 (burn-on-reveal, décision du 12/11) : le code du lot physique est créé en base mais n'est plus dans la réponse
-    // du tirage — le client l'obtient par l'activation, à partir du lendemain.
+    // du tirage — le client l'obtient par l'activation, à partir du lendemain. Revue Codex R3 (F1) : lu en base, l'état
+    // commerçant ne le sert plus.
     assert.equal(r3.contenu.code, undefined)
-    const enBase3 = ((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.tirages as Tirage[]).find((t) => t.id === r3.contenu.tirageId)
-    assert.match(enBase3?.code ?? '', /^[A-Z2-9]{6}$/, 'lot physique : code à montrer au comptoir')
+    assert.match(codeEnBase(fichierDb, r3.contenu.tirageId) ?? '', /^[A-Z2-9]{6}$/, 'lot physique : code à montrer au comptoir')
     await patch({ limiteGainsMois: 0 })
     const illimite = await inscrire()
     tiragesPasses(illimite.client.id, [1, 2, 3, 4, 5, 6].map((j) => ({ date: ilYa(j) })))

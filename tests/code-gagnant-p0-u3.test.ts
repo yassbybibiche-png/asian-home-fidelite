@@ -16,6 +16,7 @@ import { creerServeur, emettreJetonClient } from '../server/app.ts'
 import type { Client, EntreeJournal, Tirage } from '../src/types.ts'
 import { creerClientApi, ErreurApi } from '../src/data/api.ts'
 import { jourEnClair, messageGain, normaliserCodeGagnant, statutGain, tirageDuCode } from '../src/lib/roulette.ts'
+import { codeEnBase } from './code-en-base.ts'
 
 const AH = 'c-asian-home-paris'
 const PIN = { 'X-Commerce-PIN': '1234' }
@@ -37,7 +38,7 @@ describe('P0-U3 : logique pure du code gagnant', () => {
   })
 
   test('statut (R3) : perdant > remis > en attente (jour J) / inactif ou utilisable (J+1 à J+30) / expiré (après J+30)', () => {
-    const t: Tirage = { id: 't', commerceId: AH, clientId: 'c', lot: 'Nems offerts', date: new Date(2026, 10, 10, 9).toISOString(), code: 'ABCD23' }
+    const t: Tirage = { id: 't', commerceId: AH, clientId: 'c', lot: 'Nems offerts', typeLot: 'lot', date: new Date(2026, 10, 10, 9).toISOString(), code: 'ABCD23' }
     const midi = new Date(2026, 10, 10, 12)
     assert.equal(statutGain(t, midi), 'enAttente', 'le jour du tirage : pas encore utilisable')
     assert.equal(statutGain(t, new Date(2026, 10, 11, 0, 5)), 'inactif', 'lendemain 0 h 05 : utilisable, code non activé')
@@ -45,11 +46,11 @@ describe('P0-U3 : logique pure du code gagnant', () => {
     assert.equal(statutGain(active, new Date(2026, 10, 11, 0, 10)), 'utilisable', 'code activé il y a 5 min')
     assert.equal(statutGain(t, new Date(2026, 11, 11, 0, 5)), 'expire', 'J+31')
     assert.equal(statutGain({ ...active, remis: { le: midi.toISOString(), par: { type: 'membre', nom: 'Mai' } } }, midi), 'remis')
-    assert.equal(statutGain({ ...t, lot: 'Pas de chance' }, midi), 'perdant')
+    assert.equal(statutGain({ ...t, lot: 'Pas de chance', typeLot: 'perdant' }, midi), 'perdant')
   })
 
   test('même code sur deux tirages (collision) : celui dont le code est activé passe d’abord, puis un gain encore en jeu', () => {
-    const hier: Tirage = { id: 'h', commerceId: AH, clientId: 'c', lot: 'Thé glacé', date: new Date(2026, 10, 9, 12).toISOString(), code: 'ABCD23' }
+    const hier: Tirage = { id: 'h', commerceId: AH, clientId: 'c', lot: 'Thé glacé', typeLot: 'lot', date: new Date(2026, 10, 9, 12).toISOString(), code: 'ABCD23' }
     const auj: Tirage = { ...hier, id: 'a', date: new Date(2026, 10, 10, 11).toISOString() }
     const midi = new Date(2026, 10, 10, 12)
     assert.equal(tirageDuCode([auj, { ...hier, activeLe: new Date(2026, 10, 10, 11, 55).toISOString() }], midi)?.id, 'h', 'activé')
@@ -88,7 +89,10 @@ describe('P0-U3 : routes de la caisse (SQLite)', () => {
   /** Jeton client de cette carte (version d'accès 0), comme celui rangé sur le téléphone du titulaire. */
   const jetonDe = (clientId: string) =>
     emettreJetonClient(SECRET, { typ: 'client', jti: randomUUID(), cid: clientId, com: AH, ver: 0, exp: Math.floor(horloge.getTime() / 1000) + 60 * 24 * 3600 })
-  /** Client inscrit, visite validée en caisse, roue tournée : le client, la réponse du tirage et le code (lu côté commerçant). */
+  /**
+   * Client inscrit, visite validée en caisse, roue tournée : le client, la réponse du tirage et le code — lu en base :
+   * depuis la revue Codex R3 (F1), l'état commerçant ne le sert plus.
+   */
   async function joueur(prenom: string, contact: string) {
     const c = (await api('POST', `/commerces/${AH}/clients`, { prenom, contact }, PIN)).contenu.client as Client
     assert.equal((await api('POST', `/commerces/${AH}/caisse/passage`, { clientId: c.id, actionId: `act-${c.id}` }, CODE)).statut, 200)
@@ -96,8 +100,7 @@ describe('P0-U3 : routes de la caisse (SQLite)', () => {
     assert.equal(t.statut, 201)
     const tirage = t.contenu as { tirageId: string; lot: string; code?: string; date: string; perdant: boolean }
     assert.equal(tirage.code, undefined, 'R3 : jamais de code dans la réponse du tirage')
-    const enBase = ((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.tirages as Tirage[]).find((x) => x.id === tirage.tirageId)!
-    return { client: c, tirage, code: enBase.code!, jeton: jetonDe(c.id) }
+    return { client: c, tirage, code: codeEnBase(join(dossier, 'f.db'), tirage.tirageId) ?? '', jeton: jetonDe(c.id) }
   }
   /** Le titulaire appuie sur « Utiliser mon gain » : code valable 10 minutes en caisse. */
   async function activer(j: { tirage: { tirageId: string }; jeton: string }) {
@@ -185,7 +188,8 @@ describe('P0-U3 : routes de la caisse (SQLite)', () => {
     assert.equal((await api('GET', gains(code), undefined, CODE)).contenu.gain.statut, 'remis')
 
     const etat = (await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu as { tirages: Tirage[]; journal: EntreeJournal[] }
-    const t = etat.tirages.find((x) => x.code === code)!
+    const t = etat.tirages.find((x) => x.id === lina.tirage.tirageId)!
+    assert.equal(t.code, undefined, 'revue Codex R3 (F1) : l’état commerçant ne porte pas le code')
     assert.equal(t.remis?.par.nom, 'Mai')
     assert.equal(t.remis?.par.type, 'membre')
     const gainsJournal = etat.journal.filter((e) => e.action === 'gain')

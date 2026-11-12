@@ -65,7 +65,6 @@ export default function Roulette() {
               <li key={t.id} className="flex justify-between gap-3 py-2.5">
                 <span>
                   <span className="font-semibold">{prenom(t.clientId)}</span> — {t.lot}
-                  {t.code && <span className="block font-mono text-sm text-gray-600">code {t.code}</span>}
                 </span>
                 <span className="shrink-0 text-sm text-gray-600">{dateRelative(t.date)}</span>
               </li>

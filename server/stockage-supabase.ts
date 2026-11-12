@@ -166,8 +166,11 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
   }
 
   /** UPDATE de `donnees` d'un tirage seulement s'il n'est pas déjà remis (`tirages` n'a pas de colonne version). */
-  async function majTirageNonRemis(t: Tirage): Promise<boolean> {
-    return (await ok<unknown[]>('tirages', sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->remis', null).select('id'))).length > 0
+  async function majTirageNonRemis(t: Tirage, activeApres?: string): Promise<boolean> {
+    let requete = sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->remis', null)
+    // Revue Codex R3 F4 : fenêtre d'activation vérifiée par la base, à l'écriture (texte ISO : ordre = ordre chronologique).
+    if (activeApres !== undefined) requete = requete.gt('donnees->>activeLe', activeApres)
+    return (await ok<unknown[]>('tirages', requete.select('id'))).length > 0
   }
 
   const AVEC_VERSION = 'id,version,donnees'
@@ -274,7 +277,7 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       lirePages<Tirage>('tirages', (debut, fin) =>
         sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('donnees->>code', code).order('date', { ascending: false }).order('id').range(debut, fin),
       ),
-    marquerTirageRemis: (t) => majTirageNonRemis(t),
+    marquerTirageRemis: (t, activeApres) => majTirageNonRemis(t, activeApres),
     activerTirage: (t) => majTirageNonRemis(t),
 
     avis: (commerceId) =>

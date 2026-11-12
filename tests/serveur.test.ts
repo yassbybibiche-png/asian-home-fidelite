@@ -10,6 +10,7 @@ import { creerServeur, type OptionsServeur } from '../server/app.ts'
 import type { Client, Commerce } from '../src/types.ts'
 import { creerClientApi, type ClientApi, type ErreurApi } from '../src/data/api.ts'
 import { lancerTirage } from '../src/data/jeuApi.ts'
+import { codeEnBase } from './code-en-base.ts'
 
 const ADMIN = '98765432'
 const ASIAN_HOME = 'c-asian-home-paris'
@@ -176,12 +177,14 @@ describe('Serveur /api/v1', () => {
     const libelles = etat.contenu.commerce.lots.map((l: { libelle: string }) => l.libelle)
     assert.ok(libelles.includes(r.contenu.lot))
     // R3 (burn-on-reveal, décision du 12/11) : la réponse du tirage ne porte plus jamais de code ; le code est en base
-    // (vu par le commerçant) et ne sera servi au client que par l'activation. R2 : aucun code pour une consolation.
+    // et ne sera servi au client que par l'activation — revue Codex R3 (F1) : l'état commerçant ne le porte pas non
+    // plus. R2 : aucun code pour une consolation.
     assert.equal(r.contenu.code, undefined)
     assert.equal(etat.contenu.tirages.length, 1)
     assert.equal(etat.contenu.tirages[0].id, r.contenu.tirageId)
-    if (r.contenu.type === 'points') assert.equal(etat.contenu.tirages[0].code, undefined)
-    else assert.match(etat.contenu.tirages[0].code, /^[A-Z2-9]{6}$/)
+    assert.equal(etat.contenu.tirages[0].code, undefined)
+    if (r.contenu.type === 'points') assert.equal(codeEnBase(fichierDb, r.contenu.tirageId), undefined)
+    else assert.match(codeEnBase(fichierDb, r.contenu.tirageId) ?? '', /^[A-Z2-9]{6}$/)
 
     const r2 = await srv.api('POST', `/commerces/${commerceId}/tirages`, { contact: '06 12 34 56 78' })
     assert.equal(r2.statut, 409)
@@ -361,10 +364,12 @@ describe('V2 : front ↔ serveur (contrat) et carte publique', () => {
 
     const etat = await api.etat(commerce.id, { role: 'admin', pin: ADMIN })
     assert.equal(etat.tirages.length, 1)
-    // R3 : le client ne reçoit plus le code au tirage (seulement à l'activation) ; le commerçant, lui, le voit toujours.
+    // R3 : le client ne reçoit plus le code au tirage (seulement à l'activation). Revue Codex R3 (F1) : le commerçant non
+    // plus — la caisse vérifie le code que le client montre, elle n'a pas à le connaître d'avance.
     assert.equal(gagne.resultat.code, undefined, 'aucun code dans la réponse du tirage')
     assert.equal(etat.tirages[0].id, gagne.resultat.tirageId)
-    if (!gagne.resultat.perdant) assert.match(etat.tirages[0].code!, /^[A-Z2-9]{6}$/, 'le commerçant voit le code pour le vérifier')
+    assert.equal(etat.tirages[0].code, undefined, 'pas de code dans l’état commerçant')
+    if (!gagne.resultat.perdant) assert.match(codeEnBase(join(dossier, 'v2.db'), gagne.resultat.tirageId) ?? '', /^[A-Z2-9]{6}$/, 'code créé en base')
   })
 
   test('carte publique : inconnue → 404 ; commerce inactif → 409', async () => {

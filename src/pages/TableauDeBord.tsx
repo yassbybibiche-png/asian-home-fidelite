@@ -249,7 +249,6 @@ export default function TableauDeBord() {
                   <span>
                     <span className="font-semibold">{prenom(t.clientId)}</span>
                     <span className="block text-gray-700">🎁 {t.lot}</span>
-                    {t.code && <span className="block font-mono text-sm text-gray-600">code {t.code}</span>}
                   </span>
                   <span className="shrink-0 text-sm text-gray-600">{dateRelative(t.date)}</span>
                 </li>

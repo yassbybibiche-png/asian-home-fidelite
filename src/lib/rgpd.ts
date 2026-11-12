@@ -4,6 +4,7 @@
 import type { Client, Commerce, CommercePublic, EnvoiRelance, Tirage } from '../types'
 import { celluleCsv } from './csv.ts'
 import { reserveUtilisable, recompensesEnAttenteValables } from './programme.ts'
+import { statutGain, type StatutGain } from './roulette.ts'
 
 // ---------- Durée de conservation ----------
 
@@ -135,13 +136,24 @@ const ORIGINES: Record<NonNullable<Client['consentementRelanceOrigine']>, string
   'lien-email': 'lien de désinscription (e-mail)',
 }
 
+/** Statut d'un tirage dans l'export (perdant : rien ; remis : la date de remise suit déjà). */
+const STATUTS_EXPORT: Record<StatutGain, string> = {
+  enAttente: 'gain utilisable à partir de demain',
+  inactif: 'gain à utiliser',
+  utilisable: 'gain à utiliser',
+  remis: '',
+  expire: 'gain expiré',
+  perdant: '',
+  consolation: '',
+}
+
 /**
  * Toutes les données d'UN client, en CSV (même format que l'export global `clientsEnCsv` : séparateur « ; », BOM
  * UTF-8, cellules protégées contre l'injection de formules). Une ligne par donnée : rubrique ; date ; libellé ; valeur.
  * Jamais : PIN, hash, code équipe, identifiants techniques (anti-doublon, idempotence), ni l'identifiant d'un autre
  * client (le parrain n'est indiqué que par « oui »).
  */
-export function exportClientCsv(client: Client, tirages: Tirage[], envois: EnvoiRelance[] = []): string {
+export function exportClientCsv(client: Client, tirages: Tirage[], envois: EnvoiRelance[] = [], maintenant = new Date()): string {
   const lignes: (string | number | null | undefined)[][] = []
   const l = (rubrique: string, date: string | null | undefined, libelle: string, valeur?: string | number | null) => lignes.push([rubrique, date ?? '', libelle, valeur ?? ''])
 
@@ -173,8 +185,11 @@ export function exportClientCsv(client: Client, tirages: Tirage[], envois: Envoi
   for (const d of client.defisReussis ?? []) l('recompense', d.date, 'Défi réussi', d.recompense)
   if (client.reserve) l('recompense', client.reserve.gagneLe, 'Plat en réserve', client.reserve.utiliseLe ? `utilisé le ${client.reserve.utiliseLe.slice(0, 10)}` : `valable jusqu’au ${client.reserve.expireLe.slice(0, 10)}`)
   for (const e of client.echangesPoints ?? []) l('echange', e.date, 'Échange de points', `${e.libelle} (−${e.cout} points, solde ${e.soldeAvant} → ${e.soldeApres})`)
+  // Revue Codex R3 (F1) : jamais le code brut — il ne circule que par l'activation (« Utiliser mon gain ») ; à la place,
+  // le statut du gain à la date de l'export.
   for (const t of [...tirages].filter((x) => x.clientId === client.id).sort((a, b) => a.date.localeCompare(b.date))) {
-    l('tirage', t.date, 'Roue du jour', `${t.lot}${t.code ? ` (code ${t.code})` : ''}${t.remis ? ` — remis le ${t.remis.le.slice(0, 10)}` : ''}`)
+    const statut = STATUTS_EXPORT[statutGain(t, maintenant)]
+    l('tirage', t.date, 'Roue du jour', `${t.lot}${statut ? ` (${statut})` : ''}${t.remis ? ` — remis le ${t.remis.le.slice(0, 10)}` : ''}`)
   }
   for (const d of client.demandesRattrapage ?? []) l('rattrapage', d.date, 'Visite oubliée signalée', `${d.statut} · ${d.montantCentimes} centimes${d.ticket ? ` · ticket ${d.ticket}` : ''}`)
   for (const m of client.messages ?? []) l('message', m.date, 'Message reçu sur la carte', m.texte)

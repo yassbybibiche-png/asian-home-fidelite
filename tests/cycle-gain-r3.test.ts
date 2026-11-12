@@ -13,9 +13,10 @@ import type { Client, Tirage } from '../src/types.ts'
 import { ErreurApi } from '../src/data/api.ts'
 import { activerCode } from '../src/data/jeuApi.ts'
 import {
-  ajouterJours, cycleGain, fenetreActive, finActivation, finGain, FENETRE_ACTIVATION_MS, gainEnCours, jourEnClair, MESSAGE_ACTIVATION, messageGain,
+  cycleGain, fenetreActive, finActivation, finGain, FENETRE_ACTIVATION_MS, gainEnCours, instantParis, jourEnClair, MESSAGE_ACTIVATION, messageGain,
   refusActivation, statutGain, utilisableLe,
 } from '../src/lib/roulette.ts'
+import { codeEnBase } from './code-en-base.ts'
 
 const AH = 'c-asian-home-paris'
 const PIN = { 'X-Commerce-PIN': '1234' }
@@ -23,10 +24,13 @@ const CODE_EQUIPE = { 'X-Equipe-Code': '2468' }
 const SECRET = 'secret-de-test-r3-cycle-gain-au-moins-32-caracteres-0123'
 const LARGES = { inscriptionParIp: 1000, inscriptionParContact: 1000, ficheClientParIp: 1000, lectureParIp: 1000, lectureParCarte: 1000, tirageParIp: 1000, tirageParContact: 1000 }
 
-/** Tirage gagné le mardi 10 novembre 2026 à 9 h (heure locale) : J = 10/11, J+1 = 11/11, J+30 = 10/12, J+31 = 11/12. */
-const J = new Date(2026, 10, 10, 9, 0)
+/**
+ * Tirage gagné le mardi 10 novembre 2026 à 9 h, heure de PARIS (revue Codex R3 F3 : les bornes sont des jours parisiens,
+ * quel que soit le fuseau du processus) : J = 10/11, J+1 = 11/11, J+30 = 10/12, J+31 = 11/12.
+ */
+const J = instantParis(2026, 11, 10, 9, 0)
 const gain: Tirage = { id: 'ti-1', commerceId: AH, clientId: 'c', lot: 'Nems offerts', lotId: 'lot-nems', typeLot: 'lot', date: J.toISOString(), code: 'ABCD23' }
-const le = (jour: number, h = 0, min = 0) => new Date(2026, 10, 10 + jour, h, min)
+const le = (jour: number, h = 0, min = 0) => instantParis(2026, 11, 10 + jour, h, min)
 
 describe('R3 : cycle de vie (fonctions pures)', () => {
   test('matrice par date : J → enAttente ; J+1 → utilisable ; J+30 (fin de journée) → utilisable ; J+31 → expire', () => {
@@ -36,7 +40,7 @@ describe('R3 : cycle de vie (fonctions pures)', () => {
       [le(1, 0, 0), 'utilisable'],
       [le(15, 12), 'utilisable'],
       [le(30, 0, 0), 'utilisable'],
-      [new Date(2026, 11, 10, 23, 59, 59, 999), 'utilisable'],
+      [new Date(le(31).getTime() - 1), 'utilisable'],
       [le(31, 0, 0), 'expire'],
       [le(60), 'expire'],
     ]
@@ -66,17 +70,6 @@ describe('R3 : cycle de vie (fonctions pures)', () => {
     assert.deepEqual((['enAttente', 'utilisable', 'inactif', 'remis', 'expire', 'perdant', 'consolation'] as const).filter(gainEnCours), ['enAttente', 'utilisable', 'inactif'])
   })
 
-  test('rétro-compatibilité : un gain d’avant R3 (ancien modèle « le jour même », sans activeLe) devient utilisable jusqu’à J+30', () => {
-    const ancien: Tirage = { id: 'ti-0', commerceId: AH, clientId: 'c', lot: 'Thé glacé', date: le(-1, 12).toISOString(), code: 'ZZZZ22' }
-    assert.equal(cycleGain(ancien, le(0, 12)), 'utilisable', 'cadeau de transition')
-    assert.equal(statutGain(ancien, le(0, 12)), 'inactif')
-  })
-
-  test('ajouterJours : minuit local, fin de mois et changement d’heure compris', () => {
-    assert.deepEqual(ajouterJours(new Date(2026, 9, 24, 23, 30), 1), new Date(2026, 9, 25))
-    assert.deepEqual(ajouterJours(new Date(2026, 9, 25, 12), 1), new Date(2026, 9, 26))
-    assert.deepEqual(ajouterJours(new Date(2026, 0, 31, 8), 30), new Date(2026, 2, 2))
-  })
 
   test('messages caisse v2 (maquettes §4) et refus d’activation vus par le client', () => {
     const base = { lot: 'Nems offerts', date: gain.date, remis: null }
@@ -158,7 +151,7 @@ describe('R3 : serveur (SQLite, mode strict)', () => {
   const gains = (code: string) => `/commerces/${AH}/caisse/gains/${code}`
   const activer = (tirageId: string, jeton: string) => api('POST', `/commerces/${AH}/tirages/${tirageId}/activer`, undefined, bearer(jeton))
 
-  /** Joueur inscrit (page de jeu), visite validée, roue tournée avec son jeton ; code lu côté commerçant. */
+  /** Joueur inscrit (page de jeu), visite validée, roue tournée avec son jeton ; code lu en base (revue Codex R3 F1). */
   async function joueur(contact: string) {
     const ins = await api('POST', `/commerces/${AH}/clients`, { contact })
     assert.equal(ins.statut, 201, ins.texte)
@@ -166,8 +159,8 @@ describe('R3 : serveur (SQLite, mode strict)', () => {
     assert.equal((await api('POST', `/commerces/${AH}/clients/${client.id}/visite`, undefined, PIN)).statut, 200)
     const t = await api('POST', `/commerces/${AH}/tirages`, {}, bearer(jeton))
     assert.equal(t.statut, 201, t.texte)
-    const enBase = ((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.tirages as Tirage[]).find((x) => x.id === t.contenu.tirageId)!
-    return { client, jeton, reponse: t, tirageId: t.contenu.tirageId as string, code: enBase.code!, date: enBase.date }
+    const tirageId = t.contenu.tirageId as string
+    return { client, jeton, reponse: t, tirageId, code: codeEnBase(join(dossier, 'r3.db'), tirageId)!, date: t.contenu.date as string }
   }
 
   before(async () => {
@@ -199,6 +192,10 @@ describe('R3 : serveur (SQLite, mode strict)', () => {
     assert.equal(j.reponse.contenu.code, undefined)
     assert.ok(!j.reponse.texte.includes(j.code), 'réponse du POST tirage')
     const publiques = async () => [
+      // Revue Codex R3 (F1) : l'état commerçant et l'export CSV du client ne le portent pas non plus.
+      await api('GET', `/commerces/${AH}/etat`, undefined, PIN),
+      await api('GET', `/commerces/${AH}/clients/${j.client.id}/export.csv`, undefined, PIN),
+      await api('POST', `/cartes/${j.client.id}/donnees`, { contact: '0610000001' }, bearer(j.jeton)),
       await api('GET', '/commerces'),
       await api('GET', `/commerces/${AH}`),
       await api('GET', `/commerces/${AH}/menu`),

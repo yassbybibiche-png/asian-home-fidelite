@@ -18,6 +18,7 @@ import { lotAccroche } from '../src/lib/mesure.ts'
 import { messageGain, secteurs, statutGain, tirageDuCode } from '../src/lib/roulette.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
 import type { Client, Commerce, CommercePublic, Lot, Tirage } from '../src/types.ts'
+import { codeEnBase } from './code-en-base.ts'
 
 const AH = 'c-asian-home-paris'
 const PIN = { 'X-Commerce-PIN': '1234' }
@@ -332,8 +333,9 @@ describe('R1 : serveur (SQLite) — validation, tirage par id, consolation', () 
     ])
     const d = (await tirer()).tirage
     assert.deepEqual([d.type, d.perdant], ['lot', false])
-    // R3 : code lu côté commerçant (plus dans la réponse du tirage) ; un gain du jour est « enAttente » (dès demain).
-    const codeD = ((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu as { tirages: Tirage[] }).tirages.find((t) => t.id === d.tirageId)!.code
+    // R3 : code plus dans la réponse du tirage ; revue Codex R3 (F1) : ni dans l'état commerçant — lu en base. Un gain du
+    // jour est « enAttente » (dès demain).
+    const codeD = codeEnBase(join(dossier, 'r1.db'), d.tirageId)
     assert.equal((await api('GET', `/commerces/${AH}/caisse/gains/${codeD}`, undefined, CODE)).contenu.gain.statut, 'enAttente')
   })
 

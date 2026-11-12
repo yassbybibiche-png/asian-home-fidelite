@@ -133,9 +133,11 @@ export interface Stockage {
   /**
    * Remise d'un gain (P0-U3) : écrit `t` (avec `remis`) seulement si le tirage en base n'est PAS déjà remis — une seule
    * requête conditionnelle, atomique pour la base (UPDATE … WHERE remis IS NULL). false = déjà remis, y compris par une
-   * requête simultanée : un code ne peut jamais être remis deux fois.
+   * requête simultanée : un code ne peut jamais être remis deux fois. `activeApres` (revue Codex R3 F4) : la condition
+   * exige EN PLUS `activeLe > activeApres` en base (fenêtre d'activation encore ouverte à l'heure de l'écriture ; ISO
+   * `toISOString`, comparables comme texte). false = déjà remis ou fenêtre échue.
    */
-  marquerTirageRemis(t: Tirage): P<boolean>
+  marquerTirageRemis(t: Tirage, activeApres?: string): P<boolean>
   /** Activation du code par le client (R3, `activeLe`) : même écriture conditionnelle — jamais sur un tirage déjà remis. */
   activerTirage(t: Tirage): P<boolean>
   avis(commerceId: string): P<Avis[]>
@@ -373,6 +375,9 @@ export function ouvrirStockage(fichier: string) {
     ),
     tiragesParCode: db.prepare("SELECT donnees FROM tirages WHERE commerce_id = ? AND json_extract(donnees, '$.code') = ? ORDER BY date DESC"),
     remettreTirage: db.prepare("UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL"),
+    remettreTirageActif: db.prepare(
+      "UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL AND json_extract(donnees, '$.activeLe') > ?",
+    ),
     avis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? ORDER BY date DESC'),
     unAvis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? AND id = ?'),
     ajoutAvis: db.prepare('INSERT INTO avis (id, commerce_id, date, donnees) VALUES (?, ?, ?, ?)'),
@@ -464,7 +469,8 @@ export function ouvrirStockage(fichier: string) {
     tiragesSansLot: (commerceId: string) => lire<Tirage>(q.tiragesSansLot.all(commerceId)),
     completerLotTirage: (t: Tirage) => Number(q.completerLotTirage.run(JSON.stringify(t), t.id, t.commerceId, t.remis ? 1 : 0).changes) > 0,
     tiragesParCode: (commerceId: string, code: string) => lire<Tirage>(q.tiragesParCode.all(commerceId, code)),
-    marquerTirageRemis: (t: Tirage) => Number(q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId).changes) > 0,
+    marquerTirageRemis: (t: Tirage, activeApres?: string) =>
+      Number((activeApres === undefined ? q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId) : q.remettreTirageActif.run(JSON.stringify(t), t.id, t.commerceId, activeApres)).changes) > 0,
     activerTirage: (t: Tirage) => Number(q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId).changes) > 0,
 
     avis: (commerceId: string) => lire<Avis>(q.avis.all(commerceId)),

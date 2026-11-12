@@ -15,7 +15,7 @@ import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotS
 import {
   debutDuJourParis, finActivation, finGain, gainEnCours, gainsSur30Jours, LIMITE_GAINS_MOIS_MAX, limiteGainsMois, lotsJouables,
   lotsPlafonnes, lotsTirables, messageGain, modeAccesRoue, normaliserCodeGagnant, PLAFOND_JOUR_MAX, refusActivation, statutGain, statutJeu, tirageDuCode, tirageDuJour,
-  tirerLot, utilisableLe,
+  tirageHerite, tirerLot, utilisableLe, FENETRE_ACTIVATION_MS,
 } from '../src/lib/roulette.ts'
 import { cleLibelle, estGainPhysique, estTypeLot, FORMAT_ID_LOT, libellesEnDouble, normaliserLots, POINTS_LOT_MAX, POINTS_LOT_MIN, rattachementsTirages, TYPES_LOT, typeDeduitDuLibelle, typeTirage } from '../src/lib/lots.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
@@ -889,7 +889,16 @@ function commerceCaisse(c: Commerce): CommerceCaisse {
   }
 }
 
-/** Gain vu en caisse (P0-U3) : de quoi reconnaître le client (prénom seul, jamais son contact) et l'état du code. */
+/** Tirage sans son code gagnant (état commerçant, revue Codex R3 F1). */
+function tirageSansCode(t: Tirage): Tirage {
+  const { code: _code, ...reste } = t
+  return reste
+}
+
+/**
+ * Gain vu en caisse (P0-U3) : de quoi reconnaître le client (prénom seul, jamais son contact) et l'état du code (`code` :
+ * celui que la caisse vient de saisir). `ancienneRegle` : tirage d'avant la roue v2 (`tirageHerite`, revue Codex F2).
+ */
 function gainCaisse(t: Tirage, client: Client | undefined, maintenant: Date) {
   return {
     code: t.code ?? '',
@@ -898,6 +907,7 @@ function gainCaisse(t: Tirage, client: Client | undefined, maintenant: Date) {
     statut: statutGain(t, maintenant),
     client: client ? { id: client.id, prenom: client.prenom } : null,
     remis: t.remis ? { le: t.remis.le, par: t.remis.par.nom } : null,
+    ...(tirageHerite(t) ? { ancienneRegle: true as const } : {}),
   }
 }
 
@@ -919,7 +929,8 @@ function gainsEnCoursDe(tirages: Tirage[], maintenant: Date) {
         utilisableLe: utilisableLe(x).toISOString(),
         // Premier instant expiré : minuit à la fin de J+30.
         expireLe: finGain(x).toISOString(),
-        expireActivation: statut === 'utilisable' ? finActivation(x) : null,
+        // Tirage hérité du jour même : utilisable sans activation, donc sans fenêtre.
+        expireActivation: statut === 'utilisable' && !tirageHerite(x) ? finActivation(x) : null,
       }
     })
 }
@@ -2931,7 +2942,7 @@ export async function creerServeur(o: OptionsServeur) {
       }
       const auteur: Auteur = { type: 'client', nom: 'Client (depuis sa carte)' }
       if (sous === 'donnees') {
-        const csv = exportClientCsv(client, await st.tiragesClient(c.id, client.id), await st.envois(c.id, 500, client.id))
+        const csv = exportClientCsv(client, await st.tiragesClient(c.id, client.id), await st.envois(c.id, 500, client.id), maintenant())
         await journaliser(c.id, auteur, 'rgpd', 'Export de ses données téléchargé par le client', client)
         return { csv: { nom: nomFichierExportClient(client.id), contenu: csv } }
       }
@@ -3164,7 +3175,9 @@ export async function creerServeur(o: OptionsServeur) {
         json: {
           commerce,
           clients: (await st.clients(id)).map(clientCaisse),
-          tirages: await st.tirages(id),
+          // Revue Codex R3 (F1) : sans le code — il ne circule que par l'activation du titulaire ; le tableau de bord et
+          // l'écran Roulette n'affichent que lot, client et statut.
+          tirages: (await st.tirages(id)).map(tirageSansCode),
           avis: await st.avis(id),
           membres: (await st.membres(id)).map((m) => m.membre),
           journal: await st.journal(id, 200),
@@ -3411,21 +3424,29 @@ export async function creerServeur(o: OptionsServeur) {
 
       // R3 : remise seulement si le gain est utilisable (J+1 à J+30) ET son code activé il y a moins de 10 minutes
       // (statut 'utilisable'). Expiré : 410 ; tout le reste (en attente, inactif, remis, perdant, consolation) : 409.
-      const refus = (x: Tirage) => {
-        const g = gainCaisse(x, undefined, t)
+      const refus = (x: Tirage, quand: Date) => {
+        const g = gainCaisse(x, undefined, quand)
         if (g.statut !== 'utilisable') throw err(g.statut === 'expire' ? 410 : 409, messageGain(g))
       }
-      refus(trouve)
-      const remis: Tirage = { ...trouve, remis: { le: t.toISOString(), par: auteur } }
-      // Garde de la base : l'écriture n'a lieu que si personne ne l'a remis entre-temps (deux caisses au même moment).
-      if (!(await st.marquerTirageRemis(remis))) {
+      // Revue Codex R3 (F4) : l'heure de vérité est celle de l'ÉCRITURE, pas celle d'avant la lecture (une lecture lente
+      // laisserait passer une remise juste après la fin de la fenêtre ou du gain). Re-vérifié à l'heure de l'écriture,
+      // et la base re-vérifie la fenêtre elle-même (`activeLe` dans les 10 dernières minutes, condition de l'UPDATE).
+      const quand = maintenant()
+      refus(trouve, quand)
+      const remis: Tirage = { ...trouve, remis: { le: quand.toISOString(), par: auteur } }
+      // Tirage hérité du jour même : remise directe, sans fenêtre (ancienne règle, revue Codex F2).
+      const activeApres = tirageHerite(trouve) ? undefined : new Date(quand.getTime() - FENETRE_ACTIVATION_MS).toISOString()
+      // Garde de la base : l'écriture n'a lieu que si personne ne l'a remis entre-temps (deux caisses au même moment) et
+      // si la fenêtre d'activation est encore ouverte.
+      if (!(await st.marquerTirageRemis(remis, activeApres))) {
         const relu = (await st.tiragesParCode(id, code)).find((x) => x.id === trouve.id)
-        if (relu) refus(relu)
+        if (relu) refus(relu, maintenant())
+        if (relu && !relu.remis) throw err(409, 'Le code vient de changer d’état : vérifiez-le à nouveau.')
         throw err(409, 'Lot déjà remis : un code ne sert qu’une fois.')
       }
       const client = await st.client(id, remis.clientId)
       await journaliser(id, auteur, 'gain', `Gain de la roue remis : ${remis.lot} (code ${code})`, client)
-      return { json: { gain: gainCaisse(remis, client, t) } }
+      return { json: { gain: gainCaisse(remis, client, quand) } }
     }
 
     // ---------- RGPD (P1-B6) : export individuel, suppression, purge de conservation — gérant / admin seulement ----------
@@ -3435,7 +3456,7 @@ export async function creerServeur(o: OptionsServeur) {
       // rien d'un autre client, jamais de PIN / hash / code équipe.
       const nom = await exigerCommercant(req, id)
       const client = await clientOu404(id, sousId)
-      const csv = exportClientCsv(client, await st.tiragesClient(id, client.id), await st.envois(id, 500, client.id))
+      const csv = exportClientCsv(client, await st.tiragesClient(id, client.id), await st.envois(id, 500, client.id), maintenant())
       await journaliser(id, { type: 'gerant', nom }, 'rgpd', 'Export des données du client (CSV)', client)
       return { csv: { nom: nomFichierExportClient(client.id), contenu: csv } }
     }

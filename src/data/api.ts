@@ -190,6 +190,8 @@ export interface GainCaisse {
   statut: StatutGain
   client: { id: string; prenom: string } | null
   remis: { le: string; par: string } | null
+  /** Tirage d'avant la roue v2 (revue Codex R3 F2) : ancienne règle, valable le jour du tirage seulement, sans activation. */
+  ancienneRegle?: true
 }
 
 export type ChampsReglages = Partial<
