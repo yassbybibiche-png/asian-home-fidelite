@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, CommercePublic, Tirage, TypeLot } from '../types'
@@ -32,7 +32,7 @@ import {
   TEXTE_ATTENTE,
   type SuiviVisite,
 } from '../lib/attenteVisite'
-import { estAsianHome } from '../lib/visuels'
+import { estAsianHome, LOGO_DEFAUT_PETIT, logoCommerce, VISUELS } from '../lib/visuels'
 import { attributsChamp, avecPrenom, etatSaisieContact, virgulePrenom, type ModeContact } from '../lib/inscriptionJeu'
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ReponseCarte, type ResultatTirage } from '../data/api'
 import { assurerJetonClient, avecJetonClient, lancerTirage, marquerScanSignale, memoireJoueur, signalerScan, type JoueurMemorise } from '../data/jeuApi'
@@ -46,8 +46,12 @@ import {
   etapesEcranAccueilLangue,
   genererConfettis,
   MOTIF_VIBRATION_GAIN,
+  memoriserSon,
   MOTIF_VIBRATION_PERDU,
   NOTE_WALLET,
+  ouvrirScene,
+  type SceneRoue,
+  sonActive,
   TEXTE_CODE_A_MONTRER,
   TEXTE_CODE_UNE_FOIS,
   TEXTE_CONSOLATION,
@@ -60,7 +64,7 @@ import {
   toursRotation,
   vibrer,
 } from '../lib/animationRoue'
-import { LegendeRoue, Roue, useMouvementReduit } from '../components/Roue'
+import { ContexteRoue, LegendeRoue, Roue, useMouvementReduit } from '../components/Roue'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteJeu } from '../components/Squelette'
 import { CommutateurLangue, useLangue } from '../components/Langue'
@@ -109,34 +113,67 @@ function verifierCommerce(commerce: CommerceJeu): ReactNode {
 
 type Etape = 'pret' | 'rotation' | 'resultat'
 
+/**
+ * Son de la roue (R5) : préférence de l'appareil (défaut activé), scène ouverte dans le clic « Tourner » — l'AudioContext
+ * n'est jamais créé hors de ce geste ; la synthèse (sonRoue.ts) est chargée à ce moment-là, hors bundle initial.
+ */
+function useJeuRoue() {
+  const [son, setSon] = useState(() => sonActive(stockageLocal()))
+  const scene = useRef<Promise<SceneRoue | null> | null>(null)
+  return {
+    son,
+    scene,
+    basculer() {
+      memoriserSon(stockageLocal(), !son)
+      void scene.current?.then((s) => s && (s.muet = son))
+      setSon(!son)
+    },
+    ouvrir: () => void (scene.current = ouvrirScene(son)),
+  }
+}
+
+type JeuRoue = ReturnType<typeof useJeuRoue>
+
+/** Logo du moyeu : image du commerce (petite variante pour le logo par défaut), sinon son initiale. */
+function decorRoue(commerce: CommerceJeu, jeu: JeuRoue, fete?: TypeLot) {
+  // Un logo-texte (émoji, sigle) n'a pas de « / » : seul un chemin ou une adresse d'image est affiché comme image.
+  const logo = logoCommerce(commerce)
+  return { couleur: commerce.apparence?.couleur, logo: logo.includes('/') ? (logo === VISUELS.logo ? LOGO_DEFAUT_PETIT : logo) : undefined, initiale: commerce.nom.trim()[0]?.toUpperCase(), scene: jeu.scene, fete }
+}
+
 /** En-tête + roue, communs aux deux modes. `infos` (R4) : avant le tirage, lots du jour + règles + lien règlement. */
-function Cadre({ commerce, rotation, children, pied, infos }: { commerce: CommerceJeu; rotation: number; children: ReactNode; pied: ReactNode; infos: boolean }) {
+function Cadre({ commerce, rotation, children, pied, infos, jeu, fete }: { commerce: CommerceJeu; rotation: number; children: ReactNode; pied: ReactNode; infos: boolean; jeu: JeuRoue; fete?: TypeLot }) {
   const { t } = useLangue()
   // Test A/B « accroche » (P2-Q3, docs/TESTS-AB.md) : variante du jour, la même pour tous les clients de la journée.
   const accroche = accrocheJeu(commerce, jourParis(new Date()))
   return (
-    <div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
-      <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-2 pb-8 text-center shadow-relief">
-        <CommutateurLangue sombre />
-        <div className="flex justify-center">
-          <LogoCommerce commerce={commerce} taille="lg" />
+    <ContexteRoue.Provider value={decorRoue(commerce, jeu, fete)}>
+      <div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
+        <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-2 pb-8 text-center shadow-relief">
+          <CommutateurLangue sombre />
+          <div className="flex justify-center">
+            <LogoCommerce commerce={commerce} taille="lg" />
+          </div>
+          <h1 className="titre-magenta mt-3 text-2xl">{commerce.nom}</h1>
+          <p className="mt-1 font-semibold text-magenta-300">{t(accroche.modele, accroche.valeurs)}</p>
+          {commerce.coordonnees && <p className="mt-1 text-sm text-white/70">{commerce.coordonnees}</p>}
+        </header>
+
+        <div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-magenta-400/30">
+          <div className="relative z-20 -mb-11 flex justify-end">
+            <button type="button" className="bouton-son" aria-pressed={jeu.son} aria-label={t('Son de la roue')} onClick={jeu.basculer} />
+          </div>
+          <Roue lots={commerce.lots} rotation={rotation} />
+          <LegendeRoue lots={commerce.lots} />
         </div>
-        <h1 className="titre-magenta mt-3 text-2xl">{commerce.nom}</h1>
-        <p className="mt-1 font-semibold text-magenta-300">{t(accroche.modele, accroche.valeurs)}</p>
-        {commerce.coordonnees && <p className="mt-1 text-sm text-white/70">{commerce.coordonnees}</p>}
-      </header>
 
-      <div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-magenta-400/30">
-        <Roue lots={commerce.lots} rotation={rotation} />
-        <LegendeRoue lots={commerce.lots} />
+        {children}
+        {infos && <InfosJeu commerce={commerce} />}
+
+        <p className="text-center text-sm text-gray-600">{pied}</p>
+        <PiedPublic commerceId={commerce.id} />
       </div>
-
-      {children}
-      {infos && <InfosJeu commerce={commerce} />}
-
-      <p className="text-center text-sm text-gray-600">{pied}</p>
-      <PiedPublic commerceId={commerce.id} />
-    </div>
+    </ContexteRoue.Provider>
   )
 }
 
@@ -358,6 +395,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
   const minuterie = useRef<number | undefined>(undefined)
   useEffect(() => () => window.clearTimeout(minuterie.current), [])
   const reduit = useMouvementReduit()
+  const jeuRoue = useJeuRoue()
   const { t } = useLangue()
 
   const trouver = (id: string | null) => (id ? etat.clients.find((c) => c.id === id && c.commerceId === commerce.id) : undefined)
@@ -393,6 +431,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
       }),
     )
     if (!tirables.length) return
+    jeuRoue.ouvrir()
     const secteur = secteurs(normalises).find((s) => s.lot.id === tirables[tirerLot(tirables)].id)!
     const tirage: Tirage = {
       id: `ti-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
@@ -415,6 +454,8 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
     <Cadre
       commerce={commerce}
       rotation={rotation}
+      jeu={jeuRoue}
+      fete={etape === 'resultat' && gain ? typeTirage(gain) : undefined}
       infos={etape === 'pret' && !dejaJoue}
       pied={
         <>
@@ -549,6 +590,7 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
   const verifierMaintenant = useRef<() => void>(() => {})
   useEffect(() => () => window.clearTimeout(minuterie.current), [])
   const reduit = useMouvementReduit()
+  const jeuRoue = useJeuRoue()
   const { t } = useLangue()
   const visiteValidee = useVisiteValidee(jeu?.statut)
   // Mesure anonyme (P2-Q3) : page de jeu ouverte, une fois par onglet ; seul le type part, jamais la carte.
@@ -652,6 +694,8 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
 
   async function tourner() {
     if (!joueur || etape !== 'pret' || enCours) return
+    // Dans le geste, avant toute attente réseau : sinon le navigateur refuserait de démarrer le son.
+    jeuRoue.ouvrir()
     setEnCours(true)
     setMessage(null)
     const issue = await lancerTirage(api, commerce, joueur.contact, joueur.prenom)
@@ -686,6 +730,8 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
     <Cadre
       commerce={commerce}
       rotation={rotation}
+      jeu={jeuRoue}
+      fete={etape === 'resultat' && gain ? typeTirage({ lot: gain.lot, typeLot: gain.type }) : undefined}
       infos={etape === 'pret' && jeu?.statut !== 'dejaJoue' && !accesPerdu}
       pied={
         <>
@@ -1073,6 +1119,9 @@ export function Resultat({
   const { langue, t } = useLangue()
   // Retour tactile à l'apparition du résultat (Android ; sans effet sur iPhone, qui n'a pas l'API).
   useEffect(() => void vibrer(perdu ? MOTIF_VIBRATION_PERDU : MOTIF_VIBRATION_GAIN), [perdu])
+  // Motif sonore du gain (R5), allégé pour des points ; scène ouverte au clic « Tourner », muette si le son est coupé.
+  const { scene } = useContext(ContexteRoue)
+  useEffect(() => void (!perdu && scene?.current?.then((s) => s?.fanfare(consolation))), [perdu])
   if (perdu)
     return (
       <section className="carte apparition text-center" role="status" aria-live="polite" data-resultat="perdu">
@@ -1086,7 +1135,7 @@ export function Resultat({
       </section>
     )
   return (
-    <section className="carte apparition bg-gradient-to-b from-magenta-500/10 to-white text-center ring-2 ring-magenta-500" role="status" aria-live="polite" data-resultat="gain">
+    <section className="carte apparition bg-gradient-to-b from-magenta-500/10 to-white text-center ring-2 ring-magenta-500" role="status" aria-live="polite" data-leger={consolation} data-resultat="gain">
       <Confettis />
       <p className="text-5xl" aria-hidden>
         {consolation ? '🍀' : '🎉'}

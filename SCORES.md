@@ -108,7 +108,7 @@ l'AUDIT §7, sur le staging (jamais la production) :
 5. Relever les erreurs console via le navigateur distant (Chrome DevTools USB) ou,
    à défaut, noter tout écran blanc / blocage visible.
 
-## Bundle (build frais, mode par défaut, 12/11/2026 — roue v2 R4)
+## Bundle (build frais, mode par défaut, 12/11/2026 — roue v2 R5+R8)
 
 Définition unique : **JS initial non gzipé** = script d'entrée de `index.html` +
 ses imports statiques (méthode `fichiersInitiaux` de
@@ -121,13 +121,21 @@ référence P1-U1 est conservée verbatim juste après (titre et chiffres), comm
 archive historique — le test `tests/mesure-p1-u1.test.ts` y lit ses chiffres
 figés ; elle ne doit pas être modifiée.
 
-- JS initial non gzipé : 478582 o (467,4 Ko) — `index-Ds9Zh83s.js` 366800 o +
-  `ui-BFq4U8ue.js` 102940 o + `jsx-runtime-CkXRJ162.js` 8243 o +
+- JS initial non gzipé : 481300 o (470,0 Ko) — `index-Cq47eQ9g.js` 369463 o +
+  `ui-B4-rHVEO.js` 102995 o + `jsx-runtime-CkXRJ162.js` 8243 o +
   `rolldown-runtime-WkwZ5CU-.js` 599 o.
-- CSS non gzipé : 71129 o (69,5 Ko) — `index-Da4efFS0.css`.
-- Total initial : 549711 o (536,8 Ko).
-- JS total (tous chunks) : 829128 o (809,7 Ko) ; 25 chunks ; plus gros chunk : 366800 o
+- CSS non gzipé : 76972 o (75,2 Ko) — `index-DdJ8QMRp.css`.
+- Total initial : 558272 o (545,2 Ko).
+- JS total (tous chunks) : 836947 o (817,3 Ko) ; 26 chunks ; plus gros chunk : 369463 o
   (limite test : 500 000 o — respectée).
+- Roue v2 R5+R8 (son, couleur du commerce, roue premium) : JS initial 479360 o → 481300 o
+  (+1 940 o) — plafond P2-Q2 481376 o (< 80 % de 601720 o) respecté avec **76 o de marge
+  seulement** : le prochain lot qui ajoute du code au premier affichage de #/jouer devra
+  d'abord découper (ex. bloc « À gagner aujourd’hui », « Garder ma carte »). Le décor
+  premium (anneau, reflet, moyeu, ampoules, rayons, pointeur) est en CSS (+5 843 o de CSS,
+  hors plafond JS) ; la synthèse sonore est un chunk à la demande, `sonRoue-*.js` 1278 o
+  (+1 chunk), chargé au clic « Tourner ». Mesure « avant » (R4 + revue Codex, 4db69b4) :
+  479360 o ; la valeur 478582 o ci-dessous date de R4 avant sa revue Codex.
 - Roue v2 (12/11/2026) : après R3 (mesuré au commit f1bf0fd, build frais) JS initial
   470200 o, CSS 71129 o, total 541329 o, JS total 813761 o, 24 chunks, plus gros
   360485 o — soit +15 843 o de JS initial pour R1–R3 (types de lots, moteur v2, cycle
@@ -224,8 +232,8 @@ ses imports statiques (méthode `fichiersInitiaux` de
 
 ## Couverture de tests
 
-Suite verte : **1433/1433** (`npm test`, typechecks inclus — 1090 après P2-Q2, +73 tests
-P2-Q3 à P2-Q6, +3 tests boucle t1, +4 tests boucle t2, +1 test SW boucle t2, +4 tests boucle t4, +1 test auto (nouvelle entrée VISUELS), +4 tests boucle t5, +3 tests boucle t6, +1 test auto (nouvelle entrée VISUELS), +10 tests boucle t10, +6 tests auto (nouvelles entrées VISUELS), +4 tests correction Codex point 5, +13 tests correction Codex point 11, +8 tests correction Codex point 6, +5 tests correction Codex point 9, +15 tests correction Codex point 10, +4 tests correction Codex point 2, +7 tests correction Codex point 4, +6 tests correction Codex point 7, +3 tests correction Codex point 8, +9 tests revue Codex finale, +2 tests correction Codex point 1, +2 tests correction Codex point 3, +8 tests revue Codex finale points 1-3, +5 tests item B catalogue par défaut, +4 tests auto item C (2 vignettes de galerie : fichiers WebP et entrées VISUELS), +13 tests item D sauvegarde téléchargeable par l'admin, +12 tests item E alerte e-mail sur rafale de 5xx, +6 tests revue Codex nov12 (1/2) délai propre de la sauvegarde, +7 tests revue Codex nov12 (2/2) reprise après échec d'une alerte 5xx, +21 tests roue v2 R1 lots structurés (id + type), +1 test revue Codex R1 (écriture sans type), +17 tests roue v2 R2 moteur de tirage (accès libre, plafonds, limite mensuelle, consolation points), +11 tests revue Codex R2 (tirages sérialisés par commerce, crédit de consolation exactement-une-fois, journée des plafonds à Paris, rattrapage des lotId), +12 tests roue v2 R3 cycle de vie du gain (J+1 à J+30, code burn-on-reveal 10 min), +12 tests revue Codex R3 (code seulement par l'activation, bornes en jours de Paris, anciens tirages sous l'ancienne règle, remise conditionnelle à l'heure de l'écriture ; 2 tests R3 remplacés), +20 tests roue v2 R4 écrans client (lots du jour, règlement généré, gains sur la carte et compte à rebours, écran résultat v2, route publique du règlement), +6 tests revue Codex R4 (compte à rebours sur l'heure du serveur, carte rafraîchie aux bornes de statut, règlement bilingue) ; voir `JOURNAL.md`).
+Suite verte : **1454/1454** (`npm test`, typechecks inclus — 1090 après P2-Q2, +73 tests
+P2-Q3 à P2-Q6, +3 tests boucle t1, +4 tests boucle t2, +1 test SW boucle t2, +4 tests boucle t4, +1 test auto (nouvelle entrée VISUELS), +4 tests boucle t5, +3 tests boucle t6, +1 test auto (nouvelle entrée VISUELS), +10 tests boucle t10, +6 tests auto (nouvelles entrées VISUELS), +4 tests correction Codex point 5, +13 tests correction Codex point 11, +8 tests correction Codex point 6, +5 tests correction Codex point 9, +15 tests correction Codex point 10, +4 tests correction Codex point 2, +7 tests correction Codex point 4, +6 tests correction Codex point 7, +3 tests correction Codex point 8, +9 tests revue Codex finale, +2 tests correction Codex point 1, +2 tests correction Codex point 3, +8 tests revue Codex finale points 1-3, +5 tests item B catalogue par défaut, +4 tests auto item C (2 vignettes de galerie : fichiers WebP et entrées VISUELS), +13 tests item D sauvegarde téléchargeable par l'admin, +12 tests item E alerte e-mail sur rafale de 5xx, +6 tests revue Codex nov12 (1/2) délai propre de la sauvegarde, +7 tests revue Codex nov12 (2/2) reprise après échec d'une alerte 5xx, +21 tests roue v2 R1 lots structurés (id + type), +1 test revue Codex R1 (écriture sans type), +17 tests roue v2 R2 moteur de tirage (accès libre, plafonds, limite mensuelle, consolation points), +11 tests revue Codex R2 (tirages sérialisés par commerce, crédit de consolation exactement-une-fois, journée des plafonds à Paris, rattrapage des lotId), +12 tests roue v2 R3 cycle de vie du gain (J+1 à J+30, code burn-on-reveal 10 min), +12 tests revue Codex R3 (code seulement par l'activation, bornes en jours de Paris, anciens tirages sous l'ancienne règle, remise conditionnelle à l'heure de l'écriture ; 2 tests R3 remplacés), +20 tests roue v2 R4 écrans client (lots du jour, règlement généré, gains sur la carte et compte à rebours, écran résultat v2, route publique du règlement), +6 tests revue Codex R4 (compte à rebours sur l'heure du serveur, carte rafraîchie aux bornes de statut, règlement bilingue), +21 tests roue v2 R5+R8 (préférence son par appareil, AudioContext seulement dans le geste et synthèse chargée à la demande, tics depuis l’angle animé et aucun tic en mouvement réduit, couleur du commerce lisible sur toute couleur acceptée, décor premium sur couches fixes animé en opacity/transform seulement, célébration allégée pour des points) ; voir `JOURNAL.md`).
 
 - Couverture globale : 97,90 % lignes / 91,49 % branches / 93,06 % fonctions
   (`node --test --experimental-test-coverage`, suite verte, 11/11/2026 —
@@ -1433,3 +1441,18 @@ lots de modification issus de la boucle.
 
 Un tour de la boucle d'amélioration ne fusionne que s'il améliore au moins une
 de ces métriques sans régresser les autres (AUDIT.md §7, boucle continue).
+
+## Cohérence DA /10 — écran de jeu après roue v2 R5+R8 (re-mesure 12/11/2026 ~14:00 UTC, 1 passe)
+
+Méthode identique aux notations précédentes : captures Playwright Pixel 7 (Chromium, build API,
+serveur E2E local), commerce de test 6 lots en accès libre, magenta par défaut ET couleur de
+commerce `#3b2d8f` ; roue au repos, en rotation (2 instants), à l'arrêt sur le gain, rayons
+ouverts. Captures avant/après : `node_modules/.cache/boucle-roue/captures-R58-avant/` et
+`captures-R58-apres/` (non versionnées).
+
+| Écran | Avant | Après | Justification |
+| --- | --- | --- | --- |
+| Jouer (roue) | 9/10 | **9,5/10** | Roue « casino » réussie : anneau en relief (reflet haut, ombre basse, filet), 16 ampoules en poursuite pendant la rotation, brillant bombé et ombre interne du moyeu, filets nets, moyeu à initiale serif, pointeur goutte qui rebondit, rayons discrets au gain, couleur du commerce reprise par la roue et la légende ; reste visible : libellés de la moitié gauche à l'envers au repos, légende et cadre restés magenta sur une couleur perso, émoji 🎡 multicolore du bouton « Tourner », libellés abrégés (« Dessert… », règle des 12 caractères). |
+
+Cible 10/10 **non atteinte** : note non gonflée ; ce qui manque est listé dans `BOUCLE.md`
+(roue v2 R5+R8).

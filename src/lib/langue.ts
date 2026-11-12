@@ -77,6 +77,7 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'À gagner': 'Prizes',
   'Lots de la roue': 'Wheel prizes',
   'Roue de la chance : {n} lots à gagner, détaillés ci-dessous': 'Wheel of fortune: {n} prizes to win, listed below',
+  'Son de la roue': 'Wheel sound',
   '🎡 Tourner la roue{prenom} !': '🎡 Spin the wheel{prenom}!',
   'La roue tourne…': 'The wheel is spinning…',
   'Tirage en cours…': 'Drawing…',

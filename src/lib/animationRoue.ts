@@ -47,6 +47,52 @@ export function toursRotation(reduit: boolean): number {
   return reduit ? 0 : 5
 }
 
+// ---- Son (R5) : préférence de l'appareil, AudioContext ouvert dans le geste, synthèse chargée à la demande ----
+
+/** Clé par appareil (pas par commerce) ; absente = son activé. */
+export const CLE_SON = 'fidelite:son-roue'
+
+/** Accès au stockage déjà protégé par l'appelant (`stockageLocal`) ; sans stockage : son activé. */
+export function sonActive(stockage: Pick<Storage, 'getItem'> | null | undefined): boolean {
+  return stockage?.getItem(CLE_SON) !== '0'
+}
+
+export function memoriserSon(stockage: Pick<Storage, 'setItem'> | null | undefined, actif: boolean): void {
+  try {
+    stockage?.setItem(CLE_SON, actif ? '1' : '0')
+  } catch {
+    // Stockage indisponible : le choix vaut pour cette page seulement.
+  }
+}
+
+/** Tics, inclinaison du pointeur et motif de gain : `src/lib/sonRoue.ts`, hors bundle initial. */
+export interface SceneRoue {
+  /** Son coupé en cours de partie : les notes se taisent, l'inclinaison du pointeur continue. */
+  muet: boolean
+  planifier(de: number, a: number, limites: number[], duree: number, pointeur?: Element | null, ecoule?: number): () => void
+  fanfare(leger: boolean): void
+}
+
+type FenetreAudio = { AudioContext?: new () => AudioContext; webkitAudioContext?: new () => AudioContext }
+
+/**
+ * À appeler UNIQUEMENT dans le clic « Tourner » : crée (ou réveille) l'AudioContext pendant le geste si le son est
+ * activé, puis charge la scène. Ne lève jamais ; sans WebAudio, la scène tourne en silence.
+ */
+export function ouvrirScene(son: boolean, w: FenetreAudio = globalThis as never): Promise<SceneRoue | null> {
+  let ctx: AudioContext | null = null
+  try {
+    const C = w.AudioContext ?? w.webkitAudioContext
+    if (son && C) void (ctx = new C()).resume?.()?.catch?.(() => {})
+  } catch {
+    ctx = null
+  }
+  return import('./sonRoue.ts').then(
+    (m) => m.creerScene(ctx),
+    () => null,
+  )
+}
+
 // ---- Vibration ----
 
 /** Motif de vibration au gain : deux impulsions courtes. */
@@ -66,6 +112,8 @@ export function vibrer(motif: number[], nav: { vibrate?: (m: number[]) => boolea
 // ---- Confettis (CSS maison, aucune dépendance) ----
 
 export const NOMBRE_CONFETTIS = 36
+/** Consolation en points (R5) : même pluie, allégée. */
+export const NOMBRE_CONFETTIS_LEGER = 14
 
 export interface Confetti {
   /** Position de départ horizontale, en % de la largeur. */

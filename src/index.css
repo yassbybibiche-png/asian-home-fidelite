@@ -174,6 +174,24 @@ h3 {
   .apparition {
     animation: apparition 0.35s ease-out both;
   }
+  /* Bouton son de la roue (R5), sur le fond sombre de la roue : 44 × 44 px, icône haut-parleur en masque (blanc ;
+     barré et atténué quand le son est coupé). */
+  .bouton-son {
+    @apply flex h-11 w-11 items-center justify-center rounded-full ring-1 ring-white/25 hover:bg-white/10 aria-pressed:ring-magenta-400/60;
+  }
+  .bouton-son::before {
+    content: '';
+    width: 22px;
+    height: 22px;
+    background-color: white;
+    -webkit-mask: var(--icone-son) center / contain no-repeat;
+    mask: var(--icone-son) center / contain no-repeat;
+    --icone-son: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 9h4l5-4v14l-5-4H3z'/%3E%3Cpath d='M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  }
+  .bouton-son[aria-pressed='false']::before {
+    opacity: 0.6;
+    --icone-son: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 9h4l5-4v14l-5-4H3z'/%3E%3Cpath d='M16 9.5l5 5m0-5l-5 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  }
   .attente-pulse {
     @apply relative inline-flex h-3 w-3 shrink-0 rounded-full bg-magenta-400;
     animation: attente-point 1.6s ease-in-out infinite;
@@ -219,6 +237,271 @@ h3 {
   animation-name: confetti-chute;
   animation-timing-function: cubic-bezier(0.25, 0.6, 0.4, 1);
   animation-fill-mode: both;
+}
+
+/* Consolation en points (R5) : même pluie, allégée (NOMBRE_CONFETTIS_LEGER = 14 pièces). */
+[data-leger='true'] .confetti:nth-child(n + 15) {
+  display: none;
+}
+
+/* #/jouer, roue premium (R8). Tout le décor est sur des couches FIXES (seule la couche des secteurs tourne) et
+   n'anime que opacity / transform / rotate. Teintes : variables --roue-* posées par Roue.tsx (magenta du thème ou
+   couleur du commerce, jamais en dur). */
+/* Anneau en relief : dégradé radial (gorge sombre → teinte vive → bord sombre), reflet en haut, ombre en bas,
+   filet clair au bord, ombre portée douce. Le centre est recouvert par les secteurs. */
+.roue {
+  container-type: inline-size; /* initiale du moyeu en cqw : proportionnelle à la roue */
+}
+.roue-anneau {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background:
+    linear-gradient(color-mix(in srgb, white 45%, transparent), transparent 42%, transparent 62%, color-mix(in srgb, black 55%, transparent)),
+    radial-gradient(closest-side, var(--roue-nuit) 87%, var(--roue-fonce) 91%, var(--roue-vif) 95.5%, var(--roue-nuit));
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--roue-clair) 55%, transparent),
+    0 16px 32px -12px color-mix(in srgb, black 70%, transparent),
+    0 0 26px -4px color-mix(in srgb, var(--roue-vif) 45%, transparent);
+}
+
+/* Couche fixe au-dessus des secteurs (r = 88) : ombre du moyeu, brillant bombé vers le bord, ombre interne du bord,
+   reflet de verre en haut. La profondeur ne vient pas des secteurs : ils tournent. */
+.roue-verre {
+  position: absolute;
+  inset: 6%;
+  border-radius: 9999px;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 42% at 50% 4%, color-mix(in srgb, white 22%, transparent), transparent 70%),
+    radial-gradient(
+      closest-side,
+      color-mix(in srgb, black 55%, transparent) 18%,
+      transparent 34%,
+      transparent 60%,
+      color-mix(in srgb, white 15%, transparent) 84%,
+      color-mix(in srgb, black 40%, transparent)
+    );
+}
+
+/* Moyeu : anneau dégradé aux teintes de la roue, disque nuit, initiale ou logo, reflet. */
+.roue-moyeu {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 17%;
+  height: 17%;
+  padding: 1.6%;
+  translate: -50% -50%;
+  border-radius: 9999px;
+  background: linear-gradient(160deg, var(--roue-clair), var(--roue-vif) 50%, var(--roue-nuit));
+  box-shadow: 0 3px 8px color-mix(in srgb, black 55%, transparent);
+}
+.roue-moyeu > * {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  background-color: var(--color-nuit-950);
+  object-fit: cover;
+  color: var(--roue-clair);
+  font-size: 8cqw;
+  font-weight: 700;
+  line-height: 1;
+}
+.roue-moyeu::after {
+  content: '';
+  position: absolute;
+  top: 10%;
+  left: 22%;
+  width: 56%;
+  height: 32%;
+  border-radius: 50%;
+  background: linear-gradient(color-mix(in srgb, white 35%, transparent), transparent);
+}
+
+/* Libellés : liseré de la teinte opposée sous le texte (paint-order), lisible sur secteur et reflet. */
+.roue text {
+  stroke: black;
+  stroke-opacity: 0.3;
+  stroke-width: 1.6px;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+.roue .roue-texte-fonce {
+  stroke: white;
+}
+/* Filets nets du moyeu au bord : trait sombre large, puis trait clair fin par-dessus ; liseré clair du bord. */
+.roue-filet {
+  fill: none;
+  stroke: black;
+  stroke-opacity: 0.4;
+  stroke-width: 2.2px;
+}
+.roue-filet-clair,
+.roue-bord {
+  stroke: var(--roue-clair);
+  stroke-opacity: 1;
+  stroke-width: 0.9px;
+}
+.roue-bord {
+  stroke-width: 1.6px;
+}
+
+/* Halo statique derrière la roue ; rayons coniques qui s'ouvrent au gain (allégés pour des points). */
+.roue-halo {
+  position: absolute;
+  inset: -6%;
+  z-index: -1;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--roue-vif) 30%, transparent) 70%, transparent);
+}
+.roue-halo::after {
+  content: '';
+  position: absolute;
+  inset: -4%;
+  border-radius: inherit;
+  background: repeating-conic-gradient(color-mix(in srgb, var(--roue-clair) var(--rayons, 34%), transparent) 0 5deg, transparent 5deg 22.5deg);
+  -webkit-mask-image: radial-gradient(closest-side, black 62%, transparent);
+  mask-image: radial-gradient(closest-side, black 62%, transparent);
+  opacity: 0;
+  transform: scale(0.6);
+}
+.roue[data-fete='lot'] .roue-halo::after,
+.roue[data-fete='points'] .roue-halo::after {
+  will-change: transform, opacity;
+  animation:
+    roue-rayons-ouverture 0.7s cubic-bezier(0.2, 0.8, 0.3, 1) both,
+    roue-rayons-tour 40s linear 0.7s infinite;
+}
+.roue[data-fete='points'] {
+  --rayons: 18%;
+}
+@keyframes roue-rayons-ouverture {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes roue-rayons-tour {
+  from {
+    opacity: 1;
+    transform: rotate(0deg);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(360deg);
+  }
+}
+
+/* 16 ampoules : halo doux au repos ; pendant la rotation, poursuite lumineuse par délais échelonnés (opacité). */
+.roue-perle {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform: rotate(calc(var(--i) * 22.5deg));
+}
+.roue-perle::before,
+.roue-perle::after {
+  content: '';
+  position: absolute;
+  top: 3.25%;
+  left: 50%;
+  width: 3%;
+  height: 3%;
+  margin: -1.5% 0 0 -1.5%;
+  border-radius: 9999px;
+}
+.roue-perle::before {
+  background: radial-gradient(circle at 35% 35%, white, var(--roue-clair) 75%);
+  box-shadow: 0 0 5px 1px color-mix(in srgb, var(--roue-clair) 55%, transparent);
+}
+.roue-perle:nth-of-type(odd)::before {
+  background: radial-gradient(circle at 35% 35%, white 40%, color-mix(in srgb, var(--roue-clair) 35%, white));
+}
+.roue-perle::after {
+  background: white;
+  box-shadow:
+    0 0 6px 2px white,
+    0 0 14px 5px var(--roue-clair);
+  opacity: 0;
+}
+.roue-tourne .roue-perle::after {
+  animation: roue-poursuite 0.8s linear infinite;
+  animation-delay: calc(var(--i) * 0.05s);
+}
+@keyframes roue-poursuite {
+  0%,
+  25% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Pointeur : ombre portée statique ; à l'arrêt, rebond élastique autour de son pivot (propriété rotate). */
+.roue-pointeur {
+  transform-origin: 50% 35%;
+  filter: drop-shadow(0 3px 3px color-mix(in srgb, black 55%, transparent));
+}
+/* Goutte de 32 × 40 px : liseré blanc (::before), corps dégradé + joyau noir cerclé de blanc (::after). */
+.roue-pointeur::before,
+.roue-pointeur::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.roue-pointeur::before {
+  background: white;
+  clip-path: path('M16 40 L4.74 20.5 A13 13 0 1 1 27.26 20.5 Z');
+}
+.roue-pointeur::after {
+  background:
+    radial-gradient(circle at 16px 14px, var(--color-nuit-950) 4px, white 4.5px 5.5px, transparent 6px),
+    linear-gradient(100deg, var(--roue-clair), var(--roue-fonce));
+  clip-path: path('M16 37 L6.34 19.26 A11 11 0 1 1 25.66 19.26 Z');
+}
+.roue-arret .roue-pointeur {
+  animation: roue-rebond 0.7s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+}
+@keyframes roue-rebond {
+  0% {
+    rotate: -12deg;
+  }
+  35% {
+    rotate: 9deg;
+  }
+  60% {
+    rotate: -4deg;
+  }
+  80% {
+    rotate: 1.5deg;
+  }
+  100% {
+    rotate: 0deg;
+  }
+}
+
+/* Mouvement réduit : pas de poursuite, pointeur sans rebond, rayons immobiles (affichés d'emblée, sans animation). */
+@media (prefers-reduced-motion: reduce) {
+  .roue-tourne .roue-perle::after,
+  .roue-arret .roue-pointeur {
+    animation: none;
+  }
+  .roue[data-fete='lot'] .roue-halo::after,
+  .roue[data-fete='points'] .roue-halo::after {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* #/carte, nouveau tampon depuis la dernière ouverture (P1-C3) : le tampon se pose (échelle + rotation), transform seul. */

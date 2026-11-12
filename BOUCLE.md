@@ -1167,3 +1167,21 @@ de tâches inhérentes au rendu initial.
 consécutifs : **1**. Branche supprimée sans fusion ; seul `BOUCLE.md`
 fusionné (doc). Scripts de diagnostic conservés :
 `node_modules/.cache/profil-t8/tracer.mjs`, `trace.json`, `trace-cpu.json`.
+
+### Roue v2 R5+R8 — son, couleur du commerce, roue premium (12/11/2026) — écart à la cible DA
+
+Note DA de l'écran de jeu : 9/10 → **9,5/10** (captures Pixel 7 avant/après, `SCORES.md`
+§ « écran de jeu après roue v2 R5+R8 »). Cible 10/10 (mandat utilisateur 12/11 09h44)
+**non atteinte** — ce qui manque, à traiter en PHASE 3 (polish visuel) :
+1. Libellés de la moitié gauche de la roue à l'envers au repos (orientation radiale
+   unique) : retourner le texte des secteurs dont le milieu est entre 180° et 360° —
+   à arbitrer, la roue tourne et l'orientation au repos dépend de l'arrêt précédent.
+2. Couleur de commerce : la roue et les pastilles de la légende la prennent, mais le
+   cadre (`ring-magenta-400/30`, ligne épinglée par `roue-p0-u2`/`theme`), le titre
+   « À gagner » et l'anneau des pastilles restent magenta.
+3. Bouton « 🎡 Tourner la roue » : émoji multicolore hors registre noir + magenta
+   (libellé épinglé par plusieurs tests et traduit — à changer avec eux).
+4. Libellés abrégés sur la roue (« Dessert… », « 10 points… ») : règle des 12
+   caractères voulue (légende complète dessous), mais visible.
+5. Budget : JS initial à 76 o du plafond P2-Q2 (481300 / 481376 o) — tout polish qui
+   ajoute du JS au premier affichage de #/jouer impose d'abord un découpage.
