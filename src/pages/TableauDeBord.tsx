@@ -65,7 +65,7 @@ export default function TableauDeBord() {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div className="border-l-4 border-magenta-500 pl-3">
         <p className="surtitre">Bonjour</p>
         <h1 className="font-titre text-[1.75rem] font-bold tracking-tight">Tableau de bord</h1>
         <p className="mt-0.5 text-gray-600">

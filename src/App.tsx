@@ -221,7 +221,7 @@ function BandeauDonnees() {
   }
   if (connexion !== 'horsLigne') return null
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl bg-gray-800 px-3 py-2 text-sm text-white" role="status">
+    <div className="flex items-center justify-between gap-3 rounded-xl bg-nuit-900 px-3 py-2 text-sm text-white ring-1 ring-white/10" role="status">
       <span>
         <strong>Hors ligne</strong> — dernières données connues{derniereSynchro ? ` (${heure.format(new Date(derniereSynchro))})` : ''}. Serveur injoignable —
         vérifiez la connexion.
@@ -318,7 +318,7 @@ export default function App() {
 
       {!commerce.actif && (
         <div className="mx-auto max-w-5xl px-4 pt-3 print:hidden">
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-gray-800 px-4 py-3 text-sm text-white">
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-nuit-950 px-4 py-3 text-sm text-white ring-1 ring-magenta-400/30">
             <span>Ce commerce est désactivé : son QR code et sa carte de fidélité ne sont plus accessibles aux clients.</span>
             <button className="min-h-11 shrink-0 px-1 font-semibold text-magenta-300 underline" onClick={() => aller('admin')}>
               Gérer
@@ -336,7 +336,7 @@ export default function App() {
       </main>
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-gray-900/5 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_-8px_rgb(17_24_39/0.15)] backdrop-blur-md md:hidden print:hidden"
+        className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-white/10 bg-nuit-950/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_-8px_rgb(0_0_0/0.5)] backdrop-blur-md md:hidden print:hidden"
         aria-label="Navigation principale"
       >
         {ONGLETS_MOBILE.map((o) => {
@@ -345,10 +345,10 @@ export default function App() {
             <a
               key={o.page}
               href={`#/${o.page}`}
-              className={`flex min-h-16 flex-col items-center justify-center gap-0.5 text-xs font-semibold ${actif ? 'text-magenta-700' : 'text-gray-600'}`}
+              className={`flex min-h-16 flex-col items-center justify-center gap-0.5 text-xs font-semibold ${actif ? 'text-magenta-300' : 'text-white/70'}`}
               aria-current={actif ? 'page' : undefined}
             >
-              <span className={`flex h-8 w-14 items-center justify-center rounded-full transition-colors ${actif ? 'bg-magenta-500/10' : ''}`}>
+              <span className={`flex h-8 w-14 items-center justify-center rounded-full transition-colors ${actif ? 'bg-magenta-400/15' : ''}`}>
                 <Icone nom={o.page} />
               </span>
               {o.libelle}
