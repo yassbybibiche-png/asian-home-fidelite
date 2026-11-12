@@ -507,6 +507,13 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
           </a>
         </>
       )}
+
+      {/* Menu public : proposé à chaque écran du parcours (identification, roue, résultat), pas seulement en attente. */}
+      {estAsianHome(commerce) && (
+        <a href={`#/menu/${commerce.id}`} className="bouton-secondaire w-full">
+          {t('📖 Voir le menu')}
+        </a>
+      )}
     </Cadre>
   )
 }
@@ -828,6 +835,13 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
             {t('Voir ma carte de fidélité')}
           </a>
         </>
+      )}
+
+      {/* Menu public à chaque écran du parcours ; l'écran d'attente a déjà le sien (« … en attendant »). */}
+      {menuDisponible && jeu?.statut !== 'sansVisite' && (
+        <a href={`#/menu/${commerce.id}`} className="bouton-secondaire w-full">
+          {t('📖 Voir le menu')}
+        </a>
       )}
     </Cadre>
   )

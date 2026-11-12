@@ -565,3 +565,36 @@ describe('R4 : GET /commerces/:id/reglement limité par IP (lectures publiques)'
     assert.equal(await lire('c-asian-home-paris', '203.0.113.8'), 200, 'autre IP : non bloquée')
   })
 })
+
+describe('Déblocage C : « Voir le menu » dans le parcours de jeu (et sur toute carte chargée)', () => {
+  // Lien en fin de cadre, hors de tout branchement du parcours : présent à l'identification, à la roue et au résultat.
+  const LIEN_FIN_DE_CADRE =
+    /\{([^\n]*?) && \(\n\s*<a href=\{`#\/menu\/\$\{commerce\.id\}`\} className="bouton-secondaire w-full">\n\s*\{t\('📖 Voir le menu'\)\}\n\s*<\/a>\n\s*\)\}\n\s*<\/Cadre>/
+
+  test('Jouer.tsx : lien #/menu/<id> « 📖 Voir le menu » dans le parcours principal des deux modes, hors MessageSansVisite', () => {
+    const jouer = lire('src/pages/Jouer.tsx')
+    for (const partie of ['PartieLocale', 'PartieApi']) assert.match(corps(jouer, partie), LIEN_FIN_DE_CADRE, partie)
+    // L'écran d'attente garde son propre lien (« … en attendant ») : le nouveau n'y est pas.
+    assert.doesNotMatch(corps(jouer, 'MessageSansVisite'), /\{t\('📖 Voir le menu'\)\}/)
+    assert.notEqual(traduire('📖 Voir le menu', 'en'), '📖 Voir le menu', 'chaîne déjà traduite, réutilisée')
+  })
+
+  test('le lien de la page de jeu n’apparaît que si le menu est disponible (pas de lien mort)', () => {
+    const jouer = lire('src/pages/Jouer.tsx')
+    assert.equal(LIEN_FIN_DE_CADRE.exec(corps(jouer, 'PartieLocale'))?.[1], 'estAsianHome(commerce)')
+    // Mode API : état `menuDisponible` (Asian Home d'emblée, puis réponse du serveur) ; pas de doublon à l'écran d'attente.
+    assert.equal(LIEN_FIN_DE_CADRE.exec(corps(jouer, 'PartieApi'))?.[1], "menuDisponible && jeu?.statut !== 'sansVisite'")
+    assert.match(corps(jouer, 'PartieApi'), /const \[menuDisponible, setMenuDisponible\] = useState\(\(\) => estAsianHome\(commerce\)\)/)
+  })
+
+  test('carte client : bouton menu dans la vue complète ET la vue limitée (même règle de disponibilité)', () => {
+    const carte = lire('src/pages/CartePublique.tsx')
+    const api = corps(carte, 'CarteApi')
+    assert.match(api, /const menu = !!r\.menuDisponible \|\| estAsianHome\(r\.commerce\)\n\s*if \(estVueLimitee\(r\)\)/)
+    assert.match(api, /setLimitee\(\{[^\n]*, menu \}\)/)
+    assert.match(api, /menu=\{donnees\.menu\}/)
+    for (const vue of ['Carte', 'VueLimitee']) {
+      assert.match(corps(carte, vue), /\{menu && \(\n\s*<a href=\{`#\/menu\/\$\{commerce\.id\}`\} className="bouton-secondaire w-full">\n\s*\{t\('📖 Voir le menu'\)\}/, vue)
+    }
+  })
+})
