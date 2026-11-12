@@ -219,6 +219,7 @@ export type ChampsReglages = Partial<
     | 'conservationMois'
     | 'modeAccesRoue'
     | 'limiteGainsMois'
+    | 'plagesOuverture'
   >
 > & { testsAB?: { accroche?: { actif: boolean } } }
 

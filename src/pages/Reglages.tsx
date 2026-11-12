@@ -16,7 +16,8 @@ import { libellesEnDouble, normaliserLots, nouvelIdLot } from '../lib/lots'
 import { LIMITE_GAINS_MOIS_DEFAUT, LIMITE_GAINS_MOIS_MAX, modeAccesRoue } from '../lib/roulette'
 import { CHOIX_TYPE_LOT, lotPourEnvoi, problemeLot } from '../lib/reglagesRoue'
 import { ApercuRoue } from '../components/ApercuRoue'
-import type { ModeAccesRoue, TypeLot } from '../types'
+import type { ModeAccesRoue, PlageOuverture, TypeLot } from '../types'
+import { INSTANTS_JOUR_MAX, PLAGES_MAX, plagesOuverture, problemePlages } from '../lib/instants'
 
 /** Accès à la roue (R6) : les deux modes du serveur, dans l'ordre affiché. */
 const MODES_ACCES: { valeur: ModeAccesRoue; libelle: string; aide: string }[] = [
@@ -104,6 +105,9 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   // Règles du jeu (R2/R6) : limite de lots gagnés par client sur 30 jours, 0 = illimité, absente = 4.
   const limiteGains = brouillon.limiteGainsMois ?? LIMITE_GAINS_MOIS_DEFAUT
   const limiteValide = Number.isInteger(limiteGains) && limiteGains >= 0 && limiteGains <= LIMITE_GAINS_MOIS_MAX
+  // Plages d'ouverture (D1) : absentes = défaut (les deux services) ; mêmes règles que le serveur (`problemePlages`).
+  const plages = plagesOuverture(brouillon)
+  const erreurPlages = problemePlages(plages)
   const nomValide = brouillon.nom.trim().length > 0
   const seuilValide = Number.isInteger(brouillon.seuilTampons) && brouillon.seuilTampons >= 2 && brouillon.seuilTampons <= 50
   const [catalogue, setCatalogue] = useState<RecompensePoints[]>(commerce.catalogue ?? [])
@@ -124,7 +128,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   // Liens de commande (P1-C5) : vides ou en https (le serveur refuse le reste).
   const liensCommandeValides = [brouillon.lienDeliveroo, brouillon.lienUberEats].every((l) => !l?.trim() || /^https:\/\/\S+$/i.test(l.trim()))
   const lotsValides = lots.length >= 2 && probasValides && coutsValides && champsTypeValides && !doublons.length && total > 0
-  const valide = nomValide && seuilValide && lotsValides && limiteValide && tauxValide && catalogueValide && !problemes.length && conservationValide && liensCommandeValides
+  const valide = nomValide && seuilValide && lotsValides && limiteValide && tauxValide && catalogueValide && !problemes.length && conservationValide && liensCommandeValides && !erreurPlages
 
   function maj<K extends keyof Commerce>(champ: K, valeur: Commerce[K]) {
     setBrouillon((b) => ({ ...b, [champ]: valeur }))
@@ -162,6 +166,10 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   function majLot(i: number, lot: Lot | null) {
     setLotsEdites((ls) => (lot ? ls.map((l, j) => (j === i ? lot : l)) : ls.filter((_, j) => j !== i)))
     setEnregistre(false)
+  }
+
+  function majPlage(i: number, plage: PlageOuverture | null) {
+    maj('plagesOuverture', plage ? plages.map((p, j) => (j === i ? plage : p)) : plages.filter((_, j) => j !== i))
   }
 
   async function enregistrer(e: FormEvent) {
@@ -718,6 +726,41 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                       />
                       <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-gray-600">/ jour</span>
                     </div>
+                    {/* Instants gagnants (D1) : case cochée = au moins 1 instant par jour, tiré dans les plages d'ouverture. */}
+                    <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+                      <span className="zone-case">
+                        <input
+                          type="checkbox"
+                          className="case-a-cocher"
+                          disabled={exclu}
+                          checked={lot.instantsParJour !== undefined}
+                          onChange={(e) => majLot(i, { ...lot, instantsParJour: e.target.checked ? 1 : undefined })}
+                        />
+                      </span>
+                      Instant gagnant
+                    </label>
+                    {lot.instantsParJour !== undefined && (
+                      <>
+                        <label className="sr-only" htmlFor={`instants-${i}`}>
+                          Instants gagnants par jour du lot {i + 1}
+                        </label>
+                        <div className="relative min-w-0 flex-1 sm:w-40 sm:flex-none">
+                          <input
+                            id={`instants-${i}`}
+                            className="champ pr-20 text-right"
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            max={INSTANTS_JOUR_MAX}
+                            disabled={exclu}
+                            aria-invalid={!!erreurLot && erreurLot.includes('instants')}
+                            value={Number.isNaN(lot.instantsParJour) ? '' : lot.instantsParJour}
+                            onChange={(e) => majLot(i, { ...lot, instantsParJour: e.target.value === '' ? 0 : e.target.valueAsNumber })}
+                          />
+                          <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-gray-600">/ jour</span>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </div>
@@ -794,6 +837,37 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           aide={`${limiteValide ? (limiteGains === 0 ? 'Illimité' : `${limiteGains} lot${limiteGains > 1 ? 's' : ''} physique${limiteGains > 1 ? 's' : ''} au plus par client sur 30 jours`) : `entre 0 et ${LIMITE_GAINS_MOIS_MAX}`} — 0 = illimité, ${LIMITE_GAINS_MOIS_DEFAUT} par défaut. Au-delà, la roue ne donne plus que des points ou « perdu » à ce client.`}
           onChange={(v) => maj('limiteGainsMois', v)}
         />
+        {/* Plages d'ouverture (D1) : les instants gagnants du jour sont tirés au hasard dans ces créneaux. */}
+        <div className="space-y-2">
+          <p className="etiquette">Plages d’ouverture (instants gagnants)</p>
+          <p className="text-sm text-gray-600">
+            Heures de Paris. Les instants gagnants de chaque jour sont tirés au hasard dans ces créneaux ; le premier client qui joue dans les 5 minutes suivant un instant gagne le lot (sauf plafond du jour ou limite de gains atteints). Les instants à venir restent secrets, même pour vous : le tableau de bord ne les montre qu’une fois passés.
+          </p>
+          <ul className="space-y-2">
+            {plages.map((p, i) => (
+              <li key={i} className="flex flex-wrap items-center gap-2">
+                <label className="sr-only" htmlFor={`plage-debut-${i}`}>
+                  Début de la plage {i + 1}
+                </label>
+                <input id={`plage-debut-${i}`} className="champ w-32" type="time" value={p.debut} onChange={(e) => majPlage(i, { ...p, debut: e.target.value })} />
+                <span aria-hidden="true">–</span>
+                <label className="sr-only" htmlFor={`plage-fin-${i}`}>
+                  Fin de la plage {i + 1}
+                </label>
+                <input id={`plage-fin-${i}`} className="champ w-32" type="time" value={p.fin} onChange={(e) => majPlage(i, { ...p, fin: e.target.value })} />
+                <button type="button" className="min-h-11 text-sm font-semibold text-red-800 underline" onClick={() => majPlage(i, null)}>
+                  Retirer
+                </button>
+              </li>
+            ))}
+          </ul>
+          {plages.length < PLAGES_MAX && (
+            <button type="button" className="bouton-secondaire w-full" onClick={() => maj('plagesOuverture', [...plages, { debut: '12:00', fin: '14:00' }])}>
+              + Ajouter une plage
+            </button>
+          )}
+          {erreurPlages ? <p className="text-sm font-medium text-red-700">Plages d’ouverture : {erreurPlages.replace(/^plages d’ouverture : /, '')}</p> : !plages.length && <p className="text-sm text-gray-600">Aucune plage : aucun instant gagnant ne sera tiré.</p>}
+        </div>
       </section>
       {/* Aperçu (R6) : roue du brouillon, tirage de test dans le navigateur — rien n'est enregistré. */}
       <section className="carte space-y-3" aria-labelledby="apercu-roue-titre">

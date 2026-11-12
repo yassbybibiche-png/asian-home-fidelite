@@ -1824,6 +1824,33 @@ describe('Revue Codex R2 : tirages de la roue sous Supabase (plafonds sous concu
     }
   })
 
+  test('D1 : insertion du tirage en échec après la consommation d’un instant gagnant → instant rendu, gagné au tirage suivant', async (t) => {
+    t.mock.method(console, 'error', () => {})
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const r = await api('PATCH', `/commerces/${AH}`, { lots: [{ ...LOTS[0], instantsParJour: 1, plafondJour: 0 }, LOTS[1]] }, PIN)
+      assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+      // Instants du jour générés à l'ouverture du tableau de bord, puis remplacés par un instant passé d'une minute.
+      assert.equal((await api('GET', `/commerces/${AH}/instants-gagnants`, undefined, PIN)).statut, 200)
+      const ligne = f.tables.meta.find((l) => String(l.cle).startsWith(`instants:${AH}:`))!
+      const heure = new Date(new Date(2026, 10, 10, 12).getTime() - 60_000).toISOString()
+      ligne.valeur = JSON.stringify({ jour: String(ligne.cle).slice(-10), instants: [{ id: 'ig-sb', heure, lotId: 'lot-rare', lot: 'Menu offert' }] })
+      hasard = 0.99 // sans l'instant : consolation en points
+      f.echouer('POST', 'tirages')
+      assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0677777777' })).statut, 500)
+      const relue = () => JSON.parse(String(f.tables.meta.find((l) => l.cle === ligne.cle)!.valeur)).instants[0]
+      assert.equal(relue().consommePar, undefined, 'Supabase n’annule rien : l’instant est rendu explicitement')
+      const r2 = await api('POST', `/commerces/${AH}/tirages`, { contact: '0677777777' })
+      assert.equal(r2.statut, 201, JSON.stringify(r2.contenu))
+      assert.equal(r2.contenu.lotId, 'lot-rare')
+      const consomme = relue()
+      assert.deepEqual([consomme.consommePar, consomme.gagne], [r2.contenu.tirageId, true])
+    } finally {
+      await app.fermer()
+    }
+  })
+
   test('F2 : crédit ET suppression en échec → incohérence journalisée explicitement (ligne JSON), 500 qui le dit', async (t) => {
     const erreurs = t.mock.method(console, 'error', () => {})
     const f = fauxPostgrest()

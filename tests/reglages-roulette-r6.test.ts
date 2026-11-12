@@ -135,7 +135,8 @@ describe('R6 : sources (Réglages, aperçu, store)', () => {
     const ligne = reglages.slice(reglages.indexOf('{lotsEdites.map((lot, i) => {'), reglages.indexOf('+ Ajouter un lot'))
     const champs = ligne.match(/<input\b[\s\S]*?\/>/g) ?? []
     const avecContrainte = champs.filter((c) => /\b(min|max|step|required|pattern|minLength|maxLength)=/.test(c))
-    assert.deepEqual(avecContrainte.map((c) => /id=\{`(\w+)-/.exec(c)?.[1]), ['proba', 'cout', 'points', 'plafond'])
+    // D1 (brief « instants gagnants ») : + le nombre d'instants gagnants par jour, même règle `disabled={exclu}`.
+    assert.deepEqual(avecContrainte.map((c) => /id=\{`(\w+)-/.exec(c)?.[1]), ['proba', 'cout', 'points', 'plafond', 'instants'])
     for (const c of avecContrainte) assert.match(c, /\n\s+disabled=\{exclu\}\n/, c)
     // Le libellé reste toujours saisissable (sinon la ligne ne pourrait plus être réactivée).
     assert.doesNotMatch(champs.find((c) => c.includes('id={`lot-${i}`}')) ?? '', /disabled/)

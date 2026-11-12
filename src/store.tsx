@@ -517,12 +517,15 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
             messagesAuto: c.messagesAuto,
             apparence: c.apparence,
             programme: c.programme,
-            ...(c.relancesAuto ? { relancesAuto: c.relancesAuto } : {}),
+            // Même forme `x: c.x` (plafond du bundle initial, D1) : `relancesAuto` absent → `undefined`, non envoyé.
+            relancesAuto: c.relancesAuto,
             conservationMois: c.conservationMois,
             // Règles du jeu (R6) : absentes d'une config d'avant R2 tant que Réglages ne les a pas touchées → `undefined`,
             // que JSON.stringify n'envoie pas (défauts du serveur). Écrit sans `...(x ? {} : {})` : plafond du bundle initial.
             modeAccesRoue: c.modeAccesRoue,
             limiteGainsMois: c.limiteGainsMois,
+            // Plages d'ouverture des instants gagnants (D1) : absentes = défaut du serveur, non envoyées.
+            plagesOuverture: c.plagesOuverture,
             // Test A/B (P2-Q3) : seul l'état est envoyé, le serveur pose lui-même les dates.
             ...(c.testsAB?.accroche ? { testsAB: { accroche: { actif: c.testsAB.accroche.actif } } } : {}),
           })

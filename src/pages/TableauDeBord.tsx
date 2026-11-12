@@ -5,6 +5,7 @@ import { listePurge, resumeRappelPurge } from '../lib/rgpd'
 import { dateRelative } from '../lib/format'
 import { Etoiles, Vide } from '../components/ui'
 import { Mesure } from '../components/Mesure'
+import { InstantsGagnants } from '../components/InstantsGagnants'
 import type { ActionJournal } from '../types'
 
 const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
@@ -134,6 +135,8 @@ export default function TableauDeBord() {
       </section>
 
       <Mesure />
+
+      <InstantsGagnants />
 
       <nav className="grid grid-cols-3 gap-2" aria-label="Actions rapides">
         {mode === 'api' ? (

@@ -6,7 +6,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, CommerceCaisse, CommercePublic, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, CommerceCaisse, CommercePublic, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, InstantsDuJour, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
@@ -45,6 +45,8 @@ import {
 } from '../src/lib/programme.ts'
 import { problemesApparence } from '../src/lib/apparence.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
+import { cleInstants, genererInstants, INSTANTS_JOUR_MAX, instantEnCours, instantsPasses, lotsAInstants, plagesOuverture, problemePlages, statutInstant } from '../src/lib/instants.ts'
+import type { InstantPasse } from '../src/lib/instantsTableau.ts'
 import { donneesReglement } from '../src/lib/reglement.ts'
 import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurLogo, LIMITES_LOGO, messageTropLourd, urlLogo, validerLogo, type FormatLogo } from '../src/lib/logo.ts'
@@ -668,6 +670,14 @@ function lots(v: unknown, existants: Lot[] = []): Lot[] {
       // Points / perdant ne sont jamais plafonnés : un plafond laissé sur un lot devenu consolation n'est pas gardé.
       if (plafond > 0 && type === 'lot') lot.plafondJour = plafond
     }
+    // Instants gagnants (D1) : lots physiques seulement ; absent / null / 0 = désactivé (rien d'écrit).
+    const instants = o.instantsParJour
+    if (instants != null) {
+      if (typeof instants !== 'number' || !Number.isInteger(instants) || instants < 0 || instants > INSTANTS_JOUR_MAX) {
+        throw err(400, `Lot n° ${i + 1} : le nombre d’instants gagnants par jour doit être un entier de 0 à ${INSTANTS_JOUR_MAX}.`)
+      }
+      if (instants > 0 && type === 'lot') lot.instantsParJour = instants
+    }
     if (type === 'points') {
       const n = o.points ?? actuel?.points
       if (typeof n !== 'number' || !Number.isInteger(n) || n < POINTS_LOT_MIN || n > POINTS_LOT_MAX) {
@@ -723,7 +733,7 @@ function apparence(v: unknown): Apparence {
   return a
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB', 'modeAccesRoue', 'limiteGainsMois']
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB', 'modeAccesRoue', 'limiteGainsMois', 'plagesOuverture']
 
 /**
  * Tests A/B (P2-Q3) : le navigateur n'envoie que `{ accroche: { actif } }` ; les dates de début et de fin sont posées
@@ -820,6 +830,11 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
       throw err(400, `« limiteGainsMois » : nombre entier de lots gagnés par client sur 30 jours, de 0 (illimité) à ${LIMITE_GAINS_MOIS_MAX}.`)
     }
     r.limiteGainsMois = n
+  }
+  if ('plagesOuverture' in corps) {
+    const p = problemePlages(corps.plagesOuverture)
+    if (p) throw err(400, `« plagesOuverture » : ${p}.`)
+    r.plagesOuverture = (corps.plagesOuverture as Corps[]).map((x) => ({ debut: x.debut as string, fin: x.fin as string }))
   }
   if ('conservationMois' in corps) {
     const n = corps.conservationMois
@@ -2411,6 +2426,27 @@ export async function creerServeur(o: OptionsServeur) {
     const lots = normaliserLots(c.lots ?? [])
     if (!lots.some((l) => l.type === 'lot' && (l.plafondJour ?? 0) > 0)) return new Set()
     return lotsPlafonnes(lots, await st.tiragesDepuis(c.id, debutDuJourParis(t)), t)
+  }
+
+  /**
+   * Instants gagnants du jour (D1), à Paris : lus dans `meta` ; absents et au moins un lot à instants → générés ICI, à
+   * la 1re utilisation du jour (pas de cron garanti sur Render Free), avec le hasard crypto, puis persistés par une
+   * insertion conditionnelle — deux générations simultanées : la 1re écrite fait foi, l'autre relit. Une fois écrits,
+   * ils ne changent plus de la journée (un réglage modifié s'applique au lendemain). `generer: false` (tableau de bord)
+   * : lecture seule. Le brut est rendu tel que lu : il sert de valeur attendue pour la consommation (`majMetaSi`).
+   */
+  async function instantsDuJour(c: Commerce, t: Date, generer = true): Promise<{ cle: string; brut: string; doc: InstantsDuJour } | null> {
+    const jour = jourParis(t)
+    const cle = cleInstants(c.id, jour)
+    let brut = await st.meta(cle)
+    if (brut === undefined) {
+      const lots = lotsAInstants(normaliserLots(c.lots ?? []))
+      if (!generer || !lots.length) return null
+      const neuf = JSON.stringify(genererInstants(lots, plagesOuverture(c), jour, (n) => randomInt(n)))
+      brut = (await st.majMetaSi(cle, undefined, neuf)) ? neuf : await st.meta(cle)
+      if (brut === undefined) return null
+    }
+    return { cle, brut, doc: JSON.parse(brut) as InstantsDuJour }
   }
 
   /** Fiche publique (R2) : sans les lots plafonnés du jour — ils disparaissent de la roue et de « À gagner aujourd'hui ». */
@@ -4122,10 +4158,39 @@ export async function creerServeur(o: OptionsServeur) {
           if (!jouables.length) {
             return { refus: lotsJouables(normalises).length ? 'Tous les lots du jour sont partis : revenez demain !' : 'Aucun lot n’est configuré pour le moment.' }
           }
-          const tire = jouables[tirerLot(jouables, alea())]
+          const tirageId = `ti-${randomUUID()}`
+          // D1 — instant gagnant en cours (non consommé, depuis moins de 5 min) : il attribue SON lot, avant le tirage
+          // pondéré, si ce lot est encore tirable pour ce client (ni plafonné aujourd'hui, ni client à sa limite mensuelle,
+          // chance > 0). Bloqué : l'instant est quand même consommé (`gagne: false`) et le client a le tirage normal — le
+          // plafond protège le commerce. Consommation AVANT l'insertion, par écriture conditionnelle sur la valeur lue :
+          // un seul tirage peut la gagner, même hors du verrou par commerce ; rendue si le tirage échoue ensuite.
+          // Aucune lecture de plus pour un commerce sans lot à instants (désactiver les instants les arrête aussitôt).
+          let instant: { cle: string; avant: string; apres: string } | undefined
+          let tire: (typeof jouables)[number] | undefined
+          const jourInstants = lotsAInstants(normalises).length ? await instantsDuJour(commerce, t) : null
+          const enCours = jourInstants && instantEnCours(jourInstants.doc, t)
+          if (jourInstants && enCours) {
+            const gagnable = jouables.find((l) => l.id === enCours.lotId)
+            const doc = { ...jourInstants.doc, instants: jourInstants.doc.instants.map((x) => (x.id === enCours.id ? { ...x, consommePar: tirageId, gagne: !!gagnable } : x)) }
+            const apres = JSON.stringify(doc)
+            if (await st.majMetaSi(jourInstants.cle, jourInstants.brut, apres)) {
+              instant = { cle: jourInstants.cle, avant: jourInstants.brut, apres }
+              tire = gagnable
+            }
+          }
+          /** Tirage refusé ou annulé après la consommation : l'instant redevient gagnable (s'il n'a pas bougé depuis). */
+          const rendreInstant = async () => {
+            if (!instant) return
+            try {
+              await st.majMetaSi(instant.cle, instant.apres, instant.avant)
+            } catch (e) {
+              console.warn(`[instant] instant ${instant.cle} non rendu après l’échec du tirage : ${e instanceof Error ? e.message : String(e)}`)
+            }
+          }
+          tire ??= jouables[tirerLot(jouables, alea())]
           const points = tire.type === 'points' ? tire.points : undefined
           const tirage: Tirage = {
-            id: `ti-${randomUUID()}`, commerceId: id, clientId: client.id, lot: tire.libelle, lotId: tire.id, typeLot: tire.type,
+            id: tirageId, commerceId: id, clientId: client.id, lot: tire.libelle, lotId: tire.id, typeLot: tire.type,
             ...(points ? { points } : {}),
             date: t.toISOString(),
             // R2 : aucun code pour une consolation en points (rien à retirer, rien à vérifier au comptoir). Un perdant garde
@@ -4138,6 +4203,7 @@ export async function creerServeur(o: OptionsServeur) {
             await st.ajouterTirage(tirage)
           } catch (e) {
             // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e — même message unique.
+            await rendreInstant()
             if (e instanceof ErreurConflit) return { refus: refusJeu }
             throw e
           }
@@ -4157,6 +4223,7 @@ export async function creerServeur(o: OptionsServeur) {
                 }
               }
             } catch (e) {
+              await rendreInstant()
               await annulerTirageNonCredite(tirage, e)
             }
           }
@@ -4192,6 +4259,25 @@ export async function creerServeur(o: OptionsServeur) {
       // Commerce en pause : rien à compter (la page de jeu l'affiche déjà fermé).
       const compte = commerce.actif ? await compter(id, type) : false
       return { statut: 202, json: { ok: true, compte } }
+    }
+
+    if (sous === 'instants-gagnants' && !sousId && m === 'GET') {
+      // Gérant (D1) — preuve et transparence : les instants gagnants du jour DÉJÀ PASSÉS (heure ≤ maintenant), avec leur
+      // issue et le prénom du gagnant. Les instants futurs ne sortent jamais du serveur, pas même leur nombre. Ouvrir le
+      // tableau de bord génère les instants du jour s'ils ne l'étaient pas encore (1re utilisation).
+      await exigerCommercant(req, id)
+      const t = maintenant()
+      const jour = await instantsDuJour(commerce, t)
+      const passes = jour ? instantsPasses(jour.doc, t) : []
+      const gagnes = passes.filter((i) => i.consommePar && i.gagne)
+      const tirages = gagnes.length ? await st.tiragesDepuis(id, debutDuJourParis(t)) : []
+      const instants: InstantPasse[] = []
+      for (const i of passes) {
+        const tirage = i.gagne ? tirages.find((x) => x.id === i.consommePar) : undefined
+        const gagnant = tirage ? (await st.client(id, tirage.clientId))?.prenom : undefined
+        instants.push({ heure: i.heure, lot: i.lot, statut: statutInstant(i, t), ...(gagnant ? { gagnant } : {}) })
+      }
+      return { json: { jour: jourParis(t), instants } }
     }
 
     if (sous === 'mesures' && !sousId && m === 'GET') {

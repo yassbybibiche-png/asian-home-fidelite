@@ -2,6 +2,7 @@
 // serveur, `lots()` dans server/app.ts), lot tel qu'envoyé, et tirage de TEST de l'aperçu — fait dans le navigateur,
 // sur les probabilités configurées, sans plafond ni limite client, jamais enregistré. Logique pure, testable sans navigateur.
 import type { Lot, TypeLot } from '../types'
+import { INSTANTS_JOUR_MAX } from './instants.ts'
 import { normaliserLots, type LotNormalise } from './lots.ts'
 import { PLAFOND_JOUR_MAX, POINTS_LOT_MAX, POINTS_LOT_MIN, secteurs, tirerLot, type Secteur } from './roulette.ts'
 
@@ -19,12 +20,16 @@ const entierEntre = (n: unknown, min: number, max: number) => typeof n === 'numb
  * (entier de 1 à 10 000) ; le plafond par jour d'un lot physique est vide (illimité) ou un entier de 0 à 10 000.
  * Points / perdant : le plafond n'est pas envoyé, donc jamais bloquant.
  */
-export function problemeLot(l: Pick<Lot, 'type' | 'points' | 'plafondJour'>): string | null {
+export function problemeLot(l: Pick<Lot, 'type' | 'points' | 'plafondJour' | 'instantsParJour'>): string | null {
   if (l.type === 'points' && !entierEntre(l.points, POINTS_LOT_MIN, POINTS_LOT_MAX)) {
     return `indiquez le nombre de points offerts (entier de ${POINTS_LOT_MIN} à ${POINTS_LOT_MAX.toLocaleString('fr-FR')})`
   }
   if ((l.type ?? 'lot') === 'lot' && l.plafondJour !== undefined && !entierEntre(l.plafondJour, 0, PLAFOND_JOUR_MAX)) {
     return `plafond par jour : nombre entier de 0 à ${PLAFOND_JOUR_MAX.toLocaleString('fr-FR')}, ou vide pour illimité`
+  }
+  // D1 : instants gagnants d'un lot physique, 0 (ou vide) = désactivé.
+  if ((l.type ?? 'lot') === 'lot' && l.instantsParJour !== undefined && !entierEntre(l.instantsParJour, 0, INSTANTS_JOUR_MAX)) {
+    return `instants gagnants : nombre entier de 0 à ${INSTANTS_JOUR_MAX} par jour`
   }
   return null
 }
@@ -35,11 +40,13 @@ export function problemeLot(l: Pick<Lot, 'type' | 'points' | 'plafondJour'>): st
  * revenir ne les perd pas.
  */
 export function lotPourEnvoi(l: Lot): Lot {
-  const { points, plafondJour, ...reste } = l
+  const { points, plafondJour, instantsParJour, ...reste } = l
   return {
     ...reste,
     ...(l.type === 'points' && points !== undefined ? { points } : {}),
     ...((l.type ?? 'lot') === 'lot' && plafondJour ? { plafondJour } : {}),
+    // D1 : instants gagnants, lot physique seulement ; 0 / vide = désactivé, rien d'écrit.
+    ...((l.type ?? 'lot') === 'lot' && instantsParJour ? { instantsParJour } : {}),
   }
 }
 

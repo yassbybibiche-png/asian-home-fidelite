@@ -62,6 +62,11 @@ export interface Lot {
    * lot n'est plus tiré ni affiché jusqu'au lendemain. Absent / 0 = illimité. Ignoré pour 'points' et 'perdant'.
    */
   plafondJour?: number
+  /**
+   * Instants gagnants (D1) d'un lot de type 'lot' : N instants par jour tirés au hasard dans les plages d'ouverture ;
+   * le 1er tirage dans les 5 minutes qui suivent un instant gagne ce lot. Absent / 0 = désactivé. Jamais publié.
+   */
+  instantsParJour?: number
   libelle: string
   /** En %, ex. 30. Si le total ≠ 100, les chances sont recalculées au prorata. */
   probabilite: number
@@ -70,6 +75,34 @@ export interface Lot {
    * non renseigné (le tableau de bord le signale, il n'invente rien). Jamais publié aux clients (`commercePublic`).
    */
   coutCentimes?: number
+}
+
+/** Plage d'ouverture (D1), heures « HH:MM » de Paris, début < fin (ne passe pas minuit). */
+export interface PlageOuverture {
+  debut: string
+  fin: string
+}
+
+/**
+ * Instant gagnant (D1), persisté par le serveur dans `meta` (`instants:<commerce>:<jour>`), jamais dans une réponse
+ * avant son heure. `consommePar` : tirage qui l'a déclenché ; `gagne` : ce tirage a reçu le lot (faux = lot bloqué
+ * par son plafond ou la limite mensuelle du client, tirage normal à la place).
+ */
+export interface InstantGagnant {
+  id: string
+  /** ISO. */
+  heure: string
+  lotId: string
+  /** Libellé du lot à la génération. */
+  lot: string
+  consommePar?: string
+  gagne?: boolean
+}
+
+export interface InstantsDuJour {
+  /** AAAA-MM-JJ, à Paris. */
+  jour: string
+  instants: InstantGagnant[]
 }
 
 export interface Commerce {
@@ -102,6 +135,11 @@ export interface Commerce {
    * ne tire plus que points / perdant pour ce client. Absent = 4 (`LIMITE_GAINS_MOIS_DEFAUT`), 0 = illimité.
    */
   limiteGainsMois?: number
+  /**
+   * Plages d'ouverture du jour, heure de Paris (D1) : les instants gagnants sont tirés dans leur union. Absent = les deux
+   * services d'Asian Home (`PLAGES_OUVERTURE_DEFAUT`, src/lib/instants.ts) ; liste vide = aucun instant.
+   */
+  plagesOuverture?: PlageOuverture[]
   reglesReponseAuto: ReglesReponseAuto
   actif: boolean
   creeLe: string

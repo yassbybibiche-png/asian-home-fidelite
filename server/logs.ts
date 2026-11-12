@@ -56,7 +56,7 @@ const SEGMENTS_PUBLICS = new Set([
   'profil', 'reaffichage', 'revocation-acces', 'lien-acces', 'export.csv', 'pass.json', 'equipe',
   'messages', 'envois', 'etat', 'logo', 'menu', 'evenements', 'mesures', 'google', 'auth', 'callback',
   'deconnecter', 'import-avis', 'avis', 'publier-reponse', 'purge', 'stop-sms', 'attente', 'reserve', 'pin',
-  'admin', 'sauvegarde',
+  'admin', 'sauvegarde', 'instants-gagnants',
   'c', 'd', 'r',
 ])
 
