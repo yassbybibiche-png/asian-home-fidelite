@@ -154,14 +154,19 @@ export interface CompteurEvenement {
   n: number
 }
 
-/** Relances automatiques (P1-B3) : « inactif 30 jours » et « anniversaire ». */
+/** Relances automatiques (P1-B3) : « inactif 30 jours » et « anniversaire » ; R7 : « gain bientôt expiré ». */
 export interface ReglesRelancesAuto {
   inactif: boolean
   anniversaire: boolean
+  /** Gain de la roue (lot physique) non retiré, qui expire dans moins de 72 h (R7). Absent = ACTIVÉ ; false = coupé. */
+  gainExpire?: boolean
 }
 
 /** Modèles de relance SMS / e-mail (P1-B3, `src/lib/relances.ts`) ; « libre » = texte saisi par le gérant. */
 export type ModeleRelance = 'bienvenue' | 'proche' | 'inactif' | 'anniversaire'
+
+/** Modèle des relances AUTOMATIQUES seulement (R7, `src/lib/relanceGain.ts`) : jamais proposé en relance manuelle. */
+export type ModeleRelanceAuto = 'gainExpire'
 
 /**
  * Statut d'une tentative de relance : `en_cours` (réservée, envoi en cours), `envoye` (accepté par le prestataire),
@@ -180,7 +185,9 @@ export interface EnvoiRelance {
   date: string
   /** Jour à Paris (AAAA-MM-JJ) : une même relance part au plus une fois par client et par jour. */
   jour: string
-  modele: ModeleRelance | 'libre'
+  modele: ModeleRelance | ModeleRelanceAuto | 'libre'
+  /** Tirage concerné (relance `gainExpire`, R7) : clé de l'idempotence « une relance par gain ». */
+  tirageId?: string
   canal: 'sms' | 'email'
   statut: StatutEnvoi
   declencheur: 'manuel' | 'auto'

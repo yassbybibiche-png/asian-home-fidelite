@@ -56,6 +56,16 @@ const PAGE = 1000
 const STATUTS_COLONNE_0007: readonly string[] = ['en_cours', 'envoye', 'refuse', 'erreur', 'non_branche']
 export const statutColonneEnvoi = (s: EnvoiRelance['statut']): string => (STATUTS_COLONNE_0007.includes(s) ? s : 'erreur')
 
+/**
+ * Valeur de la COLONNE `envois.modele` (R7, sans migration) : la contrainte CHECK de 0007 n'accepte que bienvenue /
+ * proche / inactif / anniversaire / libre. Le modèle automatique `gainExpire` est rangé sous `libre` dans la colonne ;
+ * le vrai modèle (et le `tirageId`) restent dans `donnees`, seule source relue. Effet de bord connu : l'index unique
+ * (commerce, client, modèle, jour) fait qu'un message libre manuel et une relance de gain ne partent pas le même jour
+ * vers le même client (le 2e est refusé, rien n'est envoyé en double).
+ */
+const MODELES_COLONNE_0007: readonly string[] = ['bienvenue', 'proche', 'inactif', 'anniversaire', 'libre']
+export const modeleColonneEnvoi = (m: EnvoiRelance['modele']): string => (MODELES_COLONNE_0007.includes(m) ? m : 'libre')
+
 /** Lecture d'une table de la migration 0003 : vide tant que la migration n'est pas appliquée (l'existant continue de marcher). */
 async function ouVide<T>(lecture: Promise<T>, vide: T): Promise<T> {
   try {
@@ -449,7 +459,7 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     ajouterEnvoi: async (e) =>
       void (await ok(
         'envois',
-        sb.from('envois').insert({ id: e.id, commerce_id: e.commerceId, client_id: e.clientId, modele: e.modele, canal: e.canal, statut: statutColonneEnvoi(e.statut), jour: e.jour, date: e.date, donnees: e }),
+        sb.from('envois').insert({ id: e.id, commerce_id: e.commerceId, client_id: e.clientId, modele: modeleColonneEnvoi(e.modele), canal: e.canal, statut: statutColonneEnvoi(e.statut), jour: e.jour, date: e.date, donnees: e }),
       )),
     majEnvoi: async (e) => void (await ok('envois', sb.from('envois').update({ statut: statutColonneEnvoi(e.statut), donnees: e }).eq('id', e.id).eq('commerce_id', e.commerceId))),
     envois: (commerceId, limite, clientId) => {

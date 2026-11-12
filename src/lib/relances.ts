@@ -21,7 +21,8 @@ export const MODELES_RELANCE: { modele: ModeleRelance; libelle: string; aide: st
 
 export const estModeleRelance = (v: unknown): v is ModeleRelance => MODELES_RELANCE.some((m) => m.modele === v)
 
-export const libelleModele = (m: ModeleRelance | 'libre') => (m === 'libre' ? 'Message libre' : MODELES_RELANCE.find((x) => x.modele === m)!.libelle)
+export const libelleModele = (m: EnvoiRelance['modele']) =>
+  m === 'libre' ? 'Message libre' : m === 'gainExpire' ? 'Gain bientôt expiré' : MODELES_RELANCE.find((x) => x.modele === m)!.libelle
 
 /** Statut d'une tentative, tel qu'affiché au gérant (journal des envois) : ne jamais laisser croire à un envoi qui n'a pas eu lieu. */
 export function libelleStatutEnvoi(s: EnvoiRelance['statut']): string {
@@ -147,14 +148,18 @@ export function emailRelance(modele: ModeleRelance | 'libre', d: Destinataire, l
       paragraphe = libre.trim()
       break
   }
-  const texte = [
-    p ? `Bonjour ${p},` : 'Bonjour,',
+  return { sujet, texte: corpsEmail(p, n, paragraphe, liens) }
+}
+
+/** Corps commun des e-mails de relance : salutation, paragraphe, lien vers la carte, signature, pied de désinscription. */
+export function corpsEmail(prenom: string, nomCommerce: string, paragraphe: string, liens: { carte: string; desinscription: string }): string {
+  return [
+    prenom ? `Bonjour ${prenom},` : 'Bonjour,',
     paragraphe,
     `Votre carte de fidélité : ${liens.carte}`,
-    `À très bientôt,\nL’équipe de ${n}`,
-    `—\nVous recevez cet e-mail car vous avez accepté de recevoir les messages de ${n}. Pour ne plus en recevoir : ${liens.desinscription}`,
+    `À très bientôt,\nL’équipe de ${nomCommerce}`,
+    `—\nVous recevez cet e-mail car vous avez accepté de recevoir les messages de ${nomCommerce}. Pour ne plus en recevoir : ${liens.desinscription}`,
   ].join('\n\n')
-  return { sujet, texte }
 }
 
 // ---------- Longueur d'un SMS ----------
@@ -246,7 +251,7 @@ const occupe = (e: Pick<EnvoiRelance, 'statut'>) => e.statut === 'envoye' || e.s
  * dit si la relance est due selon les règles métier (une erreur d'un autre jour ne compte pas) ; seule la tournée
  * (`lancerRelancesAuto`) l'utilise, le renvoi manuel du commerçant n'y passe pas.
  */
-export function echecAutoDuJour(modele: ModeleRelance, envoisDuClient: Pick<EnvoiRelance, 'modele' | 'statut' | 'jour' | 'declencheur'>[], maintenant: Date): boolean {
+export function echecAutoDuJour(modele: ModeleRelance | 'gainExpire', envoisDuClient: Pick<EnvoiRelance, 'modele' | 'statut' | 'jour' | 'declencheur'>[], maintenant: Date): boolean {
   const jour = jourParis(maintenant)
   return envoisDuClient.some((e) => e.declencheur === 'auto' && e.modele === modele && e.statut === 'erreur' && e.jour === jour)
 }

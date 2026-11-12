@@ -12,8 +12,9 @@ import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
 import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
+import { emailGainExpire, gainBientotExpire, gainsARelancer, smsGainExpire } from '../src/lib/relanceGain.ts'
 import {
-  debutDuJourParis, finActivation, finGain, gainEnCours, gainsSur30Jours, LIMITE_GAINS_MOIS_MAX, limiteGainsMois, lotsJouables,
+  debutDuJourParis, DUREE_GAIN_JOURS, finActivation, finGain, gainEnCours, gainsSur30Jours, LIMITE_GAINS_MOIS_MAX, limiteGainsMois, lotsJouables,
   lotsPlafonnes, lotsTirables, messageGain, modeAccesRoue, normaliserCodeGagnant, PLAFOND_JOUR_MAX, refusActivation, statutGain, statutJeu, tirageDuCode, tirageDuJour,
   tirageHerite, tirerLot, utilisableLe, FENETRE_ACTIVATION_MS,
 } from '../src/lib/roulette.ts'
@@ -799,9 +800,14 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
   }
   if ('relancesAuto' in corps) {
     const o = (corps.relancesAuto ?? {}) as Corps
-    const inconnus = Object.keys(o).filter((k) => k !== 'inactif' && k !== 'anniversaire')
+    const inconnus = Object.keys(o).filter((k) => k !== 'inactif' && k !== 'anniversaire' && k !== 'gainExpire')
     if (inconnus.length) throw err(400, `« relancesAuto » : champ inconnu (${inconnus.join(', ')}).`)
-    r.relancesAuto = { inactif: booleen(o.inactif ?? false, 'inactif'), anniversaire: booleen(o.anniversaire ?? false, 'anniversaire') }
+    r.relancesAuto = {
+      inactif: booleen(o.inactif ?? false, 'inactif'),
+      anniversaire: booleen(o.anniversaire ?? false, 'anniversaire'),
+      // R7 : absent = activé (rien n'est écrit tant que le commerçant n'a pas choisi).
+      ...(o.gainExpire != null ? { gainExpire: booleen(o.gainExpire, 'gainExpire') } : {}),
+    }
   }
   if ('modeAccesRoue' in corps) {
     const v = corps.modeAccesRoue
@@ -2045,7 +2051,7 @@ export async function creerServeur(o: OptionsServeur) {
   async function relancer(
     commerce: Commerce,
     client: Client,
-    demande: { modele: ModeleRelance | 'libre'; canal?: Canal; libre?: string; declencheur: EnvoiRelance['declencheur']; auteur: string },
+    demande: { modele: ModeleRelance | 'libre'; canal?: Canal; libre?: string; declencheur: EnvoiRelance['declencheur']; auteur: string } | { modele: 'gainExpire'; tirage: Tirage; declencheur: 'auto'; auteur: string; canal?: undefined },
     site: string,
   ): Promise<Tentative> {
     const t = maintenant()
@@ -2058,6 +2064,7 @@ export async function creerServeur(o: OptionsServeur) {
       date: t.toISOString(),
       jour: jourParis(t),
       modele: demande.modele,
+      ...(demande.modele === 'gainExpire' ? { tirageId: demande.tirage.id } : {}),
       canal,
       statut: 'en_cours',
       declencheur: demande.declencheur,
@@ -2096,9 +2103,13 @@ export async function creerServeur(o: OptionsServeur) {
       // /d/… — P1-B9 : « répondez STOP » est impossible avec l'expéditeur alphanumérique Brevo).
       const jeton = await jetonDesinscription(commerce.id, client.id)
       if (canal === 'sms') {
-        message = { destinataire, texte: smsRelance(demande.modele, d, lienCourtCarte(site, client.id), demande.libre, lienCourtDesinscription(site, client.id, jeton)) }
+        const carte = lienCourtCarte(site, client.id)
+        const stop = lienCourtDesinscription(site, client.id, jeton)
+        const texte = demande.modele === 'gainExpire' ? smsGainExpire({ ...d, tirage: demande.tirage }, carte, stop) : smsRelance(demande.modele, d, carte, demande.libre, stop)
+        message = { destinataire, texte }
       } else {
-        const e = emailRelance(demande.modele, d, { carte: lienCarte(site, client.id), desinscription: `${site}/#/desinscription/${client.id}/${jeton}` }, demande.libre)
+        const liens = { carte: lienCarte(site, client.id), desinscription: `${site}/#/desinscription/${client.id}/${jeton}` }
+        const e = demande.modele === 'gainExpire' ? emailGainExpire({ ...d, tirage: demande.tirage }, liens) : emailRelance(demande.modele, d, liens, demande.libre)
         message = {
           destinataire,
           sujet: e.sujet,
@@ -2165,15 +2176,23 @@ export async function creerServeur(o: OptionsServeur) {
   // on ne les retente pas dans la même tournée, ni à la reprise d'une tournée interrompue le même jour (`echecAutoDuJour`,
   // revue Codex finale ; le renvoi manuel reste possible). Un délai dépassé (statut `incertain`, point Codex 10 : chaque appel est
   // borné par DELAI_PRESTATAIRE_MS) compte comme un envoi pour `relanceAutoDue` : jamais de renvoi automatique.
+  //
+  // R7 — « gain bientôt expiré » (`gainExpire`, ACTIVÉ si absent) : lot physique de la roue non retiré qui expire dans
+  // moins de 72 h (src/lib/relanceGain.ts). Une seule relance par tirage : le journal des envois porte `tirageId`, et
+  // une ligne `envoye` / `en_cours` / `incertain` / `test` pour ce tirage suffit à ne plus rien envoyer. Toujours une
+  // seule relance automatique par client et par tournée, dans l'ordre anniversaire (le jour J seulement), gain (la
+  // tournée suivante a encore le temps : fenêtre de 72 h), inactif. La marque du jour porte les règles actives : une
+  // règle activée en cours de journée a sa tournée le jour même (les anti-doublons ci-dessus restent les garde-fous).
   const tournees = new Map<string, string>()
   const tourneesActives = new Set<string>()
   const tourneesEnCours = new Set<Promise<void>>()
   function lancerRelancesAuto(commerce: Commerce, site: string) {
-    const regles = commerce.relancesAuto
-    if (!regles?.inactif && !regles?.anniversaire) return
+    const regles = { inactif: false, anniversaire: false, ...commerce.relancesAuto }
+    const gainExpire = regles.gainExpire !== false
+    if (!regles.inactif && !regles.anniversaire && !gainExpire) return
     const t = maintenant()
-    const jour = jourParis(t)
-    if (tournees.get(commerce.id) === jour || tourneesActives.has(commerce.id)) return
+    const marque = `${jourParis(t)}|${regles.inactif}|${regles.anniversaire}|${gainExpire}`
+    if (tournees.get(commerce.id) === marque || tourneesActives.has(commerce.id)) return
     tourneesActives.add(commerce.id)
     const p = (async () => {
       const branche = notifications.statut()
@@ -2181,18 +2200,34 @@ export async function creerServeur(o: OptionsServeur) {
       // n'est pas marqué : si tout est branché plus tard dans la journée, la tournée part. Ce test ne coûte presque
       // rien à chaque ouverture (statut en mémoire, `schemaRelances` mis en cache 60 s).
       if ((!branche.sms && !branche.email) || !(await schemaRelances())) return
-      for (const client of await st.clients(commerce.id)) {
+      // R7 : gains qui expirent dans moins de 72 h, par client (tirages des 32 derniers jours seulement).
+      const gains = new Map<string, Tirage[]>()
+      if (gainExpire) {
+        for (const x of await st.tiragesDepuis(commerce.id, new Date(t.getTime() - (DUREE_GAIN_JOURS + 2) * 86_400_000).toISOString())) {
+          if (gainBientotExpire(x, t)) gains.set(x.clientId, [...(gains.get(x.clientId) ?? []), x])
+        }
+      }
+      // Gain seul activé : on ne lit que les clients concernés, pas tout le fichier.
+      const clients =
+        regles.inactif || regles.anniversaire
+          ? await st.clients(commerce.id)
+          : (await Promise.all([...gains.keys()].map((id) => st.client(commerce.id, id)))).filter((c): c is Client => !!c)
+      for (const client of clients) {
         const canal = canalDuClient(client)
         if (client.consentementRelance !== true || !canal || !branche[canal]) continue
+        if (!regles.inactif && !regles.anniversaire && !gains.has(client.id)) continue
         const deja = await st.envois(commerce.id, 50, client.id)
-        // Une seule relance automatique par client et par tournée : l'anniversaire passe avant.
-        const modele = (['anniversaire', 'inactif'] as const).find((x) => regles[x] && relanceAutoDue(x, client, deja, t))
+        const gain = gainsARelancer(gains.get(client.id) ?? [], deja, t)[0]
+        // Une seule relance automatique par client et par tournée : l'anniversaire passe avant, puis le gain.
+        const modele = (['anniversaire', 'gainExpire', 'inactif'] as const).find((x) => (x === 'gainExpire' ? !!gain : regles[x] && relanceAutoDue(x, client, deja, t)))
         // Revue Codex finale, point 5 : le modèle retenu a déjà échoué chez le prestataire aujourd'hui (tentative de la
         // tournée interrompue) → client déjà traité, rien de plus (ni ce modèle ni un autre en repli). Filtre posé ici,
         // à côté de la règle « une relance par client et par tournée » qu'il prolonge, et pas dans `relanceAutoDue`.
-        if (modele && !echecAutoDuJour(modele, deja, t)) await relancer(commerce, client, { modele, declencheur: 'auto', auteur: 'Automatique' }, site)
+        if (!modele || echecAutoDuJour(modele, deja, t)) continue
+        if (modele === 'gainExpire') await relancer(commerce, client, { modele, tirage: gain!, declencheur: 'auto', auteur: 'Automatique' }, site)
+        else await relancer(commerce, client, { modele, declencheur: 'auto', auteur: 'Automatique' }, site)
       }
-      tournees.set(commerce.id, jour)
+      tournees.set(commerce.id, marque)
     })()
       .catch((e) => console.warn(`[relances] tournée automatique interrompue (reprise à la prochaine ouverture) : ${e instanceof Error ? e.message : e}`))
       .finally(() => {
