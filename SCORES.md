@@ -108,7 +108,7 @@ l'AUDIT §7, sur le staging (jamais la production) :
 5. Relever les erreurs console via le navigateur distant (Chrome DevTools USB) ou,
    à défaut, noter tout écran blanc / blocage visible.
 
-## Bundle (build frais, mode par défaut, 12/11/2026 — roue v2 R-t1 polish visuel)
+## Bundle (build frais, mode par défaut, 12/11/2026 — déblocage D)
 
 Définition unique : **JS initial non gzipé** = script d'entrée de `index.html` +
 ses imports statiques (méthode `fichiersInitiaux` de
@@ -121,13 +121,18 @@ référence P1-U1 est conservée verbatim juste après (titre et chiffres), comm
 archive historique — le test `tests/mesure-p1-u1.test.ts` y lit ses chiffres
 figés ; elle ne doit pas être modifiée.
 
-- JS initial non gzipé : 481283 o (470,0 Ko) — `index-C4Xor2bi.js` 369504 o +
-  `ui-ZIVMaRXG.js` 102937 o + `jsx-runtime-CkXRJ162.js` 8243 o +
+- JS initial non gzipé : 482374 o (471,1 Ko) — `index-BuSpb0Wk.js` 370542 o +
+  `ui-D37O8kXP.js` 102990 o + `jsx-runtime-CkXRJ162.js` 8243 o +
   `rolldown-runtime-WkwZ5CU-.js` 599 o.
-- CSS non gzipé : 82135 o (80,2 Ko) — `index-DRZsZD6q.css`.
-- Total initial : 563418 o (550,2 Ko).
-- JS total (tous chunks) : 859828 o (839,7 Ko) ; 26 chunks ; plus gros chunk : 369504 o
+- CSS non gzipé : 82282 o (80,4 Ko) — `index-BFx1uSLa.css`.
+- Total initial : 564656 o (551,4 Ko).
+- JS total (tous chunks) : 860956 o (840,8 Ko) ; 26 chunks ; plus gros chunk : 370542 o
   (limite test : 500 000 o — respectée).
+- **Plafond du JS initial relevé (déblocage, décision utilisateur du 12/11/2026)** : ancien
+  plafond 481376 o (80 % de 601720 o) → nouveau plafond `PLAFOND_BUNDLE_INITIAL` = 484422 o
+  dans `tests/performance-bundle-p2-q2.test.ts` (taille mesurée 482374 o + 2048 o de marge,
+  ≈ 2 Ko). Le dépassement de l'ancien plafond (+998 o) vient des trois chantiers du déblocage
+  (prénom à l'inscription, badge heures creuses, bouton « Voir le menu »). Voir DEBLOCAGE-RAPPORT.md.
 - Roue v2 R-t1 (polish visuel) : JS initial 481373 o (après D2, a3e2290) → 481283 o (−90 o ;
   plafond 481376 o, marge 93 o). Les classes utilitaires du pointeur, du titre et des pastilles
   de la légende sont passées en CSS (−200 o de JS), ce qui paie le retournement des libellés de
