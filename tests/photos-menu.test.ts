@@ -23,7 +23,9 @@ const SLUGS: Record<string, string> = {
   'Tigre qui pleure': 'tigre-qui-pleure',
   'Bo Bun': 'bo-bun',
 }
-const FICHIERS = Object.values(SLUGS).flatMap((s) => [`menu-${s}.webp`, `menu-${s}-vignette.webp`])
+// Item C : vignettes des photos de galerie (JPEG) de Loc Lac et Mango Stick.
+const VIGNETTES_GALERIE = ['menu-loc-lac-vignette.webp', 'menu-mango-sticky-rice-vignette.webp']
+const FICHIERS = [...Object.values(SLUGS).flatMap((s) => [`menu-${s}.webp`, `menu-${s}-vignette.webp`]), ...VIGNETTES_GALERIE]
 const fichier = (nom: string) => new URL(`../public/visuels/${nom}`, import.meta.url)
 const plats = () => menuReelAsianHome().categories.flatMap((c) => c.produits)
 const categorie = (nom: string) => menuReelAsianHome().categories.find((c) => c.nom === nom)!
@@ -65,7 +67,7 @@ describe('Fichiers WebP livrés (public/visuels/menu-*.webp)', () => {
       assert.ok(Math.abs(v.hauteur / v.largeur - f.hauteur / f.largeur) < 0.02, s)
     }
   })
-  test('aucun autre menu-*.webp que les 18 attendus', () => {
+  test('aucun autre menu-*.webp que les 20 attendus', () => {
     // Boucle t2 : le dossier contient aussi logo-petit.webp (variante du logo, pas une photo de
     // menu) — le filtre porte sur le préfixe menu-, l'exigence est inchangée : les 18 attendus
     // doivent exister et tout menu-*.webp supplémentaire fait échouer le test.
@@ -99,7 +101,7 @@ describe('Rattachements dans la carte officielle (menuReelAsianHome)', () => {
       Object.values(SLUGS).map((s) => `/visuels/menu-${s}.webp`).sort(),
     )
   })
-  test('Loc Lac et Mango Stick gardent leur photo existante, sans vignette ; les 2 makis n’ont plus de photo (P1-M3)', () => {
+  test('Loc Lac et Mango Stick gardent leur photo existante, avec leur vignette WebP (item C) ; les 2 makis n’ont plus de photo (P1-M3)', () => {
     const de = (nom: string) => plats().find((x) => x.nom === nom)!
     assert.equal(de('Loc Lac').photo, VISUELS.menuLocLac)
     assert.equal(de('Mango Stick').photo, VISUELS.menuMangoStickyRice)
@@ -107,7 +109,8 @@ describe('Rattachements dans la carte officielle (menuReelAsianHome)', () => {
     assert.equal(de('8 Maki Chicken Dragon').photo, undefined)
     assert.equal(de('8 Maki Tiger').photoVignette, undefined)
     assert.equal(de('8 Maki Chicken Dragon').photoVignette, undefined)
-    for (const nom of ['Loc Lac', 'Mango Stick']) assert.equal(de(nom).photoVignette, undefined, nom)
+    assert.equal(de('Loc Lac').photoVignette, '/visuels/menu-loc-lac-vignette.webp')
+    assert.equal(de('Mango Stick').photoVignette, '/visuels/menu-mango-sticky-rice-vignette.webp')
   })
   test('sans photo : Love Bao, 6 Maki Gold, Tiramisu, boissons, variantes makis / california / sashimi / sushi', () => {
     for (const nom of ['Love Bao', '6 Maki Gold', 'Tiramisu']) {
@@ -123,7 +126,7 @@ describe('Rattachements dans la carte officielle (menuReelAsianHome)', () => {
     for (const p of plats()) {
       if (!p.photoVignette) continue
       assert.ok(p.photo, p.nom)
-      assert.equal(p.photoVignette, p.photo!.replace(/\.webp$/, '-vignette.webp'), p.nom)
+      assert.equal(p.photoVignette, p.photo!.replace(/\.(webp|jpe?g)$/, '-vignette.webp'), p.nom)
     }
   })
   test('menu-nouilles-crevettes.jpg n’est plus référencée par le code (fichier gardé, non rattaché)', () => {
@@ -158,7 +161,7 @@ describe('photoVignette : validation partagée (validerMenu)', () => {
   })
   test('la carte officielle passe la validation serveur avec ses vignettes intactes', () => {
     const m = validerMenu(menuReelAsianHome(), ID_ASIAN_HOME, MAINTENANT)
-    assert.equal(m.categories.flatMap((c) => c.produits).filter((p) => p.photoVignette).length, 9)
+    assert.equal(m.categories.flatMap((c) => c.produits).filter((p) => p.photoVignette).length, 11)
   })
 })
 
@@ -192,11 +195,11 @@ describe('CSV : colonne optionnelle photo_vignette', () => {
     assert.deepEqual(sansIds(relu), sansIds(validerMenu(menu, ID_ASIAN_HOME, MAINTENANT)))
     assert.deepEqual(importer(menuEnCsv(relu)), relu)
   })
-  test('carte officielle : aller-retour CSV exact, les 9 vignettes comprises', () => {
+  test('carte officielle : aller-retour CSV exact, les 11 vignettes comprises', () => {
     const officiel = validerMenu(menuReelAsianHome(), ID_ASIAN_HOME, MAINTENANT)
     const relu = importer(menuEnCsv(officiel))
     assert.deepEqual(sansIds(relu), sansIds(officiel))
-    assert.equal(relu.categories.flatMap((c) => c.produits).filter((p) => p.photoVignette).length, 9)
+    assert.equal(relu.categories.flatMap((c) => c.produits).filter((p) => p.photoVignette).length, 11)
   })
   test('ancien CSV (sans la colonne) toujours accepté : pas de vignette ; colonne lue quel que soit son rang', () => {
     const ancien = importer(`${COLONNES_CSV_MENU.join(';')}\nE;N;1;;/visuels/menu-loc-lac.jpg;\n`)

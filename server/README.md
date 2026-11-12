@@ -14,6 +14,7 @@ voient enfin **les mêmes données**. Une seule instance Node pour tous les comm
 | `server/index.ts` | Point d'entrée (`npm run serveur`) : variables d'environnement, fuseau, démarrage. |
 | `server/app.ts` | Routes `/api/v1`, PIN, anti-bruteforce, validation, service du front compilé (CSV : `src/lib/csv.ts`, partagé avec le front depuis la V2). |
 | `server/logs.ts` | **P2-Q6** : logs structurés JSON — une ligne par réponse terminée (niveau, horodatage, route masquée, statut, durée) ; jamais de secret, PIN, jeton, téléphone/e-mail brut ni identifiant de carte ou de client brut (empreinte SHA-256). Voir « Logs structurés et alertes ». |
+| `server/alertes.ts` | **Item E** : alerte e-mail sur rafale de 5xx (> 10 en 15 min, 1 livrée par heure max, reprise 5 min après un échec), inactive sans `ALERTE_EMAIL`. Voir « Logs structurés et alertes ». |
 | `server/stockage.ts` | Base SQLite (schéma + requêtes) et contrat `Stockage` commun aux deux bases. |
 | `server/stockage-supabase.ts` | **S1** : même contrat sur Supabase (API REST PostgREST, clé service_role). |
 | `supabase/migrations/` | **S1** : schéma Postgres (`0001_schema_initial.sql`) et RLS (`0002_rls.sql`). |
@@ -89,6 +90,7 @@ en production, le serveur refuse de démarrer sans `ADMIN_PIN`.
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | — | **P1-B3, non configuré.** SMS via Twilio (`TWILIO_FROM` = numéro expéditeur `+33…` ou identifiant de Messaging Service `MG…`). Les trois sont nécessaires, sinon 501. **Depuis le lot « Brancher Brevo » : Twilio n'est plus que le repli SMS** (utilisé seulement si Brevo SMS n'est pas configuré). |
 | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `BREVO_SMS_SENDER` | — | **P1-B3 + lot « Brancher Brevo », non configuré.** E-mail via Brevo (adresse expéditrice à valider chez Brevo ; nom optionnel) **et SMS via Brevo** (`BREVO_SMS_SENDER` = nom d'expéditeur alphanumérique, 11 caractères max, ex. `ASIANHOME`). Clé + adresse nécessaires pour l'e-mail, clé + expéditeur SMS pour le SMS, sinon 501. Procédure complète : `docs/BREVO.md`. |
 | `BREVO_MODE_TEST` | `0` | **Lot « Brancher Brevo », consigne du 10/11/2026 : aucun envoi réel pendant le développement.** `1` = mode test : e-mail en sandbox Brevo (`X-Sib-Sandbox: drop`, rien livré), SMS simulé (aucun appel réseau, Twilio aussi simulé), journal des envois avec le statut `test` (« Test — rien envoyé »), `/sante` → `integrations.modeTest: true`. **À retirer pour envoyer pour de vrai** (plus tard, avec accord explicite — voir `docs/BREVO.md` §5). |
+| `ALERTE_EMAIL` | — (alerte désactivée) | **Item E.** Adresse de l'exploitant qui reçoit l'alerte e-mail sur rafale de 5xx : plus de 10 réponses 5xx en 15 minutes glissantes → 1 e-mail, au plus 1 livré par heure (nouvelle tentative 5 min après un échec), via l'adaptateur e-mail Brevo (suit `BREVO_MODE_TEST`). Absente ou vide = aucun compteur, aucun envoi. Voir « Alerte e-mail sur rafale de 5xx ». |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | **P1-B4, non configuré. `GOOGLE_CLIENT_SECRET` = secret serveur.** Identifiants OAuth 2.0 (application Web) du projet Google Cloud approuvé pour les API Business Profile. Les deux sont nécessaires, sinon les routes Google répondent 501. Voir `docs/GOOGLE-BUSINESS.md`. |
 | `GOOGLE_REDIRECT_URI` | `PUBLIC_URL` (ou adresse du serveur) + `/api/v1/commerces/<id>/google/callback` | **P1-B4.** URI de redirection déclarée chez Google, à l'identique. |
 | `GOOGLE_BUSINESS_LOCATION` | — (fiche trouvée à l'import) | **P1-B4, facultatif.** `accounts/<n°>/locations/<n°>` si le compte gère plusieurs fiches et que l'app ne trouve pas la bonne. |
@@ -738,17 +740,39 @@ grep '^{' logs.txt | jq -r 'select(.statut == 401 and .route == "/api/v1/session
 grep '^{' logs.txt | jq -s 'sort_by(-.dureeMs) | .[0:10] | .[] | "\(.dureeMs)ms \(.methode) \(.route) \(.statut)"'
 ```
 
-**Alertes à surveiller — procédure seulement, rien n'est branché.** Aucun envoi automatique d'alerte
-(e-mail, SMS, webhook, service tiers payant type PagerDuty) n'est configuré, volontairement : le critère
-AUDIT.md (« alerte reçue sur staging lors d'un 500 provoqué ») suppose un staging qui n'existe pas encore
-et un canal d'alerte à choisir (coût et bruit à calibrer — une alerte qui sonne à chaque 429 du wifi du
-restaurant ne sert à rien). **Statut honnête : ce lot livre les logs + la procédure, pas l'alerte.**
-La moitié réalisable du critère est couverte par un test : une 500 réelle émet une ligne de niveau
-`erreur` (`tests/logs-structures-p2-q6.test.ts`, « émission simulée ») — c'est le signal qu'une alerte
-consommerait. La seconde moitié (une alerte réellement reçue sur staging lors d'un 500 provoqué) reste
-à faire : elle suppose un staging (à créer, voir `docs/DEPLOIEMENT.md` §6) et un canal choisi. Ce qui est
-en place, c'est le **signal** (les lignes JSON) et la **procédure** ci-dessous ; le branchement d'un canal
-reste à décider (voir « Ce qui n'est pas branché »).
+**Alertes à surveiller.** Lot P2-Q6 : logs + procédure ci-dessous. Depuis l'item E (12/11/2026), une
+**alerte e-mail sur rafale de 5xx** existe, désactivée tant que `ALERTE_EMAIL` n'est pas définie (voir
+le paragraphe suivant) ; aucun autre canal (SMS, webhook, PagerDuty) n'est branché. Une 500 réelle émet
+une ligne de niveau `erreur` (`tests/logs-structures-p2-q6.test.ts`, « émission simulée »). Le critère
+AUDIT.md « alerte reçue sur staging lors d'un 500 provoqué » reste non vérifié en conditions réelles : pas
+de staging (`docs/DEPLOIEMENT.md` §6) et Brevo en mode test.
+
+**Alerte e-mail sur rafale de 5xx (item E, `server/alertes.ts`).** Alimentée au même point d'accroche que
+les logs JSON (`res.on('finish')`, juste après `journaliserRequete`, sans changer le format des lignes).
+- **Seuil** : plus de 10 réponses 5xx (donc à la 11e) dans une **fenêtre glissante de 15 minutes**.
+- **Plafond** : au plus **1 alerte livrée par heure** (livrée = envoi accepté par le prestataire, y compris
+  en mode test), compté à partir de la livraison ; le compteur continue, seul l'envoi est plafonné. Après
+  une heure, une rafale toujours au-dessus du seuil redéclenche une alerte.
+- **Reprise après échec** : un envoi refusé par le prestataire (ou délai dépassé), ou impossible faute de
+  prestataire, ne consomme pas le plafond : nouvelle tentative possible **5 minutes** plus tard
+  (`DELAI_REPRISE_ALERTE_5XX_MS`) si le seuil est toujours dépassé. Une seule tentative à la fois ; une
+  ligne `[alerte-5xx]` par tentative (une rafale instantanée n'en produit donc qu'une).
+- **Destinataire** : `ALERTE_EMAIL`. Absente ou vide = module inactif (aucun compteur, aucun envoi).
+- **Envoi** : adaptateur e-mail existant (Brevo, expéditeur `BREVO_SENDER_EMAIL` / `BREVO_SENDER_NAME`,
+  délai 10 s de `server/notifications/delai.ts`), en tâche de fond : la réponse HTTP en cours n'attend
+  jamais l'envoi et une erreur d'envoi ne la fait jamais échouer.
+- **Contenu** : nombre de 5xx dans la fenêtre, bornes de la fenêtre (UTC), les 5 routes les plus touchées
+  (chemins **masqués** comme dans les logs : `routeMasquee`), horodatage. Jamais de corps, d'en-tête, de
+  requête `?…` ni d'identifiant brut.
+- **Mode test** (`BREVO_MODE_TEST=1`) : même chemin que les relances — e-mail en sandbox Brevo
+  (`X-Sib-Sandbox: drop`, rien livré) — et une ligne `[alerte-5xx] mode test : alerte simulée, rien
+  envoyé (…)`. Sans prestataire e-mail configuré : ligne `[alerte-5xx] alerte non envoyée (aucun
+  prestataire e-mail configuré)`, aucune exception. Envoi réel : `[alerte-5xx] alerte envoyée (…)` ;
+  refus ou délai dépassé : `[alerte-5xx] alerte non envoyée : <raison>`. L'adresse du destinataire n'est
+  jamais écrite dans les logs.
+- **Limites** : compteur en mémoire, par instance (remis à zéro au redémarrage / réveil Render) ; borné à
+  5 000 erreurs mémorisées.
+- Tests : `tests/alertes-5xx-ameliorations.test.ts`, `tests/revue-codex-nov12-alertes.test.ts` (reprise).
 
 | Signal | Ce que ça veut dire | Que faire |
 |---|---|---|
@@ -762,10 +786,10 @@ reste à décider (voir « Ce qui n'est pas branché »).
 **Routine recommandée (pas une automatisation).** À chaque signalement d'incident (« ça ne marche pas »,
 « je suis bloqué ») : ouvrir les logs Render sur la fenêtre du signalement et filtrer `niveau == "erreur"`
 puis `statut == 429` / `401` pour l'IP concernée. Une fois par semaine : un coup d'œil aux 5xx (une seule
-ligne suffit à justifier une correction). **Ce qui n'est pas branché** : aucune alerte automatique, aucun
-transfert des logs hors Render, aucune rétention longue — les logs Render Free sont éphémères ; pour une
-alerte réelle (e-mail sur 500, webhook sur blocage), il faudra choisir un canal (e-mail de l'opérateur,
-webhook gratuit) et le brancher sur ces lignes, sans toucher à leur format.
+ligne suffit à justifier une correction). **Ce qui n'est pas branché** : aucune alerte automatique autre
+que l'e-mail sur rafale de 5xx (ci-dessus, inactif sans `ALERTE_EMAIL`), aucun transfert des logs hors
+Render, aucune rétention longue — les logs Render Free sont éphémères ; une alerte sur une 500 isolée ou
+un webhook sur blocage resteraient à brancher sur ces lignes, sans toucher à leur format.
 
 ### Migration 0006 (anti-bruteforce persistant) — à appliquer en production
 
@@ -1024,10 +1048,15 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
   sortie 1, aucun fichier. Vérification : `npm run restaurer -- <fichier> --cible pglite --verifier` (base locale
   jetable ; Supabase refusé). Procédure complète, RPO 24 h / RTO 1–2 h, copie hors VM, restauration manuelle vers
   Supabase et limites : **`docs/SAUVEGARDE.md`**.
+- **`GET /api/v1/admin/sauvegarde`** (admin seulement : session admin ou X-Admin-PIN ; session commerce / équipe → 403)
+  — bouton « Télécharger une sauvegarde » de l'écran Admin, routine quotidienne recommandée (12/11/2026). Même export,
+  même `.json.gz`, même nom horodaté et même chiffrement que le script (lecture Supabase partagée : `lireTablePostgrest`
+  de `server/sauvegarde.ts`, via `Stockage.lireTableSauvegarde`) ; chiffré si `SAUVEGARDE_CLE_CHIFFREMENT` est définie
+  sur le service (clé invalide = refus de démarrer), sinon en clair + `[sauvegarde] AVERTISSEMENT` dans le journal.
+  Table métier absente ou illisible → 500 `ERREUR SAUVEGARDE — …`, aucune archive. Fonctionne aussi sous SQLite (dev).
 - SQLite (dev / Render Starter + disque) : copier le fichier `data/fidelite.db` serveur arrêté (ou
-  `sqlite3 fidelite.db ".backup copie.db"`) — le script ci-dessus ne lit que Supabase.
-- Toujours **pas de route HTTP** de sauvegarde ni d'import, et pas de restauration automatique vers Supabase (manuelle,
-  `docs/SAUVEGARDE.md` § 8).
+  `sqlite3 fidelite.db ".backup copie.db"`) — le script ci-dessus ne lit que Supabase (la route admin lit les deux).
+- Pas de route d'**import** ni de restauration automatique vers Supabase (manuelle, `docs/SAUVEGARDE.md` § 8).
 
 ## RGPD (P1-B6)
 

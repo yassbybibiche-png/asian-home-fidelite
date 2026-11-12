@@ -34,6 +34,12 @@ export function nouveauCommerce(nom: string, type: TypeCommerce, lienGoogle: str
       { libelle: 'Dommage !', probabilite: 30 },
     ],
     reglesReponseAuto: { auto5Etoiles: true, auto4Etoiles: false, brouillonAutres: true },
+    // Catalogue d'échange de points pré-rempli (ids stables, conformes à `catalogue()` de server/app.ts).
+    catalogue: [
+      { id: 'boisson-offerte', nom: 'Boisson offerte', cout: 100 },
+      { id: 'dessert-offert', nom: 'Dessert offert', cout: 150 },
+      { id: 'remise-10', nom: 'Remise 10 %', cout: 250 },
+    ],
     actif: true,
     creeLe: new Date().toISOString(),
   }

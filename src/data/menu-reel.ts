@@ -248,7 +248,7 @@ export function menuReelAsianHome(): Menu {
           plat('reel-c3-p6', 'Curry Vert', 1390, 'Poulet ou crevette, riz blanc, velouté de curry, légumes croquants.', PHOTOS_PDF.curryVert),
           plat('reel-c3-p3', 'Tigre qui pleure', 1590, 'Bœuf tranché et sa sauce thaï, riz nature ou riz thaï.', PHOTOS_PDF.tigreQuiPleure),
           // Photo existante (1109×720) gardée : le PDF montre le même plat en plus basse résolution.
-          plat('reel-c3-p2', 'Loc Lac', 1490, 'Riz rouge, bœuf caramélisé, œuf, salade.', '/visuels/menu-loc-lac.jpg'),
+          plat('reel-c3-p2', 'Loc Lac', 1490, 'Riz rouge, bœuf caramélisé, œuf, salade.', { photo: VISUELS.menuLocLac, photoVignette: VISUELS.menuLocLacVignette }),
           plat('reel-c3-p1', 'Bo Bun', 1390, 'Vermicelles de riz, bœuf, nems, légumes.', PHOTOS_PDF.boBun),
         ],
       },
@@ -282,7 +282,7 @@ export function menuReelAsianHome(): Menu {
         id: 'reel-cat-6',
         nom: 'Desserts',
         produits: [
-          plat('reel-c6-p1', 'Mango Stick', 890, 'Mangue et riz coco.', '/visuels/menu-mango-sticky-rice.jpg'),
+          plat('reel-c6-p1', 'Mango Stick', 890, 'Mangue et riz coco.', { photo: VISUELS.menuMangoStickyRice, photoVignette: VISUELS.menuMangoStickyRiceVignette }),
           plat('reel-c6-p2', 'Tiramisu', 890, 'Fait maison.'),
           plat('reel-o-dessert-du-jour', 'Dessert du jour', 890),
         ],

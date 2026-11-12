@@ -638,13 +638,13 @@ function Comptoir({
 
   return (
     <div className="mx-auto max-w-xl space-y-4 px-4 pt-4 pb-10">
-      <header className="flex items-center gap-3">
+      <header className="hero-sombre flex items-center gap-3 rounded-2xl px-4 py-3 shadow-relief">
         <LogoCommerce commerce={commerce} />
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-titre text-xl font-bold">Caisse · {commerce.nom}</h1>
-          <p className="text-sm text-gray-600">{degrade ? 'Connecté : code reconnu sur cet appareil (nom vérifié au retour du réseau)' : `Connecté : ${auteur.nom}`}</p>
+          <p className="text-sm text-white/80">{degrade ? 'Connecté : code reconnu sur cet appareil (nom vérifié au retour du réseau)' : `Connecté : ${auteur.nom}`}</p>
         </div>
-        <button className="min-h-11 shrink-0 rounded-xl px-3 text-sm font-semibold text-gray-700 ring-1 ring-gray-300 active:bg-gray-100" onClick={onVerrouiller}>
+        <button className="min-h-11 shrink-0 rounded-xl px-3 text-sm font-semibold text-white ring-1 ring-white/30 active:bg-white/10" onClick={onVerrouiller}>
           🔒 Verrouiller
         </button>
       </header>

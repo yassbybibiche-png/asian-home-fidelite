@@ -30,6 +30,7 @@ import { createClient, type PostgrestError } from '@supabase/supabase-js'
 import type { Avis, Client, Commerce, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, Parrainage, Tirage } from '../src/types.ts'
 import { cleContact } from '../src/lib/fidelite.ts'
 import { ErreurConflit, ErreurMigrationManquante, type DemandeRattrapageTrace, type Pin, type Stockage, type TentativesAuth } from './stockage.ts'
+import { lireTablePostgrest, type ClientPostgrest } from './sauvegarde.ts'
 
 const TABLES_0003 = ['equipe', 'journal', 'menus']
 const TABLES_0004 = ['parrainages', 'demandes_rattrapage']
@@ -489,6 +490,9 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       const client = (await suppr('clients', 'id')) > 0
       return { client, tirages, journal, parrainages, rattrapages, envois }
     },
+
+    // Sauvegarde admin : exactement la lecture du CLI (pages de 1 000 + compteur exact, table absente = erreur).
+    lireTableSauvegarde: lireTablePostgrest(sb as unknown as ClientPostgrest),
 
     /** PAS de « tout ou rien » (voir l'en-tête du fichier) : verrou optimiste sur les lignes lues pendant `fn`. */
     transaction: (fn) => versions.run(new Map(), async () => fn()),

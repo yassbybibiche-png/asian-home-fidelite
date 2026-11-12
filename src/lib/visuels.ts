@@ -55,6 +55,9 @@ export const VISUELS = {
   menuMakis: '/visuels/menu-makis.jpg',
   /** Loc Lac : bœuf caramélisé, riz rouge, œuf au plat. */
   menuLocLac: '/visuels/menu-loc-lac.jpg',
+  /** Même plat, recadrage carré centré pour la liste du menu (192×192, WebP q75, ~6 Ko) —
+      le JPEG 1109×720 (156 Ko) reste la photo de la fiche (item C). */
+  menuLocLacVignette: '/visuels/menu-loc-lac-vignette.webp',
   /**
    * Nouilles sautées aux crevettes — rattachée à AUCUN plat depuis le lot P1-B2 : « Mi Prat » a désormais
    * la photo légendée « MI PRAT » par le restaurant dans son PDF. Gardée au cas où le commerçant confirme le plat montré.
@@ -62,6 +65,9 @@ export const VISUELS = {
   menuNouillesCrevettes: '/visuels/menu-nouilles-crevettes.jpg',
   /** Mango sticky rice : mangue et riz gluant coco (Mango Stick). */
   menuMangoStickyRice: '/visuels/menu-mango-sticky-rice.jpg',
+  /** Même dessert, recadrage carré centré pour la liste du menu (192×192, WebP q75, ~7 Ko) —
+      le JPEG 411×412 (61 Ko) reste la photo de la fiche (item C). */
+  menuMangoStickyRiceVignette: '/visuels/menu-mango-sticky-rice-vignette.webp',
   /** Même dessert, recadré au ratio de la photo de catégorie (411×134, WebP q75, ~12 Ko) —
       le JPEG 411×412 (61 Ko) reste le repli (boucle t10, photo paresseuse). */
   menuMangoStickyRicePetit: '/visuels/menu-mango-sticky-rice-petit.webp',

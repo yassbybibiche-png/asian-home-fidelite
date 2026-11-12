@@ -80,6 +80,13 @@ if (origineCors === '*') {
   )
 }
 
+// Sauvegarde téléchargée par l'admin (écran Admin) : chiffrée avec la même clé que le CLI si elle est définie.
+// Clé invalide = refus de démarrer (sinon le bouton échouerait au moment où l'on a besoin de la sauvegarde).
+const cleChiffrementSauvegarde = env.SAUVEGARDE_CLE_CHIFFREMENT?.trim() || undefined
+if (cleChiffrementSauvegarde && !/^[0-9a-fA-F]{64}$/.test(cleChiffrementSauvegarde)) {
+  arreter('SAUVEGARDE_CLE_CHIFFREMENT invalide : 64 caractères hexadécimaux attendus (openssl rand -hex 32).')
+}
+
 let pinInitial = env.PIN_ASIAN_HOME
 if (!pinInitial && !production) pinInitial = '1234'
 
@@ -116,6 +123,9 @@ try {
     notifications: configDepuisEnv(env),
     // P1-B4 : GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (+ GOOGLE_REDIRECT_URI, GOOGLE_BUSINESS_LOCATION facultatives).
     googleBusiness: configGoogleBusinessDepuisEnv(env),
+    cleChiffrementSauvegarde,
+    // Item E : alerte e-mail sur rafale de 5xx (> 10 en 15 min, 1 par heure max) ; absente ou vide = désactivée.
+    alerteEmail: env.ALERTE_EMAIL?.trim() || undefined,
   })
 } catch (e) {
   arreter(e instanceof Error ? e.message : String(e))

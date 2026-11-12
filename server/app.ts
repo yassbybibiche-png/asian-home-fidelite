@@ -45,9 +45,11 @@ import { EVENEMENTS_PUBLICS, ajouterJours, basculerAccroche } from '../src/lib/m
 import { CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, dureeConservationMois, estPurgeable, exportClientCsv, libelleDuree, listePurge, nomFichierExportClient } from '../src/lib/rgpd.ts'
 import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSuppression, type CompteurPublic, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
 import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
+import { chiffrerSauvegarde, exporterSauvegarde, nomFichierSauvegarde } from './sauvegarde.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { menuAffichePour, pageMenuIndisponible, pageMenuPrerendue, pageNonTrouvee } from './prerendu.ts'
-import { cheminMasquePourErreur, journaliserRequete } from './logs.ts'
+import { cheminMasquePourErreur, journaliserRequete, routeMasquee } from './logs.ts'
+import { creerAlertes5xx } from './alertes.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
 import { estAbandon } from './notifications/delai.ts'
 import {
@@ -168,6 +170,13 @@ export interface OptionsServeur {
    * `plafond` = lignes max par minute (défaut 600) : au-delà, les lignes sont comptées puis résumées en une
    * seule ligne à la minute suivante (l'attaque reste visible par son volume, sans noyer les logs). */
   journalLectures?: { taux?: number; plafond?: number }
+  /**
+   * Clé de chiffrement des sauvegardes (SAUVEGARDE_CLE_CHIFFREMENT, 64 hex), la même que pour le CLI : présente = la
+   * sauvegarde téléchargée par l'admin (`GET /admin/sauvegarde`) est chiffrée AES-256-GCM ; absente = en clair + avertissement.
+   */
+  cleChiffrementSauvegarde?: string
+  /** Destinataire de l'alerte e-mail sur rafale de 5xx (ALERTE_EMAIL, `server/alertes.ts`) ; absent = alerte désactivée. */
+  alerteEmail?: string
   /** Horloge injectable (tests). */
   maintenant?: () => Date
 }
@@ -1258,6 +1267,8 @@ export async function creerServeur(o: OptionsServeur) {
   // En mémoire seulement : haché directement en scrypt à chaque démarrage.
   const adminPin = await hacherPin(o.adminPin)
   const notifications = creerNotifications(o.notifications)
+  // Item E : alerte e-mail sur rafale de 5xx (inactive sans ALERTE_EMAIL), alimentée à la fin de chaque réponse.
+  const alertes5xx = creerAlertes5xx({ destinataire: o.alerteEmail, notifications, maintenant })
   const integrations = () => ({
     googleWallet: walletConfigure(o.googleWallet),
     appleWallet: 'en_suspens',
@@ -2564,6 +2575,8 @@ export async function creerServeur(o: OptionsServeur) {
     xml?: string
     redirection?: string
     image?: { type: string; octets: Buffer; etag: string; cache: string }
+    /** Pièce jointe binaire déjà compressée (sauvegarde `.json.gz`) : envoyée telle quelle, jamais recompressée. */
+    fichier?: { nom: string; type: string; octets: Buffer }
   }
 
   async function router(req: IncomingMessage, chemin: string[]): Promise<Reponse> {
@@ -2824,6 +2837,30 @@ export async function creerServeur(o: OptionsServeur) {
         return { json: { ok: true, commerce: c.nom } }
       }
       throw err(404, 'Lien de désinscription invalide.')
+    }
+
+    if (ressource === 'admin' && id === 'sauvegarde' && !sous) {
+      // ADMIN SEULEMENT — sauvegarde complète téléchargeable (écran Admin) : même export, même format et même
+      // chiffrement que le CLI `scripts/sauvegarde-base.mjs` (docs/SAUVEGARDE.md), restaurable par
+      // `scripts/restaurer-base.mjs`. Table métier absente ou illisible → erreur, AUCUNE archive partielle.
+      if (m !== 'GET') throw err(405, 'Méthode non autorisée.')
+      await exigerAdmin(req)
+      let sauvegarde: Awaited<ReturnType<typeof exporterSauvegarde>>
+      try {
+        sauvegarde = await exporterSauvegarde((table) => st.lireTableSauvegarde(table), maintenant)
+      } catch (e) {
+        const cause = e instanceof Error ? e.message : String(e)
+        console.error(`[sauvegarde] ERREUR SAUVEGARDE — ${cause}`)
+        // 500 et non 503 : le front affiche le message d'une 500, alors qu'il traduit une 502-504 en « hors ligne ».
+        throw err(500, `ERREUR SAUVEGARDE — ${cause}`)
+      }
+      const json = JSON.stringify(sauvegarde)
+      const cle = o.cleChiffrementSauvegarde
+      if (!cle) console.warn('[sauvegarde] AVERTISSEMENT — sauvegarde non chiffrée téléchargée par l’admin (SAUVEGARDE_CLE_CHIFFREMENT absente) : fichier sensible, à protéger.')
+      const contenu = cle ? chiffrerSauvegarde(json, cle) : json
+      const total = Object.values(sauvegarde.compteurs).reduce((a, b) => a + b, 0)
+      console.log(`[sauvegarde] téléchargée par l’admin — ${total} lignes${cle ? ' — chiffrée AES-256-GCM' : ''}`)
+      return { fichier: { nom: nomFichierSauvegarde(sauvegarde.creeLe), type: 'application/gzip', octets: gzipSync(Buffer.from(contenu, 'utf8')) } }
     }
 
     if (ressource !== 'commerces') throw err(404, 'Route inconnue.')
@@ -4011,6 +4048,7 @@ export async function creerServeur(o: OptionsServeur) {
           pathname = '/'
         }
         journaliserRequete({ methode: req.method ?? '?', pathname, statut: res.statusCode, dureeMs: Date.now() - debutRequete, ip: ipRequete, commercesConnus: idsCommercesConnus })
+        alertes5xx.enregistrer(res.statusCode, () => routeMasquee(pathname, idsCommercesConnus))
       } catch {
         // La journalisation ne doit jamais faire échouer une requête.
       }
@@ -4162,6 +4200,17 @@ export async function creerServeur(o: OptionsServeur) {
           'text/csv; charset=utf-8',
           Buffer.from(r.csv.contenu),
         )
+        return
+      }
+      if (r.fichier) {
+        res.writeHead(200, {
+          ...entetes,
+          'Content-Type': r.fichier.type,
+          'Content-Length': String(r.fichier.octets.length),
+          'Content-Disposition': `attachment; filename="${r.fichier.nom.replace(/[^\w.-]/g, '_')}"`,
+          'Cache-Control': 'no-store',
+        })
+        res.end(r.fichier.octets)
         return
       }
       if (r.image) {

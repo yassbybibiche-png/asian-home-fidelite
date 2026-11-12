@@ -7,6 +7,10 @@ import type { ClientAPurger } from '../lib/rgpd'
 import type { LotHistorique } from '../lib/carte'
 
 export const MESSAGE_HORS_LIGNE = 'Serveur injoignable — vérifiez la connexion.'
+/** Le délai de la requête (`delaiMs`) a expiré : le serveur répond, mais trop lentement (pas une panne réseau). */
+export const MESSAGE_DELAI_REQUETE = 'Délai dépassé : le serveur met trop longtemps à répondre. Réessayez.'
+/** Délai d'un téléchargement binaire (sauvegarde : lecture paginée de toutes les tables + réception du fichier). */
+export const DELAI_TELECHARGEMENT_MS = 120_000
 
 export class ErreurApi extends Error {
   /** Code HTTP ; 0 = serveur injoignable (réseau coupé, serveur arrêté, délai dépassé). */
@@ -197,6 +201,12 @@ export function baseApi(valeur: string | undefined): string | null {
   return sansSlash.endsWith('/api/v1') ? sansSlash : `${sansSlash}/api/v1`
 }
 
+/** Nom de fichier d'un `Content-Disposition: attachment; filename="…"` ; à défaut (en-tête non exposé en CORS), nom daté. */
+export function nomPieceJointe(disposition: string | null, maintenant = new Date()): string {
+  const nom = /filename="([\w.-]+)"/.exec(disposition ?? '')?.[1]
+  return nom ?? `asian-home-${maintenant.toISOString().slice(0, 19).replace(/:/g, '')}.json.gz`
+}
+
 function entetesAcces(acces: AccesCaisse | null | undefined): Record<string, string> {
   if (!acces) return {}
   if ('code' in acces) return { 'X-Equipe-Code': acces.code }
@@ -245,7 +255,7 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
   async function requete(
     methode: string,
     chemin: string,
-    options: { acces?: AccesCaisse | null; corps?: unknown; fichier?: Blob; texte?: boolean; delaiMs?: number; jetonClient?: string | null } = {},
+    options: { acces?: AccesCaisse | null; corps?: unknown; fichier?: Blob; texte?: boolean; binaire?: boolean; delaiMs?: number; jetonClient?: string | null } = {},
   ) {
     const entetes: Record<string, string> = { ...entetesAcces(options.acces) }
     // Jeton client de la carte (P0-S7) : prouve que ce téléphone est celui du titulaire.
@@ -253,6 +263,11 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     if (options.corps !== undefined) entetes['Content-Type'] = 'application/json'
     // Fichier brut (logo) : envoyé tel quel ; le serveur lit le format dans les octets, pas dans cet en-tête.
     if (options.fichier) entetes['Content-Type'] = options.fichier.type || 'application/octet-stream'
+    // Pièce jointe binaire (sauvegarde) : délai propre, le serveur lit toutes les tables avant de répondre.
+    const signal = signalDelai(options.delaiMs ?? (options.binaire ? DELAI_TELECHARGEMENT_MS : delaiMs))
+    // Statut 0 dans les deux cas (réessais de réveil inchangés) ; seul le message distingue notre délai expiré
+    // (signal annulé, pendant l'envoi ou la lecture du corps) d'une panne réseau.
+    const injoignable = () => new ErreurApi(0, signal?.aborted ? MESSAGE_DELAI_REQUETE : MESSAGE_HORS_LIGNE)
     let r: Response
     try {
       r = await f(base + chemin, {
@@ -260,10 +275,10 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
         headers: entetes,
         body: options.fichier ?? (options.corps === undefined ? undefined : JSON.stringify(options.corps)),
         cache: 'no-store',
-        signal: signalDelai(options.delaiMs ?? delaiMs),
+        signal,
       })
     } catch {
-      throw new ErreurApi(0, MESSAGE_HORS_LIGNE)
+      throw injoignable()
     }
     if (!r.ok) {
       let message = `Erreur du serveur (${r.status}).`
@@ -277,10 +292,12 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
       throw new ErreurApi(r.status >= 502 && r.status <= 504 ? 0 : r.status, r.status >= 502 && r.status <= 504 ? MESSAGE_HORS_LIGNE : message)
     }
     try {
+      // Pièce jointe binaire (sauvegarde) : octets intacts + nom du fichier donné par le serveur (Content-Disposition).
+      if (options.binaire) return { nom: nomPieceJointe(r.headers.get('content-disposition')), contenu: await r.blob() }
       // `r.text()` retirerait le BOM UTF-8 du CSV, indispensable pour qu'Excel lise les accents.
       return options.texte ? new TextDecoder('utf-8', { ignoreBOM: true }).decode(await r.arrayBuffer()) : await r.json()
     } catch {
-      throw new ErreurApi(0, MESSAGE_HORS_LIGNE)
+      throw injoignable()
     }
   }
 
@@ -406,6 +423,8 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     mesures: (commerceId: string, acces: Acces) =>
       requete('GET', `/commerces/${enc(commerceId)}/mesures`, { acces }) as Promise<{ compteurs: CompteurEvenement[]; migration: boolean; depuis: string; aujourdhui: string }>,
     exportCsv: (commerceId: string, acces: Acces) => requete('GET', `/commerces/${enc(commerceId)}/export.csv`, { acces, texte: true }) as Promise<string>,
+    /** Admin seulement : sauvegarde complète de la base (`.json.gz`, chiffrée si le serveur a la clé), à restaurer avec scripts/restaurer-base.mjs. */
+    sauvegarde: (acces: Acces) => requete('GET', '/admin/sauvegarde', { acces, binaire: true }) as Promise<{ nom: string; contenu: Blob }>,
     majClient: async (commerceId: string, acces: Acces, clientId: string, champs: { anniversaire?: string; platPrefere?: string; consentementRelance?: boolean; exclusPurge?: boolean }) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}`, { acces, corps: champs })) as { client: Client }).client,
     // ---- RGPD (P1-B6) ----
