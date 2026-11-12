@@ -85,8 +85,9 @@ export interface PlageOuverture {
 
 /**
  * Instant gagnant (D1), persisté par le serveur dans `meta` (`instants:<commerce>:<jour>`), jamais dans une réponse
- * avant son heure. `consommePar` : tirage qui l'a déclenché ; `gagne` : ce tirage a reçu le lot (faux = lot bloqué
- * par son plafond ou la limite mensuelle du client, tirage normal à la place).
+ * avant son heure. `consommePar` : tirage qui l'a déclenché ; `gagne` : ce tirage a reçu le lot (faux = lot
+ * indisponible pour tout le monde, p. ex. au plafond du jour : tirage normal à la place). Un client seulement à sa
+ * limite mensuelle ne consomme pas l'instant (revue Codex D1, F2).
  */
 export interface InstantGagnant {
   id: string

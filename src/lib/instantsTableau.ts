@@ -20,7 +20,7 @@ export const aDesInstants = (lots: Pick<Lot, 'type' | 'instantsParJour'>[]) => l
 export function texteInstant(i: InstantPasse): string {
   const heure = new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' }).format(new Date(i.heure))
   if (i.statut === 'gagne') return `Instant ${heure} — gagné (${i.lot})${i.gagnant ? ` par ${i.gagnant}` : ''}`
-  if (i.statut === 'bloque') return `Instant ${heure} — déclenché, mais « ${i.lot} » était au plafond du jour (ou le client à sa limite de gains) : tirage normal`
+  if (i.statut === 'bloque') return `Instant ${heure} — déclenché, mais « ${i.lot} » était indisponible (plafond du jour atteint) : tirage normal`
   if (i.statut === 'enCours') return `Instant ${heure} — en cours (${i.lot}), encore gagnable quelques minutes`
   return `Instant ${heure} — passé sans gagnant (${i.lot})`
 }

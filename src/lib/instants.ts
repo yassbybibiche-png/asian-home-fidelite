@@ -55,6 +55,30 @@ export function unionPlages(plages: PlageOuverture[]): [number, number][] {
   return r
 }
 
+const FORMAT_MURAL_PARIS = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Europe/Paris', hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
+})
+
+/**
+ * Revue Codex D1 (F3) — plages ramenées aux minutes murales qui EXISTENT ce jour-là à Paris : une minute existe si
+ * l'instant `instantParis` qui lui correspond, relu en heure de Paris, redonne ce jour et cette minute (aller-retour).
+ * Le jour du passage à l'heure d'été, 02:00–02:59 n'existe pas : ces minutes sortent des plages (une plage entièrement
+ * dedans n'a plus aucun instant ce jour-là). L'heure doublée du passage à l'heure d'hiver, elle, existe (1re occurrence).
+ */
+export function plagesExistantes(union: [number, number][], a: number, m: number, j: number): [number, number][] {
+  const r: [number, number][] = []
+  for (const [d, f] of union) {
+    for (let minute = d; minute < f; minute++) {
+      const p = Object.fromEntries(FORMAT_MURAL_PARIS.formatToParts(instantParis(a, m, j, Math.floor(minute / 60), minute % 60)).map((x) => [x.type, Number(x.value)]))
+      if (p.year !== a || p.month !== m || p.day !== j || p.hour * 60 + p.minute !== minute) continue
+      const dernier = r[r.length - 1]
+      if (dernier && dernier[1] === minute) dernier[1] = minute + 1
+      else r.push([minute, minute + 1])
+    }
+  }
+  return r
+}
+
 /** Lots physiques qui ont des instants gagnants (type 'lot', `instantsParJour` > 0). */
 export function lotsAInstants<T extends Pick<Lot, 'type' | 'instantsParJour'>>(lots: T[]): T[] {
   return lots.filter((l) => l.type === 'lot' && (l.instantsParJour ?? 0) > 0)
@@ -63,7 +87,8 @@ export function lotsAInstants<T extends Pick<Lot, 'type' | 'instantsParJour'>>(l
 /**
  * Instants du jour `jour` (AAAA-MM-JJ, à Paris) : pour chaque lot à instants, exactement `instantsParJour` instants
  * uniformes (à la seconde) dans l'union des plages, triés par heure. `hasard(n)` : entier uniforme dans [0, n[ —
- * `crypto.randomInt` côté serveur. Aucune plage → aucun instant.
+ * `crypto.randomInt` côté serveur. Aucune plage → aucun instant. Seules les minutes murales qui existent ce jour-là
+ * sont tirables (`plagesExistantes`) : un changement d'heure ne pousse jamais un instant hors des plages.
  */
 export function genererInstants(
   lots: { id: string; libelle: string; type?: Lot['type']; instantsParJour?: number }[],
@@ -71,9 +96,9 @@ export function genererInstants(
   jour: string,
   hasard: (n: number) => number,
 ): InstantsDuJour {
-  const union = unionPlages(plages)
-  const secondes = union.reduce((s, [d, f]) => s + (f - d) * 60, 0)
   const [a, m, j] = jour.split('-').map(Number)
+  const union = plagesExistantes(unionPlages(plages), a, m, j)
+  const secondes = union.reduce((s, [d, f]) => s + (f - d) * 60, 0)
   const instants: Omit<InstantGagnant, 'id'>[] = []
   if (secondes > 0) {
     for (const l of lotsAInstants(lots)) {

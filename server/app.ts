@@ -136,6 +136,8 @@ const BLOCAGE_INITIAL_MS = 10 * 60_000
 const BLOCAGE_MAX_MS = 24 * 3600_000
 /** Lignes de `tentatives_auth` sans activité depuis ce délai (ni échec, ni blocage en cours) : supprimées au passage. */
 const CONSERVATION_TENTATIVES_MS = 7 * 24 * 3600_000
+/** Instant gagnant à rendre après un tirage échoué (D1, revue Codex F1) : relectures + écritures conditionnelles, au plus. */
+export const ESSAIS_RESTITUTION = 4
 
 export interface OptionsServeur {
   /** Fichier SQLite (créé au besoin) : stockage utilisé quand Supabase n'est pas configuré. */
@@ -4197,8 +4199,9 @@ export async function creerServeur(o: OptionsServeur) {
         // s'attendent pas entre eux. La lecture du statut (1 tirage par jour) reste avant le verrou : pour un même
         // client, c'est l'index unique (client + jour) de la base qui tranche entre deux appels simultanés, ci-dessous.
         return fileTirages(id, async () => {
+          const plafonnes = await plafonnesDuJour(commerce, t)
           const tirables = lotsTirables(normalises, {
-            plafonnes: await plafonnesDuJour(commerce, t),
+            plafonnes,
             gainsMois: gainsSur30Jours(tiragesClient, t),
             limite: limiteGainsMois(commerce),
           })
@@ -4209,31 +4212,60 @@ export async function creerServeur(o: OptionsServeur) {
           const tirageId = `ti-${randomUUID()}`
           // D1 — instant gagnant en cours (non consommé, depuis moins de 5 min) : il attribue SON lot, avant le tirage
           // pondéré, si ce lot est encore tirable pour ce client (ni plafonné aujourd'hui, ni client à sa limite mensuelle,
-          // chance > 0). Bloqué : l'instant est quand même consommé (`gagne: false`) et le client a le tirage normal — le
-          // plafond protège le commerce. Consommation AVANT l'insertion, par écriture conditionnelle sur la valeur lue :
-          // un seul tirage peut la gagner, même hors du verrou par commerce ; rendue si le tirage échoue ensuite.
-          // Aucune lecture de plus pour un commerce sans lot à instants (désactiver les instants les arrête aussitôt).
-          let instant: { cle: string; avant: string; apres: string } | undefined
+          // chance > 0). Revue Codex D1 (F2) — lot indisponible pour TOUT LE MONDE (plafond du jour, chance 0, lot
+          // retiré) : l'instant est consommé sans gain (`gagne: false`), le plafond protège le commerce. Client SEUL
+          // bloqué (sa limite mensuelle) : l'instant n'est pas touché — le prochain client éligible dans la fenêtre peut
+          // encore le gagner ; ce client-ci a son tirage normal, sans aucun signe de l'instant. Consommation AVANT
+          // l'insertion, par écriture conditionnelle sur la valeur lue : un seul tirage peut la gagner, même hors du
+          // verrou par commerce ; rendue si le tirage échoue ensuite. Aucune lecture de plus pour un commerce sans lot à
+          // instants (désactiver les instants les arrête aussitôt).
+          let instant: { cle: string; id: string } | undefined
           let tire: (typeof jouables)[number] | undefined
           const jourInstants = lotsAInstants(normalises).length ? await instantsDuJour(commerce, t) : null
           const enCours = jourInstants && instantEnCours(jourInstants.doc, t)
           if (jourInstants && enCours) {
             const gagnable = jouables.find((l) => l.id === enCours.lotId)
-            const doc = { ...jourInstants.doc, instants: jourInstants.doc.instants.map((x) => (x.id === enCours.id ? { ...x, consommePar: tirageId, gagne: !!gagnable } : x)) }
-            const apres = JSON.stringify(doc)
-            if (await st.majMetaSi(jourInstants.cle, jourInstants.brut, apres)) {
-              instant = { cle: jourInstants.cle, avant: jourInstants.brut, apres }
-              tire = gagnable
+            const pourTous = lotsJouables(lotsTirables(normalises, { plafonnes, gainsMois: 0, limite: 0 })).some((l) => l.id === enCours.lotId)
+            if (gagnable || !pourTous) {
+              const doc = { ...jourInstants.doc, instants: jourInstants.doc.instants.map((x) => (x.id === enCours.id ? { ...x, consommePar: tirageId, gagne: !!gagnable } : x)) }
+              if (await st.majMetaSi(jourInstants.cle, jourInstants.brut, JSON.stringify(doc))) {
+                instant = { cle: jourInstants.cle, id: enCours.id }
+                tire = gagnable
+              }
             }
           }
-          /** Tirage refusé ou annulé après la consommation : l'instant redevient gagnable (s'il n'a pas bougé depuis). */
+          /**
+           * Tirage refusé ou annulé après la consommation : l'instant redevient gagnable. Revue Codex D1 (F1) — le
+           * document du jour porte TOUS les instants : un autre instant consommé entre-temps (autre instance du serveur)
+           * fait échouer la comparaison. On relit donc le document frais et on n'y libère que CET instant, s'il est
+           * toujours à ce tirage ; `ESSAIS_RESTITUTION` essais, puis incohérence journalisée (ligne JSON, comme
+           * `annulerTirageNonCredite`) : l'instant resterait consommé sans tirage.
+           */
           const rendreInstant = async () => {
             if (!instant) return
-            try {
-              await st.majMetaSi(instant.cle, instant.apres, instant.avant)
-            } catch (e) {
-              console.warn(`[instant] instant ${instant.cle} non rendu après l’échec du tirage : ${e instanceof Error ? e.message : String(e)}`)
+            let cause = 'document modifié à chaque essai'
+            for (let essai = 1; essai <= ESSAIS_RESTITUTION; essai++) {
+              try {
+                const brut = await st.meta(instant.cle)
+                if (brut === undefined) return
+                const doc = JSON.parse(brut) as InstantsDuJour
+                if (!doc.instants.some((x) => x.id === instant!.id && x.consommePar === tirageId)) return
+                const libre = doc.instants.map((x) => {
+                  if (x.id !== instant!.id) return x
+                  const rendu = { ...x }
+                  delete rendu.consommePar
+                  delete rendu.gagne
+                  return rendu
+                })
+                if (await st.majMetaSi(instant.cle, brut, JSON.stringify({ ...doc, instants: libre }))) return
+              } catch (e) {
+                cause = e instanceof Error ? e.message : String(e)
+              }
             }
+            console.error(JSON.stringify({
+              type: 'incoherence', niveau: 'erreur', horodatage: new Date().toISOString(), evenement: 'instant-non-rendu',
+              commerce: id, tirage: tirageId, instant: instant.id, cle: instant.cle, essais: ESSAIS_RESTITUTION, cause,
+            }))
           }
           tire ??= jouables[tirerLot(jouables, alea())]
           const points = tire.type === 'points' ? tire.points : undefined

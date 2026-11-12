@@ -19,6 +19,7 @@ import {
   instantEnCours,
   instantsPasses,
   PLAGES_OUVERTURE_DEFAUT,
+  plagesExistantes,
   plagesOuverture,
   problemePlages,
   statutInstant,
@@ -139,6 +140,65 @@ describe('D1 : logique pure (src/lib/instants.ts)', () => {
     assert.match(lire('src/store.tsx'), /\n\s+plagesOuverture: c\.plagesOuverture,\n/)
     assert.match(lire('src/pages/TableauDeBord.tsx'), /<InstantsGagnants \/>/)
     assert.match(lire('src/components/InstantsGagnants.tsx'), /\/instants-gagnants`/)
+  })
+})
+
+describe('Revue Codex D1 (F3) : aucun instant dans une heure murale inexistante (changements d’heure)', () => {
+  /** Date et heure murales à Paris d'un ISO : « AAAA-MM-JJ HH:MM:SS ». */
+  const muralParis = (iso: string) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Paris', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(iso))
+  const lot = (n: number) => ({ id: 'lot-the', type: 'lot' as const, libelle: 'Thé glacé', instantsParJour: n })
+  /** Tous les instants (nombreux, hasard varié + bornes) du `jour`, relus à Paris : ce jour-là et dans une plage. */
+  function verifier(jour: string, plages: { debut: string; fin: string }[]) {
+    const dans = (h: string) => plages.some((p) => h >= `${p.debut}:00` && h < `${p.fin}:00`)
+    const tirages = [
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map((g) => genererInstants([lot(20), { ...lot(20), id: 'b' }], plages, jour, hasardFixe(g))),
+      genererInstants([lot(1)], plages, jour, () => 0),
+      genererInstants([lot(1)], plages, jour, (n) => n - 1),
+    ]
+    for (const d of tirages) {
+      for (const i of d.instants) {
+        const [j, h] = muralParis(i.heure).split(' ')
+        assert.equal(j, jour, i.heure)
+        assert.ok(dans(h), `${i.heure} → ${h} hors des plages ${JSON.stringify(plages)}`)
+      }
+    }
+    return tirages
+  }
+
+  test('passage à l’heure d’été (29/03/2026) : 02:00–02:59 n’existe pas → aucun instant dedans, tous dans les plages', () => {
+    const plages = [{ debut: '01:30', fin: '03:30' }, { debut: '11:30', fin: '14:30' }]
+    const tirages = verifier('2026-03-29', plages)
+    assert.ok(tirages.slice(0, 8).every((d) => d.instants.length === 40), 'le nombre d’instants est conservé')
+    assert.ok(tirages.flatMap((d) => d.instants).some((i) => muralParis(i.heure).slice(11) < '03:30' && muralParis(i.heure).slice(11) >= '03:00'))
+    assert.ok(!tirages.flatMap((d) => d.instants).some((i) => muralParis(i.heure).slice(11, 13) === '02'))
+    // Bornes : dernière seconde de 01:59, puis la 1re seconde tirable suivante est 03:00:00 (pas 03:00 + l'heure sautée).
+    assert.equal(muralParis(genererInstants([lot(1)], plages, '2026-03-29', () => 30 * 60 - 1).instants[0].heure).slice(11), '01:59:59')
+    assert.equal(muralParis(genererInstants([lot(1)], plages, '2026-03-29', () => 30 * 60).instants[0].heure).slice(11), '03:00:00')
+    // Plage entièrement dans l'heure sautée : aucun instant ce jour-là (rien de déplacé hors plage).
+    assert.deepEqual(genererInstants([lot(5)], [{ debut: '02:15', fin: '02:45' }], '2026-03-29', hasardFixe()).instants, [])
+    assert.deepEqual(plagesExistantes([[0, 1439]], 2026, 3, 29), [[0, 120], [180, 1439]])
+  })
+
+  test('passage à l’heure d’hiver (25/10/2026, 02:00–02:59 doublée) : tous les instants relus à Paris sont dans les plages', () => {
+    const plages = [{ debut: '01:30', fin: '03:30' }, { debut: '02:15', fin: '02:45' }]
+    const tirages = verifier('2026-10-25', plages)
+    assert.ok(tirages.slice(0, 8).every((d) => d.instants.length === 40))
+    assert.ok(tirages.flatMap((d) => d.instants).some((i) => muralParis(i.heure).slice(11, 13) === '02'), 'l’heure doublée existe : elle reste tirable')
+    assert.deepEqual(plagesExistantes([[0, 1439]], 2026, 10, 25), [[0, 1439]])
+  })
+
+  test('jours ordinaires : plages inchangées, génération identique à la règle d’avant (minute de plage + seconde)', () => {
+    for (const [a, m, j] of [[2026, 3, 28], [2026, 3, 30], [2026, 7, 14], [2026, 10, 24], [2026, 10, 26], [2026, 11, 10]]) {
+      assert.deepEqual(plagesExistantes([[0, 1439]], a, m, j), [[0, 1439]], `${a}-${m}-${j}`)
+    }
+    const d = genererInstants([lot(20)], [...PLAGES_OUVERTURE_DEFAUT], JOUR, hasardFixe(42))
+    const h = hasardFixe(42)
+    const attendu = Array.from({ length: 20 }, () => {
+      const s = h(8 * 3600) // 11:30–14:30 + 18:30–23:30
+      const minute = (s < 3 * 3600 ? 690 : 1110 - 180) + Math.floor(s / 60)
+      return new Date(instantParis(2026, 11, 10, Math.floor(minute / 60), minute % 60).getTime() + (s % 60) * 1000).toISOString()
+    }).sort()
+    assert.deepEqual(d.instants.map((i) => i.heure), attendu)
   })
 })
 
@@ -315,7 +375,8 @@ describe('D1 : serveur (SQLite) — génération paresseuse, fenêtre, consommat
     assert.equal(i.consommePar, r.contenu.tirageId, 'consommé par ce tirage')
     assert.equal(i.gagne, false)
     assert.deepEqual((await instantsTableau()).map((x) => x.statut), ['bloque'])
-    // Limite mensuelle du client atteinte : même règle (plafond retiré, limite 1, client qui a déjà gagné un lot hier).
+    // Limite mensuelle du client atteinte (plafond retiré, limite 1, client qui a déjà gagné un lot hier) : revue Codex D1
+    // (F2), l'instant n'est PLUS consommé — il reste gagnable pour le prochain client éligible.
     await patch({
       limiteGainsMois: 1,
       lots: [
@@ -342,7 +403,7 @@ describe('D1 : serveur (SQLite) — génération paresseuse, fenêtre, consommat
     const limite = await tirer(contact)
     assert.equal(limite.statut, 201, JSON.stringify(limite.contenu))
     assert.equal(limite.contenu.lot, '+5 points', 'limite atteinte : consolation, pas le lot de l’instant')
-    assert.equal(lireInstants()!.instants[0].gagne, false)
+    assert.equal(lireInstants()!.instants[0].consommePar, undefined, 'client seul bloqué : instant intact (F2)')
   })
 
   test('aucune fuite : vue publique, carte client, règlement, état commerçant sans instant futur ; révélé seulement une fois passé', async () => {
@@ -381,5 +442,89 @@ describe('D1 : serveur (SQLite) — génération paresseuse, fenêtre, consommat
   test('route des instants : gérant seulement', async () => {
     assert.equal((await api('GET', `/commerces/${AH}/instants-gagnants`)).statut, 401)
     assert.equal((await api('GET', `/commerces/${AH}/instants-gagnants`, undefined, { 'X-Commerce-PIN': '0000' })).statut, 401)
+  })
+
+  /**
+   * Client à sa limite mensuelle (limite 1) : un 1er tirage le matin (hors instant) pour l'inscrire, remplacé par un lot
+   * physique gagné hier — il peut rejouer aujourd'hui, sans lot physique possible.
+   */
+  async function clientLimite() {
+    const contact = nouveauContact()
+    const avant = horloge
+    horloge = paris(9)
+    const premier = await tirer(contact)
+    horloge = avant
+    assert.equal(premier.statut, 201, JSON.stringify(premier.contenu))
+    const clientId = ((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.tirages as { id: string; clientId: string }[]).find((t) => t.id === premier.contenu.tirageId)!.clientId
+    const hier = new Date(paris(9).getTime() - 86_400_000).toISOString()
+    const id = `ti-hier-${contact}`
+    sql((db) => db.prepare('DELETE FROM tirages WHERE id = ?').run(premier.contenu.tirageId))
+    sql((db) =>
+      db.prepare('INSERT INTO tirages (id, commerce_id, client_id, date, donnees) VALUES (?, ?, ?, ?, ?)').run(
+        id, AH, clientId, hier, JSON.stringify({ id, commerceId: AH, clientId, lot: 'Thé glacé', lotId: 'lot-the', typeLot: 'lot', date: hier, code: 'ABCDEF' }),
+      ),
+    )
+    return contact
+  }
+  const LOTS_F2 = [
+    { id: 'lot-the', type: 'lot', libelle: 'Thé glacé', probabilite: 10, instantsParJour: 2 },
+    { id: 'lot-p', type: 'points', points: 5, libelle: '+5 points', probabilite: 90 },
+  ]
+  /** Réponse d'un tirage : mêmes clés qu'un tirage ordinaire, aucune trace d'instant. */
+  const sansTraceInstant = (contenu: Record<string, unknown>) => {
+    assert.deepEqual(Object.keys(contenu).sort(), ['date', 'lot', 'lotId', 'perdant', 'points', 'solde', 'tirageId', 'type'])
+    assert.ok(!/instant|ig-test/i.test(JSON.stringify(contenu)), JSON.stringify(contenu))
+  }
+
+  test('Revue Codex D1 (F2) : client seul à sa limite → instant intact, puis gagné par le client éligible suivant dans la fenêtre', async () => {
+    await patch({ limiteGainsMois: 1, lots: LOTS_F2 })
+    const bloque = await clientLimite()
+    poserInstants([paris(12)])
+    horloge = paris(12, 1)
+    const r = await tirer(bloque)
+    assert.equal(r.statut, 201, JSON.stringify(r.contenu))
+    assert.equal(r.contenu.lot, '+5 points', 'consolation normale')
+    sansTraceInstant(r.contenu)
+    assert.equal(lireInstants()!.instants[0].consommePar, undefined, 'instant NON consommé')
+    assert.deepEqual((await instantsTableau()).map((x) => x.statut), ['enCours'])
+    horloge = paris(12, 3)
+    const eligible = await tirer()
+    assert.equal(eligible.contenu.lot, 'Thé glacé', 'le client éligible suivant gagne le lot de l’instant')
+    assert.deepEqual([lireInstants()!.instants[0].consommePar, lireInstants()!.instants[0].gagne], [eligible.contenu.tirageId, true])
+  })
+
+  test('Revue Codex D1 (F2) : lot au plafond du jour → instant consommé sans gain (gagne: false), comme avant', async () => {
+    // Le Thé glacé est déjà sorti aujourd'hui : plafond 1 → indisponible pour tout le monde.
+    await patch({ limiteGainsMois: 1, lots: [{ ...LOTS_F2[0], plafondJour: 1 }, LOTS_F2[1]] })
+    poserInstants([paris(13)])
+    horloge = paris(13, 1)
+    const r = await tirer()
+    assert.equal(r.contenu.lot, '+5 points')
+    sansTraceInstant(r.contenu)
+    assert.deepEqual([lireInstants()!.instants[0].consommePar, lireInstants()!.instants[0].gagne], [r.contenu.tirageId, false])
+    // Même avec un client à sa limite qui tire : le plafond prime, l'instant est consommé par lui.
+    poserInstants([paris(13, 30)])
+    horloge = paris(13, 31)
+    const limite = await tirer(await clientLimite())
+    assert.deepEqual([lireInstants()!.instants[0].consommePar, lireInstants()!.instants[0].gagne], [limite.contenu.tirageId, false])
+  })
+
+  test('Revue Codex D1 (F2) : fenêtre expirée sans client éligible → instant perdu (« passé sans gagnant »), rien de visible côté client', async () => {
+    await patch({ limiteGainsMois: 1, lots: LOTS_F2 })
+    const bloque = await clientLimite()
+    poserInstants([paris(14)])
+    horloge = paris(14, 2)
+    const r = await tirer(bloque)
+    assert.equal(r.contenu.lot, '+5 points')
+    sansTraceInstant(r.contenu)
+    horloge = paris(14, 6)
+    const apres = await tirer()
+    assert.equal(apres.contenu.lot, '+5 points', 'fenêtre de 5 min passée : tirage normal')
+    assert.equal(lireInstants()!.instants[0].consommePar, undefined)
+    assert.deepEqual((await instantsTableau()).map((x) => x.statut), ['sansGagnant'])
+    const tirages = (await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.tirages as { id: string; clientId: string }[]
+    const carte = await brut(`/cartes/${tirages.find((t) => t.id === r.contenu.tirageId)!.clientId}`)
+    assert.match(carte, /"jeu":\{"statut":"dejaJoue"/, 'vraie carte du client bloqué : ' + carte.slice(0, 300))
+    assert.ok(!/instant|ig-test|14:00/.test(carte), 'la carte du client bloqué ne dit rien de l’instant')
   })
 })

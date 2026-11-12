@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 
-import { creerServeur, emettreJetonClient, hacherPinAncien, type OptionsServeur } from '../server/app.ts'
+import { creerServeur, emettreJetonClient, ESSAIS_RESTITUTION, hacherPinAncien, type OptionsServeur } from '../server/app.ts'
 import { ErreurConflit, ErreurMigrationManquante } from '../server/stockage.ts'
 import { configSupabaseDepuisEnv, ouvrirStockageSupabase } from '../server/stockage-supabase.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
@@ -1847,6 +1847,90 @@ describe('Revue Codex R2 : tirages de la roue sous Supabase (plafonds sous concu
       const consomme = relue()
       assert.deepEqual([consomme.consommePar, consomme.gagne], [r2.contenu.tirageId, true])
     } finally {
+      await app.fermer()
+    }
+  })
+
+  /** Deux instants du même document, passés d'une et d'une demi-minute (lot rare sans plafond) ; renvoie la ligne `meta`. */
+  async function deuxInstants(f: ReturnType<typeof fauxPostgrest>, api: Awaited<ReturnType<typeof demarrer>>['api']) {
+    const r = await api('PATCH', `/commerces/${AH}`, { lots: [{ ...LOTS[0], instantsParJour: 2, plafondJour: 0 }, LOTS[1]] }, PIN)
+    assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+    assert.equal((await api('GET', `/commerces/${AH}/instants-gagnants`, undefined, PIN)).statut, 200)
+    const ligne = f.tables.meta.find((l) => String(l.cle).startsWith(`instants:${AH}:`))!
+    const midi = new Date(2026, 10, 10, 12).getTime()
+    ligne.valeur = JSON.stringify({
+      jour: String(ligne.cle).slice(-10),
+      instants: [
+        { id: 'ig-i', heure: new Date(midi - 60_000).toISOString(), lotId: 'lot-rare', lot: 'Menu offert' },
+        { id: 'ig-j', heure: new Date(midi - 30_000).toISOString(), lotId: 'lot-rare', lot: 'Menu offert' },
+      ],
+    })
+    hasard = 0.99 // sans instant : consolation en points
+    return (id: string) => (JSON.parse(String(f.tables.meta.find((l) => l.cle === ligne.cle)!.valeur)).instants as { id: string; consommePar?: string; gagne?: boolean }[]).find((x) => x.id === id)!
+  }
+
+  test('Revue Codex D1 (F1) : A consomme I, B (autre instance) consomme J, l’insertion de A échoue → I rendu, J reste à B', async (t) => {
+    t.mock.method(console, 'error', () => {})
+    const f = fauxPostgrest()
+    // Deux instances du serveur sur la même base : le verrou par commerce (en mémoire) ne les sérialise pas.
+    const s1 = await demarrer(f)
+    const s2 = await demarrer(f)
+    try {
+      const instant = await deuxInstants(f, s1.api)
+      // L'insertion de A attend celle de B (barrière à 2), puis échoue (1re servie) ; B a consommé J entre-temps.
+      f.barriere('POST', 'tirages')
+      f.echouer('POST', 'tirages')
+      const pa = s1.api('POST', `/commerces/${AH}/tirages`, { contact: '0681111111' })
+      for (let k = 0; !f.requetes.some((q) => q.methode === 'POST' && q.table === 'tirages'); k++) {
+        assert.ok(k < 400, 'A n’est jamais arrivé à son insertion')
+        await new Promise((ok) => setTimeout(ok, 5))
+      }
+      assert.equal(instant('ig-i').consommePar?.startsWith('ti-'), true, 'A a consommé I avant son insertion')
+      const [ra, rb] = await Promise.all([pa, s2.api('POST', `/commerces/${AH}/tirages`, { contact: '0682222222' })])
+      assert.equal(ra.statut, 500, JSON.stringify(ra.contenu))
+      assert.equal(rb.statut, 201, JSON.stringify(rb.contenu))
+      assert.equal(rb.contenu.lotId, 'lot-rare', 'B a gagné par J')
+      assert.equal(instant('ig-i').consommePar, undefined, 'I redevient gagnable malgré le document modifié par B')
+      assert.deepEqual([instant('ig-j').consommePar, instant('ig-j').gagne], [rb.contenu.tirageId, true], 'J reste à B')
+      const rc = await s1.api('POST', `/commerces/${AH}/tirages`, { contact: '0683333333' })
+      assert.equal(rc.statut, 201, JSON.stringify(rc.contenu))
+      assert.equal(rc.contenu.lotId, 'lot-rare')
+      assert.deepEqual([instant('ig-i').consommePar, instant('ig-i').gagne], [rc.contenu.tirageId, true])
+    } finally {
+      await s1.app.fermer()
+      await s2.app.fermer()
+    }
+  })
+
+  test(`Revue Codex D1 (F1) : restitution impossible après ${ESSAIS_RESTITUTION} essais → incohérence journalisée (ligne JSON)`, async (t) => {
+    const erreurs = t.mock.method(console, 'error', () => {})
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const instant = await deuxInstants(f, api)
+      f.echouer('POST', 'tirages')
+      // Dès que la consommation est écrite, chaque écriture suivante du document échoue (un essai = une écriture).
+      let arme = false
+      f.ralentir({
+        ms: 0,
+        vise: (methode, table) => {
+          if (methode === 'PATCH' && table === 'meta' && !arme) {
+            arme = true
+            for (let k = 0; k < ESSAIS_RESTITUTION; k++) f.echouer('PATCH', 'meta')
+          }
+          return false
+        },
+      })
+      const r = await api('POST', `/commerces/${AH}/tirages`, { contact: '0684444444' })
+      assert.equal(r.statut, 500, JSON.stringify(r.contenu))
+      assert.equal(f.rejets.filter((x) => x === 'meta:echec-PATCH').length, ESSAIS_RESTITUTION)
+      assert.ok(instant('ig-i').consommePar, 'instant resté consommé sans tirage…')
+      const lignes = erreurs.mock.calls.map((c) => String(c.arguments[0])).filter((x) => x.includes('"instant-non-rendu"'))
+      assert.equal(lignes.length, 1, '…et dit explicitement')
+      const l = JSON.parse(lignes[0])
+      assert.deepEqual([l.type, l.niveau, l.commerce, l.instant, l.tirage], ['incoherence', 'erreur', AH, 'ig-i', instant('ig-i').consommePar])
+    } finally {
+      f.ralentir()
       await app.fermer()
     }
   })
