@@ -106,6 +106,8 @@ export const TITRE_PERDU = 'Pas de lot cette fois'
 export const TEXTE_PERDU_TAMPON = 'Votre visite du jour est bien enregistrée sur votre carte de fidélité : un tampon de plus vers votre récompense.'
 export const TEXTE_PERDU_PROCHAINE = 'Prochaine chance à votre prochaine visite validée au comptoir, dès demain.'
 export const TEXTE_GAIN_SANS_CODE = 'Montrez cet écran au comptoir pour profiter de votre lot.'
+/** Gain physique (R4) : utilisable de J+1 à J+30, code affiché 10 minutes depuis la carte (« Utiliser mon gain »). */
+export const TEXTE_GAIN_ACTIVATION = 'Le jour venu, ouvrez votre carte au comptoir et appuyez sur « Utiliser mon gain » : votre code s’affiche pendant 10 minutes.'
 /** Consolation en points (R1) : rien à retirer au comptoir ; la visite compte toujours. */
 export const TEXTE_CONSOLATION = 'Rien à retirer au comptoir : votre visite du jour compte sur votre carte de fidélité.'
 export const TEXTE_CODE_A_MONTRER = 'Montrez ce code au serveur :'

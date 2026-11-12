@@ -4,7 +4,7 @@
 import type { Lot, Tirage, TypeLot } from '../types'
 // Résolution du type au tirage (ancienne règle comprise) : définie dans roulette.ts, que ce module complète — dans ce
 // sens-là seulement (roulette.ts n'importe rien d'ici : un import roulette → lots découpait 3 petits chunks de plus).
-import { estTypeLot, typeDeduitDuLibelle } from './roulette.ts'
+import { estTypeLot, lotsJouables, typeDeduitDuLibelle } from './roulette.ts'
 export { estGainPhysique, estTypeLot, POINTS_LOT_MAX, POINTS_LOT_MIN, typeDeduitDuLibelle, typeTirage, TYPES_LOT } from './roulette.ts'
 
 /** Type résolu d'un lot : son type explicite, à défaut l'ancienne règle (configs enregistrées avant R1). */
@@ -98,4 +98,20 @@ export function rattachementsTirages<T extends Pick<Tirage, 'lot' | 'lotId' | 't
     if (candidats.length === 1) rattaches.push({ ...t, lotId: candidats[0].id, ...(t.typeLot ? {} : { typeLot: candidats[0].type, typeDeduit: true }) })
   }
   return rattaches
+}
+
+/** Lot affiché avant le tirage et dans le règlement (R4) : libellé + type — jamais la probabilité, le coût ni le plafond. */
+export interface LotAffiche {
+  libelle: string
+  type: Exclude<TypeLot, 'perdant'>
+}
+
+/**
+ * « À gagner aujourd'hui » (R4) : lots jouables, dans l'ordre de la roue, sans les secteurs perdants — un lot 'points'
+ * est une consolation. Vue publique : les lots plafonnés du jour en sont déjà retirés par le serveur.
+ */
+export function lotsAGagner(lots: { libelle: string; id?: string; type?: TypeLot; probabilite?: number }[]): LotAffiche[] {
+  return lotsJouables(normaliserLots(lots))
+    .filter((l): l is typeof l & { type: LotAffiche['type'] } => l.type !== 'perdant')
+    .map((l) => ({ libelle: l.libelle.trim(), type: l.type }))
 }

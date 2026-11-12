@@ -1,4 +1,5 @@
-// Version anglaise des pages clientes (P2-Q1) : #/jouer, #/carte, #/menu, #/desinscription, #/confidentialite.
+// Version anglaise des pages clientes (P2-Q1) : #/jouer, #/carte, #/menu, #/desinscription, #/confidentialite,
+// #/reglement (R4 : chrome traduit, texte légal en français comme la politique de confidentialité).
 // Le back-office et la caisse restent en français. #/desinscription et #/confidentialite n'ont pas de
 // commutateur : elles appliquent la langue mémorisée sur les autres pages clientes.
 // Logique pure (testée sans React) : le français est la clé, l'anglais la traduction ; une chaîne absente du
@@ -11,7 +12,7 @@ export const CLE_LANGUE = 'fideliz:langue'
 
 /** Pages où la langue mémorisée s'applique (pages publiques du client final ; le commutateur FR / EN
  *  n'est affiché que sur #/jouer, #/carte et #/menu). */
-export const PAGES_TRADUITES = ['jouer', 'carte', 'menu', 'desinscription', 'confidentialite'] as const
+export const PAGES_TRADUITES = ['jouer', 'carte', 'menu', 'desinscription', 'confidentialite', 'reglement'] as const
 
 export function estPageTraduite(page: string): boolean {
   return (PAGES_TRADUITES as readonly string[]).includes(page)
@@ -160,10 +161,35 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'Merci {prenom}, votre carte est à votre nom.': 'Thank you {prenom}, the card is now in your name.',
   // Résultat : gain / perdu.
   '{bravo}, vous avez gagné :': '{bravo}, you won:',
-  '{bravo}, lot de consolation :': '{bravo}, consolation prize:',
   'Rien à retirer au comptoir : votre visite du jour compte sur votre carte de fidélité.': 'Nothing to collect at the counter: today’s visit counts on your loyalty card.',
   'Bravo': 'Well done',
   'Pas de lot cette fois{prenom}… mais votre visite compte !': 'No prize this time{prenom}… but your visit counts!',
+  // Roue v2, R4 : avant le tirage (lots du jour, règles, règlement), résultat (dates du gain, solde de points).
+  'À gagner aujourd’hui': 'To win today',
+  'consolation': 'consolation prize',
+  '1 tirage par jour · gain utilisable dès demain, pendant 30 jours': '1 spin per day · prize usable from tomorrow, for 30 days',
+  'Le résultat est tiré au hasard.': 'The result is drawn at random.',
+  'Règlement du jeu': 'Game rules',
+  '1 tirage par jour. Tirage effectué par le serveur.': '1 spin per day. Draw made by the server.',
+  'Données stockées dans ce navigateur uniquement. 1 tirage par jour.': 'Data stored in this browser only. 1 spin per day.',
+  'Pas de lot cette fois{prenom}…': 'No prize this time{prenom}…',
+  '+{n} points ajoutés à votre carte. Elle compte {total} points.': '+{n} points added to your card. It now has {total} points.',
+  'Prochaine chance demain !': 'Next chance tomorrow!',
+  'À utiliser dès demain et jusqu’au {date} au comptoir.': 'To use at the counter from tomorrow until {date}.',
+  'Le jour venu, ouvrez votre carte au comptoir et appuyez sur « Utiliser mon gain » : votre code s’affiche pendant 10 minutes.':
+    'When the day comes, open your card at the counter and tap “Use my prize”: your code shows for 10 minutes.',
+  // Roue v2, R4 : gains sur la carte (en attente, à utiliser, code affiché 10 minutes).
+  'Votre gain de la roue': 'Your wheel prize',
+  '🎁 Votre gain : {lot}': '🎁 Your prize: {lot}',
+  'Utilisable du {du} au {au}.': 'Usable from {du} to {au}.',
+  'Le code s’affichera quand vous serez au comptoir.': 'The code will show when you are at the counter.',
+  'À retirer directement au comptoir aujourd’hui.': 'Collect it directly at the counter today.',
+  'Présentez ce code au comptoir :': 'Show this code at the counter:',
+  'Il expire dans {reste} — passé ce délai, réactivez-le ici.': 'It expires in {reste} — after that, reactivate it here.',
+  'Utilisable jusqu’au {au}.': 'Usable until {au}.',
+  'Code expiré : appuyez de nouveau au comptoir pour en afficher un nouveau.': 'Code expired: tap again at the counter to show a new one.',
+  'Utiliser mon gain': 'Use my prize',
+  'Appuyez au comptoir : le code ne s’affiche que 10 minutes.': 'Tap at the counter: the code only shows for 10 minutes.',
   'Votre visite du jour est bien enregistrée sur votre carte de fidélité : un tampon de plus vers votre récompense.':
     'Today’s visit is saved on your loyalty card: one more stamp towards your reward.',
   'Prochaine chance à votre prochaine visite validée au comptoir, dès demain.': 'Next chance at your next visit validated at the counter, from tomorrow.',

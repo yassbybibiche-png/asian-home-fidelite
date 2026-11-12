@@ -108,7 +108,7 @@ l'AUDIT §7, sur le staging (jamais la production) :
 5. Relever les erreurs console via le navigateur distant (Chrome DevTools USB) ou,
    à défaut, noter tout écran blanc / blocage visible.
 
-## Bundle (build frais, mode par défaut, 11/11/2026 — boucle t1)
+## Bundle (build frais, mode par défaut, 12/11/2026 — roue v2 R4)
 
 Définition unique : **JS initial non gzipé** = script d'entrée de `index.html` +
 ses imports statiques (méthode `fichiersInitiaux` de
@@ -121,12 +121,21 @@ référence P1-U1 est conservée verbatim juste après (titre et chiffres), comm
 archive historique — le test `tests/mesure-p1-u1.test.ts` y lit ses chiffres
 figés ; elle ne doit pas être modifiée.
 
-- JS initial non gzipé : 454357 o (443,7 Ko) — `index-D45UlNII.js` 355234 o +
-  `ui-QUCFVz_5.js` 98524 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
-- CSS non gzipé : 70766 o (69,1 Ko) — `index-BAxqKb1k.css`.
-- Total initial : 525123 o (512,8 Ko).
-- JS total (tous chunks) : 804719 o (785,9 Ko) ; 24 chunks ; plus gros chunk : 355234 o
+- JS initial non gzipé : 478582 o (467,4 Ko) — `index-Ds9Zh83s.js` 366800 o +
+  `ui-BFq4U8ue.js` 102940 o + `jsx-runtime-CkXRJ162.js` 8243 o +
+  `rolldown-runtime-WkwZ5CU-.js` 599 o.
+- CSS non gzipé : 71129 o (69,5 Ko) — `index-Da4efFS0.css`.
+- Total initial : 549711 o (536,8 Ko).
+- JS total (tous chunks) : 829128 o (809,7 Ko) ; 25 chunks ; plus gros chunk : 366800 o
   (limite test : 500 000 o — respectée).
+- Roue v2 (12/11/2026) : après R3 (mesuré au commit f1bf0fd, build frais) JS initial
+  470200 o, CSS 71129 o, total 541329 o, JS total 813761 o, 24 chunks, plus gros
+  360485 o — soit +15 843 o de JS initial pour R1–R3 (types de lots, moteur v2, cycle
+  du gain) depuis la mesure t10 ci-dessous. R4 (écrans client + règlement) : JS
+  initial 478582 o (+8 382 o, +1,8 % vs R3 — bloc « À gagner aujourd’hui », écran
+  résultat v2, gains et compte à rebours sur la carte, ~25 traductions), total
+  549711 o ; 25 chunks (+1 : page différée `Reglement-*.js`, 6958 o — le texte du
+  règlement reste hors du bundle initial). Seuil P2-Q2 (< 80 % de 601720 o) : respecté.
 - Différé (boucle t1) : `QrCode-D610mFEe.js` 21182 o (`qrcode-generator` + composant),
   chargé à la demande par la carte de fidélité ; `jsx-runtime-CkXRJ162.js` est un
   nouveau fichier partagé sorti par le découpage (runtime JSX, auparavant dans `ui-*.js`).
@@ -215,8 +224,8 @@ ses imports statiques (méthode `fichiersInitiaux` de
 
 ## Couverture de tests
 
-Suite verte : **1407/1407** (`npm test`, typechecks inclus — 1090 après P2-Q2, +73 tests
-P2-Q3 à P2-Q6, +3 tests boucle t1, +4 tests boucle t2, +1 test SW boucle t2, +4 tests boucle t4, +1 test auto (nouvelle entrée VISUELS), +4 tests boucle t5, +3 tests boucle t6, +1 test auto (nouvelle entrée VISUELS), +10 tests boucle t10, +6 tests auto (nouvelles entrées VISUELS), +4 tests correction Codex point 5, +13 tests correction Codex point 11, +8 tests correction Codex point 6, +5 tests correction Codex point 9, +15 tests correction Codex point 10, +4 tests correction Codex point 2, +7 tests correction Codex point 4, +6 tests correction Codex point 7, +3 tests correction Codex point 8, +9 tests revue Codex finale, +2 tests correction Codex point 1, +2 tests correction Codex point 3, +8 tests revue Codex finale points 1-3, +5 tests item B catalogue par défaut, +4 tests auto item C (2 vignettes de galerie : fichiers WebP et entrées VISUELS), +13 tests item D sauvegarde téléchargeable par l'admin, +12 tests item E alerte e-mail sur rafale de 5xx, +6 tests revue Codex nov12 (1/2) délai propre de la sauvegarde, +7 tests revue Codex nov12 (2/2) reprise après échec d'une alerte 5xx, +21 tests roue v2 R1 lots structurés (id + type), +1 test revue Codex R1 (écriture sans type), +17 tests roue v2 R2 moteur de tirage (accès libre, plafonds, limite mensuelle, consolation points), +11 tests revue Codex R2 (tirages sérialisés par commerce, crédit de consolation exactement-une-fois, journée des plafonds à Paris, rattrapage des lotId), +12 tests roue v2 R3 cycle de vie du gain (J+1 à J+30, code burn-on-reveal 10 min), +12 tests revue Codex R3 (code seulement par l'activation, bornes en jours de Paris, anciens tirages sous l'ancienne règle, remise conditionnelle à l'heure de l'écriture ; 2 tests R3 remplacés) ; voir `JOURNAL.md`).
+Suite verte : **1427/1427** (`npm test`, typechecks inclus — 1090 après P2-Q2, +73 tests
+P2-Q3 à P2-Q6, +3 tests boucle t1, +4 tests boucle t2, +1 test SW boucle t2, +4 tests boucle t4, +1 test auto (nouvelle entrée VISUELS), +4 tests boucle t5, +3 tests boucle t6, +1 test auto (nouvelle entrée VISUELS), +10 tests boucle t10, +6 tests auto (nouvelles entrées VISUELS), +4 tests correction Codex point 5, +13 tests correction Codex point 11, +8 tests correction Codex point 6, +5 tests correction Codex point 9, +15 tests correction Codex point 10, +4 tests correction Codex point 2, +7 tests correction Codex point 4, +6 tests correction Codex point 7, +3 tests correction Codex point 8, +9 tests revue Codex finale, +2 tests correction Codex point 1, +2 tests correction Codex point 3, +8 tests revue Codex finale points 1-3, +5 tests item B catalogue par défaut, +4 tests auto item C (2 vignettes de galerie : fichiers WebP et entrées VISUELS), +13 tests item D sauvegarde téléchargeable par l'admin, +12 tests item E alerte e-mail sur rafale de 5xx, +6 tests revue Codex nov12 (1/2) délai propre de la sauvegarde, +7 tests revue Codex nov12 (2/2) reprise après échec d'une alerte 5xx, +21 tests roue v2 R1 lots structurés (id + type), +1 test revue Codex R1 (écriture sans type), +17 tests roue v2 R2 moteur de tirage (accès libre, plafonds, limite mensuelle, consolation points), +11 tests revue Codex R2 (tirages sérialisés par commerce, crédit de consolation exactement-une-fois, journée des plafonds à Paris, rattrapage des lotId), +12 tests roue v2 R3 cycle de vie du gain (J+1 à J+30, code burn-on-reveal 10 min), +12 tests revue Codex R3 (code seulement par l'activation, bornes en jours de Paris, anciens tirages sous l'ancienne règle, remise conditionnelle à l'heure de l'écriture ; 2 tests R3 remplacés), +20 tests roue v2 R4 écrans client (lots du jour, règlement généré, gains sur la carte et compte à rebours, écran résultat v2, route publique du règlement) ; voir `JOURNAL.md`).
 
 - Couverture globale : 97,90 % lignes / 91,49 % branches / 93,06 % fonctions
   (`node --test --experimental-test-coverage`, suite verte, 11/11/2026 —

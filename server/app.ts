@@ -44,6 +44,7 @@ import {
 } from '../src/lib/programme.ts'
 import { problemesApparence } from '../src/lib/apparence.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
+import { donneesReglement } from '../src/lib/reglement.ts'
 import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurLogo, LIMITES_LOGO, messageTropLourd, urlLogo, validerLogo, type FormatLogo } from '../src/lib/logo.ts'
 import { EVENEMENTS_PUBLICS, ajouterJours, basculerAccroche } from '../src/lib/mesure.ts'
@@ -3012,7 +3013,7 @@ export async function creerServeur(o: OptionsServeur) {
     if (ressource !== 'commerces') throw err(404, 'Route inconnue.')
 
     // Lectures publiques d'un commerce (liste, fiche, menu) : par IP, avant toute lecture en base.
-    if (m === 'GET' && (!sous || (sous === 'menu' && !sousId))) limiterIp(req, 'lecture', limites.lectureParIp)
+    if (m === 'GET' && (!sous || ((sous === 'menu' || sous === 'reglement') && !sousId))) limiterIp(req, 'lecture', limites.lectureParIp)
 
     if (!id) {
       if (m === 'GET') return { json: { commerces: await Promise.all((await st.commerces()).map(fichePublique)) } }
@@ -3057,6 +3058,14 @@ export async function creerServeur(o: OptionsServeur) {
       }
       if (m === 'GET') return { json: { commerce: await fichePublique(commerce) } }
       throw err(405, 'Méthode non autorisée.')
+    }
+
+    // ---------- Règlement du jeu (R4) ----------
+    // PUBLIC (page #/reglement/<id>) : mode d'accès, limite de gains par personne, lots actifs (libellé + type) —
+    // jamais les probabilités, les coûts ni les plafonds. Limité par IP comme la fiche (ci-dessus, avant la lecture).
+    if (sous === 'reglement' && !sousId) {
+      if (m !== 'GET') throw err(405, 'Méthode non autorisée.')
+      return { json: { reglement: donneesReglement(commerce) } }
     }
 
     // ---------- Logo téléversé (P1-B5) ----------

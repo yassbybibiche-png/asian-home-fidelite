@@ -13,7 +13,7 @@
 //   défauts et afficherait au client des paliers ou offres que le commerce n'a peut-être pas.
 import type { Commerce, CommercePublic, ProgrammePublic } from '../types'
 import { configDefi, configNiveaux, configOffreHebdo, configPaliers, configParrainage, configRattrapage } from './programme.ts'
-import { lotsJouables } from './roulette.ts'
+import { lotsJouables, modeAccesRoue } from './roulette.ts'
 import { normaliserLots } from './lots.ts'
 import { dureeConservationMois } from './rgpd.ts'
 
@@ -54,6 +54,8 @@ export function commercePublic(c: Commerce, plafonnes: ReadonlySet<string> = new
     lots: lotsJouables(normaliserLots(c.lots))
       .filter((l) => !plafonnes.has(l.id))
       .map((l) => ({ id: l.id, libelle: l.libelle, type: l.type })),
+    // R4 : mode d'accès effectif (défaut appliqué) — la page de jeu et le règlement l'annoncent au client.
+    modeAccesRoue: modeAccesRoue(c),
     actif: c.actif,
     demo: !!c.demo,
     ...(c.catalogue ? { catalogue: c.catalogue.map((r) => ({ nom: r.nom, cout: r.cout, ...(r.description ? { description: r.description } : {}) })) } : {}),

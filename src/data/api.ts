@@ -5,6 +5,7 @@ import type { StatutGain, StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
 import type { ClientAPurger } from '../lib/rgpd'
 import type { GainEnCours, LotHistorique } from '../lib/carte'
+import type { DonneesReglement } from '../lib/reglement'
 
 export const MESSAGE_HORS_LIGNE = 'Serveur injoignable — vérifiez la connexion.'
 /** Le délai de la requête (`delaiMs`) a expiré : le serveur répond, mais trop lentement (pas une panne réseau). */
@@ -352,6 +353,8 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     // Fiches publiques seulement : le commerce complet (réglages) vient de `etat`, avec PIN ou session.
     commerces: async () => ((await requete('GET', '/commerces')) as { commerces: CommercePublic[] }).commerces,
     commerce: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}`)) as { commerce: CommercePublic }).commerce,
+    /** Règlement du jeu (R4, public) : de quoi générer la page #/reglement/<id> (src/lib/reglement.ts). */
+    reglement: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}/reglement`)) as { reglement: DonneesReglement }).reglement,
     /** Vue complète avec le jeton client de cette carte, vue limitée sans (P0-S7). */
     carte: (clientId: string, jeton?: string | null) => requete('GET', `/cartes/${enc(clientId)}`, { jetonClient: jeton }) as Promise<ReponseCarte>,
     /**

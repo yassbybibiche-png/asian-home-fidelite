@@ -3,14 +3,25 @@ import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, CommercePublic, MessageClient } from '../types'
 import { ErreurApi, estVueLimitee, type AccesCarte, type ClientApi, type ReponseCarte } from '../data/api'
-import { assurerJetonClient, avecJetonClient, memoireJoueur, memoriserJoueurCarte } from '../data/jeuApi'
+import { activerCode, assurerJetonClient, avecJetonClient, memoireJoueur, memoriserJoueurCarte } from '../data/jeuApi'
 import { hashSansLienAcces, idCarteDuParam, lienAccesDuHash, memoireJetons } from '../lib/jetonCarte'
 import { CarteFidelite } from '../components/CarteFidelite'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteCarte } from '../components/Squelette'
 import { BadgeDemo, BoutonCopier, EncartWallet, LienConfidentialite, LogoCommerce, MessageErreur, PiedPublic, telecharger } from '../components/ui'
 import { dateRelative } from '../lib/format'
-import { historiqueCarte, messageRechercheCarte, type GainDuJour, type LigneHistorique, type LotHistorique } from '../lib/carte'
+import {
+  compteARebours,
+  historiqueCarte,
+  jourMois,
+  messageRechercheCarte,
+  vueGain,
+  type ActivationAffichee,
+  type GainDuJour,
+  type GainEnCours,
+  type LigneHistorique,
+  type LotHistorique,
+} from '../lib/carte'
 import { lienCourtCarte } from '../lib/relances'
 import { estAsianHome, VISUELS } from '../lib/visuels'
 import { configRattrapage, peutCompleterProfil } from '../lib/programme'
@@ -19,6 +30,7 @@ import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
 import { localeDate } from '../lib/langue'
 import { Confirmation } from '../components/Confirmation'
+import { TEXTE_GAIN_SANS_CODE } from '../lib/animationRoue'
 
 /** Texte traduit dans la langue choisie (pages clientes). */
 function Traduit({ texte }: { texte: string }) {
@@ -135,6 +147,7 @@ function Carte({
   gainDuJour,
   lotsRoue = [],
   lienCourt,
+  gains,
 }: {
   client: Client
   commerce: CommerceCarte
@@ -145,6 +158,8 @@ function Carte({
   gainDuJour?: GainDuJour | null
   lotsRoue?: LotHistorique[]
   lienCourt?: string
+  /** Gains de la roue en cours (R4), juste sous la carte : en attente, à utiliser, code affiché. */
+  gains?: ReactNode
 }) {
   const { t } = useLangue()
   if (!commerce.actif) return <MessagePublic titre={commerce.nom}>La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
@@ -162,6 +177,7 @@ function Carte({
         </picture>
       )}
       <CarteFidelite client={client} commerce={commerce} animer gainDuJour={gainDuJour} />
+      {gains}
       {lienCourt && <LienCourt lien={lienCourt} />}
       {actions}
       <BoiteReception messages={client.messages ?? []} commerce={commerce} />
@@ -250,6 +266,7 @@ function CarteApi({ api: apiServeur }: { api: ClientApi }) {
     menu: boolean
     gainDuJour: GainDuJour | null
     lots: LotHistorique[]
+    gains: GainEnCours[]
     acces?: AccesCarte
   } | null>(null)
   const [limitee, setLimitee] = useState<{ tampons: number; commerce: CommercePublic; gainDuJour: GainDuJour | null; acces: AccesCarte } | null>(null)
@@ -296,6 +313,7 @@ function CarteApi({ api: apiServeur }: { api: ClientApi }) {
         menu: !!r.menuDisponible || estAsianHome(r.commerce),
         gainDuJour,
         lots: r.historiqueLots ?? [],
+        gains: r.gainsEnCours ?? [],
         acces: r.acces,
       })
       // Messages affichés = lus (le badge « nouveau » reste visible pendant cette ouverture).
@@ -337,6 +355,7 @@ function CarteApi({ api: apiServeur }: { api: ClientApi }) {
       gainDuJour={donnees.gainDuJour}
       lotsRoue={donnees.lots}
       lienCourt={lienCourtCarte(window.location.origin, donnees.client.id)}
+      gains={<GainsRoue api={api} jetons={jetons} commerceId={donnees.commerce.id} clientId={donnees.client.id} gains={donnees.gains} />}
       actions={
         <>
           {donnees.acces?.ancienLien && donnees.acces.graceJusquAu && <BandeauGrace jusquAu={donnees.acces.graceJusquAu} />}
@@ -353,6 +372,101 @@ function CarteApi({ api: apiServeur }: { api: ClientApi }) {
         </>
       }
     />
+  )
+}
+
+/** Heure courante, rafraîchie chaque seconde tant que `actif` (compte à rebours d'un code affiché). */
+function useMaintenant(actif: boolean): Date {
+  const [maintenant, setMaintenant] = useState(() => new Date())
+  useEffect(() => {
+    setMaintenant(new Date())
+    if (!actif) return
+    const minuterie = window.setInterval(() => setMaintenant(new Date()), 1000)
+    return () => window.clearInterval(minuterie)
+  }, [actif])
+  return maintenant
+}
+
+/**
+ * Gains de la roue sur la carte (R4, maquettes §3) : en attente (« Utilisable du … au … »), à utiliser (bouton
+ * « Utiliser mon gain » → activation, jeton client de ce téléphone exigé), code affiché avec son compte à rebours de
+ * 10 minutes, puis réactivable tant que le gain est valable. Un gain expiré disparaît : l'historique le garde.
+ */
+function GainsRoue({
+  api,
+  jetons,
+  commerceId,
+  clientId,
+  gains,
+}: {
+  api: ClientApi
+  jetons: ReturnType<typeof memoireJetons>
+  commerceId: string
+  clientId: string
+  gains: GainEnCours[]
+}) {
+  const [activations, setActivations] = useState<Record<string, ActivationAffichee>>({})
+  const [enCours, setEnCours] = useState<string | null>(null)
+  const [erreurs, setErreurs] = useState<Record<string, string>>({})
+  const maintenant = useMaintenant(Object.keys(activations).length > 0)
+  const { langue, t } = useLangue()
+  const vues = gains.flatMap((g) => {
+    const vue = vueGain(g, activations[g.tirageId], maintenant)
+    return vue ? [{ g, vue }] : []
+  })
+  if (!vues.length) return null
+  const date = (d: Date) => jourMois(d, localeDate(langue))
+
+  async function utiliser(tirageId: string) {
+    if (enCours) return
+    setEnCours(tirageId)
+    setErreurs((e) => ({ ...e, [tirageId]: '' }))
+    const issue = await activerCode(api, jetons, { commerceId, clientId, tirageId })
+    setEnCours(null)
+    if (issue.ok) setActivations((a) => ({ ...a, [tirageId]: { code: issue.activation.code, expireActivation: issue.activation.expireActivation } }))
+    else setErreurs((e) => ({ ...e, [tirageId]: issue.message }))
+  }
+
+  return (
+    <div className="space-y-3" data-gains-roue>
+      {vues.map(({ g, vue }) => (
+        <section key={g.tirageId} className="carte space-y-2 text-center" aria-label={t('Votre gain de la roue')} data-gain={vue.etat}>
+          <p className="titre-carte">{t('🎁 Votre gain : {lot}', { lot: g.lot })}</p>
+          {vue.etat === 'enAttente' ? (
+            <>
+              <p className="font-semibold text-gray-900">{t('Utilisable du {du} au {au}.', { du: date(vue.du), au: date(vue.au) })}</p>
+              <p className="text-sm text-gray-600">{t('Le code s’affichera quand vous serez au comptoir.')}</p>
+            </>
+          ) : vue.etat === 'direct' ? (
+            <>
+              <p className="font-semibold text-gray-900">{t('À retirer directement au comptoir aujourd’hui.')}</p>
+              <p className="text-sm text-gray-600">{t(TEXTE_GAIN_SANS_CODE)}</p>
+            </>
+          ) : vue.etat === 'code' ? (
+            <div className="space-y-2" data-code-active>
+              <p className="text-sm text-gray-600">{t('Présentez ce code au comptoir :')}</p>
+              <p className="rounded-xl border-2 border-dashed border-magenta-500 bg-magenta-500/10 py-4 font-mono text-4xl font-extrabold tracking-[0.3em] text-gray-900 select-all">
+                {vue.code}
+              </p>
+              <p className="text-base font-bold text-gray-900" role="timer" data-compte-a-rebours>
+                {t('Il expire dans {reste} — passé ce délai, réactivez-le ici.', { reste: compteARebours(vue.resteMs) })}
+              </p>
+            </div>
+          ) : (
+            <>
+              <p className="font-semibold text-gray-900">{t('Utilisable jusqu’au {au}.', { au: date(vue.au) })}</p>
+              {vue.reactiver && <p className="text-sm text-gray-600">{t('Code expiré : appuyez de nouveau au comptoir pour en afficher un nouveau.')}</p>}
+              <button type="button" className="bouton w-full" disabled={enCours !== null} onClick={() => void utiliser(g.tirageId)} data-utiliser-gain>
+                {enCours === g.tirageId ? t('Un instant…') : t('Utiliser mon gain')}
+              </button>
+              <p className="text-sm text-gray-600">{t('Appuyez au comptoir : le code ne s’affiche que 10 minutes.')}</p>
+            </>
+          )}
+          {/* Message du serveur (en français, comme les autres erreurs de l'API). */}
+          {erreurs[g.tirageId] && <MessageErreur>{erreurs[g.tirageId]}</MessageErreur>}
+        </section>
+      ))}
+    </div>
   )
 }
 

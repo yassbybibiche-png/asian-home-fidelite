@@ -3,7 +3,7 @@
 // SUPABASE_* n'est lue, aucune URL distante, écoute sur 127.0.0.1 uniquement. PIN de développement seulement.
 process.env.TZ ||= 'Europe/Paris'
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { build } from 'vite'
@@ -16,12 +16,18 @@ const ADMIN_PIN_E2E = '000000'
 const racine = resolve(import.meta.dirname, '..')
 const dossier = mkdtempSync(join(tmpdir(), 'fidelite-e2e-'))
 const statique = join(dossier, 'dist')
+const fichierDb = join(dossier, 'e2e.db')
+// Roue v2 R4 : le parcours « remise le lendemain » recule la date d'un tirage DANS CETTE base temporaire (jamais en
+// production) — le chemin de la base est publié aux specs par ce fichier (même nom calculé dans la spec : rien ne
+// s'importe d'ici), effacé à l'arrêt.
+const infoBaseE2E = (port: number) => join(tmpdir(), `fidelite-e2e-base-${port}.json`)
+writeFileSync(infoBaseE2E(PORT_E2E), JSON.stringify({ fichierDb }))
 
 // Front en mode API (`.env.api` : VITE_API_URL=/) → il appelle CE serveur, même origine.
 await build({ root: racine, configFile: join(racine, 'vite.config.ts'), mode: 'api', logLevel: 'warn', build: { outDir: statique, emptyOutDir: true } })
 
 const app = await creerServeur({
-  fichierDb: join(dossier, 'e2e.db'),
+  fichierDb,
   adminPin: ADMIN_PIN_E2E,
   pinInitial: '1234',
   secretSession: 'e2e-secret-de-session-local-uniquement-0123456789',
@@ -43,6 +49,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     arret = true
     app.fermer().finally(() => {
       rmSync(dossier, { recursive: true, force: true })
+      rmSync(infoBaseE2E(PORT_E2E), { force: true })
       process.exit(0)
     })
   })

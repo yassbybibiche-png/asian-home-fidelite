@@ -235,6 +235,11 @@ export interface CommercePublic {
    * résolu (une consolation s'affiche comme telle) — jamais la probabilité (le tirage est fait par le serveur).
    */
   lots: (Pick<Lot, 'libelle'> & { id: string; type: TypeLot })[]
+  /**
+   * Mode d'accès EFFECTIF à la roue (R4) : la page de jeu et le règlement disent « après une visite validée » ou non.
+   * Absent d'un serveur d'avant R4 = 'visite' (`modeAccesRoue`, src/lib/roulette.ts).
+   */
+  modeAccesRoue?: ModeAccesRoue
   actif: boolean
   demo: boolean
   catalogue?: Pick<RecompensePoints, 'nom' | 'cout' | 'description'>[]

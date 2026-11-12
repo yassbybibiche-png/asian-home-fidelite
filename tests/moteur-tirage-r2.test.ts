@@ -122,7 +122,11 @@ describe('R2 : logique pure (src/lib/roulette.ts)', () => {
     }
     assert.deepEqual(commercePublic(c).lots.map((l) => l.id), ['lot-a', 'lot-p'])
     assert.deepEqual(commercePublic(c, new Set(['lot-a'])).lots.map((l) => l.id), ['lot-p'])
-    assert.doesNotMatch(JSON.stringify(commercePublic(c)), /plafond|limiteGains|modeAcces/)
+    // R4 (brief R4, décision utilisateur du 12/11) : le mode d'accès EFFECTIF est publié (page de jeu, règlement) ;
+    // le plafond et la limite de gains restent privés dans la vue publique.
+    assert.doesNotMatch(JSON.stringify(commercePublic(c)), /plafond|limiteGains/)
+    assert.equal(commercePublic(c).modeAccesRoue, 'libre')
+    assert.equal(commercePublic({ ...c, modeAccesRoue: undefined }).modeAccesRoue, 'visite')
   })
 
   test('début du jour : minuit local, en ISO (borne de lecture des tirages du jour)', () => {

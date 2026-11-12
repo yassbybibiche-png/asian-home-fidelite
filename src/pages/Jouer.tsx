@@ -3,8 +3,25 @@ import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, CommercePublic, Tirage, TypeLot } from '../types'
 import { analyserContact } from '../lib/fidelite'
-import { normaliserLots, typeTirage } from '../lib/lots'
-import { gainsSur30Jours, limiteGainsMois, lotsJouables, lotsPlafonnes, lotsTirables, modeAccesRoue, peutJouer, type LotRoue, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
+import { lotsAGagner, normaliserLots, typeTirage } from '../lib/lots'
+import {
+  dernierJourGain,
+  gainsSur30Jours,
+  limiteGainsMois,
+  lotsJouables,
+  lotsPlafonnes,
+  lotsTirables,
+  modeAccesRoue,
+  peutJouer,
+  type LotRoue,
+  rotationCible,
+  secteurs,
+  statutJeu,
+  tirageDuJour,
+  tirerLot,
+  type StatutJeu,
+} from '../lib/roulette'
+import { jourMois } from '../lib/carte'
 import {
   apresVerification,
   ETAPES_VALIDATION,
@@ -34,8 +51,8 @@ import {
   TEXTE_CODE_A_MONTRER,
   TEXTE_CODE_UNE_FOIS,
   TEXTE_CONSOLATION,
+  TEXTE_GAIN_ACTIVATION,
   TEXTE_DEJA_JOUE,
-  TEXTE_GAIN_SANS_CODE,
   TEXTE_PERDU_PROCHAINE,
   TEXTE_PERDU_TAMPON,
   texteValidite,
@@ -47,7 +64,7 @@ import { LegendeRoue, Roue, useMouvementReduit } from '../components/Roue'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteJeu } from '../components/Squelette'
 import { CommutateurLangue, useLangue } from '../components/Langue'
-import { texteValiditeLangue } from '../lib/langue'
+import { localeDate, texteValiditeLangue } from '../lib/langue'
 import { BadgeDemo, BoutonCopier, LienConfidentialite, LogoCommerce, MessageErreur, PiedPublic } from '../components/ui'
 
 export function MessagePublic({ titre, children }: { titre: string; children: ReactNode }) {
@@ -92,8 +109,8 @@ function verifierCommerce(commerce: CommerceJeu): ReactNode {
 
 type Etape = 'pret' | 'rotation' | 'resultat'
 
-/** En-tête + roue, communs aux deux modes. */
-function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; rotation: number; children: ReactNode; pied: ReactNode }) {
+/** En-tête + roue, communs aux deux modes. `infos` (R4) : avant le tirage, lots du jour + règles + lien règlement. */
+function Cadre({ commerce, rotation, children, pied, infos }: { commerce: CommerceJeu; rotation: number; children: ReactNode; pied: ReactNode; infos: boolean }) {
   const { t } = useLangue()
   // Test A/B « accroche » (P2-Q3, docs/TESTS-AB.md) : variante du jour, la même pour tous les clients de la journée.
   const accroche = accrocheJeu(commerce, jourParis(new Date()))
@@ -115,10 +132,48 @@ function Cadre({ commerce, rotation, children, pied }: { commerce: CommerceJeu; 
       </div>
 
       {children}
+      {infos && <InfosJeu commerce={commerce} />}
 
       <p className="text-center text-sm text-gray-600">{pied}</p>
       <PiedPublic commerceId={commerce.id} />
     </div>
+  )
+}
+
+/**
+ * Avant le tirage (R4, point 8) : « À gagner aujourd’hui » (lots publics du jour — plafonnés retirés par le serveur —,
+ * une consolation en points annoncée comme telle, jamais de secteur perdant), les règles en une ligne, la mention du
+ * hasard et le lien vers le règlement. Sous l'écran d'attente en mode « visite », sous le bouton en mode « libre ».
+ */
+export function InfosJeu({ commerce }: { commerce: CommerceJeu }) {
+  const { t } = useLangue()
+  const lots = lotsAGagner(commerce.lots)
+  return (
+    <section className="carte space-y-3" aria-labelledby="a-gagner-titre" data-lots-du-jour>
+      <h2 id="a-gagner-titre" className="titre-carte">
+        {t('À gagner aujourd’hui')}
+      </h2>
+      {lots.length > 0 && (
+        <ul className="space-y-1">
+          {lots.map((l, i) => (
+            <li key={`${i}-${l.libelle}`} className="flex items-baseline gap-2 text-gray-900" data-type-lot={l.type}>
+              <span aria-hidden>{l.type === 'points' ? '🍀' : '🎁'}</span>
+              <span>
+                {l.libelle}
+                {l.type === 'points' && <span className="text-sm text-gray-600"> · {t('consolation')}</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-sm font-semibold text-gray-800">{t('1 tirage par jour · gain utilisable dès demain, pendant 30 jours')}</p>
+      <p className="text-sm text-gray-600">
+        {t('Le résultat est tiré au hasard.')}{' '}
+        <a className="lien" href={`#/reglement/${commerce.id}`} data-lien-reglement>
+          {t('Règlement du jeu')} →
+        </a>
+      </p>
+    </section>
   )
 }
 
@@ -360,9 +415,13 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
     <Cadre
       commerce={commerce}
       rotation={rotation}
+      infos={etape === 'pret' && !dejaJoue}
       pied={
         <>
-          <BadgeDemo>{t('Démo')}</BadgeDemo> {t('Données stockées dans ce navigateur uniquement. 1 participation par visite validée, 1 tirage par jour.')}
+          <BadgeDemo>{t('Démo')}</BadgeDemo>{' '}
+          {mode === 'libre'
+            ? t('Données stockées dans ce navigateur uniquement. 1 tirage par jour.')
+            : t('Données stockées dans ce navigateur uniquement. 1 participation par visite validée, 1 tirage par jour.')}
         </>
       }
     >
@@ -379,7 +438,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
           />
         )
       ) : etape === 'resultat' && gain ? (
-        <Resultat lot={gain.lot} type={typeTirage(gain)} prenom={joueur.prenom} lienCarte={`#/carte/${joueur.id}`} />
+        <Resultat lot={gain.lot} type={typeTirage(gain)} prenom={joueur.prenom} lienCarte={`#/carte/${joueur.id}`} date={gain.date} />
       ) : dejaJoue ? (
         <MessageDejaJoue prenom={joueur.prenom} lot={dejaJoue.lot} />
       ) : statut === 'sansVisite' ? (
@@ -627,9 +686,13 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
     <Cadre
       commerce={commerce}
       rotation={rotation}
+      infos={etape === 'pret' && jeu?.statut !== 'dejaJoue' && !accesPerdu}
       pied={
         <>
-          {commerce.demo && <BadgeDemo>{t('Démo')}</BadgeDemo>} {t('1 participation par visite validée au comptoir, 1 tirage par jour. Tirage effectué par le serveur.')}
+          {commerce.demo && <BadgeDemo>{t('Démo')}</BadgeDemo>}{' '}
+          {modeAccesRoue(commerce) === 'libre'
+            ? t('1 tirage par jour. Tirage effectué par le serveur.')
+            : t('1 participation par visite validée au comptoir, 1 tirage par jour. Tirage effectué par le serveur.')}
         </>
       }
     >
@@ -650,7 +713,7 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
         )
       ) : etape !== 'pret' && gain ? (
         etape === 'resultat' ? (
-          <Resultat lot={gain.lot} type={gain.type} prenom={joueur.prenom} code={gain.perdant ? undefined : gain.code} lienCarte={`#/carte/${joueur.clientId}`} />
+          <Resultat lot={gain.lot} type={gain.type} prenom={joueur.prenom} code={gain.perdant ? undefined : gain.code} lienCarte={`#/carte/${joueur.clientId}`} date={gain.date} points={gain.points} solde={gain.solde} />
         ) : (
           <button className="bouton w-full py-4 text-lg" disabled>
             {t('La roue tourne…')}
@@ -980,8 +1043,30 @@ export function GarderCarte({ lienCarte }: { lienCarte: string }) {
   )
 }
 
-/** `type` : type du lot tiré (R1) ; absent (serveur d'avant R1) = déduit de l'ancien libellé, une seule fois, ici. */
-export function Resultat({ lot, type, prenom, code, lienCarte }: { lot: string; type?: TypeLot; prenom: string; code?: string; lienCarte: string }) {
+/**
+ * `type` : type du lot tiré (R1) ; absent (serveur d'avant R1) = déduit de l'ancien libellé, une seule fois, ici.
+ * R4 (maquettes §2) — `date` : date du tirage (gain physique : « dès demain et jusqu’au JJ/MM ») ; `points` / `solde` :
+ * consolation créditée par le serveur et nouveau solde de la carte.
+ */
+export function Resultat({
+  lot,
+  type,
+  prenom,
+  code,
+  lienCarte,
+  date,
+  points,
+  solde,
+}: {
+  lot: string
+  type?: TypeLot
+  prenom: string
+  code?: string
+  lienCarte: string
+  date?: string
+  points?: number
+  solde?: number
+}) {
   const typeResolu = typeTirage({ lot, typeLot: type })
   const perdu = typeResolu === 'perdant'
   const consolation = typeResolu === 'points'
@@ -1004,24 +1089,25 @@ export function Resultat({ lot, type, prenom, code, lienCarte }: { lot: string; 
     <section className="carte apparition bg-gradient-to-b from-magenta-500/10 to-white text-center ring-2 ring-magenta-500" role="status" aria-live="polite" data-resultat="gain">
       <Confettis />
       <p className="text-5xl" aria-hidden>
-        🎉
+        {consolation ? '🍀' : '🎉'}
       </p>
       <p className="mt-2 text-lg font-bold">
-        {consolation ? t('{bravo}, lot de consolation :', { bravo: avecPrenom(t('Bravo'), prenom) }) : t('{bravo}, vous avez gagné :', { bravo: avecPrenom(t('Bravo'), prenom) })}
+        {consolation ? t('Pas de lot cette fois{prenom}…', { prenom: virgulePrenom(prenom) }) : t('{bravo}, vous avez gagné :', { bravo: avecPrenom(t('Bravo'), prenom) })}
       </p>
       <p className="mt-1 font-titre text-4xl leading-tight font-bold break-words text-magenta-700">{lot}</p>
       {code ? (
         <CodeGagnant code={code} />
       ) : consolation ? (
         <p className="mt-2 text-sm text-gray-600" data-consolation>
-          {t(TEXTE_CONSOLATION)}
+          {points != null && solde != null ? t('+{n} points ajoutés à votre carte. Elle compte {total} points.', { n: points, total: solde }) : t(TEXTE_CONSOLATION)}{' '}
+          {t('Prochaine chance demain !')}
         </p>
       ) : (
         <>
-          <p className="mt-2 text-sm text-gray-600">{t(TEXTE_GAIN_SANS_CODE)}</p>
-          <p className="mt-1 text-base font-bold text-gray-900" data-validite>
-            🗓️ {texteValiditeLangue(new Date(), langue, texteValidite)}
+          <p className="mt-2 text-base font-bold text-gray-900" data-validite>
+            🗓️ {t('À utiliser dès demain et jusqu’au {date} au comptoir.', { date: jourMois(dernierJourGain({ date: date ?? new Date().toISOString(), typeLot: 'lot' }), localeDate(langue)) })}
           </p>
+          <p className="mt-1 text-sm text-gray-600">{t(TEXTE_GAIN_ACTIVATION)}</p>
         </>
       )}
       <GarderCarte lienCarte={lienCarte} />

@@ -99,6 +99,49 @@ export interface GainEnCours {
   expireActivation: string | null
 }
 
+/** « 13/11 » : jour et mois à Paris (bornes des gains = minuits parisiens), au format de la langue affichée. */
+export function jourMois(d: Date, locale: 'fr-FR' | 'en-GB' = 'fr-FR'): string {
+  return d.toLocaleDateString(locale, { timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit' })
+}
+
+/** Code obtenu sur ce téléphone par « Utiliser mon gain » (R3 `activerCode`), gardé le temps de l'affichage. */
+export interface ActivationAffichee {
+  code: string
+  expireActivation: string
+}
+
+/**
+ * Bloc d'un gain sur la carte (R4, maquettes §3) — enAttente : « Utilisable du … au … » ; aActiver : bouton « Utiliser
+ * mon gain » (`reactiver` : un code a déjà été affiché, sa fenêtre est échue) ; code : code + temps restant ; direct :
+ * gain d'avant la roue v2, à retirer au comptoir le jour même sans activation. null : expiré entre-temps (le bloc
+ * disparaît, l'historique le garde). `au` = dernier jour d'utilisation (J+30).
+ */
+export type VueGain =
+  | { etat: 'enAttente'; du: Date; au: Date }
+  | { etat: 'aActiver'; au: Date; reactiver: boolean }
+  | { etat: 'code'; code: string; au: Date; resteMs: number }
+  | { etat: 'direct' }
+
+export function vueGain(g: GainEnCours, activation: ActivationAffichee | undefined, maintenant: Date): VueGain | null {
+  const fin = new Date(g.expireLe)
+  if (maintenant.getTime() >= fin.getTime()) return null
+  const au = new Date(fin.getTime() - 1)
+  const du = new Date(g.utilisableLe)
+  if (maintenant.getTime() < du.getTime()) return { etat: 'enAttente', du, au }
+  // Tirage hérité du jour (revue Codex R3, F2) : « utilisable » sans fenêtre d'activation — jamais activable.
+  if (g.statut === 'utilisable' && !g.expireActivation && !activation) return { etat: 'direct' }
+  const resteMs = activation ? new Date(activation.expireActivation).getTime() - maintenant.getTime() : 0
+  if (activation && resteMs > 0) return { etat: 'code', code: activation.code, au, resteMs }
+  // Fenêtre en cours côté serveur mais code inconnu ici (page rechargée) : un nouvel appui le réaffiche.
+  return { etat: 'aActiver', au, reactiver: !!activation }
+}
+
+/** « 09:47 » : minutes et secondes restantes (arrondi à la seconde supérieure, jamais négatif). */
+export function compteARebours(resteMs: number): string {
+  const s = Math.max(0, Math.ceil(resteMs / 1000))
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
+
 export interface LigneHistorique {
   date: string
   type: 'visite' | 'recompense' | 'echange' | 'defi' | 'roue'
