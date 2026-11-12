@@ -74,6 +74,16 @@ export function teintesRoue(couleur?: string): Record<'--roue-vif' | '--roue-fon
   return { '--roue-vif': vif, '--roue-fonce': fonce, '--roue-nuit': nuit, '--roue-clair': clair }
 }
 
+/**
+ * Légende et cadre du jeu (R-t1) : teintes de la roue + `--roue-texte`, la teinte claire comme texte sur le cadre nuit,
+ * éclaircie de moitié quand elle n'atteint pas 4,5:1 (commerce très sombre). Magenta par défaut : inchangé (5,2:1).
+ */
+export function styleLegende(couleur?: string): Record<string, string> {
+  const t = teintesRoue(couleur)
+  const clair = t['--roue-clair']
+  return { ...t, '--roue-texte': contraste(clair, THEME.surface) < 4.5 ? melanger(clair, THEME.blanc, 0.5) : clair }
+}
+
 /** Secteurs recolorés à la couleur du commerce (roue ET légende, mêmes couleurs). Sans couleur valide : inchangés. */
 export function colorerSecteurs(parts: SecteurAffiche[], couleur?: string): SecteurAffiche[] {
   const palette = paletteRoue(couleur)

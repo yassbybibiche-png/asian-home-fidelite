@@ -449,6 +449,7 @@ h3 {
 
 /* Pointeur : ombre portée statique ; à l'arrêt, rebond élastique autour de son pivot (propriété rotate). */
 .roue-pointeur {
+  @apply absolute top-0 left-1/2 z-10 h-10 w-8 -translate-x-1/2 -translate-y-2;
   transform-origin: 50% 35%;
   filter: drop-shadow(0 3px 3px color-mix(in srgb, black 55%, transparent));
 }
@@ -502,6 +503,81 @@ h3 {
     opacity: 1;
     transform: none;
   }
+}
+
+/* Légende et cadre du jeu aux teintes du commerce (R-t1). Les variables --roue-* sont posées sur la racine de la
+   légende (LegendeRoue, juste après la roue) : magenta du thème sans couleur de commerce, sinon ses teintes.
+   Texte en --roue-texte (styleLegende, roue.ts) : ≥ 4,5:1 sur le fond nuit du cadre (tests/polish-roue-t1.test.ts). */
+[data-roue] + div {
+  @apply mt-4 px-2;
+}
+[data-roue] + div > h2 {
+  @apply text-center text-base font-semibold;
+  color: var(--roue-texte);
+}
+.pastille-roue {
+  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold ring-1;
+  --tw-ring-color: color-mix(in srgb, var(--roue-clair) 60%, transparent);
+}
+/* Le cadre (hero-sombre de #/jouer) ne voit pas ces variables : la légende le repeint par-dessous (::before, même
+   dégradé nocturne, halo et filet à la teinte du commerce) et pose l'anneau du bouton son allumé (::after). */
+@supports selector(:has(a)) {
+  .hero-sombre:has(> [data-roue]) {
+    position: relative;
+    isolation: isolate;
+    background: none;
+    box-shadow: none;
+  }
+  .hero-sombre:has(> [data-roue]) .bouton-son {
+    --tw-ring-color: color-mix(in srgb, white 25%, transparent);
+  }
+  .hero-sombre > [data-roue] + div::before,
+  .hero-sombre:has(.bouton-son[aria-pressed='true']) > [data-roue] + div::after {
+    content: '';
+    position: absolute;
+    pointer-events: none;
+  }
+  .hero-sombre > [data-roue] + div::before {
+    inset: 0;
+    z-index: -1;
+    border-radius: var(--radius-3xl);
+    background:
+      radial-gradient(120% 90% at 85% 0%, color-mix(in srgb, var(--roue-clair) 25%, transparent), transparent 55%),
+      radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--color-violet-nuit) 35%, transparent), transparent 55%),
+      linear-gradient(160deg, var(--color-nuit-950) 0%, var(--color-nuit-900) 60%, var(--roue-nuit) 100%);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--roue-clair) 30%, transparent);
+  }
+  /* Bouton son : 44 px en haut à droite du cadre (padding px-2 / py-4). */
+  .hero-sombre:has(.bouton-son[aria-pressed='true']) > [data-roue] + div::after {
+    top: calc(var(--spacing) * 4);
+    right: calc(var(--spacing) * 2);
+    z-index: 30;
+    width: calc(var(--spacing) * 11);
+    height: calc(var(--spacing) * 11);
+    border-radius: 9999px;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--roue-clair) 60%, transparent);
+  }
+}
+
+/* Bouton « Tourner » (R-t1) : l'émoji en tête du libellé (multicolore, hors DA) est réduit à rien (::first-letter de
+   taille nulle) et la même boîte dessine un signe de roue à la couleur du texte : anneau, trois diamètres (six rayons),
+   moyeu. Libellé, nom accessible et comportement inchangés. Seul le bouton actif porte l'émoji (désactivé : « La roue
+   tourne… », « Tirage en cours… »). ::first-letter ne s'applique qu'à un bloc : ces trois boutons passent en block. */
+.bouton.w-full.py-4.text-lg {
+  display: block;
+}
+.bouton.w-full.py-4.text-lg:enabled::first-letter {
+  font-size: 0;
+  padding: 0.55rem;
+  margin-right: 0.2rem;
+  vertical-align: 0.32rem;
+  border: 2px solid;
+  border-radius: 9999px;
+  background:
+    radial-gradient(closest-side, currentColor 70%, transparent 76%) center / 38% 38% no-repeat,
+    linear-gradient(90deg, transparent calc(50% - 1px), currentColor 0 calc(50% + 1px), transparent 0),
+    linear-gradient(30deg, transparent calc(50% - 1px), currentColor 0 calc(50% + 1px), transparent 0),
+    linear-gradient(150deg, transparent calc(50% - 1px), currentColor 0 calc(50% + 1px), transparent 0);
 }
 
 /* #/carte, nouveau tampon depuis la dernière ouverture (P1-C3) : le tampon se pose (échelle + rotation), transform seul. */

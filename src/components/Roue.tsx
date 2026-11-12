@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type CSSProperties } from 'react'
-import { colorerSecteurs, LONGUEUR_TEXTE_MAX, POLICE_ROUE, RAYON_LIBELLE, largeurEstimee, secteursAffiches, teintesRoue } from '../lib/roue'
+import { colorerSecteurs, LONGUEUR_TEXTE_MAX, POLICE_ROUE, RAYON_LIBELLE, largeurEstimee, secteursAffiches, styleLegende, teintesRoue } from '../lib/roue'
 import type { LotRoue } from '../lib/roulette'
 import type { SceneRoue } from '../lib/animationRoue'
 // Pas animationRoue (→ roulette, theme) : la roue est aussi importée par Réglages (aperçu R6), voir mouvementRoue.ts.
@@ -97,7 +97,7 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
       ))}
       {/* Pointeur fixe en haut (goutte dessinée en CSS, aux teintes de la roue) ; il bute à chaque secteur franchi et
           rebondit à l'arrêt. */}
-      <div ref={pointeur} className="roue-pointeur absolute top-0 left-1/2 z-10 h-10 w-8 -translate-x-1/2 -translate-y-2" />
+      <div ref={pointeur} className="roue-pointeur" />
       {/* Secteurs : seule cette couche tourne (transform seul, couche composée : 60 fps sans repeindre le SVG). */}
       <div className="absolute inset-0 will-change-transform" style={{ transform: `rotate(${rotation}deg)`, transition: transitionRoue(reduit) }}>
         <svg viewBox="-100 -100 200 200" className="h-full w-full" aria-hidden>
@@ -112,13 +112,14 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
                   <path d={`M0 0 L${point(s.debut, R)} A${R} ${R} 0 ${etendue > 180 ? 1 : 0} 1 ${point(s.fin, R)} Z`} fill={s.couleur} />
                 )
               // Garde-fou : un libellé large (majuscules…) est resserré plutôt que de déborder du secteur.
+              // Moitié gauche (R-t1) : libellé retourné sur l'axe du secteur (+90° au lieu de −90°), lisible au repos.
               const serre = s.affichage === 'libelle' && largeurEstimee(s.texteRoue) > LONGUEUR_TEXTE_MAX
               return (
                 <g key={s.numero}>
                   {forme}
                   {s.affichage !== 'aucun' && (
                     <text
-                      transform={s.affichage === 'libelle' ? `rotate(${milieu}) translate(0 -${RAYON_LIBELLE}) rotate(-90)` : `rotate(${milieu}) translate(0 -72)`}
+                      transform={s.affichage === 'libelle' ? `rotate(${milieu}) translate(0 -${RAYON_LIBELLE}) rotate(${milieu > 180 ? 90 : -90})` : `rotate(${milieu}) translate(0 -72)`}
                       textAnchor="middle"
                       dominantBaseline="middle"
                       fontSize={POLICE_ROUE}
@@ -159,14 +160,16 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
 export function LegendeRoue({ lots }: { lots: LotRoue[] }) {
   const parts = colorerSecteurs(secteursAffiches(lots), useContext(ContexteRoue).couleur)
   const { t } = useLangue()
+  // Teintes de la roue aussi sur la légende (R-t1) : titre, anneau des pastilles et, en CSS, cadre du jeu
+  // (mise en forme dans index.css, « [data-roue] + div »).
   return (
-    <div className="mt-4 px-2">
-      <h2 className="text-center text-base font-semibold text-magenta-300">{t('À gagner')}</h2>
+    <div style={styleLegende(useContext(ContexteRoue).couleur)}>
+      <h2>{t('À gagner')}</h2>
       <ol className="mt-2 grid gap-2 text-base text-white" aria-label={t('Lots de la roue')}>
         {parts.map((s) => (
           <li key={s.numero} className="flex items-center gap-3" data-legende-lot>
             <span
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold ring-1 ring-magenta-400/60"
+              className="pastille-roue"
               style={{ backgroundColor: s.couleur, color: s.couleurTexte }}
               aria-hidden
             >
