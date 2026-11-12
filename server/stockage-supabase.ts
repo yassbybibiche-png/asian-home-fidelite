@@ -171,6 +171,20 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
 
     meta: async (cle) => (await ok<{ valeur: string }[]>('meta', sb.from('meta').select('valeur').eq('cle', cle)))[0]?.valeur,
     majMeta: async (cle, valeur) => void (await ok('meta', sb.from('meta').upsert({ cle, valeur }, { onConflict: 'cle' }))),
+    // Revue Codex (rotation du PIN) : clé absente → INSERT (la clé primaire refuse le 2e : ErreurConflit → false) ;
+    // présente → UPDATE … WHERE valeur = <attendue> (0 ligne → false). Une requête, atomique pour Postgres.
+    majMetaSi: async (cle, attendue, valeur) => {
+      if (attendue === undefined) {
+        try {
+          await ok('meta', sb.from('meta').insert({ cle, valeur }))
+          return true
+        } catch (e) {
+          if (e instanceof ErreurConflit) return false
+          throw e
+        }
+      }
+      return (await ok<unknown[]>('meta', sb.from('meta').update({ valeur }).eq('cle', cle).eq('valeur', attendue).select('cle'))).length > 0
+    },
     supprimerMeta: async (cle) => void (await ok('meta', sb.from('meta').delete().eq('cle', cle))),
 
     commerces: () => lirePages<Commerce>('commerces', (debut, fin) => sb.from('commerces').select(AVEC_VERSION).order('ordre').range(debut, fin)),
@@ -184,6 +198,14 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     // Verrou optimiste (P0-S11) dans une `transaction` qui a relu le commerce ; hors transaction : écriture inconditionnelle.
     majCommerce: (c) => majVersionnee('commerces', c.id, c),
     majPin: async (id, pin) => void (await ok('commerces', sb.from('commerces').update({ pin_hash: pin.hash, pin_sel: pin.sel }).eq('id', id))),
+    // UPDATE … WHERE pin_hash = <attendu> AND pin_sel = <attendu> : Postgres verrouille la ligne et réévalue la condition.
+    majPinSi: async (id, attendu, pin) =>
+      (
+        await ok<unknown[]>(
+          'commerces',
+          sb.from('commerces').update({ pin_hash: pin.hash, pin_sel: pin.sel }).eq('id', id).eq('pin_hash', attendu.hash).eq('pin_sel', attendu.sel).select('id'),
+        )
+      ).length > 0,
 
     clients: (commerceId) =>
       lirePages<Client>('clients', (debut, fin) => sb.from('clients').select(AVEC_VERSION).eq('commerce_id', commerceId).order('ordre').range(debut, fin)),
@@ -260,6 +282,20 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
           .eq('id', m.id)
           .eq('commerce_id', m.commerceId),
       )),
+    majCodeMembreSi: async (commerceId, id, attendu, code) =>
+      (
+        await ok<unknown[]>(
+          'equipe',
+          sb
+            .from('equipe')
+            .update({ code_hash: code.hash, code_sel: code.sel })
+            .eq('id', id)
+            .eq('commerce_id', commerceId)
+            .eq('code_hash', attendu.hash)
+            .eq('code_sel', attendu.sel)
+            .select('id'),
+        )
+      ).length > 0,
     supprimerMembre: async (commerceId, id) => void (await ok('equipe', sb.from('equipe').delete().eq('commerce_id', commerceId).eq('id', id))),
     journal: (commerceId, limite) =>
       ouVide(lire<EntreeJournal>('journal', sb.from('journal').select('donnees').eq('commerce_id', commerceId).order('date', { ascending: false }).limit(limite)), []),

@@ -76,6 +76,11 @@ export interface Stockage {
   readonly type: 'sqlite' | 'supabase'
   meta(cle: string): P<string | undefined>
   majMeta(cle: string, valeur: string): P<void>
+  /**
+   * Écriture conditionnelle (revue Codex, rotation du PIN) : écrit `valeur` seulement si la valeur actuelle est encore
+   * `attendue` (undefined = clé absente). Une seule requête, atomique pour la base ; false = changée entre-temps.
+   */
+  majMetaSi(cle: string, attendue: string | undefined, valeur: string): P<boolean>
   /** Supprime une clé de `meta` (P0-S7 : version d'accès d'une carte supprimée) ; absente : rien. */
   supprimerMeta(cle: string): P<void>
   commerces(): P<Commerce[]>
@@ -89,6 +94,11 @@ export interface Stockage {
    */
   majCommerce(c: Commerce): P<void>
   majPin(id: string, pin: Pin): P<void>
+  /**
+   * Remplace le PIN seulement si le hash et le sel stockés sont encore `attendu` (revue Codex : rotation, re-hachage).
+   * Une seule requête, atomique pour la base ; false = PIN changé entre-temps (ou commerce absent), rien n'est écrit.
+   */
+  majPinSi(id: string, attendu: Pin, pin: Pin): P<boolean>
   clients(commerceId: string): P<Client[]>
   client(commerceId: string, id: string): P<Client | undefined>
   clientParContact(commerceId: string, contact: { telephone?: string; email?: string }): P<Client | undefined>
@@ -122,6 +132,8 @@ export interface Stockage {
   membres(commerceId: string): P<MembreStocke[]>
   ajouterMembre(m: MembreEquipe, code: Pin): P<void>
   majMembre(m: MembreEquipe, code?: Pin): P<void>
+  /** Comme `majPinSi`, pour le code d'un membre (re-hachage) : `donnees` n'est pas touché. false = code changé entre-temps. */
+  majCodeMembreSi(commerceId: string, id: string, attendu: Pin, code: Pin): P<boolean>
   supprimerMembre(commerceId: string, id: string): P<void>
   /** Journal d'audit, du plus récent au plus ancien. */
   journal(commerceId: string, limite: number): P<EntreeJournal[]>
@@ -306,6 +318,8 @@ export function ouvrirStockage(fichier: string) {
   const q = {
     meta: db.prepare('SELECT valeur FROM meta WHERE cle = ?'),
     majMeta: db.prepare('INSERT INTO meta (cle, valeur) VALUES (?, ?) ON CONFLICT (cle) DO UPDATE SET valeur = excluded.valeur'),
+    insererMetaSiAbsente: db.prepare('INSERT INTO meta (cle, valeur) VALUES (?, ?) ON CONFLICT (cle) DO NOTHING'),
+    majMetaSi: db.prepare('UPDATE meta SET valeur = ? WHERE cle = ? AND valeur = ?'),
     supprimerMeta: db.prepare('DELETE FROM meta WHERE cle = ?'),
     commerces: db.prepare('SELECT donnees FROM commerces ORDER BY rowid'),
     commerce: db.prepare('SELECT donnees FROM commerces WHERE id = ?'),
@@ -313,6 +327,7 @@ export function ouvrirStockage(fichier: string) {
     ajoutCommerce: db.prepare('INSERT INTO commerces (id, donnees, pin_hash, pin_sel) VALUES (?, ?, ?, ?)'),
     majCommerce: db.prepare('UPDATE commerces SET donnees = ? WHERE id = ?'),
     majPin: db.prepare('UPDATE commerces SET pin_hash = ?, pin_sel = ? WHERE id = ?'),
+    majPinSi: db.prepare('UPDATE commerces SET pin_hash = ?, pin_sel = ? WHERE id = ? AND pin_hash = ? AND pin_sel = ?'),
     clients: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? ORDER BY rowid'),
     client: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? AND id = ?'),
     clientParCle: db.prepare('SELECT donnees FROM clients WHERE commerce_id = ? AND cle_contact = ?'),
@@ -338,6 +353,7 @@ export function ouvrirStockage(fichier: string) {
     ajoutMembre: db.prepare('INSERT INTO equipe (id, commerce_id, donnees, code_hash, code_sel) VALUES (?, ?, ?, ?, ?)'),
     majMembre: db.prepare('UPDATE equipe SET donnees = ? WHERE id = ? AND commerce_id = ?'),
     majCodeMembre: db.prepare('UPDATE equipe SET code_hash = ?, code_sel = ? WHERE id = ? AND commerce_id = ?'),
+    majCodeMembreSi: db.prepare('UPDATE equipe SET code_hash = ?, code_sel = ? WHERE id = ? AND commerce_id = ? AND code_hash = ? AND code_sel = ?'),
     supprimerMembre: db.prepare('DELETE FROM equipe WHERE commerce_id = ? AND id = ?'),
     journal: db.prepare('SELECT donnees FROM journal WHERE commerce_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
     ajoutJournal: db.prepare('INSERT INTO journal (id, commerce_id, date, donnees) VALUES (?, ?, ?, ?)'),
@@ -391,6 +407,8 @@ export function ouvrirStockage(fichier: string) {
     type: 'sqlite' as const,
     meta: (cle: string) => (q.meta.get(cle) as { valeur: string } | undefined)?.valeur,
     majMeta: (cle: string, valeur: string) => void q.majMeta.run(cle, valeur),
+    majMetaSi: (cle: string, attendue: string | undefined, valeur: string) =>
+      Number((attendue === undefined ? q.insererMetaSiAbsente.run(cle, valeur) : q.majMetaSi.run(valeur, cle, attendue)).changes) > 0,
     supprimerMeta: (cle: string) => void q.supprimerMeta.run(cle),
 
     commerces: () => lire<Commerce>(q.commerces.all()),
@@ -399,6 +417,7 @@ export function ouvrirStockage(fichier: string) {
     ajouterCommerce: (c: Commerce, pin: Pin) => inserer(q.ajoutCommerce, c.id, JSON.stringify(c), pin.hash, pin.sel),
     majCommerce: (c: Commerce) => void q.majCommerce.run(JSON.stringify(c), c.id),
     majPin: (id: string, pin: Pin) => void q.majPin.run(pin.hash, pin.sel, id),
+    majPinSi: (id: string, attendu: Pin, pin: Pin) => Number(q.majPinSi.run(pin.hash, pin.sel, id, attendu.hash, attendu.sel).changes) > 0,
 
     clients: (commerceId: string) => lire<Client>(q.clients.all(commerceId)),
     client: (commerceId: string, id: string) => lire<Client>(q.client.all(commerceId, id))[0],
@@ -430,6 +449,8 @@ export function ouvrirStockage(fichier: string) {
       q.majMembre.run(JSON.stringify(m), m.id, m.commerceId)
       if (code) q.majCodeMembre.run(code.hash, code.sel, m.id, m.commerceId)
     },
+    majCodeMembreSi: (commerceId: string, id: string, attendu: Pin, code: Pin) =>
+      Number(q.majCodeMembreSi.run(code.hash, code.sel, id, commerceId, attendu.hash, attendu.sel).changes) > 0,
     supprimerMembre: (commerceId: string, id: string) => void q.supprimerMembre.run(commerceId, id),
     journal: (commerceId: string, limite: number) => lire<EntreeJournal>(q.journal.all(commerceId, limite)),
     ajouterJournal: (e: EntreeJournal) => inserer(q.ajoutJournal, e.id, e.commerceId, e.date, JSON.stringify(e)),

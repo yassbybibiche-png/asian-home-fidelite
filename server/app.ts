@@ -1341,7 +1341,11 @@ export async function creerServeur(o: OptionsServeur) {
     return typeof v === 'string' && v ? v : undefined
   }
 
-  /** Re-hachage scrypt d'un hash ancien format après un accès réussi : best-effort, ne fait jamais échouer l'accès. */
+  /**
+   * Re-hachage scrypt d'un hash ancien format après un accès réussi : best-effort, ne fait jamais échouer l'accès.
+   * `ecrire` est une écriture conditionnelle (revue Codex point 1) : elle ne remplace le hash que s'il est encore celui
+   * qui vient d'être vérifié — un PIN / code changé entre-temps n'est jamais écrasé (re-hachage abandonné en silence).
+   */
   async function rehacher(quoi: string, ecrire: (p: Pin) => unknown) {
     try {
       await ecrire(await hacherPin(quoi))
@@ -1372,23 +1376,24 @@ export async function creerServeur(o: OptionsServeur) {
 
   async function verifierPinCommerce(ip: string, commerceId: string, pin: string) {
     await limiteur.verifier(cles(ip, commerceId))
-    const r = await pinCorrect(pin, await st.pin(commerceId))
+    const verifie = await st.pin(commerceId)
+    const r = await pinCorrect(pin, verifie)
     if (!r.ok) {
       await limiteur.echec(echecs(ip, commerceId), 'commerce')
       throw err(401, 'PIN commerçant incorrect.')
     }
     await limiteur.succes(cleIp(ip))
-    if (r.rehacher) await rehacher(pin, (p) => st.majPin(commerceId, p))
+    if (r.rehacher && verifie) await rehacher(pin, (p) => st.majPinSi(commerceId, verifie, p))
   }
 
   async function verifierCodeEquipe(ip: string, commerceId: string, code: string): Promise<MembreEquipe> {
     await limiteur.verifier(cles(ip, commerceId))
-    let trouve: { membre: MembreEquipe; rehacher: boolean } | undefined
+    let trouve: { membre: MembreEquipe; code: Pin; rehacher: boolean } | undefined
     if (CODE_EQUIPE.test(code)) {
       const membres = await st.membres(commerceId)
       const resultats = await Promise.all(membres.map((m) => pinCorrect(code, m.code)))
       const i = resultats.findIndex((r) => r.ok)
-      if (i >= 0) trouve = { membre: membres[i].membre, rehacher: resultats[i].rehacher }
+      if (i >= 0) trouve = { membre: membres[i].membre, code: membres[i].code, rehacher: resultats[i].rehacher }
     }
     if (!trouve) {
       if (!(await schemaCartiz())) throw new ErreurMigrationManquante('equipe')
@@ -1396,7 +1401,8 @@ export async function creerServeur(o: OptionsServeur) {
       throw err(401, 'Code équipe incorrect.')
     }
     await limiteur.succes(cleIp(ip))
-    if (trouve.rehacher) await rehacher(code, (p) => st.majMembre(trouve.membre, p))
+    // Code seul, conditionné au hash vérifié : ni un nouveau code ni un nom changés entre-temps ne sont écrasés.
+    if (trouve.rehacher) await rehacher(code, (p) => st.majCodeMembreSi(commerceId, trouve.membre.id, trouve.code, p))
     return trouve.membre
   }
 
@@ -1440,8 +1446,10 @@ export async function creerServeur(o: OptionsServeur) {
   }
 
   // Version du PIN par commerce, dans `meta` (clé `version_pin:<commerce>`, absente = 0) ; gardée en mémoire après la
-  // 1re lecture (même principe que `versionAcces`). Seul PUT /commerces/:id/pin l'incrémente : les sessions `commerce`
-  // émises avant (champ `vp` du jeton) sont alors refusées. Sessions admin et équipe non concernées.
+  // 1re lecture (même principe que `versionAcces` : une instance qui a l'ancienne valeur en cache ne voit pas une
+  // rotation faite par une autre — sans effet à une instance, docs/SECURITE.md § 4). Seul PUT /commerces/:id/pin
+  // l'incrémente : les sessions `commerce` émises avant (champ `vp` du jeton) sont alors refusées. Sessions admin et
+  // équipe non concernées.
   const cleVersionPin = (commerceId: string) => `version_pin:${commerceId}`
   const versionsPin = new Map<string, number>()
   async function versionPin(commerceId: string): Promise<number> {
@@ -1452,12 +1460,40 @@ export async function creerServeur(o: OptionsServeur) {
     versionsPin.set(cle, v)
     return v
   }
-  /** Changement du PIN commerce : version + 1 (relue en base), toutes les sessions `commerce` antérieures tombent. */
-  async function incrementerVersionPin(commerceId: string) {
+
+  /**
+   * Changement du PIN commerce (revue Codex points 3 et 4) : version + 1 PUIS nouveau PIN, dans une `transaction`, les
+   * deux écritures conditionnées à ce qui a été relu dedans (`majMetaSi`, `majPinSi`). SQLite : tout ou rien. Supabase
+   * (pas de transaction multi-requêtes) : une panne entre les deux laisse la version incrémentée et l'ancien PIN —
+   * sessions mortes, jamais « nouveau PIN + anciennes sessions vivantes ». Deux rotations simultanées : la perdante
+   * trouve la version ou le PIN déjà changés → ErreurConflit (409), jamais la même version écrite deux fois.
+   * Le cache n'est mis à jour qu'une fois le PIN écrit (il retarde sur la base, jamais d'avance : `ouvrirSession`).
+   */
+  async function changerPinCommerce(commerceId: string, pinClair: string) {
     const cle = cleVersionPin(commerceId)
-    const v = (Number(await st.meta(cle)) || 0) + 1
-    await st.majMeta(cle, String(v))
-    versionsPin.set(cle, v)
+    await versionPin(commerceId) // cache chaud : pendant la rotation, les ouvertures de session lisent l'ancienne version
+    const nouveau = await hacherPin(pinClair) // scrypt hors transaction (SQLite : ne pas la garder ouverte pendant le calcul)
+    let versionEcrite = false
+    try {
+      const v = await st.transaction(async () => {
+        const lue = await st.meta(cle)
+        const ancien = await st.pin(commerceId)
+        const suivante = (Number(lue) || 0) + 1
+        if (!ancien) throw err(404, 'Commerce introuvable.')
+        versionEcrite = true // une panne pendant l'écriture laisse un doute : relire la base ensuite
+        if (!(await st.majMetaSi(cle, lue, String(suivante)))) {
+          versionEcrite = false // rien écrit : une autre rotation est passée
+          throw new ErreurConflit(`Version du PIN modifiée entre-temps (${commerceId}).`)
+        }
+        if (!(await st.majPinSi(commerceId, ancien, nouveau))) throw new ErreurConflit(`PIN modifié entre-temps (${commerceId}).`)
+        return suivante
+      })
+      versionsPin.set(cle, v)
+    } catch (e) {
+      // Version peut-être écrite (Supabase) ou annulée (SQLite) : la base fait foi à la prochaine lecture.
+      if (versionEcrite) versionsPin.delete(cle)
+      throw e
+    }
   }
 
   /** Session de l'en-tête X-Session (absente → undefined). Jeton falsifié, expiré, révoqué ou PIN changé depuis → 401. */
@@ -1550,8 +1586,13 @@ export async function creerServeur(o: OptionsServeur) {
       c.role = corps.role
       c.commerceId = commerceId
       if (corps.role === 'commerce') {
+        // Revue Codex point 2 : la version tamponnée est celle d'AVANT la vérification ; si une rotation s'est terminée
+        // pendant (version changée), le PIN vérifié peut être l'ancien → refus, on se reconnecte avec le nouveau.
+        // Aucun `await` entre ce dernier contrôle et la signature du jeton (plus bas).
+        const avant = await versionPin(commerceId)
         await verifierPinCommerce(ip, commerceId, secret(corps.pin, 'pin'))
-        c.vp = await versionPin(commerceId)
+        if ((await versionPin(commerceId)) !== avant) throw err(401, 'Le code du commerce vient de changer : déverrouillez à nouveau.')
+        c.vp = avant
       } else {
         const membre = await verifierCodeEquipe(ip, commerceId, secret(corps.code, 'code'))
         c.membreId = membre.id
@@ -2961,8 +3002,7 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'pin' && m === 'PUT') {
       await exigerCommercant(req, id)
       const corps = await lireCorps(req)
-      await st.majPin(id, await hacherPin(pinNeuf(corps.pin)))
-      await incrementerVersionPin(id)
+      await changerPinCommerce(id, pinNeuf(corps.pin))
       return { json: { ok: true } }
     }
 

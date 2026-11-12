@@ -153,6 +153,41 @@ en cours, **combiner avec une rotation de `SESSION_SECRET` (§ 2)** — c'est el
 immédiatement. (La révocation unitaire existe aussi : `DELETE /api/v1/sessions` pour sa propre
 session, et `POST /commerces/<id>/clients/<clientId>/revocation-acces` côté client.)
 
+**Atomicité et concurrence de la rotation** (revue Codex finale, points 1 à 4) — ce qui est garanti, et
+le résidu assumé :
+- *Ordre « fermé »* : la version est écrite **avant** le nouveau PIN, dans `st.transaction(...)`, et
+  chacune des deux écritures est conditionnée à ce qui a été relu dans la transaction (`majMetaSi` :
+  version encore égale à la valeur lue ; `majPinSi` : hash + sel encore égaux à ceux lus). Le scrypt du
+  nouveau PIN est calculé avant d'ouvrir la transaction.
+- *SQLite* : vraie transaction sérialisée — une panne sur l'une ou l'autre écriture annule tout
+  (ancien PIN, anciennes sessions valables) ; deux rotations simultanées passent l'une après l'autre,
+  chacune avec sa propre version (testé : `tests/correction-codex-point3.test.ts`, triggers `RAISE(ABORT)`).
+- *Supabase* : PostgREST n'a **pas** de transaction multi-requêtes (et aucune migration n'est ajoutée
+  pour une fonction SQL). Chaque écriture est atomique à elle seule et conditionnelle : deux rotations
+  qui ont relu la même version → la perdante reçoit **409**, jamais la même version écrite deux fois ;
+  une rotation dont le PIN relu a changé entre-temps → 409, son PIN n'écrase pas l'autre. **Résidu** :
+  une panne (réseau, arrêt du processus) **entre** les deux écritures laisse la version incrémentée et
+  l'**ancien** PIN : toutes les sessions commerce sont fermées, l'ancien PIN rouvre une session, et le
+  gérant refait le changement. C'est l'état « fermé » choisi : jamais « nouveau PIN + anciennes
+  sessions encore valables ». (Testé avec le faux PostgREST : pannes ciblées, barrière, entrelacement.)
+- *Ouverture de session pendant une rotation* : la version tamponnée dans le jeton est lue **avant** la
+  vérification du PIN et relue juste après ; si elle a changé (rotation terminée pendant la
+  vérification), l'ouverture est refusée (**401**, « le code du commerce vient de changer ») — un jeton
+  obtenu avec l'ancien PIN ne peut pas porter la nouvelle version. Le re-hachage d'un PIN ou d'un code
+  équipe à l'ancien format (SHA-256 → scrypt) ne remplace le hash que s'il est encore celui qui vient
+  d'être vérifié : une rotation intercalée n'est jamais écrasée. *Résidu (Supabase seulement)* : si le
+  cache de version de l'instance est froid (redémarrage, ou relecture après une rotation en échec)
+  **pendant** une rotation en cours sur la même instance, une ouverture avec l'ancien PIN peut lire
+  la version déjà incrémentée, avant que le PIN ne soit écrit — fenêtre de quelques millisecondes,
+  rotation et connexion simultanées, pas de cas connu en pratique.
+- *Plusieurs instances* (revue Codex finale, point 5) : la version est gardée en mémoire par instance
+  après la 1re lecture, **même principe que `versionAcces`** (liens d'accès client). Une instance qui a
+  l'ancienne version en cache ne voit pas une rotation faite par une **autre** instance : elle accepte
+  les anciennes sessions commerce jusqu'à son redémarrage. **Sans effet aujourd'hui** : Render ne fait
+  tourner qu'**une** instance (même hypothèse que le cache des révocations, `server/README.md`). À
+  revoir avant tout passage à plusieurs instances (relecture en base ou invalidation entre instances),
+  et pendant un déploiement à chevauchement, redémarrer après une rotation faite au même moment.
+
 **`PIN_ASIAN_HOME` ne sert qu'à l'initialisation.** Changer la variable sur Render **ne remplace pas**
 le PIN enregistré (il n'est lu qu'à la création d'une base vide, `server/app.ts:839`). Après un
 `PUT /pin`, mettre la variable à jour quand même, pour cohérence — mais ce n'est pas elle qui fait la

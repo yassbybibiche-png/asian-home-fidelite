@@ -325,15 +325,22 @@ accepté pour la compatibilité (à déprécier quand tous les clients auront ba
 ### Jetons de session (P0-S1)
 
 - Forme : `v1.<base64url(JSON)>.<base64url(HMAC-SHA256(SESSION_SECRET, <base64url(JSON)>))>`, contenu
-  `{ jti (uuid), role, commerceId?, membreId?, nom?, exp (secondes unix) }`. Signé, **pas chiffré** : rien de secret dedans
-  (ni PIN ni code). Vérification de la signature à temps constant, puis expiration, puis révocation.
+  `{ jti (uuid), role, commerceId?, membreId?, nom?, vp?, exp (secondes unix) }` — `vp` (rôle `commerce` seulement) :
+  version du PIN du commerce à l'émission (absente = 0, jetons émis avant son introduction). Signé, **pas chiffré** : rien
+  de secret dedans (ni PIN ni code). Vérification de la signature à temps constant, puis expiration, puis révocation,
+  puis (rôle `commerce`) `vp` comparé à la version courante du PIN (`meta`, clé `version_pin:<commerce>`).
 - Durées : gérant et admin 8 h, équipe (caisse) 12 h. Pas de renouvellement : à l'expiration, le front redemande le PIN / code.
 - Révocation : `DELETE /sessions` → mémoire du processus + table `sessions_revoquees` (migration 0005 : `jti`, `expire_le`) ;
   les révocations expirées sont supprimées au passage. Sans la table (0005 pas appliquée) : révocation en mémoire
   seulement (perdue au redémarrage — le jeton expire de toute façon), aucune erreur. Un « non révoqué » lu en base est
   gardé 5 min en mémoire (Render = 1 instance, et toute révocation passe d'abord par la mémoire).
-- Membre retiré de l'équipe → sa session tombe aussitôt (le membre est relu à chaque requête). Limite : changer un PIN
-  ou un code ne ferme **pas** les sessions déjà ouvertes (elles expirent en 8 h / 12 h ; « Verrouiller » les ferme).
+- Membre retiré de l'équipe → sa session tombe aussitôt (le membre est relu à chaque requête).
+- Changer le **PIN commerce** (`PUT /commerces/<id>/pin`) ferme aussitôt toutes les sessions `commerce` de CE commerce
+  (version + 1 → `vp` périmé → 401), après un redémarrage aussi ; ni les autres commerces, ni les sessions admin ou
+  équipe. Rotation dans une transaction, écritures conditionnelles : détails et limites (Supabase sans transaction
+  multi-requêtes, cache mémoire à plusieurs instances) dans `docs/SECURITE.md` § 4. Limite : changer le **PIN admin**
+  (`ADMIN_PIN`) ou un **code équipe** ne ferme **pas** les sessions déjà ouvertes (elles expirent en 8 h / 12 h ;
+  « Verrouiller » les ferme ; rotation de `SESSION_SECRET` pour tout fermer).
 - Front : le PIN / code n'est envoyé qu'à `POST /sessions` ; le jeton est gardé dans le coffre chiffré de l'onglet
   (`src/data/coffrePin.ts`). 503 / ancien serveur / réseau → repli transparent sur le PIN en en-tête, comme avant.
 
