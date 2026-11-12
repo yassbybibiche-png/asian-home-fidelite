@@ -43,6 +43,9 @@ export interface ConfigProgramme {
  */
 export type TypeLot = 'lot' | 'points' | 'perdant'
 
+/** Accès à la roue (R2) : voir `Commerce.modeAccesRoue`. */
+export type ModeAccesRoue = 'libre' | 'visite'
+
 export interface Lot {
   /**
    * Identifiant stable (R1) : généré à la création, jamais réattribué, conservé quand le lot est renommé. Absent des
@@ -54,6 +57,11 @@ export interface Lot {
   type?: TypeLot
   /** Montant de la consolation (1 à 10 000 points) si `type` vaut 'points' (crédit au tirage : lot R2). */
   points?: number
+  /**
+   * Plafond journalier (R2) d'un lot de type 'lot' : au plus N sorties par jour, tous clients confondus ; atteint, le
+   * lot n'est plus tiré ni affiché jusqu'au lendemain. Absent / 0 = illimité. Ignoré pour 'points' et 'perdant'.
+   */
+  plafondJour?: number
   libelle: string
   /** En %, ex. 30. Si le total ≠ 100, les chances sont recalculées au prorata. */
   probabilite: number
@@ -83,6 +91,17 @@ export interface Commerce {
   seuilTampons: number
   /** Lots de la roulette : texte libre + probabilité simple. */
   lots: Lot[]
+  /**
+   * Accès à la roue (R2) : 'libre' = 1 tirage par jour dès l'identification ; 'visite' = il faut aussi une visite
+   * validée au comptoir le jour même. Absent = 'visite' (configs d'avant R2 : comportement inchangé) ; les nouveaux
+   * commerces sont créés en 'libre' (`nouveauCommerce`).
+   */
+  modeAccesRoue?: ModeAccesRoue
+  /**
+   * Lots physiques (type 'lot') gagnés au plus par client sur 30 jours glissants (R2), remis ou non ; au-delà, la roue
+   * ne tire plus que points / perdant pour ce client. Absent = 4 (`LIMITE_GAINS_MOIS_DEFAUT`), 0 = illimité.
+   */
+  limiteGainsMois?: number
   reglesReponseAuto: ReglesReponseAuto
   actif: boolean
   creeLe: string
@@ -487,8 +506,10 @@ export interface Tirage {
   lotId?: string
   /** Type du lot figé au tirage (R1) ; absent des tirages d'avant R1 (déduit alors du libellé : `typeTirage`). */
   typeLot?: TypeLot
+  /** Points crédités au client par ce tirage (R2, lot de type 'points' tiré par le serveur) ; absent sinon. */
+  points?: number
   date: string
-  /** Code gagnant à montrer au comptoir (tirages faits par le serveur). */
+  /** Code gagnant à montrer au comptoir (tirages faits par le serveur ; depuis R2, lots de type 'lot' seulement). */
   code?: string
   /** Lot remis au comptoir après vérification du code en caisse (P0-U3) : un code = une remise. */
   remis?: { le: string; par: EntreeJournal['auteur'] }

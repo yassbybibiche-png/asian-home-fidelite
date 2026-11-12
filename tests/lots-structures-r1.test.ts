@@ -309,11 +309,11 @@ describe('R1 : serveur (SQLite) — validation, tirage par id, consolation', () 
     ])
     const { client, tirage } = await tirer()
     assert.deepEqual([tirage.lot, tirage.lotId, tirage.type, tirage.perdant], ['+10 points', 'lot-conso', 'points', true])
-    const g = await api('GET', `/commerces/${AH}/caisse/gains/${tirage.code}`, undefined, CODE)
-    assert.equal(g.contenu.gain.statut, 'consolation')
-    const r = await api('POST', `/commerces/${AH}/caisse/gains/${tirage.code}/remise`, undefined, CODE)
-    assert.equal(r.statut, 409)
-    assert.match(r.contenu.erreur, /consolation en points/)
+    // R2 (brief : « aucun code généré pour un tirage points ») : plus de code à vérifier en caisse pour une consolation.
+    assert.equal(tirage.code, undefined)
+    const etat = (await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu as { tirages: Tirage[] }
+    const enBase = etat.tirages.find((t) => t.clientId === client.id)!
+    assert.deepEqual([enBase.typeLot, enBase.code, statutGain(enBase)], ['points', undefined, 'consolation'])
     const carte = (await api('GET', `/cartes/${client.id}`)).contenu
     assert.equal(carte.jeu.codeDuJour, null)
     assert.deepEqual(carte.historiqueLots, [], 'pas de lot physique dans l’historique')

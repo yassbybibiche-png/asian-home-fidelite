@@ -659,7 +659,9 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
 
       const jeu = await api('POST', `/commerces/${AH}/tirages`, { contact: '0033612345678' })
       assert.equal(jeu.statut, 201)
-      assert.match(jeu.contenu.code, /^[A-Z2-9]{6}$/)
+      // R2 : pas de code pour une consolation en points (seed : « +10 points » à 30 %).
+      if (jeu.contenu.type === 'points') assert.equal(jeu.contenu.code, undefined)
+      else assert.match(jeu.contenu.code, /^[A-Z2-9]{6}$/)
       assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).statut, 409)
       assert.equal(f.tables.tirages.length, 1)
 

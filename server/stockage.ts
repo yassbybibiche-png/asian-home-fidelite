@@ -116,6 +116,8 @@ export interface Stockage {
   majClient(c: Client): P<void>
   tirages(commerceId: string): P<Tirage[]>
   tiragesClient(commerceId: string, clientId: string): P<Tirage[]>
+  /** Tirages du commerce datés de `depuis` (ISO, inclus) ou après, du plus récent au plus ancien (R2 : plafonds du jour). */
+  tiragesDepuis(commerceId: string, depuis: string): P<Tirage[]>
   ajouterTirage(t: Tirage): P<void>
   /** Tirages d'un commerce portant ce code gagnant (déjà normalisé), du plus récent au plus ancien. */
   tiragesParCode(commerceId: string, code: string): P<Tirage[]>
@@ -351,6 +353,7 @@ export function ouvrirStockage(fichier: string) {
     majClient: db.prepare('UPDATE clients SET donnees = ? WHERE id = ?'),
     tirages: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? ORDER BY date DESC'),
     tiragesClient: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? AND client_id = ?'),
+    tiragesDepuis: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? AND date >= ? ORDER BY date DESC'),
     ajoutTirage: db.prepare('INSERT INTO tirages (id, commerce_id, client_id, date, donnees) VALUES (?, ?, ?, ?, ?)'),
     tiragesParCode: db.prepare("SELECT donnees FROM tirages WHERE commerce_id = ? AND json_extract(donnees, '$.code') = ? ORDER BY date DESC"),
     remettreTirage: db.prepare("UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL"),
@@ -439,6 +442,7 @@ export function ouvrirStockage(fichier: string) {
 
     tirages: (commerceId: string) => lire<Tirage>(q.tirages.all(commerceId)),
     tiragesClient: (commerceId: string, clientId: string) => lire<Tirage>(q.tiragesClient.all(commerceId, clientId)),
+    tiragesDepuis: (commerceId: string, depuis: string) => lire<Tirage>(q.tiragesDepuis.all(commerceId, depuis)),
     ajouterTirage: (t: Tirage) => inserer(q.ajoutTirage, t.id, t.commerceId, t.clientId, t.date, JSON.stringify(t)),
     tiragesParCode: (commerceId: string, code: string) => lire<Tirage>(q.tiragesParCode.all(commerceId, code)),
     marquerTirageRemis: (t: Tirage) => Number(q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId).changes) > 0,

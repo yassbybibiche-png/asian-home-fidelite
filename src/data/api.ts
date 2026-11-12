@@ -86,10 +86,14 @@ export interface ResultatTirage {
   lotId?: string
   /** Type du lot tiré (R1) : 'points' = consolation. Absent d'un serveur d'avant R1. */
   type?: TypeLot
-  code: string
+  /** Code à montrer au comptoir : lot physique seulement (depuis R2, absent pour une consolation ou un perdant). */
+  code?: string
   date: string
   /** Rien à retirer au comptoir (perdant ou consolation en points) : pas de code à montrer. */
   perdant: boolean
+  /** Consolation en points (R2) : points crédités sur la carte par ce tirage, et nouveau solde. */
+  points?: number
+  solde?: number
 }
 
 /** GET …/google : `configure` = variables Google présentes sur le serveur ; `connecte` = consentement donné. */
@@ -192,6 +196,8 @@ export type ChampsReglages = Partial<
     | 'programme'
     | 'relancesAuto'
     | 'conservationMois'
+    | 'modeAccesRoue'
+    | 'limiteGainsMois'
   >
 > & { testsAB?: { accroche?: { actif: boolean } } }
 

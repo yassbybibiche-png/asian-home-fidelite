@@ -29,7 +29,11 @@ export function programmePublic(c: Pick<Commerce, 'programme' | 'seuilTampons'>)
   }
 }
 
-export function commercePublic(c: Commerce): CommercePublic {
+/**
+ * `plafonnes` (R2) : ids des lots physiques ayant atteint leur plafond du jour (`lotsPlafonnes`, calculé par le
+ * serveur) — retirés de la roue et de la liste « À gagner aujourd'hui » jusqu'au lendemain.
+ */
+export function commercePublic(c: Commerce, plafonnes: ReadonlySet<string> = new Set()): CommercePublic {
   const { couleur, fond, banniere } = c.apparence ?? {}
   return {
     id: c.id,
@@ -46,7 +50,10 @@ export function commercePublic(c: Commerce): CommercePublic {
     // Jouables seulement (un lot à 0 % n'apparaît pas sur la roue), dans l'ordre : la roue publique a des secteurs égaux.
     // R1 : id (la roue retrouve le lot tiré par son id, jamais par son libellé) + type résolu (consolation affichée
     // comme telle). Jamais la probabilité, ni le coût, ni le montant de points (liste blanche, audit F-05).
-    lots: lotsJouables(normaliserLots(c.lots)).map((l) => ({ id: l.id, libelle: l.libelle, type: l.type })),
+    // R2 : jamais le plafond ni la limite de gains — seulement l'absence des lots plafonnés aujourd'hui.
+    lots: lotsJouables(normaliserLots(c.lots))
+      .filter((l) => !plafonnes.has(l.id))
+      .map((l) => ({ id: l.id, libelle: l.libelle, type: l.type })),
     actif: c.actif,
     demo: !!c.demo,
     ...(c.catalogue ? { catalogue: c.catalogue.map((r) => ({ nom: r.nom, cout: r.cout, ...(r.description ? { description: r.description } : {}) })) } : {}),

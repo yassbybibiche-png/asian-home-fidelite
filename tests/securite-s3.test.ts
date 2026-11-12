@@ -239,7 +239,8 @@ describe('P0-S3 : parcours public avec le client du front (fiche publique unique
   test('inscription → visite → tirage : la roue publique (secteurs égaux) contient le lot tiré par le serveur', async () => {
     const complet = await api.creerCommerce(ADMIN, { nom: 'Chez Lin', type: 'restaurant', lienGoogle: '', pin: '5555' })
     const acces = { role: 'commerce' as const, commerceId: complet.id, pin: '5555' }
-    await api.majCommerce(complet.id, acces, { lots: REGLAGES.lots, programme: REGLAGES.programme })
+    // R2 : nouveau commerce en accès libre par défaut — ce parcours décrit l'accès « visite ».
+    await api.majCommerce(complet.id, acces, { lots: REGLAGES.lots, programme: REGLAGES.programme, modeAccesRoue: 'visite' })
 
     // Ce que la page Jouer charge : la fiche publique.
     const publique = await api.commerce(complet.id)

@@ -1,5 +1,5 @@
 // Logique pure de la roulette : tirage pondéré, anti-abus, géométrie de la roue.
-import type { Client, Lot, Tirage, TypeLot } from '../types'
+import type { Client, Commerce, Lot, ModeAccesRoue, Tirage, TypeLot } from '../types'
 
 /**
  * Lot affichable sur la roue. Vue commerçant : avec sa probabilité. Vue publique (pages client) : libellé seul,
@@ -47,18 +47,79 @@ export function aVisiteDuJour(client: Client, commerceId: string, maintenant = n
 
 export type StatutJeu = 'pret' | 'sansVisite' | 'dejaJoue'
 
+/** Mode d'accès effectif (R2) : seul 'libre' explicite ouvre la roue sans visite — absent = 'visite' (configs d'avant R2). */
+export function modeAccesRoue(c: Pick<Commerce, 'modeAccesRoue'>): ModeAccesRoue {
+  return c.modeAccesRoue === 'libre' ? 'libre' : 'visite'
+}
+
 /**
- * 1 participation par visite : il faut une visite validée par le commerçant le jour même,
- * et pas encore de tirage aujourd'hui. Le jeu ne crée jamais de visite lui-même.
+ * 1 tirage par client et par jour, toujours. Mode 'visite' (défaut) : il faut en plus une visite validée par le
+ * commerçant le jour même — le jeu ne crée jamais de visite lui-même. Mode 'libre' (R2) : prêt dès l'identification,
+ * jamais 'sansVisite'.
  */
-export function statutJeu(client: Client, tirages: Tirage[], commerceId: string, maintenant = new Date()): StatutJeu {
+export function statutJeu(client: Client, tirages: Tirage[], commerceId: string, maintenant = new Date(), mode: ModeAccesRoue = 'visite'): StatutJeu {
   if (tirageDuJour(tirages, commerceId, client.id, maintenant)) return 'dejaJoue'
-  if (!aVisiteDuJour(client, commerceId, maintenant)) return 'sansVisite'
+  if (mode !== 'libre' && !aVisiteDuJour(client, commerceId, maintenant)) return 'sansVisite'
   return 'pret'
 }
 
-export function peutJouer(client: Client, tirages: Tirage[], commerceId: string, maintenant = new Date()): boolean {
-  return statutJeu(client, tirages, commerceId, maintenant) === 'pret'
+export function peutJouer(client: Client, tirages: Tirage[], commerceId: string, maintenant = new Date(), mode: ModeAccesRoue = 'visite'): boolean {
+  return statutJeu(client, tirages, commerceId, maintenant, mode) === 'pret'
+}
+
+// ---- Ensemble tirable du jour (roue v2, R2) : plafonds journaliers et limite mensuelle de gains ----
+
+export const LIMITE_GAINS_MOIS_DEFAUT = 4
+export const LIMITE_GAINS_MOIS_MAX = 31
+export const PLAFOND_JOUR_MAX = 10_000
+/** Fenêtre de la limite de gains : 30 jours glissants. */
+const FENETRE_GAINS_MS = 30 * 24 * 3600 * 1000
+
+/** Limite effective de lots physiques gagnés par client sur 30 jours : absente (ou invalide) = 4 ; 0 = illimité. */
+export function limiteGainsMois(c: Pick<Commerce, 'limiteGainsMois'>): number {
+  const n = c.limiteGainsMois
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : LIMITE_GAINS_MOIS_DEFAUT
+}
+
+/** Début du jour calendaire local de `maintenant` (même jour que `tirageDuJour`), en ISO : borne de lecture des tirages du jour. */
+export function debutDuJour(maintenant: Date): string {
+  return new Date(maintenant.getFullYear(), maintenant.getMonth(), maintenant.getDate()).toISOString()
+}
+
+type LotType = Pick<Lot, 'libelle' | 'plafondJour'> & { id: string; type: TypeLot }
+
+/** Le tirage `t` a-t-il donné ce lot ? Par id (R1+) ; tirages d'avant R1 (sans id) : par libellé. */
+const tirageDuLot = (t: Tirage, l: LotType) => (t.lotId ? t.lotId === l.id : t.lot === l.libelle)
+
+/**
+ * Ids des lots physiques ayant atteint leur `plafondJour` aujourd'hui (tous clients du commerce confondus). `tirages` :
+ * au moins ceux du jour du commerce (les autres jours sont ignorés). Lots 'points' / 'perdant' : jamais plafonnés.
+ */
+export function lotsPlafonnes(lots: LotType[], tirages: Tirage[], maintenant = new Date()): Set<string> {
+  const plafonnes = new Set<string>()
+  const duJour = tirages.filter((t) => memeJour(new Date(t.date), maintenant))
+  for (const l of lots) {
+    const plafond = l.plafondJour ?? 0
+    if (l.type !== 'lot' || !(plafond > 0)) continue
+    if (duJour.filter((t) => tirageDuLot(t, l)).length >= plafond) plafonnes.add(l.id)
+  }
+  return plafonnes
+}
+
+/** Lots physiques GAGNÉS (remis ou non) par ce client sur les 30 derniers jours. `tiragesClient` : ses tirages. */
+export function gainsSur30Jours(tiragesClient: Tirage[], maintenant = new Date()): number {
+  const depuis = maintenant.getTime() - FENETRE_GAINS_MS
+  return tiragesClient.filter((t) => estGainPhysique(typeTirage(t)) && new Date(t.date).getTime() > depuis).length
+}
+
+/**
+ * Lots tirables pour ce client aujourd'hui (R2) : tous, sauf les lots physiques plafonnés du jour, et sauf TOUS les lots
+ * physiques si le client a déjà gagné `limite` lots sur 30 jours (limite 0 = illimitée). Points et perdant ne sont jamais
+ * retirés : c'est le repli consolation. L'ordre est conservé ; le tirage pondéré renormalise au prorata (`tirerLot`).
+ */
+export function lotsTirables<T extends LotType>(lots: T[], o: { plafonnes: ReadonlySet<string>; gainsMois: number; limite: number }): T[] {
+  const limiteAtteinte = o.limite > 0 && o.gainsMois >= o.limite
+  return lots.filter((l) => l.type !== 'lot' || (!limiteAtteinte && !o.plafonnes.has(l.id)))
 }
 
 export interface Secteur {

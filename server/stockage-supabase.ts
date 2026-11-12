@@ -243,6 +243,10 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       lirePages<Tirage>('tirages', (debut, fin) =>
         sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('client_id', clientId).order('date', { ascending: true }).order('id').range(debut, fin),
       ),
+    tiragesDepuis: (commerceId, depuis) =>
+      lirePages<Tirage>('tirages', (debut, fin) =>
+        sb.from('tirages').select('donnees').eq('commerce_id', commerceId).gte('date', depuis).order('date', { ascending: false }).order('id').range(debut, fin),
+      ),
     ajouterTirage: async (t) =>
       void (await ok('tirages', sb.from('tirages').insert({ id: t.id, commerce_id: t.commerceId, client_id: t.clientId, date: t.date, donnees: t }))),
     // Code gagnant et remise (P0-U3) : dans le JSONB `donnees`, sans migration. La table `tirages` n'a pas de colonne

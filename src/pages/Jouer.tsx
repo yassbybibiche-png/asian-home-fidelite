@@ -4,7 +4,7 @@ import { useRoute } from '../router'
 import type { Client, Commerce, CommercePublic, Tirage, TypeLot } from '../types'
 import { analyserContact } from '../lib/fidelite'
 import { normaliserLots, typeTirage } from '../lib/lots'
-import { lotsJouables, peutJouer, type LotRoue, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
+import { gainsSur30Jours, limiteGainsMois, lotsJouables, lotsPlafonnes, lotsTirables, modeAccesRoue, peutJouer, type LotRoue, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
 import {
   apresVerification,
   ETAPES_VALIDATION,
@@ -308,7 +308,8 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
   const trouver = (id: string | null) => (id ? etat.clients.find((c) => c.id === id && c.commerceId === commerce.id) : undefined)
   const joueur = trouver(joueurId)
   const memorise = trouver(memoriseId)
-  const statut = joueur && etape === 'pret' ? statutJeu(joueur, etat.tirages, commerce.id) : undefined
+  const mode = modeAccesRoue(commerce)
+  const statut = joueur && etape === 'pret' ? statutJeu(joueur, etat.tirages, commerce.id, new Date(), mode) : undefined
   const dejaJoue = joueur && statut === 'dejaJoue' ? tirageDuJour(etat.tirages, commerce.id, joueur.id) : undefined
   const visiteValidee = useVisiteValidee(statut)
 
@@ -325,10 +326,19 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
 
   function tourner() {
     // Pas de visite validée aujourd'hui ou déjà joué : rien ne se passe (le jeu ne crée jamais de visite).
-    if (!joueur || etape !== 'pret' || !peutJouer(joueur, etat.tirages, commerce.id)) return
+    if (!joueur || etape !== 'pret' || !peutJouer(joueur, etat.tirages, commerce.id, new Date(), mode)) return
     // R1 : lots normalisés (id + type résolus) ; le tirage fige l'id et le type du lot, comme le serveur.
-    const parts = secteurs(normaliserLots(commerce.lots))
-    const secteur = parts[tirerLot(commerce.lots)]
+    // R2 : même ensemble tirable que le serveur (plafonds du jour, limite de gains sur 30 jours).
+    const normalises = normaliserLots(commerce.lots)
+    const tirables = lotsJouables(
+      lotsTirables(normalises, {
+        plafonnes: lotsPlafonnes(normalises, etat.tirages.filter((x) => x.commerceId === commerce.id)),
+        gainsMois: gainsSur30Jours(etat.tirages.filter((x) => x.commerceId === commerce.id && x.clientId === joueur.id)),
+        limite: limiteGainsMois(commerce),
+      }),
+    )
+    if (!tirables.length) return
+    const secteur = secteurs(normalises).find((s) => s.lot.id === tirables[tirerLot(tirables)].id)!
     const tirage: Tirage = {
       id: `ti-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       commerceId: commerce.id,

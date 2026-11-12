@@ -22,6 +22,8 @@ async function preparerCommerce(request: APIRequestContext) {
       nom: `E2E Resto ${Date.now()}`,
       type: 'restaurant',
       pin: PIN,
+      // Roue v2 R2 : un nouveau commerce est en accès libre par défaut — ce parcours décrit l'accès « visite ».
+      modeAccesRoue: 'visite',
       lots: [
         { libelle: LOT, probabilite: 100 },
         { libelle: 'Perdu', probabilite: 0 },

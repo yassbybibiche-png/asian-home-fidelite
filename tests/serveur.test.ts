@@ -87,7 +87,7 @@ describe('Serveur /api/v1', () => {
   })
 
   test('création d’un commerce : PIN admin obligatoire', async () => {
-    const corps = { nom: 'Chez Lin', type: 'restaurant', lienGoogle: 'https://g.page/r/x/review', pin: '4321', seuilTampons: 3, recompense: 'Un dessert offert' }
+    const corps = { nom: 'Chez Lin', type: 'restaurant', lienGoogle: 'https://g.page/r/x/review', pin: '4321', seuilTampons: 3, recompense: 'Un dessert offert', modeAccesRoue: 'visite' }
     assert.equal((await srv.api('POST', '/commerces', corps)).statut, 401)
     assert.equal((await srv.api('POST', '/commerces', corps, { 'X-Admin-PIN': '11111111' })).statut, 401)
     assert.equal((await srv.api('POST', '/commerces', { ...corps, pin: '12' }, { 'X-Admin-PIN': ADMIN })).statut, 400)
@@ -98,6 +98,8 @@ describe('Serveur /api/v1', () => {
     assert.equal(r.contenu.commerce.seuilTampons, 3)
     // Les défauts de `nouveauCommerce` sont repris (lots, règles).
     assert.ok(r.contenu.commerce.lots.length >= 2)
+    // R2 : un nouveau commerce est en accès libre par défaut ; ce parcours décrit l'accès « visite », demandé ici.
+    assert.equal(r.contenu.commerce.modeAccesRoue, 'visite')
     assert.equal(r.contenu.commerce.reglesReponseAuto.auto5Etoiles, true)
     assert.doesNotMatch(JSON.stringify(r.contenu), /4321/)
   })
@@ -173,7 +175,9 @@ describe('Serveur /api/v1', () => {
     const etat = await srv.api('GET', `/commerces/${commerceId}/etat`, undefined, pin)
     const libelles = etat.contenu.commerce.lots.map((l: { libelle: string }) => l.libelle)
     assert.ok(libelles.includes(r.contenu.lot))
-    assert.match(r.contenu.code, /^[A-Z2-9]{6}$/)
+    // R2 : pas de code pour une consolation en points (rien à retirer au comptoir).
+    if (r.contenu.type === 'points') assert.equal(r.contenu.code, undefined)
+    else assert.match(r.contenu.code, /^[A-Z2-9]{6}$/)
     assert.equal(etat.contenu.tirages.length, 1)
     assert.equal(etat.contenu.tirages[0].code, r.contenu.code)
 
@@ -318,6 +322,8 @@ describe('V2 : front ↔ serveur (contrat) et carte publique', () => {
   test('parcours complet avec le client du front : création → inscription → visite → tirage → refus → CSV', async () => {
     const commerce = await api.creerCommerce(ADMIN, { nom: 'Chez Lin', type: 'restaurant', lienGoogle: '', pin: '5555' })
     const acces = { role: 'commerce' as const, commerceId: commerce.id, pin: '5555' }
+    // R2 : nouveau commerce en accès libre par défaut — ce parcours décrit l'accès « visite ».
+    await api.majCommerce(commerce.id, acces, { modeAccesRoue: 'visite' })
     await assert.rejects(api.etat(commerce.id, { ...acces, pin: '0000' }), (e: ErreurApi) => e.statut === 401 && /PIN/.test(e.message))
 
     const { client } = await api.inscrirePublic(commerce.id, 'Linh', '06 12 34 56 78')

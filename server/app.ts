@@ -6,13 +6,13 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, CommerceCaisse, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, CommerceCaisse, CommercePublic, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
 import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
-import { lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
+import { debutDuJour, gainsSur30Jours, LIMITE_GAINS_MOIS_MAX, limiteGainsMois, lotsJouables, lotsPlafonnes, lotsTirables, messageGain, modeAccesRoue, normaliserCodeGagnant, PLAFOND_JOUR_MAX, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
 import { cleLibelle, estGainPhysique, estTypeLot, FORMAT_ID_LOT, libellesEnDouble, normaliserLots, POINTS_LOT_MAX, POINTS_LOT_MIN, TYPES_LOT, typeDeduitDuLibelle, typeTirage } from '../src/lib/lots.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
 import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePrive.ts'
@@ -180,6 +180,8 @@ export interface OptionsServeur {
   alerteEmail?: string
   /** Horloge injectable (tests). */
   maintenant?: () => Date
+  /** Hasard du tirage de la roue, dans [0, 1[ (tests) ; absent = Math.random. */
+  alea?: () => number
 }
 
 class ErreurHttp extends Error {
@@ -650,6 +652,15 @@ function lots(v: unknown, existants: Lot[] = []): Lot[] {
     while (!id || ids.has(id)) id = `lot-${randomUUID().slice(0, 13)}`
     ids.add(id)
     const lot: Lot = { id, type, libelle, probabilite: p }
+    // Plafond journalier (R2) : lots physiques seulement ; absent / null / 0 = illimité (rien d'écrit).
+    const plafond = o.plafondJour
+    if (plafond != null) {
+      if (typeof plafond !== 'number' || !Number.isInteger(plafond) || plafond < 0 || plafond > PLAFOND_JOUR_MAX) {
+        throw err(400, `Lot n° ${i + 1} : le plafond du jour doit être un nombre entier (0 = illimité, ${PLAFOND_JOUR_MAX.toLocaleString('fr-FR')} au plus).`)
+      }
+      // Points / perdant ne sont jamais plafonnés : un plafond laissé sur un lot devenu consolation n'est pas gardé.
+      if (plafond > 0 && type === 'lot') lot.plafondJour = plafond
+    }
     if (type === 'points') {
       const n = o.points ?? actuel?.points
       if (typeof n !== 'number' || !Number.isInteger(n) || n < POINTS_LOT_MIN || n > POINTS_LOT_MAX) {
@@ -705,7 +716,7 @@ function apparence(v: unknown): Apparence {
   return a
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB']
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB', 'modeAccesRoue', 'limiteGainsMois']
 
 /**
  * Tests A/B (P2-Q3) : le navigateur n'envoie que `{ accroche: { actif } }` ; les dates de début et de fin sont posées
@@ -785,6 +796,18 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
     const inconnus = Object.keys(o).filter((k) => k !== 'inactif' && k !== 'anniversaire')
     if (inconnus.length) throw err(400, `« relancesAuto » : champ inconnu (${inconnus.join(', ')}).`)
     r.relancesAuto = { inactif: booleen(o.inactif ?? false, 'inactif'), anniversaire: booleen(o.anniversaire ?? false, 'anniversaire') }
+  }
+  if ('modeAccesRoue' in corps) {
+    const v = corps.modeAccesRoue
+    if (v !== 'libre' && v !== 'visite') throw err(400, '« modeAccesRoue » doit valoir « libre » (1 tirage par jour dès l’identification) ou « visite » (visite validée au comptoir le jour même).')
+    r.modeAccesRoue = v
+  }
+  if ('limiteGainsMois' in corps) {
+    const n = corps.limiteGainsMois
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > LIMITE_GAINS_MOIS_MAX) {
+      throw err(400, `« limiteGainsMois » : nombre entier de lots gagnés par client sur 30 jours, de 0 (illimité) à ${LIMITE_GAINS_MOIS_MAX}.`)
+    }
+    r.limiteGainsMois = n
   }
   if ('conservationMois' in corps) {
     const n = corps.conservationMois
@@ -1273,6 +1296,7 @@ export async function creerServeur(o: OptionsServeur) {
     // Ensemble vide : masquage maximal, pas d'échec de démarrage pour les logs.
   }
   const maintenant = o.maintenant ?? (() => new Date())
+  const alea = o.alea ?? Math.random
   const limiteur = creerLimiteurAuth(st, maintenant)
   // P0-S20 : persistance des compteurs publics (migration 0010). Table absente : `enregistrer` lève
   // ErreurMigrationManquante (avertissement une fois, mémoire seulement) ; `charger` renvoie [].
@@ -2222,6 +2246,21 @@ export async function creerServeur(o: OptionsServeur) {
     return c
   }
 
+  /**
+   * Lots physiques plafonnés aujourd'hui (R2). Les tirages du jour ne sont lus que si un lot a un plafond : une config
+   * sans plafond (toutes celles d'avant R2) ne coûte aucune lecture de plus aux routes publiques.
+   */
+  async function plafonnesDuJour(c: Commerce, t = maintenant()): Promise<Set<string>> {
+    const lots = normaliserLots(c.lots ?? [])
+    if (!lots.some((l) => l.type === 'lot' && (l.plafondJour ?? 0) > 0)) return new Set()
+    return lotsPlafonnes(lots, await st.tiragesDepuis(c.id, debutDuJour(t)), t)
+  }
+
+  /** Fiche publique (R2) : sans les lots plafonnés du jour — ils disparaissent de la roue et de « À gagner aujourd'hui ». */
+  async function fichePublique(c: Commerce): Promise<CommercePublic> {
+    return commercePublic(c, await plafonnesDuJour(c))
+  }
+
   async function clientOu404(commerceId: string, id: string): Promise<Client> {
     const c = await st.client(commerceId, id)
     if (!c) throw err(404, 'Client inconnu dans ce commerce.')
@@ -2734,7 +2773,7 @@ export async function creerServeur(o: OptionsServeur) {
         const t = maintenant()
         const duJour = tirageDuJour(tirages, c.id, client.id, t)
         const jeu = {
-          statut: statutJeu(client, tirages, c.id, t),
+          statut: statutJeu(client, tirages, c.id, t, modeAccesRoue(c)),
           lotDuJour: duJour?.lot ?? null,
           // P0-S19 : code gagnant du jour servi UNIQUEMENT au titulaire authentifié (`charge` = jeton client valable
           // de cette carte). Sans jeton : null, même en vue complète (mode transition) — le lot reste affiché, le
@@ -2748,7 +2787,7 @@ export async function creerServeur(o: OptionsServeur) {
           return {
             json: {
               client: { id: client.id, commerceId: c.id, tampons: client.tampons },
-              commerce: commercePublic(c),
+              commerce: await fichePublique(c),
               jeu,
               menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
               acces,
@@ -2775,7 +2814,7 @@ export async function creerServeur(o: OptionsServeur) {
         return {
           json: {
             client: cartePublique(client),
-            commerce: commercePublic(c),
+            commerce: await fichePublique(c),
             jeu,
             menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
             // P1-C3 : historique des lots de la roue (gagnants seulement), sans aucun code — seul celui du jour est servi ci-dessus.
@@ -2898,7 +2937,7 @@ export async function creerServeur(o: OptionsServeur) {
     if (m === 'GET' && (!sous || (sous === 'menu' && !sousId))) limiterIp(req, 'lecture', limites.lectureParIp)
 
     if (!id) {
-      if (m === 'GET') return { json: { commerces: (await st.commerces()).map(commercePublic) } }
+      if (m === 'GET') return { json: { commerces: await Promise.all((await st.commerces()).map(fichePublique)) } }
       if (m === 'POST') {
         await exigerAdmin(req)
         const corps = await lireCorps(req)
@@ -2936,7 +2975,7 @@ export async function creerServeur(o: OptionsServeur) {
         })
         return { json: { commerce: maj } }
       }
-      if (m === 'GET') return { json: { commerce: commercePublic(commerce) } }
+      if (m === 'GET') return { json: { commerce: await fichePublique(commerce) } }
       throw err(405, 'Méthode non autorisée.')
     }
 
@@ -3699,7 +3738,7 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'menu' && !sousId) {
       if (m === 'GET') {
         exigerActif(commerce)
-        return { json: { menu: (await st.menu(id)) ?? { commerceId: id, categories: [], majLe: '' }, commerce: commercePublic(commerce) } }
+        return { json: { menu: (await st.menu(id)) ?? { commerceId: id, categories: [], majLe: '' }, commerce: await fichePublique(commerce) } }
       }
       if (m === 'PUT') {
         await exigerCommercant(req, id)
@@ -3814,32 +3853,72 @@ export async function creerServeur(o: OptionsServeur) {
       const resultat = await st.transaction(async () => {
         const client = charge ? await clientOu401(id, charge.cid) : (await inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain)).client
         const t = maintenant()
-        const statut = statutJeu(client, await st.tiragesClient(id, client.id), id, t)
+        const tiragesClient = await st.tiragesClient(id, client.id)
+        // R2 : mode 'libre' = prêt dès l'identification ; 'visite' (défaut des configs d'avant R2) = comme avant.
+        const statut = statutJeu(client, tiragesClient, id, t, modeAccesRoue(commerce))
         if (statut === 'dejaJoue' || statut === 'sansVisite') return { refus: refusJeu }
         // R1 : lots normalisés (id + type résolus, mêmes ids que la vue publique) ; le tirage fige l'id et le type du lot.
-        const jouables = lotsJouables(normaliserLots(commerce.lots))
-        if (!jouables.length) return { refus: 'Aucun lot n’est configuré pour le moment.' }
-        const tire = jouables[tirerLot(commerce.lots)]
-        const tirage: Tirage = { id: `ti-${randomUUID()}`, commerceId: id, clientId: client.id, lot: tire.libelle, lotId: tire.id, typeLot: tire.type, date: t.toISOString(), code: codeGagnant() }
+        // R2 : ensemble tirable du jour — sans les lots physiques plafonnés aujourd'hui, ni aucun lot physique si le
+        // client a atteint sa limite de gains sur 30 jours ; il reste alors points / perdant (repli consolation).
+        // Probabilités renormalisées au prorata sur ce qui reste (`tirerLot`).
+        const normalises = normaliserLots(commerce.lots)
+        const tirables = lotsTirables(normalises, {
+          plafonnes: await plafonnesDuJour(commerce, t),
+          gainsMois: gainsSur30Jours(tiragesClient, t),
+          limite: limiteGainsMois(commerce),
+        })
+        const jouables = lotsJouables(tirables)
+        if (!jouables.length) {
+          return { refus: lotsJouables(normalises).length ? 'Tous les lots du jour sont partis : revenez demain !' : 'Aucun lot n’est configuré pour le moment.' }
+        }
+        const tire = jouables[tirerLot(jouables, alea())]
+        const points = tire.type === 'points' ? tire.points : undefined
+        const tirage: Tirage = {
+          id: `ti-${randomUUID()}`, commerceId: id, clientId: client.id, lot: tire.libelle, lotId: tire.id, typeLot: tire.type,
+          ...(points ? { points } : {}),
+          date: t.toISOString(),
+          // R2 : aucun code pour une consolation en points (rien à retirer, rien à vérifier au comptoir). Un perdant garde
+          // le sien : la caisse le vérifie et répond « perdant » (épinglé par P0-U3).
+          ...(tire.type !== 'points' ? { code: codeGagnant() } : {}),
+        }
         try {
+          // Enregistré AVANT le crédit des points : l'index unique (client + jour) fait foi — un double appel simultané
+          // est refusé ici et ne crédite jamais deux fois.
           await st.ajouterTirage(tirage)
         } catch (e) {
           // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e — même message unique.
           if (e instanceof ErreurConflit) return { refus: refusJeu }
           throw e
         }
-        return { tirage }
+        // R2 : consolation en points créditée dans la MÊME transaction (client relu juste avant l'écriture : sous
+        // Supabase, verrou optimiste sur sa version — une écriture concurrente de la caisse fait relire et recommencer).
+        let solde: number | undefined
+        if (points) {
+          for (let essai = 1; ; essai++) {
+            const frais = await clientOu401(id, client.id)
+            try {
+              await st.majClient({ ...frais, points: soldePoints(frais) + points })
+              solde = soldePoints(frais) + points
+              break
+            } catch (e) {
+              if (!(e instanceof ErreurConflit) || essai >= 3) throw e
+            }
+          }
+        }
+        return { tirage, solde }
       })
       // Le client éventuellement créé reste inscrit même en cas de refus (la transaction est validée).
       if ('refus' in resultat) throw err(409, resultat.refus!)
-      const { lot, lotId, typeLot, code, date } = resultat.tirage!
+      const { lot, lotId, typeLot, code, date, points } = resultat.tirage!
       // Lot physique seulement (R1) : une consolation en points n'a rien à retirer au comptoir — `perdant` reste le
       // drapeau « pas de code à montrer » des clients existants ; `type` dit si c'est une consolation.
       const physique = estGainPhysique(typeLot!)
       // Mesure anonyme (P2-Q3) : après le tirage enregistré, sans identité ; un échec ici ne change rien au tirage.
       await compter(id, 'tirage')
       if (physique) await compter(id, 'gain')
-      return { statut: 201, json: { lot, lotId, type: typeLot, code, date, perdant: !physique } }
+      // R2 : consolation en points → montant crédité et nouveau solde ; aucun code.
+      const consolation = points ? { points, solde: resultat.solde } : {}
+      return { statut: 201, json: { lot, lotId, type: typeLot, code, date, perdant: !physique, ...consolation } }
     }
 
     if (sous === 'evenements' && !sousId && m === 'POST') {

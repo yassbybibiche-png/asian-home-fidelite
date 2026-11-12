@@ -35,6 +35,9 @@ export function nouveauCommerce(nom: string, type: TypeCommerce, lienGoogle: str
       { id: 'lot-remise-5', type: 'lot', libelle: 'Remise 5 %', probabilite: 30 },
       { id: 'lot-10-points', type: 'points', points: 10, libelle: '+10 points', probabilite: 30 },
     ],
+    // Roue v2 (R2) : accès libre (1 tirage par jour dès l'identification) pour les NOUVEAUX commerces ; une config
+    // existante sans ce champ reste en 'visite'. Limite de gains et plafonds : défauts effectifs (4 / 30 jours, aucun).
+    modeAccesRoue: 'libre',
     reglesReponseAuto: { auto5Etoiles: true, auto4Etoiles: false, brouillonAutres: true },
     // Catalogue d'échange de points pré-rempli (ids stables, conformes à `catalogue()` de server/app.ts).
     catalogue: [
