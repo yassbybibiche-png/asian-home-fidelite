@@ -7,6 +7,10 @@ import type { ClientAPurger } from '../lib/rgpd'
 import type { LotHistorique } from '../lib/carte'
 
 export const MESSAGE_HORS_LIGNE = 'Serveur injoignable — vérifiez la connexion.'
+/** Le délai de la requête (`delaiMs`) a expiré : le serveur répond, mais trop lentement (pas une panne réseau). */
+export const MESSAGE_DELAI_REQUETE = 'Délai dépassé : le serveur met trop longtemps à répondre. Réessayez.'
+/** Délai d'un téléchargement binaire (sauvegarde : lecture paginée de toutes les tables + réception du fichier). */
+export const DELAI_TELECHARGEMENT_MS = 120_000
 
 export class ErreurApi extends Error {
   /** Code HTTP ; 0 = serveur injoignable (réseau coupé, serveur arrêté, délai dépassé). */
@@ -259,6 +263,11 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     if (options.corps !== undefined) entetes['Content-Type'] = 'application/json'
     // Fichier brut (logo) : envoyé tel quel ; le serveur lit le format dans les octets, pas dans cet en-tête.
     if (options.fichier) entetes['Content-Type'] = options.fichier.type || 'application/octet-stream'
+    // Pièce jointe binaire (sauvegarde) : délai propre, le serveur lit toutes les tables avant de répondre.
+    const signal = signalDelai(options.delaiMs ?? (options.binaire ? DELAI_TELECHARGEMENT_MS : delaiMs))
+    // Statut 0 dans les deux cas (réessais de réveil inchangés) ; seul le message distingue notre délai expiré
+    // (signal annulé, pendant l'envoi ou la lecture du corps) d'une panne réseau.
+    const injoignable = () => new ErreurApi(0, signal?.aborted ? MESSAGE_DELAI_REQUETE : MESSAGE_HORS_LIGNE)
     let r: Response
     try {
       r = await f(base + chemin, {
@@ -266,10 +275,10 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
         headers: entetes,
         body: options.fichier ?? (options.corps === undefined ? undefined : JSON.stringify(options.corps)),
         cache: 'no-store',
-        signal: signalDelai(options.delaiMs ?? delaiMs),
+        signal,
       })
     } catch {
-      throw new ErreurApi(0, MESSAGE_HORS_LIGNE)
+      throw injoignable()
     }
     if (!r.ok) {
       let message = `Erreur du serveur (${r.status}).`
@@ -288,7 +297,7 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
       // `r.text()` retirerait le BOM UTF-8 du CSV, indispensable pour qu'Excel lise les accents.
       return options.texte ? new TextDecoder('utf-8', { ignoreBOM: true }).decode(await r.arrayBuffer()) : await r.json()
     } catch {
-      throw new ErreurApi(0, MESSAGE_HORS_LIGNE)
+      throw injoignable()
     }
   }
 
