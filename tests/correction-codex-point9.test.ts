@@ -182,7 +182,7 @@ describe('Point Codex 9 — une panne en cours de tournée ne fait plus perdre l
   })
 
   test('prestataire en échec (statut « erreur ») : pas une panne de tournée, aucune relance retentée automatiquement', async () => {
-    const s = await demarrer('prestataire.db', { statut: 500 })
+    const s = await demarrer('prestataire.db', { statut: 400 })
     try {
       await s.troisInactifs()
       await s.ouvrirTableau()

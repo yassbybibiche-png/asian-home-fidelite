@@ -177,11 +177,16 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     }
   }
 
-  /** UPDATE de `donnees` d'un tirage seulement s'il n'est pas déjà remis (`tirages` n'a pas de colonne version). */
-  async function majTirageNonRemis(t: Tirage, activeApres?: string): Promise<boolean> {
+  /**
+   * UPDATE de `donnees` d'un tirage par comparaison-échange (`tirages` n'a pas de colonne version) : non remis, et
+   * `activeLe` / `relanceGainLe` toujours tels que `lu` les a lus (revue Codex 2 R7, F1 — voir `Stockage.majTirageSi`).
+   */
+  async function majTirageSi(t: Tirage, lu: Pick<Tirage, 'activeLe' | 'relanceGainLe'>, activeApres?: string): Promise<boolean> {
     let requete = sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->remis', null)
     // Revue Codex R3 F4 : fenêtre d'activation vérifiée par la base, à l'écriture (texte ISO : ordre = ordre chronologique).
     if (activeApres !== undefined) requete = requete.gt('donnees->>activeLe', activeApres)
+    requete = lu.activeLe === undefined ? requete.is('donnees->activeLe', null) : requete.eq('donnees->>activeLe', lu.activeLe)
+    requete = lu.relanceGainLe === undefined ? requete.is('donnees->relanceGainLe', null) : requete.eq('donnees->>relanceGainLe', lu.relanceGainLe)
     return (await ok<unknown[]>('tirages', requete.select('id'))).length > 0
   }
 
@@ -289,18 +294,11 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       lirePages<Tirage>('tirages', (debut, fin) =>
         sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('donnees->>code', code).order('date', { ascending: false }).order('id').range(debut, fin),
       ),
-    marquerTirageRemis: (t, activeApres) => majTirageNonRemis(t, activeApres),
-    activerTirage: (t) => majTirageNonRemis(t),
+    marquerTirageRemis: (t, activeApres) => majTirageSi(t, t, activeApres),
     tirage: async (commerceId, id) => (await lire<Tirage>('tirages', sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('id', id)))[0],
-    // R7, revue Codex F2 : même procédé (UPDATE conditionnel sur le JSONB, sans migration). La condition porte sur le
-    // marqueur ET sur les champs que d'autres écritures posent (`remis`, `activeLe`) : `donnees` étant réécrit en entier,
-    // une remise ou une activation arrivée entre la lecture et l'écriture n'est jamais effacée (0 ligne → false).
-    marquerRelanceGain: async (t, attendu) => {
-      let requete = sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->remis', null)
-      requete = attendu === undefined ? requete.is('donnees->relanceGainLe', null) : requete.eq('donnees->>relanceGainLe', attendu)
-      requete = t.activeLe === undefined ? requete.is('donnees->activeLe', null) : requete.eq('donnees->>activeLe', t.activeLe)
-      return (await ok<unknown[]>('tirages', requete.select('id'))).length > 0
-    },
+    // R7, revues Codex F2 et F1 (2e revue) : même procédé (UPDATE conditionnel sur le JSONB, sans migration) pour toute
+    // écriture d'un tirage qui part d'une lecture : activation, remise, réclamation et libération de la relance du gain.
+    majTirageSi,
 
     avis: (commerceId) =>
       lirePages<Avis>('avis', (debut, fin) => sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).order('date', { ascending: false }).order('id').range(debut, fin)),

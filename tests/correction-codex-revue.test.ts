@@ -484,12 +484,12 @@ describe('Revue Codex finale — B. reprise d’une tournée interrompue', () =>
   test('A échoue chez le prestataire, panne de stockage sur B → après réparation, le prestataire n’est PAS rappelé pour A, B est relancé', async () => {
     const t = new Date('2026-11-10T11:00:00Z')
     const appels: string[] = []
-    // Prestataire simulé : refuse (HTTP 500) tout envoi vers le numéro d'Ines (A).
+    // Prestataire simulé : refuse (HTTP 400, refus confirmé) tout envoi vers le numéro d'Ines (A).
     const fetchPrestataire = (async (_url: string, init: RequestInit) => {
       const corps = String(init.body)
       appels.push(corps)
       return corps.includes('611111111')
-        ? new Response(JSON.stringify({ message: 'refusé' }), { status: 500 })
+        ? new Response(JSON.stringify({ message: 'refusé' }), { status: 400 })
         : new Response(JSON.stringify({ sid: `SM${appels.length}` }), { status: 201 })
     }) as unknown as typeof globalThis.fetch
     const fichierDb = join(dossier, 'relances-revue.db')

@@ -60,7 +60,7 @@ import { menuAffichePour, pageMenuIndisponible, pageMenuPrerendue, pageNonTrouve
 import { cheminMasquePourErreur, empreinte, journaliserRequete, routeMasquee } from './logs.ts'
 import { creerFileParCle } from './file-par-cle.ts'
 import { creerAlertes5xx } from './alertes.ts'
-import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
+import { creerNotifications, echecConfirme, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
 import { estAbandon } from './notifications/delai.ts'
 import {
   chiffrerJetons,
@@ -2072,8 +2072,8 @@ export async function creerServeur(o: OptionsServeur) {
   /**
    * Une tentative de relance, tracée dans `envois` quel qu'en soit le résultat :
    * 501 sans prestataire pour ce canal · 409 sans consentement, sans contact, ou déjà envoyée aujourd'hui (même modèle)
-   * · 503 migration 0007 absente (rien ne part sans anti-doublon) · 502 prestataire en erreur (`erreur`) ou délai
-   * dépassé (`incertain` : peut-être envoyé) · 200 envoyée.
+   * · 503 migration 0007 absente (rien ne part sans anti-doublon) · 502 refus 4xx du prestataire (`erreur`) ou issue
+   * ambiguë après l'émission — délai, réseau, 5xx… (`incertain` : peut-être envoyé) · 200 envoyée.
    * L'envoi est RÉSERVÉ en base (`en_cours`) avant l'appel au prestataire : l'index unique empêche tout doublon.
    */
   async function relancer(
@@ -2176,17 +2176,22 @@ export async function creerServeur(o: OptionsServeur) {
         ? { http: 200, message: 'Mode test : rien envoyé (simulation tracée dans le journal).', envoi: { ...envoi, statut: 'test', raison: 'Mode test Brevo : simulation, rien envoyé.', idPrestataire: 'test' } }
         : { http: 200, message: 'Relance envoyée.', envoi: { ...envoi, statut: 'envoye', ...(r.id ? { idPrestataire: r.id } : {}) } }
     } catch (e) {
-      if (estAbandon(e)) {
-        // Point Codex 10 — délai dépassé / appel abandonné (`TimeoutError` / `AbortError`) : la requête a pu atteindre le
-        // prestataire, le message est peut-être parti. Statut `incertain` : `relanceAutoDue` le compte comme un envoi
-        // (aucun renvoi automatique, ni le même jour ni pour la même absence). Le commerçant garde la main : l'index
-        // unique anti-doublon ne couvre que `en_cours` / `envoye`, donc une relance MANUELLE reste possible (après
-        // vérification auprès du client), elle n'est jamais bloquée par une ligne `incertain`.
-        const raison = 'Le prestataire n’a pas répondu à temps : état de l’envoi inconnu (le message est peut-être parti). Il ne sera pas renvoyé automatiquement.'
-        fin = { http: 502, message: `Relance incertaine : ${raison}`, envoi: { ...envoi, statut: 'incertain', raison } }
-      } else {
-        const raison = e instanceof Error && e.message ? e.message : 'Le prestataire n’a pas répondu.'
+      if (echecConfirme(e)) {
+        // Refus CONFIRMÉ (réponse 4xx du prestataire, ou rien de branché) : rien n'est parti, `erreur` ne compte pas.
+        const raison = e instanceof Error && e.message ? e.message : 'Le prestataire a refusé l’envoi.'
         fin = { http: 502, message: `Relance non envoyée : ${raison}`, envoi: { ...envoi, statut: 'erreur', raison } }
+      } else {
+        // Point Codex 10, étendu par la revue Codex 2 R7 (F2) — la requête est partie et l'issue n'est ni un succès ni
+        // un refus confirmés : délai dépassé / appel abandonné, coupure réseau (TypeError), 5xx, corps illisible après
+        // une réponse positive… Le prestataire a pu accepter le message. Statut `incertain` : `relanceAutoDue` le compte
+        // comme un envoi (aucun renvoi automatique, ni le même jour ni pour la même absence) et la relance d'un gain
+        // garde son marqueur. Le commerçant garde la main : l'index unique anti-doublon ne couvre que `en_cours` /
+        // `envoye`, donc une relance MANUELLE reste possible (après vérification auprès du client), elle n'est jamais
+        // bloquée par une ligne `incertain`.
+        const raison = estAbandon(e)
+          ? 'Le prestataire n’a pas répondu à temps : état de l’envoi inconnu (le message est peut-être parti). Il ne sera pas renvoyé automatiquement.'
+          : `Réponse du prestataire incomplète ou en erreur (${e instanceof Error && e.message ? e.message : 'erreur inconnue'}) : état de l’envoi inconnu (le message est peut-être parti). Il ne sera pas renvoyé automatiquement.`
+        fin = { http: 502, message: `Relance incertaine : ${raison}`, envoi: { ...envoi, statut: 'incertain', raison } }
       }
     }
     try {
@@ -2227,25 +2232,47 @@ export async function creerServeur(o: OptionsServeur) {
   // • F1 : avant l'envoi, les envois de CE tirage sont relus par `tirageId`, sans limite (`envoisDuTirage`) — les
   //   50 derniers envois du client ne servent plus qu'à présélectionner ;
   // • F2 : le tirage est RÉCLAMÉ par une écriture conditionnelle (`relanceGainLe` posé seulement s'il est absent en base,
-  //   tirage non remis, même `activeLe`) : de deux tournées simultanées — deux instances, ou à cheval sur minuit (l'index
-  //   unique des envois est par jour) — une seule passe. Le marqueur est un champ à part : la remise et l'activation
-  //   gardent leurs propres conditions (`remis` absent), et la réclamation ne peut ni effacer une remise ni une activation
-  //   arrivée entre-temps. À l'inverse, une activation lue AVANT la réclamation réécrit le tirage sans le marqueur : la
-  //   relecture F1 des envois (ligne `en_cours` / `envoye` / `test` / `incertain` du tirage) reste alors la garde ;
+  //   tirage non remis) : de deux tournées simultanées — deux instances, ou à cheval sur minuit (l'index unique des envois
+  //   est par jour) — une seule passe ;
+  // • 2e revue F1 : TOUTE écriture d'un tirage (activation, remise, réclamation, libération) applique son patch sur la
+  //   ligne fraîche par comparaison-échange (`modifierTirage` / `Stockage.majTirageSi` : `activeLe` et `relanceGainLe`
+  //   inchangés en base depuis la lecture, sinon relecture et nouvel essai) — une activation partie d'une lecture
+  //   ancienne ne peut plus effacer le marqueur, et une réclamation ni une activation ni une remise ;
   // • F3 : la réclamation relit le tirage et revérifie, à l'heure de l'écriture, qu'il est toujours à relancer
   //   (`gainBientotExpire` : non remis, pas expiré aux bornes parisiennes, dans les 72 h). Sinon : ni marqueur ni envoi —
-  //   un gain remis ou expiré ne redevient jamais éligible, rien à figer ;
-  // • échec APRÈS réclamation sans rien de parti (`erreur`, `refuse` — dont la collision F5 —, `non_branche`, exception
-  //   avant l'appel) : le marqueur est retiré (écriture conditionnelle sur NOTRE horodatage) et la tournée suivante
-  //   retente, comme le prévoyait R7 (un refus ou une erreur ne comptent pas). `envoye`, `test` et `incertain` (peut-être
-  //   parti) le gardent : jamais de renvoi automatique.
+  //   un gain remis ou expiré ne redevient jamais éligible, rien à figer. 2e revue F4 : revérifié encore APRÈS la
+  //   réclamation réussie, avant l'appel au prestataire (une écriture lente a pu passer minuit à Paris) : devenu expiré →
+  //   marqueur libéré, rien envoyé ;
+  // • échec APRÈS réclamation sans rien de parti (`erreur` = refus 4xx confirmé, `refuse` — dont la collision F5 —,
+  //   `non_branche`, exception avant l'appel) : le marqueur est retiré et la tournée suivante retente, comme le prévoyait
+  //   R7 (un refus ou une erreur ne comptent pas). 2e revue F3 : la libération ne dépend que du marqueur (NOTRE
+  //   horodatage encore en base) — une activation concurrente ne la bloque plus. `envoye`, `test` et `incertain`
+  //   (2e revue F2 : toute issue ambiguë après l'émission, peut-être partie) le gardent : jamais de renvoi automatique.
   async function reclamerRelanceGain(choisi: Tirage): Promise<Tirage | undefined> {
     if (relanceGainFaite(choisi.id, await st.envoisDuTirage(choisi.commerceId, choisi.clientId, choisi.id))) return undefined
     const relu = await st.tirage(choisi.commerceId, choisi.id)
+    if (!relu) return undefined
     const quand = maintenant()
-    if (!relu || relu.relanceGainLe || !gainBientotExpire(relu, quand)) return undefined
-    const reclame: Tirage = { ...relu, relanceGainLe: quand.toISOString() }
-    return (await st.marquerRelanceGain(reclame, undefined)) ? reclame : undefined
+    const reclame = await modifierTirage(relu, (frais) => (frais.relanceGainLe || !gainBientotExpire(frais, quand) ? undefined : { ...frais, relanceGainLe: quand.toISOString() }))
+    if (!reclame) return undefined
+    if (!gainBientotExpire(reclame, maintenant())) {
+      await libererRelanceGain(reclame)
+      return undefined
+    }
+    return reclame
+  }
+  /** Retire le marqueur posé par CETTE réclamation (et lui seul) ; best effort : sinon il reste, jamais de doublon. */
+  async function libererRelanceGain(reclame: Tirage) {
+    const notre = reclame.relanceGainLe
+    try {
+      await modifierTirage(reclame, (frais) => {
+        if (frais.relanceGainLe !== notre) return undefined
+        const { relanceGainLe: _, ...libere } = frais
+        return libere
+      })
+    } catch (e) {
+      console.warn(`[relances] marqueur de relance du gain non retiré (pas de nouvel essai) : ${e instanceof Error ? e.message : e}`)
+    }
   }
   async function relancerGain(commerce: Commerce, client: Client, reclame: Tirage, site: string) {
     let parti = true
@@ -2256,17 +2283,28 @@ export async function creerServeur(o: OptionsServeur) {
       parti = false
       throw e
     } finally {
-      if (!parti) {
-        const { relanceGainLe, ...libere } = reclame
-        try {
-          // Rien écrit si le tirage a changé entre-temps (remis, réactivé) : le marqueur reste, pas de nouvel essai
-          // automatique pour ce gain — jamais de doublon.
-          await st.marquerRelanceGain(libere, relanceGainLe)
-        } catch (e) {
-          console.warn(`[relances] marqueur de relance du gain non retiré (pas de nouvel essai) : ${e instanceof Error ? e.message : e}`)
-        }
-      }
+      if (!parti) await libererRelanceGain(reclame)
     }
+  }
+  /**
+   * Écriture d'un tirage appliquée sur la ligne FRAÎCHE (revue Codex 2 R7, F1) : `patch(frais)` → nouvelle version (ou
+   * undefined : plus rien à écrire ; peut lever un refus HTTP), écrite par comparaison-échange (`st.majTirageSi`). Si
+   * une autre écriture est passée depuis la lecture (activation, marqueur de relance…), on relit et on réapplique le
+   * patch — jamais un instantané ancien réécrit par-dessus. `lu` : lecture déjà faite par l'appelant (1er essai sans
+   * relecture). Undefined : tirage remis ou disparu en base, condition `activeApres` refusée par la base (ligne
+   * inchangée), ou trop d'écritures concurrentes.
+   */
+  async function modifierTirage(lu: Tirage, patch: (frais: Tirage) => Tirage | undefined, activeApres?: (frais: Tirage) => string | undefined): Promise<Tirage | undefined> {
+    let frais: Tirage | undefined = lu
+    for (let essai = 0; essai < 5 && frais; essai++) {
+      const apres = patch(frais)
+      if (!apres || frais.remis) return undefined
+      if (await st.majTirageSi(apres, frais, activeApres?.(frais))) return apres
+      const avant: Tirage = frais
+      frais = await st.tirage(lu.commerceId, lu.id)
+      if (frais && !frais.remis && frais.activeLe === avant.activeLe && frais.relanceGainLe === avant.relanceGainLe) return undefined
+    }
+    return undefined
   }
   const tournees = new Map<string, string>()
   const tourneesActives = new Set<string>()
@@ -3591,13 +3629,20 @@ export async function creerServeur(o: OptionsServeur) {
       // laisserait passer une remise juste après la fin de la fenêtre ou du gain). Re-vérifié à l'heure de l'écriture,
       // et la base re-vérifie la fenêtre elle-même (`activeLe` dans les 10 dernières minutes, condition de l'UPDATE).
       const quand = maintenant()
-      refus(trouve, quand)
-      const remis: Tirage = { ...trouve, remis: { le: quand.toISOString(), par: auteur } }
       // Tirage hérité du jour même : remise directe, sans fenêtre (ancienne règle, revue Codex F2).
-      const activeApres = tirageHerite(trouve) ? undefined : new Date(quand.getTime() - FENETRE_ACTIVATION_MS).toISOString()
+      const activeApres = (x: Tirage) => (tirageHerite(x) ? undefined : new Date(quand.getTime() - FENETRE_ACTIVATION_MS).toISOString())
       // Garde de la base : l'écriture n'a lieu que si personne ne l'a remis entre-temps (deux caisses au même moment) et
-      // si la fenêtre d'activation est encore ouverte.
-      if (!(await st.marquerTirageRemis(remis, activeApres))) {
+      // si la fenêtre d'activation est encore ouverte. Revue Codex 2 R7 (F1) : appliquée sur la ligne fraîche (une
+      // activation ou un marqueur de relance posés depuis la lecture ne sont pas effacés).
+      const remis = await modifierTirage(
+        trouve,
+        (frais) => {
+          refus(frais, quand)
+          return { ...frais, remis: { le: quand.toISOString(), par: auteur } }
+        },
+        activeApres,
+      )
+      if (!remis) {
         const relu = (await st.tiragesParCode(id, code)).find((x) => x.id === trouve.id)
         if (relu) refus(relu, maintenant())
         if (relu && !relu.remis) throw err(409, 'Le code vient de changer d’état : vérifiez-le à nouveau.')
@@ -4101,11 +4146,14 @@ export async function creerServeur(o: OptionsServeur) {
       const tirage = (await st.tiragesClient(id, charge.cid)).find((x) => x.id === sousId)
       if (!tirage) throw err(404, 'Gain introuvable sur cette carte.')
       const t = maintenant()
-      const refus = refusActivation(tirage, t)
-      if (refus) throw err(refus.statut, refus.message)
-      const active: Tirage = { ...tirage, activeLe: t.toISOString() }
       // Même écriture conditionnelle que la remise : une caisse qui vient de remettre le lot gagne, l'activation échoue.
-      if (!(await st.activerTirage(active))) throw err(409, 'Ce gain a déjà été remis au comptoir.')
+      // Revue Codex 2 R7 (F1) : appliquée sur la ligne fraîche — un marqueur de relance posé depuis la lecture survit.
+      const active = await modifierTirage(tirage, (frais) => {
+        const refus = refusActivation(frais, t)
+        if (refus) throw err(refus.statut, refus.message)
+        return { ...frais, activeLe: t.toISOString() }
+      })
+      if (!active) throw err(409, 'Ce gain a déjà été remis au comptoir.')
       return { json: { tirageId: active.id, lot: active.lot, code: active.code, activeLe: active.activeLe, expireActivation: finActivation(active) } }
     }
 

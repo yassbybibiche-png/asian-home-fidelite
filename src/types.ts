@@ -580,7 +580,8 @@ export interface Tirage {
   remis?: { le: string; par: EntreeJournal['auteur'] }
   /**
    * Relance « gain bientôt expiré » réclamée (R7, revue Codex F2, ISO) : posé par une écriture conditionnelle (absent en
-   * base) AVANT l'envoi — une seule relance par gain, même entre deux tournées simultanées. Retiré si l'envoi échoue.
+   * base) AVANT l'envoi — une seule relance par gain, même entre deux tournées simultanées. Retiré seulement si rien
+   * n'est parti (refus confirmé, gain expiré entre-temps) ; gardé si l'issue est incertaine (revue Codex 2 R7).
    */
   relanceGainLe?: string
 }

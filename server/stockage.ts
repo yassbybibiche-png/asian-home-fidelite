@@ -135,19 +135,20 @@ export interface Stockage {
    * requête conditionnelle, atomique pour la base (UPDATE … WHERE remis IS NULL). false = déjà remis, y compris par une
    * requête simultanée : un code ne peut jamais être remis deux fois. `activeApres` (revue Codex R3 F4) : la condition
    * exige EN PLUS `activeLe > activeApres` en base (fenêtre d'activation encore ouverte à l'heure de l'écriture ; ISO
-   * `toISOString`, comparables comme texte). false = déjà remis ou fenêtre échue.
+   * `toISOString`, comparables comme texte). false = déjà remis ou fenêtre échue. Revue Codex 2 R7 (F1) : `t` est la
+   * ligne lue + la remise, et l'écriture est la comparaison-échange de `majTirageSi` (`activeLe` / `relanceGainLe` de
+   * `t` toujours en base) — une remise partie d'une lecture ancienne n'efface ni une activation ni un marqueur récents.
    */
   marquerTirageRemis(t: Tirage, activeApres?: string): P<boolean>
-  /** Activation du code par le client (R3, `activeLe`) : même écriture conditionnelle — jamais sur un tirage déjà remis. */
-  activerTirage(t: Tirage): P<boolean>
   tirage(commerceId: string, id: string): P<Tirage | undefined>
   /**
-   * Réclamation / libération de la relance d'un gain (R7, revue Codex F2) : écrit `t` seulement si, en base, le tirage
-   * n'est pas remis, porte `relanceGainLe` = `attendu` (absent si undefined) et le même `activeLe` que `t` — une seule
-   * requête conditionnelle : une remise ou une activation arrivée entre-temps n'est jamais écrasée, et de deux
-   * réclamations simultanées une seule passe. false = rien écrit.
+   * Écriture d'un tirage par comparaison-échange (revue Codex 2 R7, F1) — activation, remise, réclamation et libération
+   * de la relance du gain : écrit `t` seulement si, en base, le tirage n'est pas remis et porte encore `activeLe` et
+   * `relanceGainLe` tels que `lu` les a lus (absents si undefined) ; `activeApres` : comme `marquerTirageRemis`. Une
+   * seule requête conditionnelle : `donnees` étant réécrit en entier, aucune écriture partie d'une lecture ancienne ne
+   * peut effacer un champ posé entre-temps par une autre (0 ligne → false ; l'appelant relit et réapplique son patch).
    */
-  marquerRelanceGain(t: Tirage, attendu: string | undefined): P<boolean>
+  majTirageSi(t: Tirage, lu: Pick<Tirage, 'activeLe' | 'relanceGainLe'>, activeApres?: string): P<boolean>
   avis(commerceId: string): P<Avis[]>
   unAvis(commerceId: string, id: string): P<Avis | undefined>
   ajouterAvis(a: Avis): P<void>
@@ -384,14 +385,11 @@ export function ouvrirStockage(fichier: string) {
       "UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.lotId') IS NULL AND (? = 1 OR json_extract(donnees, '$.remis') IS NULL)",
     ),
     tiragesParCode: db.prepare("SELECT donnees FROM tirages WHERE commerce_id = ? AND json_extract(donnees, '$.code') = ? ORDER BY date DESC"),
-    remettreTirage: db.prepare("UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL"),
-    remettreTirageActif: db.prepare(
-      "UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL AND json_extract(donnees, '$.activeLe') > ?",
-    ),
     tirage: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? AND id = ?'),
-    marquerRelanceGain: db.prepare(
+    majTirageSi: db.prepare(
       `UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL
-        AND json_extract(donnees, '$.relanceGainLe') IS ? AND json_extract(donnees, '$.activeLe') IS ?`,
+        AND json_extract(donnees, '$.activeLe') IS ? AND json_extract(donnees, '$.relanceGainLe') IS ?
+        AND (? IS NULL OR json_extract(donnees, '$.activeLe') > ?)`,
     ),
     avis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? ORDER BY date DESC'),
     unAvis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? AND id = ?'),
@@ -454,6 +452,9 @@ export function ouvrirStockage(fichier: string) {
   // IMMEDIATE … COMMIT est déjà « tout ou rien » et sérialisé ; le verrou n'existe que sous Supabase.
   let file: Promise<unknown> = Promise.resolve()
 
+  const majTirageSi = (t: Tirage, lu: Pick<Tirage, 'activeLe' | 'relanceGainLe'>, activeApres?: string) =>
+    Number(q.majTirageSi.run(JSON.stringify(t), t.id, t.commerceId, lu.activeLe ?? null, lu.relanceGainLe ?? null, activeApres ?? null, activeApres ?? null).changes) > 0
+
   return {
     type: 'sqlite' as const,
     meta: (cle: string) => (q.meta.get(cle) as { valeur: string } | undefined)?.valeur,
@@ -487,12 +488,9 @@ export function ouvrirStockage(fichier: string) {
     tiragesSansLot: (commerceId: string) => lire<Tirage>(q.tiragesSansLot.all(commerceId)),
     completerLotTirage: (t: Tirage) => Number(q.completerLotTirage.run(JSON.stringify(t), t.id, t.commerceId, t.remis ? 1 : 0).changes) > 0,
     tiragesParCode: (commerceId: string, code: string) => lire<Tirage>(q.tiragesParCode.all(commerceId, code)),
-    marquerTirageRemis: (t: Tirage, activeApres?: string) =>
-      Number((activeApres === undefined ? q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId) : q.remettreTirageActif.run(JSON.stringify(t), t.id, t.commerceId, activeApres)).changes) > 0,
-    activerTirage: (t: Tirage) => Number(q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId).changes) > 0,
+    marquerTirageRemis: (t: Tirage, activeApres?: string) => majTirageSi(t, t, activeApres),
     tirage: (commerceId: string, id: string) => lire<Tirage>(q.tirage.all(commerceId, id))[0],
-    marquerRelanceGain: (t: Tirage, attendu: string | undefined) =>
-      Number(q.marquerRelanceGain.run(JSON.stringify(t), t.id, t.commerceId, attendu ?? null, t.activeLe ?? null).changes) > 0,
+    majTirageSi,
 
     avis: (commerceId: string) => lire<Avis>(q.avis.all(commerceId)),
     unAvis: (commerceId: string, id: string) => lire<Avis>(q.unAvis.all(commerceId, id))[0],

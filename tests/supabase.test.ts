@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 
-import { creerServeur, hacherPinAncien, type OptionsServeur } from '../server/app.ts'
+import { creerServeur, emettreJetonClient, hacherPinAncien, type OptionsServeur } from '../server/app.ts'
 import { ErreurConflit, ErreurMigrationManquante } from '../server/stockage.ts'
 import { configSupabaseDepuisEnv, ouvrirStockageSupabase } from '../server/stockage-supabase.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
@@ -2014,11 +2014,14 @@ describe('Revue Codex R7 : relance « gain bientôt expiré » sous Supabase (r�
   const envoisGain = (f: ReturnType<typeof fauxPostgrest>) =>
     f.tables.envois.map((l) => l.donnees as EnvoiRelance).filter((e) => e.modele === 'gainExpire')
 
-  /** Serveur sur le faux PostgREST `f`, horloge propre, SMS simulés (Twilio factice, aucun appel réseau). */
-  async function demarrer(f: ReturnType<typeof fauxPostgrest>, horloge: { t: Date }, sms: URLSearchParams[]) {
+  /**
+   * Serveur sur le faux PostgREST `f`, horloge propre, SMS simulés (Twilio factice, aucun appel réseau). `o.reponse` :
+   * réponse du prestataire (undefined → 201) ; `o.secretSession` : active les jetons client (route d'activation).
+   */
+  async function demarrer(f: ReturnType<typeof fauxPostgrest>, horloge: { t: Date }, sms: URLSearchParams[], o: { reponse?: () => Response | undefined; secretSession?: string } = {}) {
     const fetchSms = (async (_url: string, init: RequestInit) => {
       sms.push(new URLSearchParams(String(init.body)))
-      return new Response(JSON.stringify({ sid: `SM${sms.length}` }), { status: 201 })
+      return o.reponse?.() ?? new Response(JSON.stringify({ sid: `SM${sms.length}` }), { status: 201 })
     }) as unknown as typeof globalThis.fetch
     const app = await creerServeur({
       fichierDb: join(dossier, 'ne-doit-pas-exister.db'),
@@ -2028,11 +2031,12 @@ describe('Revue Codex R7 : relance « gain bientôt expiré » sous Supabase (r�
       version: 'test',
       maintenant: () => horloge.t,
       notifications: { twilio: { accountSid: 'ACtest', authToken: 'jeton-test', expediteur: '+33700000000' }, fetch: fetchSms },
+      ...(o.secretSession ? { secretSession: o.secretSession } : {}),
     })
     await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
     const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
-    async function api(methode: string, chemin: string, corps?: unknown) {
-      const r = await fetch(base + chemin, { method: methode, headers: { 'Content-Type': 'application/json', ...PIN }, body: corps === undefined ? undefined : JSON.stringify(corps) })
+    async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = PIN) {
+      const r = await fetch(base + chemin, { method: methode, headers: { 'Content-Type': 'application/json', ...entetes }, body: corps === undefined ? undefined : JSON.stringify(corps) })
       return { statut: r.status, contenu: await r.json() }
     }
     const tournee = async () => {
@@ -2147,6 +2151,99 @@ describe('Revue Codex R7 : relance « gain bientôt expiré » sous Supabase (r�
       assert.deepEqual([dernier.statut, dernier.motif], ['refuse', 'collision_libre_gain'])
       assert.equal(sms.length, 2)
     } finally {
+      await s.app.fermer()
+    }
+  })
+
+  // ---- Revue Codex 2 R7 : écritures concurrentes sur le tirage, expiration à l'heure de la réclamation ----
+  const patchsTirage = (f: ReturnType<typeof fauxPostgrest>) => f.requetes.filter((q) => q.methode === 'PATCH' && q.table === 'tirages')
+
+  test('2e revue F1 : réclamation posée PENDANT une activation partie d’une lecture ancienne → le marqueur survit, la seconde réclamation échoue', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: MAINTENANT }
+    const SECRET = 'secret-de-session-de-test-assez-long-0123456789'
+    const s = await demarrer(f, horloge, sms, { secretSession: SECRET })
+    try {
+      await preparer(f, gain(28))
+      const marqueur = '2026-11-10T10:59:00.000Z'
+      // La lecture de l'activation (tirages du titulaire) est servie SANS marqueur ; pendant le trajet de sa réponse,
+      // une tournée (autre instance) réclame le tirage.
+      f.ralentir({
+        ms: 20,
+        vise: (m, t, p) => (m === 'GET' && t === 'tirages' && p.get('client_id') === 'eq.cl-r7' ? ((lu(f).relanceGainLe = marqueur), true) : false),
+      })
+      const jeton = emettreJetonClient(SECRET, { typ: 'client', jti: 'jti-r7b-f1', cid: 'cl-r7', com: AH, ver: 0, exp: Math.floor(MAINTENANT.getTime() / 1000) + 3600 })
+      const r = await s.api('POST', `/commerces/${AH}/tirages/ti-r7/activer`, undefined, { Authorization: `Bearer ${jeton}` })
+      f.ralentir()
+      assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+      assert.deepEqual([lu(f).activeLe, lu(f).relanceGainLe], [MAINTENANT.toISOString(), marqueur], 'activation appliquée sur la ligne fraîche : marqueur conservé')
+      const [ancienne, fraiche] = patchsTirage(f)
+      assert.equal(ancienne.params.get('donnees->relanceGainLe'), 'is.null', '1er essai : lecture ancienne, refusé par la base')
+      assert.equal(fraiche.params.get('donnees->>relanceGainLe'), `eq.${marqueur}`, '2e essai : sur la ligne relue')
+
+      // Seconde réclamation (tournée de cette instance) : le tirage est réclamé, rien ne part.
+      await s.tournee()
+      assert.equal(sms.length, 0)
+      assert.deepEqual(envoisGain(f), [])
+      assert.equal(lu(f).relanceGainLe, marqueur)
+    } finally {
+      f.ralentir()
+      await s.app.fermer()
+    }
+  })
+
+  test('2e revue F3 : activation concurrente pendant un refus du prestataire → la libération réussit quand même, nouvel essai le lendemain', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: MAINTENANT }
+    const activeLe = '2026-11-10T11:00:30.000Z'
+    const refus = { actif: true }
+    const s = await demarrer(f, horloge, sms, {
+      reponse: () => {
+        if (!refus.actif) return undefined
+        // Le client active son code pendant l'appel au prestataire (écriture sur la ligne fraîche : marqueur gardé).
+        lu(f).activeLe = activeLe
+        return new Response(JSON.stringify({ message: 'numéro invalide' }), { status: 400 })
+      },
+    })
+    try {
+      await preparer(f, gain(28))
+      await s.tournee()
+      assert.equal(sms.length, 1)
+      assert.deepEqual(envoisGain(f).map((e) => e.statut), ['erreur'])
+      assert.deepEqual([lu(f).relanceGainLe, lu(f).activeLe], [undefined, activeLe], 'marqueur retiré, activation intacte')
+
+      refus.actif = false
+      horloge.t = new Date(MAINTENANT.getTime() + JOUR)
+      await s.tournee()
+      assert.equal(sms.length, 2, 'refus confirmé : la relance repart à la tournée suivante')
+      assert.deepEqual(envoisGain(f).map((e) => e.statut).sort(), ['envoye', 'erreur'])
+      assert.ok(lu(f).relanceGainLe)
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('2e revue F4 : réclamation lente qui passe minuit à Paris (gain expiré à l’écriture) → marqueur libéré, rien envoyé', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: new Date('2026-11-10T22:59:00Z') } // 23 h 59 à Paris, dernier jour du gain
+    const s = await demarrer(f, horloge, sms)
+    try {
+      await preparer(f, gain(30))
+      // L'UPDATE de la réclamation est appliqué tout de suite, sa réponse revient après minuit à Paris.
+      f.ralentir({
+        ms: 20,
+        vise: (m, t, p) => (m === 'PATCH' && t === 'tirages' && p.get('donnees->relanceGainLe') === 'is.null' ? ((horloge.t = new Date('2026-11-10T23:01:00Z')), true) : false),
+      })
+      await s.tournee()
+      assert.equal(sms.length, 0, 'gain expiré : aucun appel au prestataire')
+      assert.deepEqual(envoisGain(f), [])
+      assert.equal(lu(f).relanceGainLe, undefined, 'réclamation libérée')
+      assert.equal(patchsTirage(f).length, 2, 'réclamation écrite puis libérée')
+    } finally {
+      f.ralentir()
       await s.app.fermer()
     }
   })

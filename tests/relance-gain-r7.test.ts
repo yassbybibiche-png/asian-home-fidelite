@@ -97,11 +97,17 @@ describe('R7 — règle « gain bientôt expiré » (fonctions pures)', () => {
 async function demarrer(nom: string, o: { modeTest?: boolean; emailSandbox?: boolean } = {}) {
   const horloge = { t: MAINTENANT }
   const appels: { url: string; corps: string }[] = []
-  /** `panne.active` : le prestataire répond 500 (relance en `erreur`). */
-  const panne = { active: false }
+  /**
+   * `panne.mode` : `refus` → le prestataire répond 400 (refus confirmé, relance en `erreur`) ; `reseau` → la requête
+   * part puis la connexion tombe (TypeError) ; `5xx` → 500 ; `corps` → 201 au corps illisible (revue Codex 2 R7, F2).
+   */
+  const panne: { mode?: 'refus' | 'reseau' | '5xx' | 'corps' } = {}
   const fetch = (async (url: string, init: RequestInit) => {
     appels.push({ url, corps: String(init.body) })
-    if (panne.active) return new Response(JSON.stringify({ message: 'panne simulée' }), { status: 500 })
+    if (panne.mode === 'refus') return new Response(JSON.stringify({ message: 'numéro invalide' }), { status: 400 })
+    if (panne.mode === '5xx') return new Response(JSON.stringify({ message: 'panne simulée' }), { status: 500 })
+    if (panne.mode === 'reseau') throw new TypeError('fetch failed')
+    if (panne.mode === 'corps') return new Response('<html>pas du JSON', { status: 201 })
     return new Response(JSON.stringify({ sid: `SM${appels.length}`, messageId: `<m${appels.length}@brevo>` }), { status: 201 })
   }) as unknown as typeof globalThis.fetch
   const fichierDb = join(dossier, nom)
@@ -275,7 +281,7 @@ describe('R7 — tournée automatique « gain bientôt expiré »', () => {
 // ---------- Revue Codex R7 (SQLite) : réclamation par tirage, pas de fenêtre de lecture, échec après réclamation, mode test ----------
 
 describe('R7 revue Codex — une seule relance par gain, sans fenêtre de lecture', () => {
-  test('F1 : marqueur effacé par une activation concurrente + 60 tentatives plus récentes → toujours pas de doublon (relecture par tirageId)', async () => {
+  test('F1 : marqueur perdu + 60 tentatives plus récentes → toujours pas de doublon (relecture par tirageId)', async () => {
     const s = await demarrer('r7-f1.db')
     try {
       const lina = await inscrire(s, 'Lina', '0611111111', true)
@@ -286,8 +292,13 @@ describe('R7 revue Codex — une seule relance par gain, sans fenêtre de lectur
       assert.ok(s.base((st) => st.tirage(AH, gain.id))!.relanceGainLe, 'tirage réclamé avant l’envoi')
 
       s.base((st) => {
-        // Activation lue AVANT la réclamation : elle réécrit `donnees` sans le marqueur (écriture conditionnelle sur `remis` seulement).
-        assert.equal(st.activerTirage({ ...gain, activeLe: new Date(MAINTENANT.getTime() + 3600_000).toISOString() }), true)
+        // Activation lue AVANT la réclamation : la comparaison-échange la refuse (2e revue F1), le marqueur survit.
+        const reclame = st.tirage(AH, gain.id)!
+        assert.equal(st.majTirageSi({ ...gain, activeLe: new Date(MAINTENANT.getTime() + 3600_000).toISOString() }, gain), false)
+        assert.equal(st.tirage(AH, gain.id)!.relanceGainLe, reclame.relanceGainLe)
+        // Marqueur perdu quand même (écriture hors de l'app, restauration…) : la relecture des envois reste la garde.
+        const { relanceGainLe: _, ...perdu } = reclame
+        assert.equal(st.majTirageSi(perdu, reclame), true)
         assert.equal(st.tirage(AH, gain.id)!.relanceGainLe, undefined)
         // 60 tentatives plus récentes pour ce client : la trace de la relance du gain sort des 50 derniers envois.
         for (let i = 0; i < 60; i++) {
@@ -316,27 +327,28 @@ describe('R7 revue Codex — une seule relance par gain, sans fenêtre de lectur
       s.ajouterTirage(g)
       s.base((st) => {
         const a = { ...g, relanceGainLe: '2026-11-10T11:00:00.000Z' }
-        assert.equal(st.marquerRelanceGain(a, undefined), true)
-        assert.equal(st.marquerRelanceGain({ ...g, relanceGainLe: '2026-11-10T11:00:01.000Z' }, undefined), false, 'déjà réclamé : la 2e réclamation échoue')
+        assert.equal(st.majTirageSi(a, g), true)
+        assert.equal(st.majTirageSi({ ...g, relanceGainLe: '2026-11-10T11:00:01.000Z' }, g), false, 'déjà réclamé : la 2e réclamation échoue')
         assert.equal(st.tirage(AH, g.id)!.relanceGainLe, a.relanceGainLe)
         assert.deepEqual(gainsARelancer([st.tirage(AH, g.id)!], [], MAINTENANT), [], 'un tirage réclamé n’est plus présélectionné')
         // Libération : seulement avec NOTRE horodatage.
-        assert.equal(st.marquerRelanceGain(g, '2026-11-10T09:00:00.000Z'), false)
-        assert.equal(st.marquerRelanceGain(g, a.relanceGainLe), true)
+        assert.equal(st.majTirageSi(g, { relanceGainLe: '2026-11-10T09:00:00.000Z' }), false)
+        assert.equal(st.majTirageSi(g, a), true)
         assert.equal(st.tirage(AH, g.id)!.relanceGainLe, undefined)
 
-        // Activation APRÈS réclamation : acceptée, garde le marqueur ; la libération (activeLe lu avant) n'efface pas l'activation.
-        assert.equal(st.marquerRelanceGain(a, undefined), true)
+        // Activation APRÈS réclamation (lecture fraîche) : acceptée, garde le marqueur ; une écriture partie d'une lecture
+        // antérieure à l'activation (libération comprise) n'écrit rien — l'app relit et réapplique son patch.
+        assert.equal(st.majTirageSi(a, g), true)
         const activeLe = new Date(MAINTENANT.getTime() + 60_000).toISOString()
-        assert.equal(st.activerTirage({ ...st.tirage(AH, g.id)!, activeLe }), true)
-        assert.equal(st.marquerRelanceGain(g, a.relanceGainLe), false, 'activeLe a changé : rien écrit')
+        assert.equal(st.majTirageSi({ ...st.tirage(AH, g.id)!, activeLe }, st.tirage(AH, g.id)!), true)
+        assert.equal(st.majTirageSi(g, a), false, 'activeLe a changé : rien écrit')
         assert.deepEqual([st.tirage(AH, g.id)!.activeLe, st.tirage(AH, g.id)!.relanceGainLe], [activeLe, a.relanceGainLe])
 
         // Remise en caisse APRÈS réclamation : acceptée ; ensuite aucune réclamation ne peut réécrire le tirage remis.
         const remis = { le: MAINTENANT.toISOString(), par: 'Gérant' as const }
         assert.equal(st.marquerTirageRemis({ ...st.tirage(AH, g.id)!, remis }), true)
-        assert.equal(st.marquerRelanceGain({ ...g, activeLe, relanceGainLe: 'x' }, a.relanceGainLe), false)
-        assert.equal(st.marquerRelanceGain({ ...g, activeLe }, a.relanceGainLe), false)
+        assert.equal(st.majTirageSi({ ...g, activeLe, relanceGainLe: 'x' }, { activeLe, relanceGainLe: a.relanceGainLe }), false)
+        assert.equal(st.majTirageSi({ ...g, activeLe }, { activeLe, relanceGainLe: a.relanceGainLe }), false)
         assert.deepEqual(st.tirage(AH, g.id)!.remis, remis)
       })
     } finally {
@@ -344,18 +356,18 @@ describe('R7 revue Codex — une seule relance par gain, sans fenêtre de lectur
     }
   })
 
-  test('échec du prestataire APRÈS réclamation : marqueur retiré, nouvel essai à la tournée suivante ; envoyé → marqueur gardé, plus rien', async () => {
+  test('refus 4xx du prestataire APRÈS réclamation : marqueur retiré, nouvel essai à la tournée suivante ; envoyé → marqueur gardé, plus rien', async () => {
     const s = await demarrer('r7-echec.db')
     try {
       const lina = await inscrire(s, 'Lina', '0611111111', true)
       const gain = tirage(lina.id, 28)
       s.ajouterTirage(gain)
-      s.panne.active = true
+      s.panne.mode = 'refus'
       await s.tournee()
       assert.deepEqual((await s.envoisAuto()).map((x) => x.statut), ['erreur'])
       assert.equal(s.base((st) => st.tirage(AH, gain.id))!.relanceGainLe, undefined, 'rien de parti : réclamation libérée')
 
-      s.panne.active = false
+      s.panne.mode = undefined
       s.horloge.t = new Date(MAINTENANT.getTime() + JOUR)
       await s.tournee()
       assert.equal(s.appels.length, 2)
@@ -367,6 +379,33 @@ describe('R7 revue Codex — une seule relance par gain, sans fenêtre de lectur
       assert.equal(s.appels.length, 2)
     } finally {
       await s.app.fermer()
+    }
+  })
+
+  test('2e revue F2 : coupure réseau, 5xx ou corps illisible APRÈS émission → `incertain`, marqueur gardé, jamais renvoyé automatiquement', async () => {
+    for (const mode of ['reseau', '5xx', 'corps'] as const) {
+      const s = await demarrer(`r7b-f2-${mode}.db`)
+      try {
+        const lina = await inscrire(s, 'Lina', '0611111111', true)
+        const gain = tirage(lina.id, 28)
+        s.ajouterTirage(gain)
+        s.panne.mode = mode
+        await s.tournee()
+        assert.equal(s.appels.length, 1, mode)
+        const [e] = await s.envoisAuto()
+        assert.deepEqual([e.statut, e.tirageId], ['incertain', gain.id], mode)
+        assert.match(e.raison!, /peut-être parti/)
+        assert.ok(s.base((st) => st.tirage(AH, gain.id))!.relanceGainLe, `${mode} : peut-être parti → marqueur conservé`)
+
+        s.panne.mode = undefined
+        for (const jours of [1, 2]) {
+          s.horloge.t = new Date(MAINTENANT.getTime() + jours * JOUR)
+          await s.tournee()
+        }
+        assert.equal(s.appels.length, 1, `${mode} : aucun renvoi automatique`)
+      } finally {
+        await s.app.fermer()
+      }
     }
   })
 

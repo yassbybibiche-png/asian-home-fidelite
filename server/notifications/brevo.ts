@@ -1,6 +1,6 @@
 // Adaptateur e-mail Brevo (API « transactional email ») + SMS Brevo (API « transactional SMS »).
 // Prêts, jamais exécutés contre le vrai Brevo : aucune clé configurée.
-import type { Adaptateur, Message } from './index.ts'
+import { ErreurPrestataire, type Adaptateur, type Message } from './index.ts'
 import { DELAI_PRESTATAIRE_MS } from './delai.ts'
 
 export interface ConfigBrevo {
@@ -77,7 +77,7 @@ export function adaptateurBrevo(c: ConfigBrevo | undefined, f: typeof fetch, del
         }),
         signal: AbortSignal.timeout(delaiMs),
       })
-      if (!r.ok) throw new Error(`Brevo a refusé l’envoi (HTTP ${r.status}).`)
+      if (!r.ok) throw new ErreurPrestataire('Brevo', r.status)
       const j = (await r.json()) as { messageId?: string }
       // Sandbox : Brevo a validé la requête (201 + messageId) sans rien livrer — l'appelant trace `test`, pas `envoye`.
       return { id: j.messageId ?? '', ...(c.bacASable ? { test: true } : {}) }
@@ -124,7 +124,7 @@ export function adaptateurBrevoSms(c: ConfigBrevoSms | undefined, f: typeof fetc
         }),
         signal: AbortSignal.timeout(delaiMs),
       })
-      if (!r.ok) throw new Error(`Brevo a refusé l’envoi (HTTP ${r.status}).`)
+      if (!r.ok) throw new ErreurPrestataire('Brevo', r.status)
       const j = (await r.json()) as { messageId?: string | number }
       return { id: j.messageId == null ? '' : String(j.messageId) }
     },

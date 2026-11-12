@@ -122,7 +122,7 @@ async function demarrer(fichierDb: string, horloge: { t: Date }, etat: { mode: M
   const fetch = (async () => {
     etat.appels++
     if (etat.mode === 'delai') throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
-    return new Response(JSON.stringify({ sid: `SM${etat.appels}` }), { status: etat.mode === 'erreur' ? 500 : 201 })
+    return new Response(JSON.stringify({ sid: `SM${etat.appels}` }), { status: etat.mode === 'erreur' ? 400 : 201 })
   }) as unknown as typeof globalThis.fetch
   const app = await creerServeur({
     fichierDb,
@@ -218,7 +218,7 @@ describe('Point Codex 10 — serveur : délai dépassé = `incertain`, jamais re
     }
   })
 
-  test('erreur ordinaire du prestataire (HTTP 500) → statut `erreur`, inchangé', async () => {
+  test('refus explicite du prestataire (HTTP 400) → statut `erreur`, inchangé (un 5xx est `incertain` depuis la revue Codex 2 R7)', async () => {
     const fichierDb = join(dossier, 'erreur.db')
     const horloge = { t: new Date('2026-11-10T11:00:00Z') }
     const etat = { mode: 'erreur' as Mode, appels: 0 }
