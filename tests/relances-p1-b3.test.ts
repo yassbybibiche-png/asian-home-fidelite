@@ -437,14 +437,14 @@ describe('Relance (route commerçant) et journal des envois', () => {
     }
   })
 
-  test('prestataire en erreur : 502, statut « erreur » journalisé, nouvel essai possible le même jour', async () => {
-    let statut = 500
+  test('prestataire en erreur (refus 4xx) : 502, statut « erreur » journalisé, nouvel essai possible le même jour', async () => {
+    let statut = 400
     const s = await demarrer('relance-erreur.db', { twilio: true, statutPrestataire: () => statut })
     try {
       const c = (await s.api('POST', `/commerces/${AH}/clients`, { contact: '0611111111', consentementRelance: true }, PIN)).contenu.client as Client
       const r = await s.api('POST', `/commerces/${AH}/clients/${c.id}/relance`, { modele: 'bienvenue' }, PIN)
       assert.equal(r.statut, 502)
-      assert.match(r.contenu.erreur, /Twilio a refusé l’envoi \(HTTP 500\)/)
+      assert.match(r.contenu.erreur, /Twilio a refusé l’envoi \(HTTP 400\)/)
       assert.doesNotMatch(r.contenu.erreur, /jeton-twilio-test|ACtest/, 'aucun secret dans le message')
       statut = 201
       assert.equal((await s.api('POST', `/commerces/${AH}/clients/${c.id}/relance`, { modele: 'bienvenue' }, PIN)).statut, 200)
@@ -673,14 +673,14 @@ describe('SMS via Brevo (prioritaire sur Twilio) — lot « Brancher Brevo »', 
     }
   })
 
-  test('Brevo SMS en erreur : 502, statut « erreur » journalisé, aucun secret dans le message', async () => {
-    let statut = 500
+  test('Brevo SMS en erreur (refus 4xx) : 502, statut « erreur » journalisé, aucun secret dans le message', async () => {
+    let statut = 400
     const s = await demarrer('brevo-erreur.db', { brevoSms: true, statutPrestataire: () => statut })
     try {
       const c = (await s.api('POST', `/commerces/${AH}/clients`, { contact: '0611111111', consentementRelance: true }, PIN)).contenu.client as Client
       const r = await s.api('POST', `/commerces/${AH}/clients/${c.id}/relance`, { modele: 'bienvenue' }, PIN)
       assert.equal(r.statut, 502)
-      assert.match(r.contenu.erreur, /Brevo a refusé l’envoi \(HTTP 500\)/)
+      assert.match(r.contenu.erreur, /Brevo a refusé l’envoi \(HTTP 400\)/)
       assert.doesNotMatch(r.contenu.erreur, /cle-test/, 'aucun secret dans le message')
       statut = 201
       assert.equal((await s.api('POST', `/commerces/${AH}/clients/${c.id}/relance`, { modele: 'bienvenue' }, PIN)).statut, 200)

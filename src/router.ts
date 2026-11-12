@@ -22,6 +22,7 @@ export type Page =
   | 'menuCarte'
   | 'desinscription'
   | 'confidentialite'
+  | 'reglement'
 
 const PAGES: Page[] = [
   'accueil',
@@ -43,14 +44,15 @@ const PAGES: Page[] = [
   'menuCarte',
   'desinscription',
   'confidentialite',
+  'reglement',
 ]
 
 /**
  * Pages sans en-tête ni navigation commerçant : pages du client final (jeu, carte, menu, désinscription des relances,
- * politique de confidentialité)
+ * politique de confidentialité, règlement du jeu)
  * et la caisse (tablette du comptoir, déverrouillée par le code équipe et non par le PIN du gérant).
  */
-export const PAGES_PUBLIQUES: Page[] = ['jouer', 'carte', 'menu', 'caisse', 'desinscription', 'confidentialite']
+export const PAGES_PUBLIQUES: Page[] = ['jouer', 'carte', 'menu', 'caisse', 'desinscription', 'confidentialite', 'reglement']
 
 export interface Route {
   page: Page

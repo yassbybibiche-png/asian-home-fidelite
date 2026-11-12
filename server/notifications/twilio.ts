@@ -1,6 +1,6 @@
 // Adaptateur SMS Twilio (API REST « Messages »). Prêt, jamais exécuté contre Twilio : aucune clé configurée.
 import { createHmac } from 'node:crypto'
-import type { Adaptateur, Message } from './index.ts'
+import { ErreurPrestataire, type Adaptateur, type Message } from './index.ts'
 import { DELAI_PRESTATAIRE_MS } from './delai.ts'
 
 /**
@@ -55,7 +55,7 @@ export function adaptateurTwilio(c: ConfigTwilio | undefined, f: typeof fetch, d
         body: corps.toString(),
         signal: AbortSignal.timeout(delaiMs),
       })
-      if (!r.ok) throw new Error(`Twilio a refusé l’envoi (HTTP ${r.status}).`)
+      if (!r.ok) throw new ErreurPrestataire('Twilio', r.status)
       const j = (await r.json()) as { sid?: string }
       return { id: j.sid ?? '' }
     },

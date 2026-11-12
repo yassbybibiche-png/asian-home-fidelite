@@ -9,14 +9,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 
-import { creerServeur, hacherPinAncien, type OptionsServeur } from '../server/app.ts'
+import { creerServeur, emettreJetonClient, ESSAIS_RESTITUTION, hacherPinAncien, type OptionsServeur } from '../server/app.ts'
 import { ErreurConflit, ErreurMigrationManquante } from '../server/stockage.ts'
 import { configSupabaseDepuisEnv, ouvrirStockageSupabase } from '../server/stockage-supabase.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import { cleContact, nouveauClient, offrirRecompense, validerVisite } from '../src/lib/fidelite.ts'
 import { calculerChiffresCartes } from '../src/lib/stats.ts'
 import { soldePoints } from '../src/lib/points.ts'
-import type { Client, Commerce, Tirage } from '../src/types.ts'
+import { MESSAGE_ACTIVATION } from '../src/lib/roulette.ts'
+import type { Client, Commerce, EnvoiRelance, Tirage } from '../src/types.ts'
 
 const URL_SB = 'https://projet-factice.supabase.co'
 const CLE = 'cle-service-role-factice' // pas une vraie clé
@@ -98,6 +99,9 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
   let compteur = 0
   let panne = false
   let barriere: { methode: string; table: string; n: number; enAttente: (() => void)[] } | undefined
+  // Revue Codex R2 : échecs ponctuels (500, consommés un par un) et lenteur simulée de certaines requêtes.
+  const echecs: { methode: string; table: string }[] = []
+  let lenteur: { ms: number; vise: (methode: string, table: string, params: URLSearchParams) => boolean } | undefined
 
   const json = (statut: number, corps?: unknown) =>
     new Response(corps === undefined ? null : JSON.stringify(corps), { status: statut, headers: { 'content-type': 'application/json' } })
@@ -118,6 +122,11 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
       if (v.startsWith('gte.')) {
         // Seul usage : jours AAAA-MM-JJ (compteurs de la mesure, P2-Q3) — l'ordre alphabétique est l'ordre chronologique.
         lignes = lignes.filter((l) => l[col] != null && String(l[col]) >= v.slice(4))
+        continue
+      }
+      if (v.startsWith('gt.')) {
+        // Seul usage : `donnees->>activeLe` (revue Codex R3 F4), texte ISO comparé comme texte, comme Postgres ; NULL : faux.
+        lignes = lignes.filter((l) => valeur(l, col) != null && String(valeur(l, col)) > v.slice(3))
         continue
       }
       if (v.startsWith('lt.')) {
@@ -264,7 +273,16 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
         }
       })
     }
-    return traiter(methode, table, url.searchParams, entetes, corps)
+    const echec = echecs.findIndex((e) => e.methode === methode && e.table === table)
+    if (echec >= 0) {
+      echecs.splice(echec, 1)
+      rejets.push(`${table}:echec-${methode}`)
+      return erreur(500, 'XX000', 'panne ponctuelle')
+    }
+    const reponse = await traiter(methode, table, url.searchParams, entetes, corps)
+    // Lecture lente : l'instantané est pris tout de suite, la réponse n'arrive que `ms` plus tard (latence réseau).
+    if (lenteur?.vise(methode, table, url.searchParams)) await new Promise((ok) => setTimeout(ok, lenteur!.ms))
+    return reponse
   }
 
   return {
@@ -274,6 +292,10 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
     rejets,
     panne: (v: boolean) => void (panne = v),
     barriere: (methode: string, table: string, n = 2) => void (barriere = { methode, table, n, enAttente: [] }),
+    /** La prochaine requête `methode` sur `table` échoue (500), une seule fois par appel. */
+    echouer: (methode: string, table: string) => void echecs.push({ methode, table }),
+    /** Réponses des requêtes visées retardées de `ms` (stockage lent, instantané pris à l'arrivée) ; sans argument : plus de lenteur. */
+    ralentir: (o?: { ms: number; vise: (methode: string, table: string, params: URLSearchParams) => boolean }) => void (lenteur = o),
   }
 }
 
@@ -659,7 +681,8 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
 
       const jeu = await api('POST', `/commerces/${AH}/tirages`, { contact: '0033612345678' })
       assert.equal(jeu.statut, 201)
-      assert.match(jeu.contenu.code, /^[A-Z2-9]{6}$/)
+      // R3 (burn-on-reveal, décision du 12/11) : plus de code dans la réponse du tirage (servi par l'activation seulement).
+      assert.equal(jeu.contenu.code, undefined)
       assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).statut, 409)
       assert.equal(f.tables.tirages.length, 1)
 
@@ -920,46 +943,63 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
   })
 
   test('P0-U3 : code gagnant remis une seule fois (UPDATE conditionnel), même simultanément ; persistant ; sans 0005/0006', async () => {
+    // R3 (décision du 12/11) : le gain s'utilise à partir de J+1, et le code ne vient que de l'activation par le titulaire
+    // (jeton client) — d'où le secret de session, le jeton et le lendemain ; l'intention (une seule remise) est inchangée.
     const f = fauxPostgrest({ sans0005: true, sans0006: true })
     const CODE = { 'X-Equipe-Code': '2468' }
     let code = ''
-    {
-      const { app, api } = await demarrer(f)
+    try {
+      {
+        const { app, api } = await demarrer(f, { secretSession: SECRET })
+        try {
+          assert.equal((await api('POST', `/commerces/${AH}/equipe`, { nom: 'Mai', code: '2468' }, PIN)).statut, 201)
+          assert.equal((await api('PATCH', `/commerces/${AH}`, { lots: [{ libelle: 'Nems offerts', probabilite: 100 }] }, PIN)).statut, 200)
+          const ins = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' })).contenu as { client: Client; jeton: string }
+          const bearer = { Authorization: `Bearer ${ins.jeton}` }
+          await api('POST', `/commerces/${AH}/clients/${ins.client.id}/visite`, undefined, PIN)
+          const tirage = (await api('POST', `/commerces/${AH}/tirages`, {}, bearer)).contenu
+          assert.equal(tirage.code, undefined)
+          horloge = new Date(horloge.getTime() + 24 * 3600 * 1000)
+          const activation = await api('POST', `/commerces/${AH}/tirages/${tirage.tirageId}/activer`, undefined, bearer)
+          assert.equal(activation.statut, 200, JSON.stringify(activation.contenu))
+          code = activation.contenu.code
+          assert.ok(code)
+          const patchActivation = f.requetes.findLast((r) => r.table === 'tirages' && r.methode === 'PATCH')!
+          assert.equal(patchActivation.params.get('donnees->remis'), 'is.null', 'activation : même garde que la remise')
+
+          const verif = await api('GET', `/commerces/${AH}/caisse/gains/${code.toLowerCase()}`, undefined, CODE)
+          assert.deepEqual([verif.statut, verif.contenu.gain.statut, verif.contenu.gain.lot, verif.contenu.gain.client.prenom], [200, 'utilisable', 'Nems offerts', 'Lina'])
+          const lecture = f.requetes.findLast((r) => r.table === 'tirages' && r.methode === 'GET')!
+          assert.equal(lecture.params.get('donnees->>code'), `eq.${code}`)
+
+          // Deux caisses valident le même code au même instant : les deux lisent « utilisable », la base n'en laisse passer qu'une.
+          const avant = f.requetes.filter((r) => r.table === 'tirages' && r.methode === 'PATCH').length
+          f.barriere('PATCH', 'tirages')
+          const remises = await Promise.all([1, 2].map(() => api('POST', `/commerces/${AH}/caisse/gains/${code}/remise`, undefined, CODE)))
+          assert.deepEqual(remises.map((r) => r.statut).sort(), [200, 409])
+          assert.match(remises.find((r) => r.statut === 409)!.contenu.erreur, /déjà remis/)
+          const maj = f.requetes.filter((r) => r.table === 'tirages' && r.methode === 'PATCH').slice(avant)
+          assert.equal(maj.length, 2)
+          for (const r of maj) assert.equal(r.params.get('donnees->remis'), 'is.null', 'garde dans la requête elle-même')
+          assert.equal(f.tables.tirages.length, 1)
+          assert.equal((f.tables.tirages[0].donnees as Tirage).remis?.par.nom, 'Mai')
+          // Une activation après la remise est refusée (409), rien n'est réécrit.
+          assert.equal((await api('POST', `/commerces/${AH}/tirages/${tirage.tirageId}/activer`, undefined, bearer)).statut, 409)
+        } finally {
+          await app.fermer()
+        }
+      }
+      // Redémarrage (Render qui se réveille) : le statut est en base, pas en mémoire.
+      const { app, api } = await demarrer(f, { secretSession: SECRET })
       try {
-        assert.equal((await api('POST', `/commerces/${AH}/equipe`, { nom: 'Mai', code: '2468' }, PIN)).statut, 201)
-        assert.equal((await api('PATCH', `/commerces/${AH}`, { lots: [{ libelle: 'Nems offerts', probabilite: 100 }] }, PIN)).statut, 200)
-        const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
-        await api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)
-        code = (await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).contenu.code
-        assert.ok(code)
-
-        const verif = await api('GET', `/commerces/${AH}/caisse/gains/${code.toLowerCase()}`, undefined, CODE)
-        assert.deepEqual([verif.statut, verif.contenu.gain.statut, verif.contenu.gain.lot, verif.contenu.gain.client.prenom], [200, 'valable', 'Nems offerts', 'Lina'])
-        const lecture = f.requetes.findLast((r) => r.table === 'tirages' && r.methode === 'GET')!
-        assert.equal(lecture.params.get('donnees->>code'), `eq.${code}`)
-
-        // Deux caisses valident le même code au même instant : les deux lisent « valable », la base n'en laisse passer qu'une.
-        f.barriere('PATCH', 'tirages')
-        const remises = await Promise.all([1, 2].map(() => api('POST', `/commerces/${AH}/caisse/gains/${code}/remise`, undefined, CODE)))
-        assert.deepEqual(remises.map((r) => r.statut).sort(), [200, 409])
-        assert.match(remises.find((r) => r.statut === 409)!.contenu.erreur, /déjà remis/)
-        const maj = f.requetes.filter((r) => r.table === 'tirages' && r.methode === 'PATCH')
-        assert.equal(maj.length, 2)
-        for (const r of maj) assert.equal(r.params.get('donnees->remis'), 'is.null', 'garde dans la requête elle-même')
-        assert.equal(f.tables.tirages.length, 1)
-        assert.equal((f.tables.tirages[0].donnees as Tirage).remis?.par.nom, 'Mai')
+        const r = await api('POST', `/commerces/${AH}/caisse/gains/${code}/remise`, undefined, CODE)
+        assert.equal(r.statut, 409)
+        assert.equal((await api('GET', `/commerces/${AH}/caisse/gains/${code}`, undefined, CODE)).contenu.gain.statut, 'remis')
       } finally {
         await app.fermer()
       }
-    }
-    // Redémarrage (Render qui se réveille) : le statut est en base, pas en mémoire.
-    const { app, api } = await demarrer(f)
-    try {
-      const r = await api('POST', `/commerces/${AH}/caisse/gains/${code}/remise`, undefined, CODE)
-      assert.equal(r.statut, 409)
-      assert.equal((await api('GET', `/commerces/${AH}/caisse/gains/${code}`, undefined, CODE)).contenu.gain.statut, 'remis')
     } finally {
-      await app.fermer()
+      horloge = new Date(2026, 10, 9, 12, 0)
     }
   })
 
@@ -1658,6 +1698,640 @@ describe('P0-S20 : compteurs publics persistants (Supabase)', () => {
 })
 
 // ---------- Secrets et configuration ----------
+
+describe('Revue Codex R2 : tirages de la roue sous Supabase (plafonds sous concurrence, crédit exactement-une-fois)', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-r2-revue-'))
+  after(() => rmSync(dossier, { recursive: true, force: true }))
+  let hasard = 0
+  let ip = 0
+  const LOTS = [
+    { id: 'lot-rare', type: 'lot', libelle: 'Menu offert', probabilite: 50, plafondJour: 1 },
+    { id: 'lot-pts', type: 'points', points: 10, libelle: '+10 points', probabilite: 50 },
+  ]
+  /** Lecture des compteurs de plafond (`tiragesDepuis` : date >= début du jour) — la seule lecture DANS le verrou. */
+  const lecturePlafonds = (methode: string, table: string, params: URLSearchParams) => methode === 'GET' && table === 'tirages' && (params.get('date') ?? '').startsWith('gte.')
+
+  // Serveur HTTP sur le faux PostgREST, accès libre et lots plafonnés ; hasard du tirage injecté ; une IP par requête.
+  async function demarrer(f: ReturnType<typeof fauxPostgrest>) {
+    const app = await creerServeur({
+      fichierDb: join(dossier, 'ne-doit-pas-exister.db'),
+      supabase: { url: URL_SB, cleServiceRole: CLE, fetch: f.fetch },
+      adminPin: ADMIN,
+      pinInitial: '1234',
+      version: 'test',
+      maintenant: () => new Date(2026, 10, 10, 12),
+      alea: () => hasard,
+      derriereProxy: true,
+    })
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = {}) {
+      const r = await fetch(base + chemin, {
+        method: methode,
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': `10.9.0.${++ip % 250}`, ...entetes },
+        body: corps === undefined ? undefined : JSON.stringify(corps),
+      })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    const r = await api('PATCH', `/commerces/${AH}`, { modeAccesRoue: 'libre', limiteGainsMois: 0, lots: LOTS }, PIN)
+    assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+    return { app, api }
+  }
+  const tiragesDe = (f: ReturnType<typeof fauxPostgrest>, filtre: (t: Tirage) => boolean) => f.tables.tirages.map((l) => l.donnees as Tirage).filter(filtre)
+  const pointsDe = (f: ReturnType<typeof fauxPostgrest>, id: string) => soldePoints(f.tables.clients.find((l) => l.id === id)!.donnees as Client)
+
+  test('F1 : deux clients tirent au même instant un lot à plafond 1 (stockage lent) → un seul gagnant de ce lot', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      hasard = 0 // les deux tombent sur le lot rare… s'ils lisent tous deux « 0 sortie »
+      // Les deux requêtes passent ensemble la lecture de leurs tirages (barrière), puis la lecture des compteurs de
+      // plafond est lente : sans sérialisation, les deux lisent « 0 sortie » avant qu'aucune n'écrive.
+      f.barriere('GET', 'tirages')
+      f.ralentir({ ms: 40, vise: lecturePlafonds })
+      const r = await Promise.all(['0611111111', '0622222222'].map((contact) => api('POST', `/commerces/${AH}/tirages`, { contact })))
+      assert.deepEqual(r.map((x) => x.statut), [201, 201], JSON.stringify(r.map((x) => x.contenu)))
+      assert.deepEqual(r.map((x) => x.contenu.lotId).sort(), ['lot-pts', 'lot-rare'], 'le 2e est servi en consolation')
+      assert.equal(tiragesDe(f, (t) => t.lotId === 'lot-rare').length, 1, 'plafond 1 : au plus 1 gagnant')
+      assert.equal(f.requetes.filter((q) => lecturePlafonds(q.methode, q.table, q.params)).length, 2, 'les deux tirages ont bien compté les plafonds')
+    } finally {
+      f.ralentir()
+      await app.fermer()
+    }
+  })
+
+  test('F1 : même client, trois appels simultanés (stockage lent) → 201 + 409 + 409, un seul tirage, points crédités une fois', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const client = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0633333333' }, PIN)).contenu.client as Client
+      const avant = pointsDe(f, client.id)
+      hasard = 0.99 // consolation en points
+      f.barriere('GET', 'tirages', 3)
+      f.ralentir({ ms: 40, vise: lecturePlafonds })
+      const r = await Promise.all([1, 2, 3].map(() => api('POST', `/commerces/${AH}/tirages`, { contact: '0633333333' })))
+      assert.deepEqual(r.map((x) => x.statut).sort(), [201, 409, 409])
+      assert.equal(tiragesDe(f, (t) => t.clientId === client.id).length, 1)
+      assert.equal(pointsDe(f, client.id), avant + 10, 'crédité exactement une fois')
+      assert.ok(f.rejets.includes('tirages:23505'), 'l’index unique client + jour a tranché')
+    } finally {
+      f.ralentir()
+      await app.fermer()
+    }
+  })
+
+  test('F1 : un commerce n’attend pas les tirages d’un autre (verrou par commerce)', async () => {
+    const { creerFileParCle } = await import('../server/file-par-cle.ts')
+    const file = creerFileParCle()
+    const ordre: string[] = []
+    let libererA!: () => void
+    const a = file('c-a', () => new Promise<void>((ok) => (libererA = () => ok(void ordre.push('a1')))))
+    const a2 = file('c-a', async () => void ordre.push('a2'))
+    await file('c-b', async () => void ordre.push('b')) // n'attend pas c-a, toujours bloqué
+    assert.deepEqual(ordre, ['b'])
+    libererA()
+    await Promise.all([a, a2])
+    assert.deepEqual(ordre, ['b', 'a1', 'a2'], 'même commerce : un par un, dans l’ordre d’arrivée')
+    // Une section en échec ne bloque pas la suivante.
+    await assert.rejects(file('c-a', async () => Promise.reject(new Error('boum'))), /boum/)
+    assert.equal(await file('c-a', async () => 42), 42)
+  })
+
+  test('F2 : crédit des points en échec après l’insertion → 500 lisible, tirage supprimé, nouveau tirage crédité une fois', async (t) => {
+    const avertissements = t.mock.method(console, 'warn', () => {})
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const client = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0644444444' }, PIN)).contenu.client as Client
+      const avant = pointsDe(f, client.id)
+      hasard = 0.99 // consolation en points
+      f.echouer('PATCH', 'clients') // le crédit échoue une fois
+      const r1 = await api('POST', `/commerces/${AH}/tirages`, { contact: '0644444444' })
+      assert.equal(r1.statut, 500, 'pas 502–504 : le front les afficherait « hors ligne »')
+      assert.match(r1.contenu.erreur, /points n’ont pas pu être crédités.*tirage est annulé.*retenter/)
+      assert.ok(f.rejets.includes('clients:echec-PATCH'))
+      assert.equal(tiragesDe(f, (x) => x.clientId === client.id).length, 0, 'aucun tirage résiduel')
+      assert.equal(pointsDe(f, client.id), avant, 'aucun point crédité')
+      assert.ok(avertissements.mock.calls.some((c) => /tirage annulé/.test(String(c.arguments[0]))))
+      const r2 = await api('POST', `/commerces/${AH}/tirages`, { contact: '0644444444' })
+      assert.equal(r2.statut, 201, JSON.stringify(r2.contenu))
+      assert.deepEqual([r2.contenu.points, r2.contenu.solde], [10, avant + 10])
+      assert.equal(tiragesDe(f, (x) => x.clientId === client.id).length, 1)
+      assert.equal(pointsDe(f, client.id), avant + 10, 'crédité exactement une fois')
+      assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0644444444' })).statut, 409, 'puis 1 tirage par jour, comme toujours')
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('D1 : insertion du tirage en échec après la consommation d’un instant gagnant → instant rendu, gagné au tirage suivant', async (t) => {
+    t.mock.method(console, 'error', () => {})
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const r = await api('PATCH', `/commerces/${AH}`, { lots: [{ ...LOTS[0], instantsParJour: 1, plafondJour: 0 }, LOTS[1]] }, PIN)
+      assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+      // Instants du jour générés à l'ouverture du tableau de bord, puis remplacés par un instant passé d'une minute.
+      assert.equal((await api('GET', `/commerces/${AH}/instants-gagnants`, undefined, PIN)).statut, 200)
+      const ligne = f.tables.meta.find((l) => String(l.cle).startsWith(`instants:${AH}:`))!
+      const heure = new Date(new Date(2026, 10, 10, 12).getTime() - 60_000).toISOString()
+      ligne.valeur = JSON.stringify({ jour: String(ligne.cle).slice(-10), instants: [{ id: 'ig-sb', heure, lotId: 'lot-rare', lot: 'Menu offert' }] })
+      hasard = 0.99 // sans l'instant : consolation en points
+      f.echouer('POST', 'tirages')
+      assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0677777777' })).statut, 500)
+      const relue = () => JSON.parse(String(f.tables.meta.find((l) => l.cle === ligne.cle)!.valeur)).instants[0]
+      assert.equal(relue().consommePar, undefined, 'Supabase n’annule rien : l’instant est rendu explicitement')
+      const r2 = await api('POST', `/commerces/${AH}/tirages`, { contact: '0677777777' })
+      assert.equal(r2.statut, 201, JSON.stringify(r2.contenu))
+      assert.equal(r2.contenu.lotId, 'lot-rare')
+      const consomme = relue()
+      assert.deepEqual([consomme.consommePar, consomme.gagne], [r2.contenu.tirageId, true])
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  /** Deux instants du même document, passés d'une et d'une demi-minute (lot rare sans plafond) ; renvoie la ligne `meta`. */
+  async function deuxInstants(f: ReturnType<typeof fauxPostgrest>, api: Awaited<ReturnType<typeof demarrer>>['api']) {
+    const r = await api('PATCH', `/commerces/${AH}`, { lots: [{ ...LOTS[0], instantsParJour: 2, plafondJour: 0 }, LOTS[1]] }, PIN)
+    assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+    assert.equal((await api('GET', `/commerces/${AH}/instants-gagnants`, undefined, PIN)).statut, 200)
+    const ligne = f.tables.meta.find((l) => String(l.cle).startsWith(`instants:${AH}:`))!
+    const midi = new Date(2026, 10, 10, 12).getTime()
+    ligne.valeur = JSON.stringify({
+      jour: String(ligne.cle).slice(-10),
+      instants: [
+        { id: 'ig-i', heure: new Date(midi - 60_000).toISOString(), lotId: 'lot-rare', lot: 'Menu offert' },
+        { id: 'ig-j', heure: new Date(midi - 30_000).toISOString(), lotId: 'lot-rare', lot: 'Menu offert' },
+      ],
+    })
+    hasard = 0.99 // sans instant : consolation en points
+    return (id: string) => (JSON.parse(String(f.tables.meta.find((l) => l.cle === ligne.cle)!.valeur)).instants as { id: string; consommePar?: string; gagne?: boolean }[]).find((x) => x.id === id)!
+  }
+
+  test('Revue Codex D1 (F1) : A consomme I, B (autre instance) consomme J, l’insertion de A échoue → I rendu, J reste à B', async (t) => {
+    t.mock.method(console, 'error', () => {})
+    const f = fauxPostgrest()
+    // Deux instances du serveur sur la même base : le verrou par commerce (en mémoire) ne les sérialise pas.
+    const s1 = await demarrer(f)
+    const s2 = await demarrer(f)
+    try {
+      const instant = await deuxInstants(f, s1.api)
+      // L'insertion de A attend celle de B (barrière à 2), puis échoue (1re servie) ; B a consommé J entre-temps.
+      f.barriere('POST', 'tirages')
+      f.echouer('POST', 'tirages')
+      const pa = s1.api('POST', `/commerces/${AH}/tirages`, { contact: '0681111111' })
+      for (let k = 0; !f.requetes.some((q) => q.methode === 'POST' && q.table === 'tirages'); k++) {
+        assert.ok(k < 400, 'A n’est jamais arrivé à son insertion')
+        await new Promise((ok) => setTimeout(ok, 5))
+      }
+      assert.equal(instant('ig-i').consommePar?.startsWith('ti-'), true, 'A a consommé I avant son insertion')
+      const [ra, rb] = await Promise.all([pa, s2.api('POST', `/commerces/${AH}/tirages`, { contact: '0682222222' })])
+      assert.equal(ra.statut, 500, JSON.stringify(ra.contenu))
+      assert.equal(rb.statut, 201, JSON.stringify(rb.contenu))
+      assert.equal(rb.contenu.lotId, 'lot-rare', 'B a gagné par J')
+      assert.equal(instant('ig-i').consommePar, undefined, 'I redevient gagnable malgré le document modifié par B')
+      assert.deepEqual([instant('ig-j').consommePar, instant('ig-j').gagne], [rb.contenu.tirageId, true], 'J reste à B')
+      const rc = await s1.api('POST', `/commerces/${AH}/tirages`, { contact: '0683333333' })
+      assert.equal(rc.statut, 201, JSON.stringify(rc.contenu))
+      assert.equal(rc.contenu.lotId, 'lot-rare')
+      assert.deepEqual([instant('ig-i').consommePar, instant('ig-i').gagne], [rc.contenu.tirageId, true])
+    } finally {
+      await s1.app.fermer()
+      await s2.app.fermer()
+    }
+  })
+
+  test(`Revue Codex D1 (F1) : restitution impossible après ${ESSAIS_RESTITUTION} essais → incohérence journalisée (ligne JSON)`, async (t) => {
+    const erreurs = t.mock.method(console, 'error', () => {})
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const instant = await deuxInstants(f, api)
+      f.echouer('POST', 'tirages')
+      // Dès que la consommation est écrite, chaque écriture suivante du document échoue (un essai = une écriture).
+      let arme = false
+      f.ralentir({
+        ms: 0,
+        vise: (methode, table) => {
+          if (methode === 'PATCH' && table === 'meta' && !arme) {
+            arme = true
+            for (let k = 0; k < ESSAIS_RESTITUTION; k++) f.echouer('PATCH', 'meta')
+          }
+          return false
+        },
+      })
+      const r = await api('POST', `/commerces/${AH}/tirages`, { contact: '0684444444' })
+      assert.equal(r.statut, 500, JSON.stringify(r.contenu))
+      assert.equal(f.rejets.filter((x) => x === 'meta:echec-PATCH').length, ESSAIS_RESTITUTION)
+      assert.ok(instant('ig-i').consommePar, 'instant resté consommé sans tirage…')
+      const lignes = erreurs.mock.calls.map((c) => String(c.arguments[0])).filter((x) => x.includes('"instant-non-rendu"'))
+      assert.equal(lignes.length, 1, '…et dit explicitement')
+      const l = JSON.parse(lignes[0])
+      assert.deepEqual([l.type, l.niveau, l.commerce, l.instant, l.tirage], ['incoherence', 'erreur', AH, 'ig-i', instant('ig-i').consommePar])
+    } finally {
+      f.ralentir()
+      await app.fermer()
+    }
+  })
+
+  test('F2 : crédit ET suppression en échec → incohérence journalisée explicitement (ligne JSON), 500 qui le dit', async (t) => {
+    const erreurs = t.mock.method(console, 'error', () => {})
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const client = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0655555555' }, PIN)).contenu.client as Client
+      hasard = 0.99
+      f.echouer('PATCH', 'clients')
+      f.echouer('DELETE', 'tirages')
+      const r = await api('POST', `/commerces/${AH}/tirages`, { contact: '0655555555' })
+      assert.equal(r.statut, 500)
+      assert.match(r.contenu.erreur, /tirage est enregistré mais vos points n’ont pas pu être crédités/)
+      const restant = tiragesDe(f, (x) => x.clientId === client.id)
+      assert.equal(restant.length, 1)
+      const lignes = erreurs.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.includes('tirage-points-non-credites'))
+      assert.equal(lignes.length, 1)
+      const ligne = JSON.parse(lignes[0])
+      assert.deepEqual([ligne.type, ligne.niveau, ligne.commerce, ligne.tirage, ligne.points], ['incoherence', 'erreur', AH, restant[0].id, 10])
+      assert.doesNotMatch(lignes[0], new RegExp(client.id), 'identifiant client en empreinte seulement')
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('F4 : rattrapage du lotId — écriture conditionnelle (lotId déjà posé ou remise arrivée entre-temps : rien écrit)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce({ ...nouveauCommerce('Chez Lin', 'restaurant', ''), id: 'c-lin' }, { hash: 'h', sel: 's' })
+    const cl = { ...nouveauClient('c-lin', 'Lina', { telephone: '0612345678' }), id: 'cl-lin' }
+    await st.ajouterClient(cl)
+    const ancien = (id: string, date: string): Tirage => ({ id, commerceId: 'c-lin', clientId: cl.id, lot: 'Nems', date, code: 'ABCDEF' })
+    await st.ajouterTirage(ancien('t1', '2026-11-01T12:00:00.000Z'))
+    await st.ajouterTirage(ancien('t2', '2026-11-02T12:00:00.000Z'))
+    await st.ajouterTirage({ ...ancien('t3', '2026-11-03T12:00:00.000Z'), lotId: 'lot-x' })
+    assert.deepEqual((await st.tiragesSansLot('c-lin')).map((t) => t.id).sort(), ['t1', 't2'])
+    // t2 remis entre la lecture (sans remise) et l'écriture du rattrapage : la remise n'est pas écrasée.
+    const lu = (await st.tiragesSansLot('c-lin')).find((t) => t.id === 't2')!
+    assert.equal(await st.marquerTirageRemis({ ...lu, remis: { le: '2026-11-02T13:00:00.000Z', par: { type: 'gerant', nom: 'Gérant' } } }), true)
+    assert.equal(await st.completerLotTirage({ ...lu, lotId: 'lot-nems', typeLot: 'lot' }), false)
+    assert.ok((f.tables.tirages.find((l) => l.id === 't2')!.donnees as Tirage).remis, 'remise conservée')
+    assert.equal(await st.completerLotTirage({ ...ancien('t1', '2026-11-01T12:00:00.000Z'), lotId: 'lot-nems', typeLot: 'lot' }), true)
+    assert.equal(await st.completerLotTirage({ ...ancien('t1', '2026-11-01T12:00:00.000Z'), lotId: 'lot-autre', typeLot: 'lot' }), false, 'déjà rattaché')
+    assert.equal((f.tables.tirages.find((l) => l.id === 't1')!.donnees as Tirage).lotId, 'lot-nems')
+    await st.supprimerTirage('c-lin', 't1')
+    assert.deepEqual(f.tables.tirages.map((l) => l.id).sort(), ['t2', 't3'])
+  })
+})
+
+describe('Revue Codex R3 (F4) : remise d’un gain — l’heure de vérité est celle de l’écriture (stockage lent)', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-sb-r3-'))
+  after(() => rmSync(dossier, { recursive: true, force: true }))
+  const ACTIVE = new Date('2026-11-12T17:00:00.000Z')
+  const horloge = { t: ACTIVE }
+  /** Lecture du tirage par son code (route de remise) : `GET tirages?donnees->>code=eq.…`. */
+  const lectureParCode = (methode: string, table: string, params: URLSearchParams) => methode === 'GET' && table === 'tirages' && params.has('donnees->>code')
+
+  async function demarrer(f: ReturnType<typeof fauxPostgrest>) {
+    const app = await creerServeur({
+      fichierDb: join(dossier, 'ne-doit-pas-exister.db'),
+      supabase: { url: URL_SB, cleServiceRole: CLE, fetch: f.fetch },
+      adminPin: ADMIN,
+      pinInitial: '1234',
+      version: 'test',
+      maintenant: () => horloge.t,
+    })
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    const remettre = async (code: string) => {
+      const r = await fetch(`${base}/commerces/${AH}/caisse/gains/${code}/remise`, { method: 'POST', headers: PIN })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    // Gain v2 gagné hier, code activé par le client à 17 h 00 UTC : fenêtre jusqu'à 17 h 10.
+    const st = ouvrir(f)
+    await st.ajouterClient({ ...nouveauClient(AH, 'Lina', { telephone: '0612345678' }), id: 'cl-r3' })
+    await st.ajouterTirage({
+      id: 'ti-r3', commerceId: AH, clientId: 'cl-r3', lot: 'Nems offerts', lotId: 'lot-nems', typeLot: 'lot',
+      date: '2026-11-11T12:00:00.000Z', code: 'LENT23', activeLe: ACTIVE.toISOString(),
+    })
+    return { app, remettre }
+  }
+  const tirage = (f: ReturnType<typeof fauxPostgrest>) => f.tables.tirages.find((l) => l.id === 'ti-r3')!.donnees as Tirage
+
+  test('lecture lente : la fenêtre se ferme entre la lecture du tirage et l’écriture → remise refusée (409, message d’activation), rien écrit', async () => {
+    const f = fauxPostgrest()
+    horloge.t = new Date(ACTIVE.getTime() + 9 * 60_000 + 50_000) // 17 h 09 min 50 s : encore dans la fenêtre
+    const { app, remettre } = await demarrer(f)
+    try {
+      // La lecture par code est servie à 17 h 09 min 50 s (fenêtre ouverte) mais sa réponse met « 20 s » à revenir :
+      // l'horloge avance pendant le trajet, l'écriture arrive à 17 h 10 min 10 s.
+      f.ralentir({
+        ms: 20,
+        vise: (m, t, p) => {
+          if (!lectureParCode(m, t, p)) return false
+          horloge.t = new Date(ACTIVE.getTime() + 10 * 60_000 + 10_000)
+          return true
+        },
+      })
+      const r = await remettre('LENT23')
+      assert.equal(r.statut, 409, JSON.stringify(r.contenu))
+      assert.equal(r.contenu.erreur, MESSAGE_ACTIVATION, 'statut à jour : « inactif »')
+      assert.equal(tirage(f).remis, undefined, 'rien écrit')
+    } finally {
+      f.ralentir()
+      await app.fermer()
+    }
+  })
+
+  test('témoin : même lecture lente, fenêtre encore ouverte à l’écriture → remise 200 ; la condition de la fenêtre part bien à la base', async () => {
+    const f = fauxPostgrest()
+    horloge.t = new Date(ACTIVE.getTime() + 5 * 60_000)
+    const { app, remettre } = await demarrer(f)
+    try {
+      f.ralentir({
+        ms: 20,
+        vise: (m, t, p) => {
+          if (!lectureParCode(m, t, p)) return false
+          horloge.t = new Date(ACTIVE.getTime() + 9 * 60_000)
+          return true
+        },
+      })
+      const r = await remettre('LENT23')
+      assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+      assert.equal(tirage(f).remis?.le, new Date(ACTIVE.getTime() + 9 * 60_000).toISOString(), 'heure de remise = heure de l’écriture')
+      const ecriture = f.requetes.find((q) => q.methode === 'PATCH' && q.table === 'tirages')!
+      assert.equal(ecriture.params.get('donnees->>activeLe'), `gt.${new Date(ACTIVE.getTime() - 60_000).toISOString()}`, 'activeLe > écriture − 10 min')
+      assert.equal(ecriture.params.get('donnees->remis'), 'is.null')
+    } finally {
+      f.ralentir()
+      await app.fermer()
+    }
+  })
+
+  test('stockage seul : UPDATE conditionnel — fenêtre échue en base → false, rien écrit ; ouverte → true', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce({ ...nouveauCommerce('Asian Home', 'restaurant', ''), id: AH }, { hash: 'h', sel: 's' })
+    await st.ajouterClient({ ...nouveauClient(AH, 'Lina', { telephone: '0612345678' }), id: 'c' })
+    await st.ajouterTirage({ id: 'ti-st', commerceId: AH, clientId: 'c', lot: 'Nems', typeLot: 'lot', date: '2026-11-11T12:00:00.000Z', code: 'STOK23', activeLe: ACTIVE.toISOString() })
+    const remis: Tirage = {
+      id: 'ti-st', commerceId: AH, clientId: 'c', lot: 'Nems', typeLot: 'lot', date: '2026-11-11T12:00:00.000Z', code: 'STOK23', activeLe: ACTIVE.toISOString(),
+      remis: { le: '2026-11-12T17:10:00.000Z', par: { type: 'gerant', nom: 'Gérant' } },
+    }
+    assert.equal(await st.marquerTirageRemis(remis, ACTIVE.toISOString()), false, 'activé à 17 h 00, écriture à 17 h 10 : échue')
+    assert.equal((f.tables.tirages.find((l) => l.id === 'ti-st')!.donnees as Tirage).remis, undefined)
+    assert.equal(await st.marquerTirageRemis(remis, new Date(ACTIVE.getTime() - 1).toISOString()), true)
+    assert.equal(await st.marquerTirageRemis(remis, new Date(ACTIVE.getTime() - 1).toISOString()), false, 'déjà remis')
+  })
+})
+
+describe('Revue Codex R7 : relance « gain bientôt expiré » sous Supabase (réclamation, statut revérifié, colonne `libre`)', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-sb-r7-'))
+  after(() => rmSync(dossier, { recursive: true, force: true }))
+  const MAINTENANT = new Date('2026-11-10T11:00:00Z')
+  const JOUR = 24 * 3600_000
+  /** Tirage v2 (lot physique) de Lina, gagné `jours` jours avant MAINTENANT (30 → dernier jour le 10/11, fin à 23 h UTC). */
+  const gain = (jours: number): Tirage => ({
+    id: 'ti-r7', commerceId: AH, clientId: 'cl-r7', lot: 'Un dessert offert', lotId: 'lot-dessert', typeLot: 'lot',
+    date: new Date(MAINTENANT.getTime() - jours * JOUR).toISOString(), code: 'R7SB23',
+  })
+  const lu = (f: ReturnType<typeof fauxPostgrest>) => f.tables.tirages.find((l) => l.id === 'ti-r7')!.donnees as Tirage
+  const envoisGain = (f: ReturnType<typeof fauxPostgrest>) =>
+    f.tables.envois.map((l) => l.donnees as EnvoiRelance).filter((e) => e.modele === 'gainExpire')
+
+  /**
+   * Serveur sur le faux PostgREST `f`, horloge propre, SMS simulés (Twilio factice, aucun appel réseau). `o.reponse` :
+   * réponse du prestataire (undefined → 201) ; `o.secretSession` : active les jetons client (route d'activation).
+   */
+  async function demarrer(f: ReturnType<typeof fauxPostgrest>, horloge: { t: Date }, sms: URLSearchParams[], o: { reponse?: () => Response | undefined; secretSession?: string } = {}) {
+    const fetchSms = (async (_url: string, init: RequestInit) => {
+      sms.push(new URLSearchParams(String(init.body)))
+      return o.reponse?.() ?? new Response(JSON.stringify({ sid: `SM${sms.length}` }), { status: 201 })
+    }) as unknown as typeof globalThis.fetch
+    const app = await creerServeur({
+      fichierDb: join(dossier, 'ne-doit-pas-exister.db'),
+      supabase: { url: URL_SB, cleServiceRole: CLE, fetch: f.fetch },
+      adminPin: ADMIN,
+      pinInitial: '1234',
+      version: 'test',
+      maintenant: () => horloge.t,
+      notifications: { twilio: { accountSid: 'ACtest', authToken: 'jeton-test', expediteur: '+33700000000' }, fetch: fetchSms },
+      ...(o.secretSession ? { secretSession: o.secretSession } : {}),
+    })
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = PIN) {
+      const r = await fetch(base + chemin, { method: methode, headers: { 'Content-Type': 'application/json', ...entetes }, body: corps === undefined ? undefined : JSON.stringify(corps) })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    const tournee = async () => {
+      await api('GET', `/commerces/${AH}/etat`)
+      await app.relancesEnCours()
+    }
+    return { app, api, tournee }
+  }
+  async function preparer(f: ReturnType<typeof fauxPostgrest>, t: Tirage) {
+    const st = ouvrir(f)
+    await st.ajouterClient({ ...nouveauClient(AH, 'Lina', { telephone: '0612345678' }), id: 'cl-r7', consentementRelance: true })
+    await st.ajouterTirage(t)
+  }
+
+  test('F2 : deux tournées simultanées à cheval sur minuit (deux instances) → une seule réclamation passe, un seul SMS', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    // 23 h 59 min 30 s et 0 h 00 min 30 s à Paris : deux jours différents, l'index unique des envois ne les départage pas.
+    const a = await demarrer(f, { t: new Date('2026-11-10T22:59:30Z') }, sms)
+    const b = await demarrer(f, { t: new Date('2026-11-10T23:00:30Z') }, sms)
+    try {
+      await preparer(f, gain(29))
+      // Les deux réclamations ont relu le tirage (sans marqueur) avant que l'une n'écrive.
+      f.barriere('PATCH', 'tirages')
+      await Promise.all([a.tournee(), b.tournee()])
+      assert.equal(sms.length, 1, 'un seul SMS pour le gain')
+      assert.deepEqual(envoisGain(f).map((e) => e.statut), ['envoye'])
+      const reclamations = f.requetes.filter((q) => q.methode === 'PATCH' && q.table === 'tirages')
+      assert.equal(reclamations.length, 2)
+      for (const q of reclamations) assert.deepEqual([q.params.get('donnees->relanceGainLe'), q.params.get('donnees->remis'), q.params.get('donnees->activeLe')], ['is.null', 'is.null', 'is.null'])
+      assert.ok(lu(f).relanceGainLe)
+    } finally {
+      await a.app.fermer()
+      await b.app.fermer()
+    }
+  })
+
+  /** Lecture de présélection de la tournée (tirages des 32 derniers jours) : instantané pris, puis `pendant` s'exécute. */
+  const selection = (horloge: { t: Date }, pendant: () => void) => {
+    const depuis = `gte.${new Date(horloge.t.getTime() - 32 * JOUR).toISOString()}`
+    return { ms: 20, vise: (m: string, t: string, p: URLSearchParams) => (m === 'GET' && t === 'tirages' && p.get('date') === depuis ? (pendant(), true) : false) }
+  }
+
+  test('F3 : gain remis en caisse entre la sélection et l’envoi → ni SMS, ni marqueur, remise intacte', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: MAINTENANT }
+    const s = await demarrer(f, horloge, sms)
+    try {
+      await preparer(f, gain(28))
+      const remis = { le: MAINTENANT.toISOString(), par: { type: 'gerant' as const, nom: 'Gérant' } }
+      f.ralentir(selection(horloge, () => void ((f.tables.tirages.find((l) => l.id === 'ti-r7')!.donnees as Tirage).remis = remis)))
+      await s.tournee()
+      assert.equal(sms.length, 0)
+      assert.deepEqual(envoisGain(f), [])
+      assert.deepEqual([lu(f).relanceGainLe, lu(f).remis], [undefined, remis])
+    } finally {
+      f.ralentir()
+      await s.app.fermer()
+    }
+  })
+
+  test('F3 : gain expiré (minuit à Paris passé) entre la sélection et l’envoi → ni SMS, ni marqueur, aucune écriture', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: new Date('2026-11-10T22:59:00Z') } // 23 h 59 à Paris, dernier jour du gain
+    const s = await demarrer(f, horloge, sms)
+    try {
+      await preparer(f, gain(30))
+      f.ralentir(selection(horloge, () => void (horloge.t = new Date('2026-11-10T23:01:00Z'))))
+      await s.tournee()
+      assert.equal(sms.length, 0)
+      assert.deepEqual(envoisGain(f), [])
+      assert.equal(lu(f).relanceGainLe, undefined)
+      assert.equal(f.requetes.filter((q) => q.methode === 'PATCH' && q.table === 'tirages').length, 0, 'statut revérifié avant la réclamation')
+    } finally {
+      f.ralentir()
+      await s.app.fermer()
+    }
+  })
+
+  test('F5 : message libre et relance de gain le même jour (colonne `libre` partagée) → refus tracé avec un motif distinct, gain retenté le lendemain', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: MAINTENANT }
+    const s = await demarrer(f, horloge, sms)
+    try {
+      await preparer(f, gain(28))
+      assert.equal((await s.api('POST', `/commerces/${AH}/clients/cl-r7/relance`, { message: 'Bonjour Lina' })).statut, 200)
+      // Vrai doublon du message libre : refus ordinaire, sans motif.
+      const doublon = await s.api('POST', `/commerces/${AH}/clients/cl-r7/relance`, { message: 'Encore' })
+      assert.equal(doublon.statut, 409)
+      assert.match(doublon.contenu.erreur, /déjà été envoyée à ce client aujourd’hui/)
+
+      await s.tournee()
+      assert.equal(sms.length, 1)
+      const [refus] = envoisGain(f)
+      assert.deepEqual([refus.statut, refus.motif], ['refuse', 'collision_libre_gain'])
+      assert.match(refus.raison!, /^Relance « gain bientôt expiré » non envoyée : un message libre est déjà parti aujourd’hui/)
+      assert.equal(lu(f).relanceGainLe, undefined, 'réclamation libérée : nouvel essai à la tournée suivante')
+      assert.equal(f.tables.envois.filter((l) => (l.donnees as EnvoiRelance).motif).length, 1, 'le vrai doublon n’a pas de motif')
+
+      horloge.t = new Date(MAINTENANT.getTime() + JOUR)
+      await s.tournee()
+      assert.equal(sms.length, 2)
+      assert.deepEqual(envoisGain(f).map((e) => e.statut).sort(), ['envoye', 'refuse'])
+      // L'inverse, le même jour : le message libre est refusé avec le même motif.
+      const libre = await s.api('POST', `/commerces/${AH}/clients/cl-r7/relance`, { message: 'Bonjour' })
+      assert.equal(libre.statut, 409)
+      assert.match(libre.contenu.erreur, /^Message libre non envoyé : la relance « gain bientôt expiré » est déjà partie aujourd’hui/)
+      const dernier = f.tables.envois.map((l) => l.donnees as EnvoiRelance).filter((e) => e.modele === 'libre').at(-1)!
+      assert.deepEqual([dernier.statut, dernier.motif], ['refuse', 'collision_libre_gain'])
+      assert.equal(sms.length, 2)
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  // ---- Revue Codex 2 R7 : écritures concurrentes sur le tirage, expiration à l'heure de la réclamation ----
+  const patchsTirage = (f: ReturnType<typeof fauxPostgrest>) => f.requetes.filter((q) => q.methode === 'PATCH' && q.table === 'tirages')
+
+  test('2e revue F1 : réclamation posée PENDANT une activation partie d’une lecture ancienne → le marqueur survit, la seconde réclamation échoue', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: MAINTENANT }
+    const SECRET = 'secret-de-session-de-test-assez-long-0123456789'
+    const s = await demarrer(f, horloge, sms, { secretSession: SECRET })
+    try {
+      await preparer(f, gain(28))
+      const marqueur = '2026-11-10T10:59:00.000Z'
+      // La lecture de l'activation (tirages du titulaire) est servie SANS marqueur ; pendant le trajet de sa réponse,
+      // une tournée (autre instance) réclame le tirage.
+      f.ralentir({
+        ms: 20,
+        vise: (m, t, p) => (m === 'GET' && t === 'tirages' && p.get('client_id') === 'eq.cl-r7' ? ((lu(f).relanceGainLe = marqueur), true) : false),
+      })
+      const jeton = emettreJetonClient(SECRET, { typ: 'client', jti: 'jti-r7b-f1', cid: 'cl-r7', com: AH, ver: 0, exp: Math.floor(MAINTENANT.getTime() / 1000) + 3600 })
+      const r = await s.api('POST', `/commerces/${AH}/tirages/ti-r7/activer`, undefined, { Authorization: `Bearer ${jeton}` })
+      f.ralentir()
+      assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+      assert.deepEqual([lu(f).activeLe, lu(f).relanceGainLe], [MAINTENANT.toISOString(), marqueur], 'activation appliquée sur la ligne fraîche : marqueur conservé')
+      const [ancienne, fraiche] = patchsTirage(f)
+      assert.equal(ancienne.params.get('donnees->relanceGainLe'), 'is.null', '1er essai : lecture ancienne, refusé par la base')
+      assert.equal(fraiche.params.get('donnees->>relanceGainLe'), `eq.${marqueur}`, '2e essai : sur la ligne relue')
+
+      // Seconde réclamation (tournée de cette instance) : le tirage est réclamé, rien ne part.
+      await s.tournee()
+      assert.equal(sms.length, 0)
+      assert.deepEqual(envoisGain(f), [])
+      assert.equal(lu(f).relanceGainLe, marqueur)
+    } finally {
+      f.ralentir()
+      await s.app.fermer()
+    }
+  })
+
+  test('2e revue F3 : activation concurrente pendant un refus du prestataire → la libération réussit quand même, nouvel essai le lendemain', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: MAINTENANT }
+    const activeLe = '2026-11-10T11:00:30.000Z'
+    const refus = { actif: true }
+    const s = await demarrer(f, horloge, sms, {
+      reponse: () => {
+        if (!refus.actif) return undefined
+        // Le client active son code pendant l'appel au prestataire (écriture sur la ligne fraîche : marqueur gardé).
+        lu(f).activeLe = activeLe
+        return new Response(JSON.stringify({ message: 'numéro invalide' }), { status: 400 })
+      },
+    })
+    try {
+      await preparer(f, gain(28))
+      await s.tournee()
+      assert.equal(sms.length, 1)
+      assert.deepEqual(envoisGain(f).map((e) => e.statut), ['erreur'])
+      assert.deepEqual([lu(f).relanceGainLe, lu(f).activeLe], [undefined, activeLe], 'marqueur retiré, activation intacte')
+
+      refus.actif = false
+      horloge.t = new Date(MAINTENANT.getTime() + JOUR)
+      await s.tournee()
+      assert.equal(sms.length, 2, 'refus confirmé : la relance repart à la tournée suivante')
+      assert.deepEqual(envoisGain(f).map((e) => e.statut).sort(), ['envoye', 'erreur'])
+      assert.ok(lu(f).relanceGainLe)
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('2e revue F4 : réclamation lente qui passe minuit à Paris (gain expiré à l’écriture) → marqueur libéré, rien envoyé', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: new Date('2026-11-10T22:59:00Z') } // 23 h 59 à Paris, dernier jour du gain
+    const s = await demarrer(f, horloge, sms)
+    try {
+      await preparer(f, gain(30))
+      // L'UPDATE de la réclamation est appliqué tout de suite, sa réponse revient après minuit à Paris.
+      f.ralentir({
+        ms: 20,
+        vise: (m, t, p) => (m === 'PATCH' && t === 'tirages' && p.get('donnees->relanceGainLe') === 'is.null' ? ((horloge.t = new Date('2026-11-10T23:01:00Z')), true) : false),
+      })
+      await s.tournee()
+      assert.equal(sms.length, 0, 'gain expiré : aucun appel au prestataire')
+      assert.deepEqual(envoisGain(f), [])
+      assert.equal(lu(f).relanceGainLe, undefined, 'réclamation libérée')
+      assert.equal(patchsTirage(f).length, 2, 'réclamation écrite puis libérée')
+    } finally {
+      f.ralentir()
+      await s.app.fermer()
+    }
+  })
+})
 
 describe('Supabase : variables d’environnement et secrets', () => {
   const racine = join(import.meta.dirname, '..')

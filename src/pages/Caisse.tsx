@@ -638,13 +638,13 @@ function Comptoir({
 
   return (
     <div className="mx-auto max-w-xl space-y-4 px-4 pt-4 pb-10">
-      <header className="flex items-center gap-3">
+      <header className="hero-sombre flex items-center gap-3 rounded-2xl px-4 py-3 shadow-relief">
         <LogoCommerce commerce={commerce} />
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-titre text-xl font-bold">Caisse · {commerce.nom}</h1>
-          <p className="text-sm text-gray-600">{degrade ? 'Connecté : code reconnu sur cet appareil (nom vérifié au retour du réseau)' : `Connecté : ${auteur.nom}`}</p>
+          <p className="text-sm text-white/80">{degrade ? 'Connecté : code reconnu sur cet appareil (nom vérifié au retour du réseau)' : `Connecté : ${auteur.nom}`}</p>
         </div>
-        <button className="min-h-11 shrink-0 rounded-xl px-3 text-sm font-semibold text-gray-700 ring-1 ring-gray-300 active:bg-gray-100" onClick={onVerrouiller}>
+        <button className="min-h-11 shrink-0 rounded-xl px-3 text-sm font-semibold text-white ring-1 ring-white/30 active:bg-white/10" onClick={onVerrouiller}>
           🔒 Verrouiller
         </button>
       </header>
@@ -945,7 +945,7 @@ function CodeGagnantCaisse({ onGain }: { onGain(quoi: 'verifier' | 'remettre', c
         </button>
       </form>
       <p id="caisse-code-aide" className="text-sm text-gray-600">
-        6 lettres ou chiffres, affichés sur le téléphone du client. Majuscules et espaces sans importance. Valable le jour du tirage seulement.
+        6 lettres ou chiffres, affichés sur le téléphone du client. Majuscules et espaces sans importance. Gain utilisable du lendemain du tirage à 30 jours, code valable 10 minutes après activation par le client.
       </p>
       <MessageErreur>{erreur}</MessageErreur>
       {gain && date && (
@@ -955,7 +955,7 @@ function CodeGagnantCaisse({ onGain }: { onGain(quoi: 'verifier' | 'remettre', c
             {gain.client ? <strong>{nomAffiche(gain.client.prenom)}</strong> : 'Client supprimé'} · tiré le {date.toLocaleDateString('fr-FR')} à{' '}
             {date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · code <span className="font-mono">{gain.code}</span>
           </p>
-          {gain.statut === 'valable' ? (
+          {gain.statut === 'utilisable' ? (
             <button className="bouton min-h-14 w-full bg-green-700 text-lg hover:bg-green-800 active:bg-green-900" disabled={enCours} onClick={() => void appeler('remettre', gain.code)}>
               🎁 Marquer remis
             </button>

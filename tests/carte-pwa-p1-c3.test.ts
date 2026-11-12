@@ -357,17 +357,24 @@ describe('Carte : lots en attente avec expiration', () => {
       const c = (await s.json('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0611111111' }, PIN)).contenu.client as Client
       const passage = await s.json('POST', `/commerces/${AH}/caisse/passage`, { clientId: c.id, actionId: `act-${c.id}` }, { 'X-Equipe-Code': '2468' })
       assert.equal(passage.statut, 200, JSON.stringify(passage.contenu))
-      const tirage = (await s.json('POST', `/commerces/${AH}/tirages`, { contact: '0611111111' })).contenu as { code: string }
+      const tirage = (await s.json('POST', `/commerces/${AH}/tirages`, { contact: '0611111111' })).contenu as { tirageId: string; code?: string }
+      // R3 (burn-on-reveal, décision du 12/11) : plus de code dans la réponse du tirage ; on le lit côté commerçant pour
+      // vérifier qu'il n'apparaît nulle part sur la carte.
+      assert.equal(tirage.code, undefined)
+      const code = ((await s.json('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu as { tirages: { id: string; code: string }[] }).tirages.find((t) => t.id === tirage.tirageId)!.code
       const r = await s.json('GET', `/cartes/${c.id}`)
-      assert.deepEqual(r.contenu.historiqueLots, [{ lot: 'Nems offerts', date: s.horloge.t.toISOString(), statut: 'valable' }])
-      // P0-S19 : sans jeton client, le code du jour n'est plus servi (le titulaire authentifié le reçoit :
-      // tests/code-gagnant-p0-s19.test.ts) — l'historique reste sans code, comme avant.
+      // R3 : statut v2 — le jour du tirage, le gain est « enAttente » (utilisable dès demain).
+      assert.deepEqual(r.contenu.historiqueLots, [{ lot: 'Nems offerts', date: s.horloge.t.toISOString(), statut: 'enAttente' }])
       assert.equal(r.contenu.jeu.codeDuJour, null, 'aucun code sans jeton')
-      // Le lendemain : expiré, et le code n'apparaît plus nulle part.
+      // Le lendemain : utilisable mais code non activé (« inactif ») ; après J+30 : expiré. Le code n'apparaît jamais.
       s.horloge.t = new Date(2026, 10, 11, 12, 0)
       const demain = await s.api('GET', `/cartes/${c.id}`)
-      assert.equal(JSON.parse(demain.texte).historiqueLots[0].statut, 'expire')
-      assert.ok(!demain.texte.includes(tirage.code), 'aucun code d’un autre jour')
+      assert.equal(JSON.parse(demain.texte).historiqueLots[0].statut, 'inactif')
+      assert.ok(!demain.texte.includes(code), 'aucun code sur la carte')
+      s.horloge.t = new Date(2026, 11, 11, 12, 0)
+      const j31 = await s.api('GET', `/cartes/${c.id}`)
+      assert.equal(JSON.parse(j31.texte).historiqueLots[0].statut, 'expire')
+      assert.ok(!j31.texte.includes(code), 'aucun code sur la carte')
     } finally {
       await s.app.fermer()
     }

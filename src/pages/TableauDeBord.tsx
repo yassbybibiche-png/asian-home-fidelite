@@ -5,6 +5,9 @@ import { listePurge, resumeRappelPurge } from '../lib/rgpd'
 import { dateRelative } from '../lib/format'
 import { Etoiles, Vide } from '../components/ui'
 import { Mesure } from '../components/Mesure'
+import { InstantsGagnants } from '../components/InstantsGagnants'
+import { DEFINITION_TAUX_UTILISATION, JOURS_KPI_GAINS, kpiGains, type KpiGains } from '../lib/gainsRoue'
+import { formaterEuros } from '../lib/mesure'
 import type { ActionJournal } from '../types'
 
 const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
@@ -37,6 +40,25 @@ function Chiffre({ valeur, libelle, aide }: { valeur: string | number; libelle: 
   )
 }
 
+/** Carte « Gains de la roue » (D3, maquettes §6) : utilisation des lots gagnés sur 30 jours (définitions : `gainsRoue.ts`). */
+function GainsRoue({ kpi: k }: { kpi: KpiGains }) {
+  const valeur = k.expires === 0 ? '' : k.expiresSansCout === k.expires ? ' (valeur : non renseigné)' : ` (valeur ≈ ${formaterEuros(k.valeurExpires)}${k.expiresSansCout ? ` + ${k.expiresSansCout} sans coût renseigné` : ''})`
+  return (
+    <section className="carte space-y-1" aria-labelledby="gains-roue-titre">
+      <h2 id="gains-roue-titre" className="titre-carte">Gains de la roue</h2>
+      <p>
+        Taux d’utilisation : <strong className="tabular-nums">{k.tauxUtilisation === null ? '—' : `${k.tauxUtilisation} %`}</strong>
+        <span className="text-gray-600"> (remis ÷ (remis + expirés), {JOURS_KPI_GAINS} jours)</span>
+      </p>
+      <p className="tabular-nums">
+        Gagnés : {k.gagnes} • Remis : {k.remis} • En attente d’utilisation : {k.enAttente} • Expirés : {k.expires}
+        {valeur}
+      </p>
+      <p className="text-sm text-gray-600">{DEFINITION_TAUX_UTILISATION} En attente : gains encore utilisables aujourd’hui ou dès demain.</p>
+    </section>
+  )
+}
+
 function Raccourci({ href, icone, libelle }: { href: string; icone: string; libelle: string }) {
   return (
     <a href={href} className="bouton-secondaire min-h-14 flex-col gap-0.5 px-2 py-2 text-sm">
@@ -65,7 +87,7 @@ export default function TableauDeBord() {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div className="border-l-4 border-magenta-500 pl-3">
         <p className="surtitre">Bonjour</p>
         <h1 className="font-titre text-[1.75rem] font-bold tracking-tight">Tableau de bord</h1>
         <p className="mt-0.5 text-gray-600">
@@ -133,7 +155,11 @@ export default function TableauDeBord() {
         />
       </section>
 
+      <GainsRoue kpi={kpiGains(tirages, commerce.lots)} />
+
       <Mesure />
+
+      <InstantsGagnants />
 
       <nav className="grid grid-cols-3 gap-2" aria-label="Actions rapides">
         {mode === 'api' ? (
@@ -249,7 +275,6 @@ export default function TableauDeBord() {
                   <span>
                     <span className="font-semibold">{prenom(t.clientId)}</span>
                     <span className="block text-gray-700">🎁 {t.lot}</span>
-                    {t.code && <span className="block font-mono text-sm text-gray-600">code {t.code}</span>}
                   </span>
                   <span className="shrink-0 text-sm text-gray-600">{dateRelative(t.date)}</span>
                 </li>

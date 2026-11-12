@@ -5,8 +5,10 @@ projet en pause jamais réactivé…), clients, tampons, tirages et avis sont pe
 la plus robuste possible avec les accès disponibles : un **export complet des 15 tables par l'API (PostgREST)**, avec
 la clé `service_role`, compressé et chiffré, et une **restauration vérifiée sur un Postgres local (PGlite)**.
 
-Code : `server/sauvegarde.ts` (logique pure), `scripts/sauvegarde-base.mjs`, `scripts/restaurer-base.mjs`.
-Tests : `tests/sauvegarde-p0-s5.test.ts` (export → restauration → comparaison ligne à ligne, CLI de bout en bout).
+Code : `server/sauvegarde.ts` (logique pure), `scripts/sauvegarde-base.mjs`, `scripts/restaurer-base.mjs`, et depuis
+le 12/11/2026 la route admin `GET /api/v1/admin/sauvegarde` (`server/app.ts`, bouton de l'écran Admin, § 5).
+Tests : `tests/sauvegarde-p0-s5.test.ts` (export → restauration → comparaison ligne à ligne, CLI de bout en bout),
+`tests/sauvegarde-admin-ameliorations.test.ts` (route admin : accès, format, restauration, chiffrement, refus partiel).
 
 ## 1. Ce que la sauvegarde couvre
 
@@ -53,7 +55,7 @@ Tests : `tests/sauvegarde-p0-s5.test.ts` (export → restauration → comparaiso
 
 | | Valeur | Condition |
 |---|---|---|
-| **RPO** (perte de données maximale) | **24 h** | une sauvegarde **par jour**, lancée par l'opérateur (manuellement ou planifiée, § 5). Sans exécution, le RPO grandit d'autant. |
+| **RPO** (perte de données maximale) | **24 h** | une sauvegarde **par jour** : bouton de l'écran Admin (routine recommandée) ou script, manuel ou planifié (§ 5). Sans sauvegarde, le RPO grandit d'autant. |
 | **RTO** (durée de remise en service) | **1 à 2 h, estimé** | restauration **manuelle** (§ 8) : estimation, jamais chronométrée sur un vrai projet Supabase. |
 | **Rétention** | **30 jours / 30 fichiers** | un fichier est gardé s'il a ≤ 30 jours **ou** s'il est parmi les 30 plus récents. |
 
@@ -71,7 +73,30 @@ Tests : `tests/sauvegarde-p0-s5.test.ts` (export → restauration → comparaiso
 
 ## 5. Faire une sauvegarde
 
-Prérequis : Node 24, `npm install` fait, et les variables suivantes (les mêmes que celles du serveur sur Render, plus
+### Routine quotidienne recommandée : le bouton de l'écran Admin
+
+Chaque jour (idéalement à la fermeture, § 2) : se connecter avec le **PIN admin** → écran **Admin** → **« Télécharger
+une sauvegarde »**. Le navigateur enregistre `asian-home-AAAA-MM-JJTHHMMSS.json.gz` sur le poste : la copie est donc
+**déjà hors serveur** ; la ranger dans le coffre (cloud personnel, clé USB), jamais dans le dépôt git.
+
+- **Même fichier que le script** : même export des 15 tables (`exporterSauvegarde`, sur Supabase la même lecture paginée
+  avec compteur exact), même format JSON gzip, même nom horodaté UTC, même chiffrement. Il se **restaure avec
+  `scripts/restaurer-base.mjs` exactement comme celui du script** (§ 6 pour le vérifier, § 8 pour Supabase).
+- **Chiffrement** : si `SAUVEGARDE_CLE_CHIFFREMENT` est définie **dans les variables du service Render**, le fichier
+  téléchargé est chiffré (§ 4) — la même clé que pour le script, à garder hors du serveur. Sinon il est **en clair** et
+  le serveur écrit dans son journal `[sauvegarde] AVERTISSEMENT — sauvegarde non chiffrée téléchargée…`. Une clé mal
+  formée empêche le serveur de démarrer (plutôt qu'un bouton qui échoue le jour où l'on en a besoin).
+- **Réservé à l'admin** : session admin ou PIN admin ; une session commerce ou équipe est refusée (403), sans
+  authentification 401.
+- **Jamais d'archive partielle** : si une table métier manque ou ne se lit pas, aucun fichier n'est envoyé ; l'écran
+  affiche `Sauvegarde non téléchargée : ERREUR SAUVEGARDE — <cause>` (même règle et même message que le script, § 7).
+- En développement (SQLite), le fichier a la même forme mais sans les colonnes Postgres `ordre` / `version`, que la
+  restauration recrée (ordre d'inscription conservé).
+
+### Le script (automatisable)
+
+Le script reste le moyen **planifiable** (crontab, ci-dessous) et celui qui écrit directement dans un dossier avec
+rétention. Prérequis : Node 24, `npm install` fait, et les variables suivantes (les mêmes que celles du serveur sur Render, plus
 la clé de chiffrement). Le script **ne lit pas `.env` tout seul** : passer `--env-file`.
 
 ```sh
@@ -95,7 +120,7 @@ Rétention — supprimé : asian-home-2026-10-10T030000.json.gz
   l'export au lieu d'écrire une sauvegarde tronquée.
 - La rétention ne touche **que** les fichiers au nom `asian-home-<horodatage>.json.gz` du dossier ; jamais autre chose.
 
-**Planifier (quotidien, à faire par l'opérateur)** — rien n'est planifié par ce lot. Exemple sur une machine allumée la
+**Planifier (quotidien, à faire par l'opérateur, en plus ou à la place du bouton)** — rien n'est planifié par ce lot. Exemple sur une machine allumée la
 nuit (crontab, 3 h du matin, restaurant fermé) :
 
 ```
@@ -138,6 +163,8 @@ VÉRIFICATION OK — compteurs de la base = compteurs du fichier, pour les 15 ta
 ## 7. Alertes d'échec
 
 En cas d'échec : `ERREUR SAUVEGARDE — <cause>` sur la sortie d'erreur et **code de sortie 1**, aucun fichier écrit.
+Bouton de l'écran Admin : réponse 500 avec le même message (affiché à l'écran et écrit dans le journal du serveur),
+aucun fichier téléchargé.
 **Aucune alerte automatique** (e-mail / SMS) n'est branchée : l'opérateur doit **lire le log après chaque exécution**
 (ou vérifier qu'un nouveau fichier du jour existe). À brancher plus tard (ex. e-mail via Brevo quand il sera en
 service, ou alerte du planificateur sur code de sortie non nul).

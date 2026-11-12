@@ -510,15 +510,27 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
             seuilTampons: c.seuilTampons,
             lots: c.lots,
             reglesReponseAuto: c.reglesReponseAuto,
-            ...(c.eurosParPoint !== undefined ? { eurosParPoint: c.eurosParPoint } : {}),
-            ...(c.catalogue ? { catalogue: c.catalogue } : {}),
-            ...(c.messagesAuto ? { messagesAuto: c.messagesAuto } : {}),
-            ...(c.apparence ? { apparence: c.apparence } : {}),
-            ...(c.programme ? { programme: c.programme } : {}),
-            ...(c.relancesAuto ? { relancesAuto: c.relancesAuto } : {}),
-            ...(c.conservationMois !== undefined ? { conservationMois: c.conservationMois } : {}),
-            // Test A/B (P2-Q3) : seul l'état est envoyé, le serveur pose lui-même les dates.
-            ...(c.testsAB?.accroche ? { testsAB: { accroche: { actif: c.testsAB.accroche.actif } } } : {}),
+            // R6, plafond du bundle initial : `x: c.x` au lieu de `...(x ? { x } : {})`. Même corps envoyé — JSON.stringify
+            // omet une clé `undefined`, et Réglages (seul appelant) passe toujours un objet pour ces quatre-là.
+            eurosParPoint: c.eurosParPoint,
+            catalogue: c.catalogue,
+            messagesAuto: c.messagesAuto,
+            apparence: c.apparence,
+            programme: c.programme,
+            // Même forme `x: c.x` (plafond du bundle initial, D1) : `relancesAuto` absent → `undefined`, non envoyé.
+            relancesAuto: c.relancesAuto,
+            conservationMois: c.conservationMois,
+            // Règles du jeu (R6) : absentes d'une config d'avant R2 tant que Réglages ne les a pas touchées → `undefined`,
+            // que JSON.stringify n'envoie pas (défauts du serveur). Écrit sans `...(x ? {} : {})` : plafond du bundle initial.
+            modeAccesRoue: c.modeAccesRoue,
+            limiteGainsMois: c.limiteGainsMois,
+            // Plages d'ouverture des instants gagnants (D1) : absentes = défaut du serveur, non envoyées.
+            plagesOuverture: c.plagesOuverture,
+            // Créneaux heures creuses (D2) : même forme (absents = non envoyés).
+            creneauxCreux: c.creneauxCreux,
+            // Test A/B (P2-Q3) : seul l'état est envoyé, le serveur pose lui-même les dates. Sans test : `undefined`, non
+            // envoyé (même corps que l'ancien `...(x ? { testsAB } : {})`, plus court : plafond du bundle initial, D2).
+            testsAB: c.testsAB?.accroche && { accroche: { actif: c.testsAB.accroche.actif } },
           })
         }),
       creerCommerce: (n: NouveauCommerce) =>
@@ -553,7 +565,8 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       majAvis: (avis: Avis, maj: { reponse?: string; brouillon?: string | null }) =>
         avecPin((a) => api.majAvis(avis.commerceId, a, avis.id, maj).then(() => undefined)),
       // PATCH sans champ : le serveur réapplique les règles aux avis en attente.
-      appliquerReglesAvis: (commerceId: string) => avecPin((a) => api.majCommerce(commerceId, a, {}).then(() => undefined)),
+      // `() => {}` (résout `undefined`, comme `() => undefined`) : plus court une fois minifié — plafond du bundle initial (D2).
+      appliquerReglesAvis: (commerceId: string) => avecPin((a) => api.majCommerce(commerceId, a, {}).then(() => {})),
       exporterCsv: async (commerceId: string) => {
         const a = accesRef.current
         if (!a) throw new Error('Déverrouillez d’abord avec votre PIN.')

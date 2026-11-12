@@ -57,7 +57,7 @@ export function BadgeDemo({ children = 'Démo' }: { children?: ReactNode }) {
 export function EnTete({ titre, sousTitre, action }: { titre: string; sousTitre?: ReactNode; action?: ReactNode }) {
   return (
     <div className="mb-5 flex items-start justify-between gap-3">
-      <div className="min-w-0">
+      <div className="min-w-0 border-l-4 border-magenta-500 pl-3">
         <h1 className="font-titre text-[1.75rem] font-bold tracking-tight text-gray-900">{titre}</h1>
         {sousTitre && <p className="mt-1 text-base text-gray-600">{sousTitre}</p>}
       </div>
@@ -167,8 +167,8 @@ export function MessageErreur({ children }: { children: ReactNode }) {
 }
 
 /** Propose un fichier au téléchargement (généré dans le navigateur ou reçu du serveur). */
-export function telecharger(nom: string, contenu: string, type = 'text/csv;charset=utf-8') {
-  const url = URL.createObjectURL(new Blob([contenu], { type }))
+export function telecharger(nom: string, contenu: string | Blob, type = 'text/csv;charset=utf-8') {
+  const url = URL.createObjectURL(contenu instanceof Blob ? contenu : new Blob([contenu], { type }))
   const lien = document.createElement('a')
   lien.href = url
   lien.download = nom

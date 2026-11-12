@@ -3,7 +3,7 @@
 // Liste BLANCHE, champ par champ : un champ ajouté plus tard à `Commerce` n'est jamais publié par défaut.
 // Le commerçant reçoit le commerce complet via GET /commerces/:id/etat (PIN ou session).
 //
-// Retirés : probabilités des lots, `reglesReponseAuto`, `eurosParPoint`, `messagesAuto`, `creeLe`, identifiants du
+// Retirés : probabilités (et coûts) des lots, `reglesReponseAuto`, `eurosParPoint`, `messagesAuto`, `creeLe`, identifiants du
 // catalogue, et tout le programme qui n'est pas affiché au client (relance des inactifs, bienvenue, anniversaire,
 // réserve, points du parrain, plafond annuel de parrainage).
 // Conservés parce que la carte publique les affiche (CarteFidelite / CartePublique) :
@@ -13,7 +13,8 @@
 //   défauts et afficherait au client des paliers ou offres que le commerce n'a peut-être pas.
 import type { Commerce, CommercePublic, ProgrammePublic } from '../types'
 import { configDefi, configNiveaux, configOffreHebdo, configPaliers, configParrainage, configRattrapage } from './programme.ts'
-import { lotsJouables } from './roulette.ts'
+import { lotsJouables, modeAccesRoue } from './roulette.ts'
+import { normaliserLots } from './lots.ts'
 import { dureeConservationMois } from './rgpd.ts'
 
 export function programmePublic(c: Pick<Commerce, 'programme' | 'seuilTampons'>): ProgrammePublic {
@@ -28,7 +29,13 @@ export function programmePublic(c: Pick<Commerce, 'programme' | 'seuilTampons'>)
   }
 }
 
-export function commercePublic(c: Commerce): CommercePublic {
+/**
+ * `plafonnes` (R2) : ids des lots physiques ayant atteint leur plafond du jour (`lotsPlafonnes`, calculé par le
+ * serveur) — retirés de la roue et de la liste « À gagner aujourd'hui » jusqu'au lendemain.
+ * `creux` (D2) : un créneau heures creuses est en cours (`creneauActif`, calculé par le serveur) — les lots
+ * `heuresCreuses` sont publiés et `bonusCreux` est posé ; hors créneau, ces lots sont absents comme un lot à 0 %.
+ */
+export function commercePublic(c: Commerce, plafonnes: ReadonlySet<string> = new Set(), creux = false): CommercePublic {
   const { couleur, fond, banniere } = c.apparence ?? {}
   return {
     id: c.id,
@@ -43,7 +50,16 @@ export function commercePublic(c: Commerce): CommercePublic {
     recompense: c.recompense,
     seuilTampons: c.seuilTampons,
     // Jouables seulement (un lot à 0 % n'apparaît pas sur la roue), dans l'ordre : la roue publique a des secteurs égaux.
-    lots: lotsJouables(c.lots).map((l) => ({ libelle: l.libelle })),
+    // R1 : id (la roue retrouve le lot tiré par son id, jamais par son libellé) + type résolu (consolation affichée
+    // comme telle). Jamais la probabilité, ni le coût, ni le montant de points (liste blanche, audit F-05).
+    // R2 : jamais le plafond ni la limite de gains — seulement l'absence des lots plafonnés aujourd'hui.
+    lots: lotsJouables(normaliserLots(c.lots))
+      .filter((l) => !plafonnes.has(l.id) && (creux || !l.heuresCreuses))
+      .map((l) => ({ id: l.id, libelle: l.libelle, type: l.type })),
+    // R4 : mode d'accès effectif (défaut appliqué) — la page de jeu et le règlement l'annoncent au client.
+    modeAccesRoue: modeAccesRoue(c),
+    // D2 : seulement l'indicateur « créneau en cours » — jamais les créneaux eux-mêmes ni le drapeau des lots.
+    ...(creux ? { bonusCreux: true as const } : {}),
     actif: c.actif,
     demo: !!c.demo,
     ...(c.catalogue ? { catalogue: c.catalogue.map((r) => ({ nom: r.nom, cout: r.cout, ...(r.description ? { description: r.description } : {}) })) } : {}),

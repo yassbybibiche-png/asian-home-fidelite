@@ -6,13 +6,19 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, CommerceCaisse, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, CommerceCaisse, CommercePublic, CreneauCreux, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, InstantsDuJour, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
 import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
-import { estPerdant, lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
+import { emailGainExpire, gainBientotExpire, gainsARelancer, relanceGainFaite, smsGainExpire } from '../src/lib/relanceGain.ts'
+import {
+  debutDuJourParis, DUREE_GAIN_JOURS, finActivation, finGain, gainEnCours, gainsSur30Jours, LIMITE_GAINS_MOIS_MAX, limiteGainsMois, lotsJouables,
+  lotsPlafonnes, lotsTirables, messageGain, modeAccesRoue, normaliserCodeGagnant, PLAFOND_JOUR_MAX, refusActivation, statutGain, statutJeu, tirageDuCode, tirageDuJour,
+  tirageHerite, tirerLot, utilisableLe, FENETRE_ACTIVATION_MS,
+} from '../src/lib/roulette.ts'
+import { cleLibelle, estGainPhysique, estTypeLot, FORMAT_ID_LOT, libellesEnDouble, normaliserLots, POINTS_LOT_MAX, POINTS_LOT_MIN, rattachementsTirages, TYPES_LOT, typeDeduitDuLibelle, typeTirage } from '../src/lib/lots.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
 import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePrive.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
@@ -39,16 +45,23 @@ import {
 } from '../src/lib/programme.ts'
 import { problemesApparence } from '../src/lib/apparence.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
+import { cleInstants, genererInstants, INSTANTS_JOUR_MAX, instantEnCours, instantsPasses, lotsAInstants, plagesOuverture, problemePlages, statutInstant } from '../src/lib/instants.ts'
+import type { InstantPasse } from '../src/lib/instantsTableau.ts'
+import { creneauActif, lotsDuCreneau, nettoyerCreneaux, pointsDuCreneau, problemeCreneaux } from '../src/lib/creneaux.ts'
+import { donneesReglement } from '../src/lib/reglement.ts'
 import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurLogo, LIMITES_LOGO, messageTropLourd, urlLogo, validerLogo, type FormatLogo } from '../src/lib/logo.ts'
 import { EVENEMENTS_PUBLICS, ajouterJours, basculerAccroche } from '../src/lib/mesure.ts'
 import { CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, dureeConservationMois, estPurgeable, exportClientCsv, libelleDuree, listePurge, nomFichierExportClient } from '../src/lib/rgpd.ts'
 import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSuppression, type CompteurPublic, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
-import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
+import { modeleColonneEnvoi, ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
+import { chiffrerSauvegarde, exporterSauvegarde, nomFichierSauvegarde } from './sauvegarde.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { menuAffichePour, pageMenuIndisponible, pageMenuPrerendue, pageNonTrouvee } from './prerendu.ts'
-import { cheminMasquePourErreur, journaliserRequete } from './logs.ts'
-import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
+import { cheminMasquePourErreur, empreinte, journaliserRequete, routeMasquee } from './logs.ts'
+import { creerFileParCle } from './file-par-cle.ts'
+import { creerAlertes5xx } from './alertes.ts'
+import { creerNotifications, echecConfirme, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
 import { estAbandon } from './notifications/delai.ts'
 import {
   chiffrerJetons,
@@ -124,6 +137,8 @@ const BLOCAGE_INITIAL_MS = 10 * 60_000
 const BLOCAGE_MAX_MS = 24 * 3600_000
 /** Lignes de `tentatives_auth` sans activité depuis ce délai (ni échec, ni blocage en cours) : supprimées au passage. */
 const CONSERVATION_TENTATIVES_MS = 7 * 24 * 3600_000
+/** Instant gagnant à rendre après un tirage échoué (D1, revue Codex F1) : relectures + écritures conditionnelles, au plus. */
+export const ESSAIS_RESTITUTION = 4
 
 export interface OptionsServeur {
   /** Fichier SQLite (créé au besoin) : stockage utilisé quand Supabase n'est pas configuré. */
@@ -168,8 +183,17 @@ export interface OptionsServeur {
    * `plafond` = lignes max par minute (défaut 600) : au-delà, les lignes sont comptées puis résumées en une
    * seule ligne à la minute suivante (l'attaque reste visible par son volume, sans noyer les logs). */
   journalLectures?: { taux?: number; plafond?: number }
+  /**
+   * Clé de chiffrement des sauvegardes (SAUVEGARDE_CLE_CHIFFREMENT, 64 hex), la même que pour le CLI : présente = la
+   * sauvegarde téléchargée par l'admin (`GET /admin/sauvegarde`) est chiffrée AES-256-GCM ; absente = en clair + avertissement.
+   */
+  cleChiffrementSauvegarde?: string
+  /** Destinataire de l'alerte e-mail sur rafale de 5xx (ALERTE_EMAIL, `server/alertes.ts`) ; absent = alerte désactivée. */
+  alerteEmail?: string
   /** Horloge injectable (tests). */
   maintenant?: () => Date
+  /** Hasard du tirage de la roue, dans [0, 1[ (tests) ; absent = Math.random. */
+  alea?: () => number
 }
 
 class ErreurHttp extends Error {
@@ -614,13 +638,59 @@ function typeCommerce(v: unknown): TypeCommerce {
   return t.valeur
 }
 
-function lots(v: unknown): Lot[] {
+/**
+ * Lots de la roue (R1) : chaque lot écrit porte un `id` stable (le sien s'il est valable et unique, sinon un nouveau,
+ * aléatoire) et un `type` validé. Type absent (client d'avant R1 encore en cache) : celui du lot actuel de même `id`,
+ * sinon de même libellé (casse et espaces ignorés), et seulement à défaut déduit du libellé — un ancien client ne doit
+ * jamais inverser un type choisi (« +10 points » devenu lot physique, lot gagnant « Dommage… » devenu perdant).
+ * Libellés uniques (casse et espaces ignorés) : un libellé en double ne sert plus à rien pour le tirage, mais il
+ * tromperait le client et le comptoir.
+ */
+function lots(v: unknown, existants: Lot[] = []): Lot[] {
   if (!Array.isArray(v) || v.length > 12) throw err(400, '« lots » doit être une liste de 12 lots maximum.')
+  const actuels = normaliserLots(existants)
+  const ids = new Set<string>()
   const liste = v.map((l: unknown, i) => {
     const o = (l ?? {}) as Corps
     const p = o.probabilite
     if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 100) throw err(400, `Lot n° ${i + 1} : la probabilité doit être un nombre entre 0 et 100.`)
-    const lot: Lot = { libelle: texte(o.libelle, `lot n° ${i + 1}`, 80), probabilite: p }
+    const libelle = texte(o.libelle, `lot n° ${i + 1}`, 80)
+    if (o.type != null && !estTypeLot(o.type)) throw err(400, `Lot n° ${i + 1} : le type doit valoir ${TYPES_LOT.join(', ')}.`)
+    // Lot actuel dont hérite un lot reçu sans type : même id, sinon même libellé. Type reçu : il fait foi.
+    const actuel = o.type != null ? undefined
+      : actuels.find((a) => typeof o.id === 'string' && a.id === o.id) ?? actuels.find((a) => cleLibelle(a.libelle) === cleLibelle(libelle))
+    const type: TypeLot = actuel ? actuel.type : o.type != null ? (o.type as TypeLot) : typeDeduitDuLibelle(libelle)
+    let id = typeof o.id === 'string' && FORMAT_ID_LOT.test(o.id) && !ids.has(o.id) ? o.id : ''
+    while (!id || ids.has(id)) id = `lot-${randomUUID().slice(0, 13)}`
+    ids.add(id)
+    const lot: Lot = { id, type, libelle, probabilite: p }
+    // Plafond journalier (R2) : lots physiques seulement ; absent / null / 0 = illimité (rien d'écrit).
+    const plafond = o.plafondJour
+    if (plafond != null) {
+      if (typeof plafond !== 'number' || !Number.isInteger(plafond) || plafond < 0 || plafond > PLAFOND_JOUR_MAX) {
+        throw err(400, `Lot n° ${i + 1} : le plafond du jour doit être un nombre entier (0 = illimité, ${PLAFOND_JOUR_MAX.toLocaleString('fr-FR')} au plus).`)
+      }
+      // Points / perdant ne sont jamais plafonnés : un plafond laissé sur un lot devenu consolation n'est pas gardé.
+      if (plafond > 0 && type === 'lot') lot.plafondJour = plafond
+    }
+    // Instants gagnants (D1) : lots physiques seulement ; absent / null / 0 = désactivé (rien d'écrit).
+    const instants = o.instantsParJour
+    if (instants != null) {
+      if (typeof instants !== 'number' || !Number.isInteger(instants) || instants < 0 || instants > INSTANTS_JOUR_MAX) {
+        throw err(400, `Lot n° ${i + 1} : le nombre d’instants gagnants par jour doit être un entier de 0 à ${INSTANTS_JOUR_MAX}.`)
+      }
+      if (instants > 0 && type === 'lot') lot.instantsParJour = instants
+    }
+    // Heures creuses (D2) : drapeau, tout type de lot ; absent / null / false = toujours tirable (rien d'écrit).
+    if (o.heuresCreuses != null && typeof o.heuresCreuses !== 'boolean') throw err(400, `Lot n° ${i + 1} : « heuresCreuses » doit valoir true ou false.`)
+    if (o.heuresCreuses === true) lot.heuresCreuses = true
+    if (type === 'points') {
+      const n = o.points ?? actuel?.points
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < POINTS_LOT_MIN || n > POINTS_LOT_MAX) {
+        throw err(400, `Lot n° ${i + 1} : un lot « points » doit indiquer un nombre entier de points (${POINTS_LOT_MIN} à ${POINTS_LOT_MAX.toLocaleString('fr-FR')}).`)
+      }
+      lot.points = n
+    }
     // Coût unitaire (P2-Q3), en centimes : facultatif ; absent / null = non renseigné.
     const c = o.coutCentimes
     if (c != null) {
@@ -629,7 +699,11 @@ function lots(v: unknown): Lot[] {
     }
     return lot
   })
+  const doubles = libellesEnDouble(liste)
+  if (doubles.length) throw err(400, `Libellé de lot en double : ${doubles.map((d) => `« ${d} »`).join(', ')}. Chaque lot doit avoir un libellé différent (majuscules et espaces ne comptent pas).`)
   if (!lotsJouables(liste).length) throw err(400, 'Il faut au moins un lot avec un libellé et une probabilité > 0.')
+  // D2 : hors créneau, les lots heures creuses sont exclus — il en faut au moins un autre, sinon la roue serait vide.
+  if (!lotsJouables(lotsDuCreneau(liste, false)).length) throw err(400, 'Il faut au moins un lot jouable en dehors des heures creuses (probabilité > 0, case « Heures creuses seulement » décochée).')
   return liste
 }
 
@@ -667,7 +741,7 @@ function apparence(v: unknown): Apparence {
   return a
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB']
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB', 'modeAccesRoue', 'limiteGainsMois', 'plagesOuverture', 'creneauxCreux']
 
 /**
  * Tests A/B (P2-Q3) : le navigateur n'envoie que `{ accroche: { actif } }` ; les dates de début et de fin sont posées
@@ -712,7 +786,7 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
     if (typeof s !== 'number' || !Number.isInteger(s) || s < 1 || s > 50) throw err(400, '« seuilTampons » doit être un nombre entier entre 1 et 50.')
     r.seuilTampons = s
   }
-  if ('lots' in corps) r.lots = lots(corps.lots)
+  if ('lots' in corps) r.lots = lots(corps.lots, c.lots ?? [])
   if ('testsAB' in corps) r.testsAB = testsAB(corps.testsAB, c.testsAB, aujourdhui)
   if ('reglesReponseAuto' in corps) {
     const o = (corps.reglesReponseAuto ?? {}) as Corps
@@ -744,9 +818,36 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
   }
   if ('relancesAuto' in corps) {
     const o = (corps.relancesAuto ?? {}) as Corps
-    const inconnus = Object.keys(o).filter((k) => k !== 'inactif' && k !== 'anniversaire')
+    const inconnus = Object.keys(o).filter((k) => k !== 'inactif' && k !== 'anniversaire' && k !== 'gainExpire')
     if (inconnus.length) throw err(400, `« relancesAuto » : champ inconnu (${inconnus.join(', ')}).`)
-    r.relancesAuto = { inactif: booleen(o.inactif ?? false, 'inactif'), anniversaire: booleen(o.anniversaire ?? false, 'anniversaire') }
+    r.relancesAuto = {
+      inactif: booleen(o.inactif ?? false, 'inactif'),
+      anniversaire: booleen(o.anniversaire ?? false, 'anniversaire'),
+      // R7 : absent = activé (rien n'est écrit tant que le commerçant n'a pas choisi).
+      ...(o.gainExpire != null ? { gainExpire: booleen(o.gainExpire, 'gainExpire') } : {}),
+    }
+  }
+  if ('modeAccesRoue' in corps) {
+    const v = corps.modeAccesRoue
+    if (v !== 'libre' && v !== 'visite') throw err(400, '« modeAccesRoue » doit valoir « libre » (1 tirage par jour dès l’identification) ou « visite » (visite validée au comptoir le jour même).')
+    r.modeAccesRoue = v
+  }
+  if ('limiteGainsMois' in corps) {
+    const n = corps.limiteGainsMois
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > LIMITE_GAINS_MOIS_MAX) {
+      throw err(400, `« limiteGainsMois » : nombre entier de lots gagnés par client sur 30 jours, de 0 (illimité) à ${LIMITE_GAINS_MOIS_MAX}.`)
+    }
+    r.limiteGainsMois = n
+  }
+  if ('plagesOuverture' in corps) {
+    const p = problemePlages(corps.plagesOuverture)
+    if (p) throw err(400, `« plagesOuverture » : ${p}.`)
+    r.plagesOuverture = (corps.plagesOuverture as Corps[]).map((x) => ({ debut: x.debut as string, fin: x.fin as string }))
+  }
+  if ('creneauxCreux' in corps) {
+    const p = problemeCreneaux(corps.creneauxCreux)
+    if (p) throw err(400, `« creneauxCreux » : ${p}.`)
+    r.creneauxCreux = nettoyerCreneaux(corps.creneauxCreux as CreneauCreux[])
   }
   if ('conservationMois' in corps) {
     const n = corps.conservationMois
@@ -823,7 +924,16 @@ function commerceCaisse(c: Commerce): CommerceCaisse {
   }
 }
 
-/** Gain vu en caisse (P0-U3) : de quoi reconnaître le client (prénom seul, jamais son contact) et l'état du code. */
+/** Tirage sans son code gagnant (état commerçant, revue Codex R3 F1). */
+function tirageSansCode(t: Tirage): Tirage {
+  const { code: _code, ...reste } = t
+  return reste
+}
+
+/**
+ * Gain vu en caisse (P0-U3) : de quoi reconnaître le client (prénom seul, jamais son contact) et l'état du code (`code` :
+ * celui que la caisse vient de saisir). `ancienneRegle` : tirage d'avant la roue v2 (`tirageHerite`, revue Codex F2).
+ */
 function gainCaisse(t: Tirage, client: Client | undefined, maintenant: Date) {
   return {
     code: t.code ?? '',
@@ -832,7 +942,32 @@ function gainCaisse(t: Tirage, client: Client | undefined, maintenant: Date) {
     statut: statutGain(t, maintenant),
     client: client ? { id: client.id, prenom: client.prenom } : null,
     remis: t.remis ? { le: t.remis.le, par: t.remis.par.nom } : null,
+    ...(tirageHerite(t) ? { ancienneRegle: true as const } : {}),
   }
+}
+
+/**
+ * Gains non terminaux d'un client, vus par sa carte (R3) : statut v2, dates d'utilisation, fin de la fenêtre
+ * d'activation en cours — jamais le code. Du plus ancien au plus récent (le premier à expirer d'abord).
+ */
+function gainsEnCoursDe(tirages: Tirage[], maintenant: Date) {
+  return tirages
+    .filter((x) => estGainPhysique(typeTirage(x)) && gainEnCours(statutGain(x, maintenant)))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((x) => {
+      const statut = statutGain(x, maintenant)
+      return {
+        tirageId: x.id,
+        lot: x.lot,
+        date: x.date,
+        statut,
+        utilisableLe: utilisableLe(x).toISOString(),
+        // Premier instant expiré : minuit à la fin de J+30.
+        expireLe: finGain(x).toISOString(),
+        // Tirage hérité du jour même : utilisable sans activation, donc sans fenêtre.
+        expireActivation: statut === 'utilisable' && !tirageHerite(x) ? finActivation(x) : null,
+      }
+    })
 }
 
 // ---------- Initialisation de la base ----------
@@ -1235,6 +1370,9 @@ export async function creerServeur(o: OptionsServeur) {
     // Ensemble vide : masquage maximal, pas d'échec de démarrage pour les logs.
   }
   const maintenant = o.maintenant ?? (() => new Date())
+  const alea = o.alea ?? Math.random
+  // Tirages de la roue sérialisés PAR COMMERCE (revue Codex R2 point 1) — voir POST /commerces/:id/tirages.
+  const fileTirages = creerFileParCle()
   const limiteur = creerLimiteurAuth(st, maintenant)
   // P0-S20 : persistance des compteurs publics (migration 0010). Table absente : `enregistrer` lève
   // ErreurMigrationManquante (avertissement une fois, mémoire seulement) ; `charger` renvoie [].
@@ -1258,6 +1396,8 @@ export async function creerServeur(o: OptionsServeur) {
   // En mémoire seulement : haché directement en scrypt à chaque démarrage.
   const adminPin = await hacherPin(o.adminPin)
   const notifications = creerNotifications(o.notifications)
+  // Item E : alerte e-mail sur rafale de 5xx (inactive sans ALERTE_EMAIL), alimentée à la fin de chaque réponse.
+  const alertes5xx = creerAlertes5xx({ destinataire: o.alerteEmail, notifications, maintenant })
   const integrations = () => ({
     googleWallet: walletConfigure(o.googleWallet),
     appleWallet: 'en_suspens',
@@ -1929,17 +2069,30 @@ export async function creerServeur(o: OptionsServeur) {
     envoi: EnvoiRelance
   }
 
+  const LIMITE_LIBRE_GAIN = 'sans migration, la base n’accepte qu’un message libre OU une relance de gain par client et par jour'
+  const COLLISION_GAIN = `Relance « gain bientôt expiré » non envoyée : un message libre est déjà parti aujourd’hui vers ce client (${LIMITE_LIBRE_GAIN}). Nouvel essai à la prochaine tournée.`
+  const COLLISION_LIBRE = `Message libre non envoyé : la relance « gain bientôt expiré » est déjà partie aujourd’hui vers ce client (${LIMITE_LIBRE_GAIN}). Réessayez demain.`
+  /**
+   * Le refus d'unicité vient-il de la colonne `modele` partagée (libre / gainExpire, Supabase) ? Oui si aucune ligne du
+   * MÊME modèle n'occupe le créneau du jour mais qu'une ligne de l'autre modèle (même valeur de colonne) l'occupe.
+   */
+  async function collisionLibreGain(e: EnvoiRelance): Promise<boolean> {
+    if (e.modele !== 'libre' && e.modele !== 'gainExpire') return false
+    const occupe = (await st.envois(e.commerceId, 50, e.clientId)).filter((x) => x.jour === e.jour && (x.statut === 'en_cours' || x.statut === 'envoye'))
+    return !occupe.some((x) => x.modele === e.modele) && occupe.some((x) => modeleColonneEnvoi(x.modele) === modeleColonneEnvoi(e.modele))
+  }
+
   /**
    * Une tentative de relance, tracée dans `envois` quel qu'en soit le résultat :
    * 501 sans prestataire pour ce canal · 409 sans consentement, sans contact, ou déjà envoyée aujourd'hui (même modèle)
-   * · 503 migration 0007 absente (rien ne part sans anti-doublon) · 502 prestataire en erreur (`erreur`) ou délai
-   * dépassé (`incertain` : peut-être envoyé) · 200 envoyée.
+   * · 503 migration 0007 absente (rien ne part sans anti-doublon) · 502 refus 4xx du prestataire (`erreur`) ou issue
+   * ambiguë après l'émission — délai, réseau, 5xx… (`incertain` : peut-être envoyé) · 200 envoyée.
    * L'envoi est RÉSERVÉ en base (`en_cours`) avant l'appel au prestataire : l'index unique empêche tout doublon.
    */
   async function relancer(
     commerce: Commerce,
     client: Client,
-    demande: { modele: ModeleRelance | 'libre'; canal?: Canal; libre?: string; declencheur: EnvoiRelance['declencheur']; auteur: string },
+    demande: { modele: ModeleRelance | 'libre'; canal?: Canal; libre?: string; declencheur: EnvoiRelance['declencheur']; auteur: string } | { modele: 'gainExpire'; tirage: Tirage; declencheur: 'auto'; auteur: string; canal?: undefined },
     site: string,
   ): Promise<Tentative> {
     const t = maintenant()
@@ -1952,13 +2105,14 @@ export async function creerServeur(o: OptionsServeur) {
       date: t.toISOString(),
       jour: jourParis(t),
       modele: demande.modele,
+      ...(demande.modele === 'gainExpire' ? { tirageId: demande.tirage.id } : {}),
       canal,
       statut: 'en_cours',
       declencheur: demande.declencheur,
       auteur: demande.auteur,
     }
-    async function consigner(statut: StatutEnvoi, http: number, message: string): Promise<Tentative> {
-      const e: EnvoiRelance = { ...envoi, statut, raison: message }
+    async function consigner(statut: StatutEnvoi, http: number, message: string, motif?: EnvoiRelance['motif']): Promise<Tentative> {
+      const e: EnvoiRelance = { ...envoi, statut, raison: message, ...(motif ? { motif } : {}) }
       try {
         await st.ajouterEnvoi(e)
       } catch (err) {
@@ -1979,7 +2133,17 @@ export async function creerServeur(o: OptionsServeur) {
     try {
       await st.ajouterEnvoi(envoi)
     } catch (e) {
-      if (e instanceof ErreurConflit) return consigner('refuse', 409, 'Cette relance a déjà été envoyée à ce client aujourd’hui : rien n’a été renvoyé.')
+      if (e instanceof ErreurConflit) {
+        if (await collisionLibreGain(envoi)) {
+          // Revue Codex F5 — limite sans migration (Supabase) : `gainExpire` est rangé sous `libre` dans la colonne
+          // `envois.modele` (CHECK de 0007), l'index unique (commerce, client, modèle, jour) refuse donc le 2e des deux
+          // le même jour. Refus tracé à part (motif + raison explicites), jamais confondu avec un vrai doublon ; une
+          // relance de gain ainsi refusée est retentée à la tournée suivante (son marqueur est libéré).
+          console.warn(`[relances] ${envoi.modele} refusé : message libre / relance de gain déjà parti aujourd'hui (colonne « modele » partagée, sans migration)`)
+          return consigner('refuse', 409, envoi.modele === 'gainExpire' ? COLLISION_GAIN : COLLISION_LIBRE, 'collision_libre_gain')
+        }
+        return consigner('refuse', 409, 'Cette relance a déjà été envoyée à ce client aujourd’hui : rien n’a été renvoyé.')
+      }
       throw e
     }
 
@@ -1990,9 +2154,13 @@ export async function creerServeur(o: OptionsServeur) {
       // /d/… — P1-B9 : « répondez STOP » est impossible avec l'expéditeur alphanumérique Brevo).
       const jeton = await jetonDesinscription(commerce.id, client.id)
       if (canal === 'sms') {
-        message = { destinataire, texte: smsRelance(demande.modele, d, lienCourtCarte(site, client.id), demande.libre, lienCourtDesinscription(site, client.id, jeton)) }
+        const carte = lienCourtCarte(site, client.id)
+        const stop = lienCourtDesinscription(site, client.id, jeton)
+        const texte = demande.modele === 'gainExpire' ? smsGainExpire({ ...d, tirage: demande.tirage }, carte, stop) : smsRelance(demande.modele, d, carte, demande.libre, stop)
+        message = { destinataire, texte }
       } else {
-        const e = emailRelance(demande.modele, d, { carte: lienCarte(site, client.id), desinscription: `${site}/#/desinscription/${client.id}/${jeton}` }, demande.libre)
+        const liens = { carte: lienCarte(site, client.id), desinscription: `${site}/#/desinscription/${client.id}/${jeton}` }
+        const e = demande.modele === 'gainExpire' ? emailGainExpire({ ...d, tirage: demande.tirage }, liens) : emailRelance(demande.modele, d, liens, demande.libre)
         message = {
           destinataire,
           sujet: e.sujet,
@@ -2021,17 +2189,22 @@ export async function creerServeur(o: OptionsServeur) {
         ? { http: 200, message: 'Mode test : rien envoyé (simulation tracée dans le journal).', envoi: { ...envoi, statut: 'test', raison: 'Mode test Brevo : simulation, rien envoyé.', idPrestataire: 'test' } }
         : { http: 200, message: 'Relance envoyée.', envoi: { ...envoi, statut: 'envoye', ...(r.id ? { idPrestataire: r.id } : {}) } }
     } catch (e) {
-      if (estAbandon(e)) {
-        // Point Codex 10 — délai dépassé / appel abandonné (`TimeoutError` / `AbortError`) : la requête a pu atteindre le
-        // prestataire, le message est peut-être parti. Statut `incertain` : `relanceAutoDue` le compte comme un envoi
-        // (aucun renvoi automatique, ni le même jour ni pour la même absence). Le commerçant garde la main : l'index
-        // unique anti-doublon ne couvre que `en_cours` / `envoye`, donc une relance MANUELLE reste possible (après
-        // vérification auprès du client), elle n'est jamais bloquée par une ligne `incertain`.
-        const raison = 'Le prestataire n’a pas répondu à temps : état de l’envoi inconnu (le message est peut-être parti). Il ne sera pas renvoyé automatiquement.'
-        fin = { http: 502, message: `Relance incertaine : ${raison}`, envoi: { ...envoi, statut: 'incertain', raison } }
-      } else {
-        const raison = e instanceof Error && e.message ? e.message : 'Le prestataire n’a pas répondu.'
+      if (echecConfirme(e)) {
+        // Refus CONFIRMÉ (réponse 4xx du prestataire, ou rien de branché) : rien n'est parti, `erreur` ne compte pas.
+        const raison = e instanceof Error && e.message ? e.message : 'Le prestataire a refusé l’envoi.'
         fin = { http: 502, message: `Relance non envoyée : ${raison}`, envoi: { ...envoi, statut: 'erreur', raison } }
+      } else {
+        // Point Codex 10, étendu par la revue Codex 2 R7 (F2) — la requête est partie et l'issue n'est ni un succès ni
+        // un refus confirmés : délai dépassé / appel abandonné, coupure réseau (TypeError), 5xx, corps illisible après
+        // une réponse positive… Le prestataire a pu accepter le message. Statut `incertain` : `relanceAutoDue` le compte
+        // comme un envoi (aucun renvoi automatique, ni le même jour ni pour la même absence) et la relance d'un gain
+        // garde son marqueur. Le commerçant garde la main : l'index unique anti-doublon ne couvre que `en_cours` /
+        // `envoye`, donc une relance MANUELLE reste possible (après vérification auprès du client), elle n'est jamais
+        // bloquée par une ligne `incertain`.
+        const raison = estAbandon(e)
+          ? 'Le prestataire n’a pas répondu à temps : état de l’envoi inconnu (le message est peut-être parti). Il ne sera pas renvoyé automatiquement.'
+          : `Réponse du prestataire incomplète ou en erreur (${e instanceof Error && e.message ? e.message : 'erreur inconnue'}) : état de l’envoi inconnu (le message est peut-être parti). Il ne sera pas renvoyé automatiquement.`
+        fin = { http: 502, message: `Relance incertaine : ${raison}`, envoi: { ...envoi, statut: 'incertain', raison } }
       }
     }
     try {
@@ -2059,15 +2232,103 @@ export async function creerServeur(o: OptionsServeur) {
   // on ne les retente pas dans la même tournée, ni à la reprise d'une tournée interrompue le même jour (`echecAutoDuJour`,
   // revue Codex finale ; le renvoi manuel reste possible). Un délai dépassé (statut `incertain`, point Codex 10 : chaque appel est
   // borné par DELAI_PRESTATAIRE_MS) compte comme un envoi pour `relanceAutoDue` : jamais de renvoi automatique.
+  //
+  // R7 — « gain bientôt expiré » (`gainExpire`, ACTIVÉ si absent) : lot physique de la roue non retiré qui expire dans
+  // moins de 72 h (src/lib/relanceGain.ts). Une seule relance par tirage : le journal des envois porte `tirageId`, et
+  // une ligne `envoye` / `en_cours` / `incertain` / `test` pour ce tirage suffit à ne plus rien envoyer. Toujours une
+  // seule relance automatique par client et par tournée, dans l'ordre anniversaire (le jour J seulement), gain (la
+  // tournée suivante a encore le temps : fenêtre de 72 h), inactif. La marque du jour porte les règles actives : une
+  // règle activée en cours de journée a sa tournée le jour même (les anti-doublons ci-dessus restent les garde-fous).
+  //
+  // Revue Codex R7 — « une seule relance par gain » ne dépend plus d'une fenêtre de lecture ni de la sérialisation des
+  // tournées (en mémoire, par processus) :
+  // • F1 : avant l'envoi, les envois de CE tirage sont relus par `tirageId`, sans limite (`envoisDuTirage`) — les
+  //   50 derniers envois du client ne servent plus qu'à présélectionner ;
+  // • F2 : le tirage est RÉCLAMÉ par une écriture conditionnelle (`relanceGainLe` posé seulement s'il est absent en base,
+  //   tirage non remis) : de deux tournées simultanées — deux instances, ou à cheval sur minuit (l'index unique des envois
+  //   est par jour) — une seule passe ;
+  // • 2e revue F1 : TOUTE écriture d'un tirage (activation, remise, réclamation, libération) applique son patch sur la
+  //   ligne fraîche par comparaison-échange (`modifierTirage` / `Stockage.majTirageSi` : `activeLe` et `relanceGainLe`
+  //   inchangés en base depuis la lecture, sinon relecture et nouvel essai) — une activation partie d'une lecture
+  //   ancienne ne peut plus effacer le marqueur, et une réclamation ni une activation ni une remise ;
+  // • F3 : la réclamation relit le tirage et revérifie, à l'heure de l'écriture, qu'il est toujours à relancer
+  //   (`gainBientotExpire` : non remis, pas expiré aux bornes parisiennes, dans les 72 h). Sinon : ni marqueur ni envoi —
+  //   un gain remis ou expiré ne redevient jamais éligible, rien à figer. 2e revue F4 : revérifié encore APRÈS la
+  //   réclamation réussie, avant l'appel au prestataire (une écriture lente a pu passer minuit à Paris) : devenu expiré →
+  //   marqueur libéré, rien envoyé ;
+  // • échec APRÈS réclamation sans rien de parti (`erreur` = refus 4xx confirmé, `refuse` — dont la collision F5 —,
+  //   `non_branche`, exception avant l'appel) : le marqueur est retiré et la tournée suivante retente, comme le prévoyait
+  //   R7 (un refus ou une erreur ne comptent pas). 2e revue F3 : la libération ne dépend que du marqueur (NOTRE
+  //   horodatage encore en base) — une activation concurrente ne la bloque plus. `envoye`, `test` et `incertain`
+  //   (2e revue F2 : toute issue ambiguë après l'émission, peut-être partie) le gardent : jamais de renvoi automatique.
+  async function reclamerRelanceGain(choisi: Tirage): Promise<Tirage | undefined> {
+    if (relanceGainFaite(choisi.id, await st.envoisDuTirage(choisi.commerceId, choisi.clientId, choisi.id))) return undefined
+    const relu = await st.tirage(choisi.commerceId, choisi.id)
+    if (!relu) return undefined
+    const quand = maintenant()
+    const reclame = await modifierTirage(relu, (frais) => (frais.relanceGainLe || !gainBientotExpire(frais, quand) ? undefined : { ...frais, relanceGainLe: quand.toISOString() }))
+    if (!reclame) return undefined
+    if (!gainBientotExpire(reclame, maintenant())) {
+      await libererRelanceGain(reclame)
+      return undefined
+    }
+    return reclame
+  }
+  /** Retire le marqueur posé par CETTE réclamation (et lui seul) ; best effort : sinon il reste, jamais de doublon. */
+  async function libererRelanceGain(reclame: Tirage) {
+    const notre = reclame.relanceGainLe
+    try {
+      await modifierTirage(reclame, (frais) => {
+        if (frais.relanceGainLe !== notre) return undefined
+        const { relanceGainLe: _, ...libere } = frais
+        return libere
+      })
+    } catch (e) {
+      console.warn(`[relances] marqueur de relance du gain non retiré (pas de nouvel essai) : ${e instanceof Error ? e.message : e}`)
+    }
+  }
+  async function relancerGain(commerce: Commerce, client: Client, reclame: Tirage, site: string) {
+    let parti = true
+    try {
+      const r = await relancer(commerce, client, { modele: 'gainExpire', tirage: reclame, declencheur: 'auto', auteur: 'Automatique' }, site)
+      parti = r.envoi.statut === 'envoye' || r.envoi.statut === 'test' || r.envoi.statut === 'incertain'
+    } catch (e) {
+      parti = false
+      throw e
+    } finally {
+      if (!parti) await libererRelanceGain(reclame)
+    }
+  }
+  /**
+   * Écriture d'un tirage appliquée sur la ligne FRAÎCHE (revue Codex 2 R7, F1) : `patch(frais)` → nouvelle version (ou
+   * undefined : plus rien à écrire ; peut lever un refus HTTP), écrite par comparaison-échange (`st.majTirageSi`). Si
+   * une autre écriture est passée depuis la lecture (activation, marqueur de relance…), on relit et on réapplique le
+   * patch — jamais un instantané ancien réécrit par-dessus. `lu` : lecture déjà faite par l'appelant (1er essai sans
+   * relecture). Undefined : tirage remis ou disparu en base, condition `activeApres` refusée par la base (ligne
+   * inchangée), ou trop d'écritures concurrentes.
+   */
+  async function modifierTirage(lu: Tirage, patch: (frais: Tirage) => Tirage | undefined, activeApres?: (frais: Tirage) => string | undefined): Promise<Tirage | undefined> {
+    let frais: Tirage | undefined = lu
+    for (let essai = 0; essai < 5 && frais; essai++) {
+      const apres = patch(frais)
+      if (!apres || frais.remis) return undefined
+      if (await st.majTirageSi(apres, frais, activeApres?.(frais))) return apres
+      const avant: Tirage = frais
+      frais = await st.tirage(lu.commerceId, lu.id)
+      if (frais && !frais.remis && frais.activeLe === avant.activeLe && frais.relanceGainLe === avant.relanceGainLe) return undefined
+    }
+    return undefined
+  }
   const tournees = new Map<string, string>()
   const tourneesActives = new Set<string>()
   const tourneesEnCours = new Set<Promise<void>>()
   function lancerRelancesAuto(commerce: Commerce, site: string) {
-    const regles = commerce.relancesAuto
-    if (!regles?.inactif && !regles?.anniversaire) return
+    const regles = { inactif: false, anniversaire: false, ...commerce.relancesAuto }
+    const gainExpire = regles.gainExpire !== false
+    if (!regles.inactif && !regles.anniversaire && !gainExpire) return
     const t = maintenant()
-    const jour = jourParis(t)
-    if (tournees.get(commerce.id) === jour || tourneesActives.has(commerce.id)) return
+    const marque = `${jourParis(t)}|${regles.inactif}|${regles.anniversaire}|${gainExpire}`
+    if (tournees.get(commerce.id) === marque || tourneesActives.has(commerce.id)) return
     tourneesActives.add(commerce.id)
     const p = (async () => {
       const branche = notifications.statut()
@@ -2075,18 +2336,46 @@ export async function creerServeur(o: OptionsServeur) {
       // n'est pas marqué : si tout est branché plus tard dans la journée, la tournée part. Ce test ne coûte presque
       // rien à chaque ouverture (statut en mémoire, `schemaRelances` mis en cache 60 s).
       if ((!branche.sms && !branche.email) || !(await schemaRelances())) return
-      for (const client of await st.clients(commerce.id)) {
+      // R7 : gains qui expirent dans moins de 72 h, par client (tirages des 32 derniers jours seulement).
+      const gains = new Map<string, Tirage[]>()
+      if (gainExpire) {
+        for (const x of await st.tiragesDepuis(commerce.id, new Date(t.getTime() - (DUREE_GAIN_JOURS + 2) * 86_400_000).toISOString())) {
+          if (gainBientotExpire(x, t)) gains.set(x.clientId, [...(gains.get(x.clientId) ?? []), x])
+        }
+      }
+      // Gain seul activé : on ne lit que les clients concernés, pas tout le fichier.
+      const clients =
+        regles.inactif || regles.anniversaire
+          ? await st.clients(commerce.id)
+          : (await Promise.all([...gains.keys()].map((id) => st.client(commerce.id, id)))).filter((c): c is Client => !!c)
+      for (const client of clients) {
         const canal = canalDuClient(client)
         if (client.consentementRelance !== true || !canal || !branche[canal]) continue
+        if (!regles.inactif && !regles.anniversaire && !gains.has(client.id)) continue
         const deja = await st.envois(commerce.id, 50, client.id)
-        // Une seule relance automatique par client et par tournée : l'anniversaire passe avant.
-        const modele = (['anniversaire', 'inactif'] as const).find((x) => regles[x] && relanceAutoDue(x, client, deja, t))
-        // Revue Codex finale, point 5 : le modèle retenu a déjà échoué chez le prestataire aujourd'hui (tentative de la
-        // tournée interrompue) → client déjà traité, rien de plus (ni ce modèle ni un autre en repli). Filtre posé ici,
-        // à côté de la règle « une relance par client et par tournée » qu'il prolonge, et pas dans `relanceAutoDue`.
-        if (modele && !echecAutoDuJour(modele, deja, t)) await relancer(commerce, client, { modele, declencheur: 'auto', auteur: 'Automatique' }, site)
+        const gain = gainsARelancer(gains.get(client.id) ?? [], deja, t)[0]
+        // Une seule relance automatique par client et par tournée : l'anniversaire passe avant, puis le gain.
+        for (const modele of ['anniversaire', 'gainExpire', 'inactif'] as const) {
+          if (!(modele === 'gainExpire' ? !!gain : regles[modele] && relanceAutoDue(modele, client, deja, t))) continue
+          // Revue Codex, point P1 : `deja` est plafonné à 50 envois — un `incertain` plus ancien n'y figure plus. Une
+          // relance due d'après cette fenêtre est confirmée sur TOUS les envois de ce modèle (comme `envoisDuTirage`).
+          if (modele !== 'gainExpire' && !relanceAutoDue(modele, client, await st.envoisDuModele(commerce.id, client.id, modele), t)) continue
+          // Revue Codex finale, point 5 : le modèle retenu a déjà échoué chez le prestataire aujourd'hui (tentative de la
+          // tournée interrompue) → client déjà traité, rien de plus (ni ce modèle ni un autre en repli). Filtre posé ici,
+          // à côté de la règle « une relance par client et par tournée » qu'il prolonge, et pas dans `relanceAutoDue`.
+          if (echecAutoDuJour(modele, deja, t)) break
+          if (modele !== 'gainExpire') {
+            await relancer(commerce, client, { modele, declencheur: 'auto', auteur: 'Automatique' }, site)
+            break
+          }
+          // Réclamation refusée (déjà relancé, remis, expiré entre-temps…) : la règle suivante (inactif) peut partir.
+          const reclame = await reclamerRelanceGain(gain!)
+          if (!reclame) continue
+          await relancerGain(commerce, client, reclame, site)
+          break
+        }
       }
-      tournees.set(commerce.id, jour)
+      tournees.set(commerce.id, marque)
     })()
       .catch((e) => console.warn(`[relances] tournée automatique interrompue (reprise à la prochaine ouverture) : ${e instanceof Error ? e.message : e}`))
       .finally(() => {
@@ -2180,6 +2469,80 @@ export async function creerServeur(o: OptionsServeur) {
     const c = await st.commerce(id)
     if (!c) throw err(404, 'Commerce inconnu.')
     return c
+  }
+
+  /**
+   * Lots physiques plafonnés aujourd'hui (R2). Les tirages du jour ne sont lus que si un lot a un plafond : une config
+   * sans plafond (toutes celles d'avant R2) ne coûte aucune lecture de plus aux routes publiques. Journée : à Paris,
+   * comme l'index unique quotidien des tirages (revue Codex R2 point 3).
+   */
+  async function plafonnesDuJour(c: Commerce, t = maintenant()): Promise<Set<string>> {
+    const lots = normaliserLots(c.lots ?? [])
+    if (!lots.some((l) => l.type === 'lot' && (l.plafondJour ?? 0) > 0)) return new Set()
+    return lotsPlafonnes(lots, await st.tiragesDepuis(c.id, debutDuJourParis(t)), t)
+  }
+
+  /**
+   * Instants gagnants du jour (D1), à Paris : lus dans `meta` ; absents et au moins un lot à instants → générés ICI, à
+   * la 1re utilisation du jour (pas de cron garanti sur Render Free), avec le hasard crypto, puis persistés par une
+   * insertion conditionnelle — deux générations simultanées : la 1re écrite fait foi, l'autre relit. Une fois écrits,
+   * ils ne changent plus de la journée (un réglage modifié s'applique au lendemain). `generer: false` (tableau de bord)
+   * : lecture seule. Le brut est rendu tel que lu : il sert de valeur attendue pour la consommation (`majMetaSi`).
+   */
+  async function instantsDuJour(c: Commerce, t: Date, generer = true): Promise<{ cle: string; brut: string; doc: InstantsDuJour } | null> {
+    const jour = jourParis(t)
+    const cle = cleInstants(c.id, jour)
+    let brut = await st.meta(cle)
+    if (brut === undefined) {
+      const lots = lotsAInstants(normaliserLots(c.lots ?? []))
+      if (!generer || !lots.length) return null
+      const neuf = JSON.stringify(genererInstants(lots, plagesOuverture(c), jour, (n) => randomInt(n)))
+      brut = (await st.majMetaSi(cle, undefined, neuf)) ? neuf : await st.meta(cle)
+      if (brut === undefined) return null
+    }
+    return { cle, brut, doc: JSON.parse(brut) as InstantsDuJour }
+  }
+
+  /**
+   * Fiche publique (R2) : sans les lots plafonnés du jour — ils disparaissent de la roue et de « À gagner aujourd'hui ».
+   * D2 : lots heures creuses et `bonusCreux` seulement pendant un créneau, évalué maintenant (heure de Paris).
+   */
+  async function fichePublique(c: Commerce): Promise<CommercePublic> {
+    const t = maintenant()
+    return commercePublic(c, await plafonnesDuJour(c, t), creneauActif(c.creneauxCreux, t))
+  }
+
+  /**
+   * Revue Codex R2 point 2 — crédit d'une consolation en points échoué APRÈS l'insertion du tirage. Sous Supabase,
+   * `transaction` n'annule rien : le tirage resterait sans points et l'index unique (client + jour) refuserait le rejeu.
+   * Compensation : le tirage est supprimé, le client peut retenter et sera crédité exactement une fois. 500 (pas
+   * 502–504, que le front affiche « hors ligne ») avec un message lisible. SQLite : la transaction est de toute façon
+   * annulée. Si la suppression échoue aussi : incohérence journalisée explicitement (ligne JSON, client en empreinte).
+   */
+  async function annulerTirageNonCredite(tirage: Tirage, cause: unknown): Promise<never> {
+    const raison = cause instanceof Error ? cause.message : String(cause)
+    try {
+      await st.supprimerTirage(tirage.commerceId, tirage.id)
+    } catch (e) {
+      console.error(JSON.stringify({
+        type: 'incoherence', niveau: 'erreur', horodatage: new Date().toISOString(), evenement: 'tirage-points-non-credites',
+        commerce: tirage.commerceId, tirage: tirage.id, client: empreinte(tirage.clientId), points: tirage.points,
+        causeCredit: raison, causeSuppression: e instanceof Error ? e.message : String(e),
+      }))
+      throw err(500, 'Votre tirage est enregistré mais vos points n’ont pas pu être crédités : montrez cet écran au comptoir.')
+    }
+    console.warn(`[tirage] crédit des points échoué, tirage annulé (le client peut rejouer) : ${raison}`)
+    throw err(500, 'Vos points n’ont pas pu être crédités : votre tirage est annulé, vous pouvez retenter dès maintenant.')
+  }
+
+  /**
+   * Revue Codex R2 point 4 — tirages d'avant R1 (sans `lotId`) rattachés au lot de la nouvelle configuration dont le
+   * libellé est le leur, sans ambiguïté (`rattachementsTirages`) : sinon un renommage casserait le comptage des plafonds
+   * (rapprochement par le libellé courant). Écriture conditionnelle (`lotId` toujours absent, remise inchangée) : une
+   * remise simultanée n'est jamais écrasée.
+   */
+  async function rattraperLotsTirages(c: Commerce): Promise<void> {
+    for (const t of rattachementsTirages(c.lots ?? [], await st.tiragesSansLot(c.id))) await st.completerLotTirage(t)
   }
 
   async function clientOu404(commerceId: string, id: string): Promise<Client> {
@@ -2564,6 +2927,8 @@ export async function creerServeur(o: OptionsServeur) {
     xml?: string
     redirection?: string
     image?: { type: string; octets: Buffer; etag: string; cache: string }
+    /** Pièce jointe binaire déjà compressée (sauvegarde `.json.gz`) : envoyée telle quelle, jamais recompressée. */
+    fichier?: { nom: string; type: string; octets: Buffer }
   }
 
   async function router(req: IncomingMessage, chemin: string[]): Promise<Reponse> {
@@ -2692,12 +3057,12 @@ export async function creerServeur(o: OptionsServeur) {
         const t = maintenant()
         const duJour = tirageDuJour(tirages, c.id, client.id, t)
         const jeu = {
-          statut: statutJeu(client, tirages, c.id, t),
+          statut: statutJeu(client, tirages, c.id, t, modeAccesRoue(c)),
           lotDuJour: duJour?.lot ?? null,
-          // P0-S19 : code gagnant du jour servi UNIQUEMENT au titulaire authentifié (`charge` = jeton client valable
-          // de cette carte). Sans jeton : null, même en vue complète (mode transition) — le lot reste affiché, le
-          // code, lui, ne quitte jamais le serveur sans preuve. Tirage perdant : null, même avec jeton.
-          codeDuJour: charge && duJour?.code && !estPerdant(duJour.lot) ? duJour.code : null,
+          // R3 (burn-on-reveal) : toujours null — champ gardé pour les pages d'avant R3. Le gain du jour ne s'utilise
+          // qu'à partir de demain et le code n'est plus servi que par l'activation (POST …/tirages/:id/activer), au
+          // titulaire authentifié (P0-S19 resserré), 10 minutes à la fois.
+          codeDuJour: null,
           remisDuJour: !!duJour?.remis,
         }
         const acces = { vue: complete ? 'complete' : 'limitee', jeton: !!charge, ...infosGrace(id) }
@@ -2706,7 +3071,7 @@ export async function creerServeur(o: OptionsServeur) {
           return {
             json: {
               client: { id: client.id, commerceId: c.id, tampons: client.tampons },
-              commerce: commercePublic(c),
+              commerce: await fichePublique(c),
               jeu,
               menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
               acces,
@@ -2733,15 +3098,18 @@ export async function creerServeur(o: OptionsServeur) {
         return {
           json: {
             client: cartePublique(client),
-            commerce: commercePublic(c),
+            commerce: await fichePublique(c),
             jeu,
             menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
-            // P1-C3 : historique des lots de la roue (gagnants seulement), sans aucun code — seul celui du jour est servi ci-dessus.
+            // P1-C3 : historique des lots de la roue (gagnants seulement), sans aucun code. R3 : statut v2 (`statutGain`).
             historiqueLots: tirages
-              .filter((x) => !estPerdant(x.lot))
+              .filter((x) => estGainPhysique(typeTirage(x)))
               .sort((a, b) => b.date.localeCompare(a.date))
               .slice(0, 20)
               .map((x) => ({ lot: x.lot, date: x.date, statut: statutGain(x, t) })),
+            // R3 : gains non terminaux (en attente, utilisables, code activé ou non), sans code — de quoi afficher
+            // « Utiliser mon gain » ; le code vient de l'activation, qui exige le jeton client.
+            gainsEnCours: gainsEnCoursDe(tirages, t),
             acces,
           },
         }
@@ -2783,7 +3151,7 @@ export async function creerServeur(o: OptionsServeur) {
       }
       const auteur: Auteur = { type: 'client', nom: 'Client (depuis sa carte)' }
       if (sous === 'donnees') {
-        const csv = exportClientCsv(client, await st.tiragesClient(c.id, client.id), await st.envois(c.id, 500, client.id))
+        const csv = exportClientCsv(client, await st.tiragesClient(c.id, client.id), await st.envois(c.id, 500, client.id), maintenant())
         await journaliser(c.id, auteur, 'rgpd', 'Export de ses données téléchargé par le client', client)
         return { csv: { nom: nomFichierExportClient(client.id), contenu: csv } }
       }
@@ -2826,13 +3194,37 @@ export async function creerServeur(o: OptionsServeur) {
       throw err(404, 'Lien de désinscription invalide.')
     }
 
+    if (ressource === 'admin' && id === 'sauvegarde' && !sous) {
+      // ADMIN SEULEMENT — sauvegarde complète téléchargeable (écran Admin) : même export, même format et même
+      // chiffrement que le CLI `scripts/sauvegarde-base.mjs` (docs/SAUVEGARDE.md), restaurable par
+      // `scripts/restaurer-base.mjs`. Table métier absente ou illisible → erreur, AUCUNE archive partielle.
+      if (m !== 'GET') throw err(405, 'Méthode non autorisée.')
+      await exigerAdmin(req)
+      let sauvegarde: Awaited<ReturnType<typeof exporterSauvegarde>>
+      try {
+        sauvegarde = await exporterSauvegarde((table) => st.lireTableSauvegarde(table), maintenant)
+      } catch (e) {
+        const cause = e instanceof Error ? e.message : String(e)
+        console.error(`[sauvegarde] ERREUR SAUVEGARDE — ${cause}`)
+        // 500 et non 503 : le front affiche le message d'une 500, alors qu'il traduit une 502-504 en « hors ligne ».
+        throw err(500, `ERREUR SAUVEGARDE — ${cause}`)
+      }
+      const json = JSON.stringify(sauvegarde)
+      const cle = o.cleChiffrementSauvegarde
+      if (!cle) console.warn('[sauvegarde] AVERTISSEMENT — sauvegarde non chiffrée téléchargée par l’admin (SAUVEGARDE_CLE_CHIFFREMENT absente) : fichier sensible, à protéger.')
+      const contenu = cle ? chiffrerSauvegarde(json, cle) : json
+      const total = Object.values(sauvegarde.compteurs).reduce((a, b) => a + b, 0)
+      console.log(`[sauvegarde] téléchargée par l’admin — ${total} lignes${cle ? ' — chiffrée AES-256-GCM' : ''}`)
+      return { fichier: { nom: nomFichierSauvegarde(sauvegarde.creeLe), type: 'application/gzip', octets: gzipSync(Buffer.from(contenu, 'utf8')) } }
+    }
+
     if (ressource !== 'commerces') throw err(404, 'Route inconnue.')
 
     // Lectures publiques d'un commerce (liste, fiche, menu) : par IP, avant toute lecture en base.
-    if (m === 'GET' && (!sous || (sous === 'menu' && !sousId))) limiterIp(req, 'lecture', limites.lectureParIp)
+    if (m === 'GET' && (!sous || ((sous === 'menu' || sous === 'reglement') && !sousId))) limiterIp(req, 'lecture', limites.lectureParIp)
 
     if (!id) {
-      if (m === 'GET') return { json: { commerces: (await st.commerces()).map(commercePublic) } }
+      if (m === 'GET') return { json: { commerces: await Promise.all((await st.commerces()).map(fichePublique)) } }
       if (m === 'POST') {
         await exigerAdmin(req)
         const corps = await lireCorps(req)
@@ -2866,12 +3258,22 @@ export async function creerServeur(o: OptionsServeur) {
             const r = appliquerRegles(a, maj)
             if (r !== a) await st.majAvis(r)
           }
+          // Revue Codex R2 point 4 : lots réécrits → tirages d'avant R1 rattachés à leur lot quand c'est sans ambiguïté.
+          if ('lots' in corps) await rattraperLotsTirages(maj)
           return maj
         })
         return { json: { commerce: maj } }
       }
-      if (m === 'GET') return { json: { commerce: commercePublic(commerce) } }
+      if (m === 'GET') return { json: { commerce: await fichePublique(commerce) } }
       throw err(405, 'Méthode non autorisée.')
+    }
+
+    // ---------- Règlement du jeu (R4) ----------
+    // PUBLIC (page #/reglement/<id>) : mode d'accès, limite de gains par personne, lots actifs (libellé + type) —
+    // jamais les probabilités, les coûts ni les plafonds. Limité par IP comme la fiche (ci-dessus, avant la lecture).
+    if (sous === 'reglement' && !sousId) {
+      if (m !== 'GET') throw err(405, 'Méthode non autorisée.')
+      return { json: { reglement: donneesReglement(commerce) } }
     }
 
     // ---------- Logo téléversé (P1-B5) ----------
@@ -2990,7 +3392,9 @@ export async function creerServeur(o: OptionsServeur) {
         json: {
           commerce,
           clients: (await st.clients(id)).map(clientCaisse),
-          tirages: await st.tirages(id),
+          // Revue Codex R3 (F1) : sans le code — il ne circule que par l'activation du titulaire ; le tableau de bord et
+          // l'écran Roulette n'affichent que lot, client et statut.
+          tirages: (await st.tirages(id)).map(tirageSansCode),
           avis: await st.avis(id),
           membres: (await st.membres(id)).map((m) => m.membre),
           journal: await st.journal(id, 200),
@@ -3219,9 +3623,10 @@ export async function creerServeur(o: OptionsServeur) {
       return { json: { client: clientCaisseEquipe(resultat.client), dejaTraite: resultat.dejaTraite } }
     }
 
-    // ---------- Code gagnant de la roue (P0-U3) : vérifié puis marqué « remis » en caisse ----------
-    // GET  /commerces/:id/caisse/gains/:code         → le gain (lot, client, date, statut) ; 404 code inconnu.
-    // POST /commerces/:id/caisse/gains/:code/remise  → 200 remis ; 409 déjà remis / perdant ; 410 expiré (pas du jour).
+    // ---------- Code gagnant de la roue (P0-U3, cycle de vie R3) : vérifié puis marqué « remis » en caisse ----------
+    // GET  /commerces/:id/caisse/gains/:code         → le gain (lot, client, date, statut v2) ; 404 code inconnu.
+    // POST /commerces/:id/caisse/gains/:code/remise  → 200 remis ; 409 pas encore utilisable / code non activé ou fenêtre
+    //      de 10 min échue (« inactif ») / déjà remis / perdant ; 410 expiré (après J+30).
 
     if (sous === 'caisse' && sousId === 'gains' && action && ((!extra && m === 'GET') || (extra === 'remise' && m === 'POST'))) {
       const { auteur } = await exigerAuteur(req, id)
@@ -3234,22 +3639,38 @@ export async function creerServeur(o: OptionsServeur) {
       const gain = async (x: Tirage) => gainCaisse(x, await st.client(id, x.clientId), t)
       if (m === 'GET') return { json: { gain: await gain(trouve) } }
 
-      // Perdant / déjà remis : 409 ; expiré (tirage d'un autre jour) : 410.
-      const refus = (x: Tirage) => {
-        const g = gainCaisse(x, undefined, t)
-        if (g.statut !== 'valable') throw err(g.statut === 'expire' ? 410 : 409, messageGain(g))
+      // R3 : remise seulement si le gain est utilisable (J+1 à J+30) ET son code activé il y a moins de 10 minutes
+      // (statut 'utilisable'). Expiré : 410 ; tout le reste (en attente, inactif, remis, perdant, consolation) : 409.
+      const refus = (x: Tirage, quand: Date) => {
+        const g = gainCaisse(x, undefined, quand)
+        if (g.statut !== 'utilisable') throw err(g.statut === 'expire' ? 410 : 409, messageGain(g))
       }
-      refus(trouve)
-      const remis: Tirage = { ...trouve, remis: { le: t.toISOString(), par: auteur } }
-      // Garde de la base : l'écriture n'a lieu que si personne ne l'a remis entre-temps (deux caisses au même moment).
-      if (!(await st.marquerTirageRemis(remis))) {
+      // Revue Codex R3 (F4) : l'heure de vérité est celle de l'ÉCRITURE, pas celle d'avant la lecture (une lecture lente
+      // laisserait passer une remise juste après la fin de la fenêtre ou du gain). Re-vérifié à l'heure de l'écriture,
+      // et la base re-vérifie la fenêtre elle-même (`activeLe` dans les 10 dernières minutes, condition de l'UPDATE).
+      const quand = maintenant()
+      // Tirage hérité du jour même : remise directe, sans fenêtre (ancienne règle, revue Codex F2).
+      const activeApres = (x: Tirage) => (tirageHerite(x) ? undefined : new Date(quand.getTime() - FENETRE_ACTIVATION_MS).toISOString())
+      // Garde de la base : l'écriture n'a lieu que si personne ne l'a remis entre-temps (deux caisses au même moment) et
+      // si la fenêtre d'activation est encore ouverte. Revue Codex 2 R7 (F1) : appliquée sur la ligne fraîche (une
+      // activation ou un marqueur de relance posés depuis la lecture ne sont pas effacés).
+      const remis = await modifierTirage(
+        trouve,
+        (frais) => {
+          refus(frais, quand)
+          return { ...frais, remis: { le: quand.toISOString(), par: auteur } }
+        },
+        activeApres,
+      )
+      if (!remis) {
         const relu = (await st.tiragesParCode(id, code)).find((x) => x.id === trouve.id)
-        if (relu) refus(relu)
+        if (relu) refus(relu, maintenant())
+        if (relu && !relu.remis) throw err(409, 'Le code vient de changer d’état : vérifiez-le à nouveau.')
         throw err(409, 'Lot déjà remis : un code ne sert qu’une fois.')
       }
       const client = await st.client(id, remis.clientId)
       await journaliser(id, auteur, 'gain', `Gain de la roue remis : ${remis.lot} (code ${code})`, client)
-      return { json: { gain: gainCaisse(remis, client, t) } }
+      return { json: { gain: gainCaisse(remis, client, quand) } }
     }
 
     // ---------- RGPD (P1-B6) : export individuel, suppression, purge de conservation — gérant / admin seulement ----------
@@ -3259,7 +3680,7 @@ export async function creerServeur(o: OptionsServeur) {
       // rien d'un autre client, jamais de PIN / hash / code équipe.
       const nom = await exigerCommercant(req, id)
       const client = await clientOu404(id, sousId)
-      const csv = exportClientCsv(client, await st.tiragesClient(id, client.id), await st.envois(id, 500, client.id))
+      const csv = exportClientCsv(client, await st.tiragesClient(id, client.id), await st.envois(id, 500, client.id), maintenant())
       await journaliser(id, { type: 'gerant', nom }, 'rgpd', 'Export des données du client (CSV)', client)
       return { csv: { nom: nomFichierExportClient(client.id), contenu: csv } }
     }
@@ -3633,7 +4054,7 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'menu' && !sousId) {
       if (m === 'GET') {
         exigerActif(commerce)
-        return { json: { menu: (await st.menu(id)) ?? { commerceId: id, categories: [], majLe: '' }, commerce: commercePublic(commerce) } }
+        return { json: { menu: (await st.menu(id)) ?? { commerceId: id, categories: [], majLe: '' }, commerce: await fichePublique(commerce) } }
       }
       if (m === 'PUT') {
         await exigerCommercant(req, id)
@@ -3725,6 +4146,37 @@ export async function creerServeur(o: OptionsServeur) {
       return { xml: '<?xml version="1.0" encoding="UTF-8"?><Response></Response>' }
     }
 
+    if (sous === 'tirages' && sousId && action === 'activer' && !extra && m === 'POST') {
+      // PUBLIC, titulaire seulement (R3, burn-on-reveal) — « Utiliser mon gain » : pose `activeLe` et renvoie le code,
+      // valable 10 minutes en caisse. SEULE route qui sert un code gagnant au client, et seulement avec le jeton client
+      // (P0-S7) de la carte qui a gagné — jamais par contact, même en mode transition. Chaque appel écrase l'activation
+      // précédente (le client peut ré-appuyer une fois la fenêtre échue). Refus : 409 pas encore utilisable (le jour du
+      // tirage) ou déjà remis / sans lot ; 410 expiré (après J+30) ; 404 tirage inconnu de CETTE carte.
+      limiterIp(req, 'lecture', limites.lectureParIp)
+      if (!o.secretSession) throw err(503, 'Accès client non configuré sur ce serveur (SESSION_SECRET absente) : le code ne peut pas être activé.')
+      const charge = await jetonClient(req, { commerceId: id })
+      if (!charge) {
+        await verifierBlocageClient(req)
+        return refusCarte(req)
+      }
+      compteurs.consommer(`carte:${charge.cid}`, limites.lectureParCarte, TROP)
+      exigerActif(commerce)
+      await clientOu401(id, charge.cid)
+      // Lu parmi les tirages du titulaire : l'id d'un tirage d'un autre client donne le même 404 qu'un id inconnu.
+      const tirage = (await st.tiragesClient(id, charge.cid)).find((x) => x.id === sousId)
+      if (!tirage) throw err(404, 'Gain introuvable sur cette carte.')
+      const t = maintenant()
+      // Même écriture conditionnelle que la remise : une caisse qui vient de remettre le lot gagne, l'activation échoue.
+      // Revue Codex 2 R7 (F1) : appliquée sur la ligne fraîche — un marqueur de relance posé depuis la lecture survit.
+      const active = await modifierTirage(tirage, (frais) => {
+        const refus = refusActivation(frais, t)
+        if (refus) throw err(refus.statut, refus.message)
+        return { ...frais, activeLe: t.toISOString() }
+      })
+      if (!active) throw err(409, 'Ce gain a déjà été remis au comptoir.')
+      return { json: { tirageId: active.id, lot: active.lot, code: active.code, activeLe: active.activeLe, expireActivation: finActivation(active) } }
+    }
+
     if (sous === 'tirages' && !sousId && m === 'POST') {
       // PUBLIC : tout est décidé ici (visite du jour, 1 tirage par jour, lot tiré) — rien ne vient du navigateur.
       // P0-S7 : le joueur est le titulaire du jeton client (Authorization) de CE commerce, jamais « celui qui connaît le
@@ -3748,28 +4200,152 @@ export async function creerServeur(o: OptionsServeur) {
       const resultat = await st.transaction(async () => {
         const client = charge ? await clientOu401(id, charge.cid) : (await inscrireOuRetrouver(commerce, prenom, corps.contact, corps.parrain)).client
         const t = maintenant()
-        const statut = statutJeu(client, await st.tiragesClient(id, client.id), id, t)
+        const tiragesClient = await st.tiragesClient(id, client.id)
+        // R2 : mode 'libre' = prêt dès l'identification ; 'visite' (défaut des configs d'avant R2) = comme avant.
+        const statut = statutJeu(client, tiragesClient, id, t, modeAccesRoue(commerce))
         if (statut === 'dejaJoue' || statut === 'sansVisite') return { refus: refusJeu }
-        const jouables = lotsJouables(commerce.lots)
-        if (!jouables.length) return { refus: 'Aucun lot n’est configuré pour le moment.' }
-        const lot = jouables[tirerLot(commerce.lots)].libelle
-        const tirage: Tirage = { id: `ti-${randomUUID()}`, commerceId: id, clientId: client.id, lot, date: t.toISOString(), code: codeGagnant() }
-        try {
-          await st.ajouterTirage(tirage)
-        } catch (e) {
-          // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e — même message unique.
-          if (e instanceof ErreurConflit) return { refus: refusJeu }
-          throw e
-        }
-        return { tirage }
+        // R1 : lots normalisés (id + type résolus, mêmes ids que la vue publique) ; le tirage fige l'id et le type du lot.
+        // R2 : ensemble tirable du jour — sans les lots physiques plafonnés aujourd'hui, ni aucun lot physique si le
+        // client a atteint sa limite de gains sur 30 jours ; il reste alors points / perdant (repli consolation).
+        // Probabilités renormalisées au prorata sur ce qui reste (`tirerLot`).
+        // D2 : hors créneau heures creuses, les lots marqués sont retirés AVANT tout le reste (instants, plafonds, tirage
+        // pondéré) — exactement comme un lot à 0 % ; pendant un créneau, ils sont tirables et une consolation est doublée.
+        const creux = creneauActif(commerce.creneauxCreux, t)
+        const normalises = lotsDuCreneau(normaliserLots(commerce.lots), creux)
+        // Revue Codex R2 point 1 — comptage des plafonds → choix du lot → insertion → crédit : sérialisés PAR COMMERCE.
+        // Sous Supabase, `transaction` n'isole rien : sans ce verrou, deux clients distincts lisent « 0 sortie » d'un lot
+        // à plafond 1 et le gagnent tous les deux (l'index unique ne protège que le couple client + jour). HYPOTHÈSE :
+        // instance unique du serveur (déploiement réel : un seul service Render) — le verrou est en mémoire du processus,
+        // il ne protégerait plus rien avec deux instances (voir server/file-par-cle.ts). Les autres commerces ne
+        // s'attendent pas entre eux. La lecture du statut (1 tirage par jour) reste avant le verrou : pour un même
+        // client, c'est l'index unique (client + jour) de la base qui tranche entre deux appels simultanés, ci-dessous.
+        return fileTirages(id, async () => {
+          const plafonnes = await plafonnesDuJour(commerce, t)
+          const tirables = lotsTirables(normalises, {
+            plafonnes,
+            gainsMois: gainsSur30Jours(tiragesClient, t),
+            limite: limiteGainsMois(commerce),
+          })
+          const jouables = lotsJouables(tirables)
+          if (!jouables.length) {
+            return { refus: lotsJouables(normalises).length ? 'Tous les lots du jour sont partis : revenez demain !' : 'Aucun lot n’est configuré pour le moment.' }
+          }
+          const tirageId = `ti-${randomUUID()}`
+          // D1 — instant gagnant en cours (non consommé, depuis moins de 5 min) : il attribue SON lot, avant le tirage
+          // pondéré, si ce lot est encore tirable pour ce client (ni plafonné aujourd'hui, ni client à sa limite mensuelle,
+          // chance > 0). Revue Codex D1 (F2) — lot indisponible pour TOUT LE MONDE (plafond du jour, chance 0, lot
+          // retiré) : l'instant est consommé sans gain (`gagne: false`), le plafond protège le commerce. Client SEUL
+          // bloqué (sa limite mensuelle) : l'instant n'est pas touché — le prochain client éligible dans la fenêtre peut
+          // encore le gagner ; ce client-ci a son tirage normal, sans aucun signe de l'instant. Consommation AVANT
+          // l'insertion, par écriture conditionnelle sur la valeur lue : un seul tirage peut la gagner, même hors du
+          // verrou par commerce ; rendue si le tirage échoue ensuite. Aucune lecture de plus pour un commerce sans lot à
+          // instants (désactiver les instants les arrête aussitôt).
+          let instant: { cle: string; id: string } | undefined
+          let tire: (typeof jouables)[number] | undefined
+          const jourInstants = lotsAInstants(normalises).length ? await instantsDuJour(commerce, t) : null
+          const enCours = jourInstants && instantEnCours(jourInstants.doc, t)
+          if (jourInstants && enCours) {
+            const gagnable = jouables.find((l) => l.id === enCours.lotId)
+            const pourTous = lotsJouables(lotsTirables(normalises, { plafonnes, gainsMois: 0, limite: 0 })).some((l) => l.id === enCours.lotId)
+            if (gagnable || !pourTous) {
+              const doc = { ...jourInstants.doc, instants: jourInstants.doc.instants.map((x) => (x.id === enCours.id ? { ...x, consommePar: tirageId, gagne: !!gagnable } : x)) }
+              if (await st.majMetaSi(jourInstants.cle, jourInstants.brut, JSON.stringify(doc))) {
+                instant = { cle: jourInstants.cle, id: enCours.id }
+                tire = gagnable
+              }
+            }
+          }
+          /**
+           * Tirage refusé ou annulé après la consommation : l'instant redevient gagnable. Revue Codex D1 (F1) — le
+           * document du jour porte TOUS les instants : un autre instant consommé entre-temps (autre instance du serveur)
+           * fait échouer la comparaison. On relit donc le document frais et on n'y libère que CET instant, s'il est
+           * toujours à ce tirage ; `ESSAIS_RESTITUTION` essais, puis incohérence journalisée (ligne JSON, comme
+           * `annulerTirageNonCredite`) : l'instant resterait consommé sans tirage.
+           */
+          const rendreInstant = async () => {
+            if (!instant) return
+            let cause = 'document modifié à chaque essai'
+            for (let essai = 1; essai <= ESSAIS_RESTITUTION; essai++) {
+              try {
+                const brut = await st.meta(instant.cle)
+                if (brut === undefined) return
+                const doc = JSON.parse(brut) as InstantsDuJour
+                if (!doc.instants.some((x) => x.id === instant!.id && x.consommePar === tirageId)) return
+                const libre = doc.instants.map((x) => {
+                  if (x.id !== instant!.id) return x
+                  const rendu = { ...x }
+                  delete rendu.consommePar
+                  delete rendu.gagne
+                  return rendu
+                })
+                if (await st.majMetaSi(instant.cle, brut, JSON.stringify({ ...doc, instants: libre }))) return
+              } catch (e) {
+                cause = e instanceof Error ? e.message : String(e)
+              }
+            }
+            console.error(JSON.stringify({
+              type: 'incoherence', niveau: 'erreur', horodatage: new Date().toISOString(), evenement: 'instant-non-rendu',
+              commerce: id, tirage: tirageId, instant: instant.id, cle: instant.cle, essais: ESSAIS_RESTITUTION, cause,
+            }))
+          }
+          tire ??= jouables[tirerLot(jouables, alea())]
+          // D2 : consolation doublée pendant un créneau ; le tirage garde le montant EFFECTIF crédité + `pointsDoubles`.
+          const points = tire.type === 'points' && tire.points ? pointsDuCreneau(tire.points, creux) : undefined
+          const tirage: Tirage = {
+            id: tirageId, commerceId: id, clientId: client.id, lot: tire.libelle, lotId: tire.id, typeLot: tire.type,
+            ...(points ? { points, ...(creux ? { pointsDoubles: true as const } : {}) } : {}),
+            date: t.toISOString(),
+            // R2 : aucun code pour une consolation en points (rien à retirer, rien à vérifier au comptoir). Un perdant garde
+            // le sien : la caisse le vérifie et répond « perdant » (épinglé par P0-U3).
+            ...(tire.type !== 'points' ? { code: codeGagnant() } : {}),
+          }
+          try {
+            // Enregistré AVANT le crédit des points : l'index unique (client + jour) fait foi — un double appel simultané
+            // est refusé ici et ne crédite jamais deux fois.
+            await st.ajouterTirage(tirage)
+          } catch (e) {
+            // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e — même message unique.
+            await rendreInstant()
+            if (e instanceof ErreurConflit) return { refus: refusJeu }
+            throw e
+          }
+          // R2 : consolation en points créditée dans la MÊME transaction (client relu juste avant l'écriture : sous
+          // Supabase, verrou optimiste sur sa version — une écriture concurrente de la caisse fait relire et recommencer).
+          let solde: number | undefined
+          if (points) {
+            try {
+              for (let essai = 1; ; essai++) {
+                const frais = await clientOu401(id, client.id)
+                try {
+                  await st.majClient({ ...frais, points: soldePoints(frais) + points })
+                  solde = soldePoints(frais) + points
+                  break
+                } catch (e) {
+                  if (!(e instanceof ErreurConflit) || essai >= 3) throw e
+                }
+              }
+            } catch (e) {
+              await rendreInstant()
+              await annulerTirageNonCredite(tirage, e)
+            }
+          }
+          return { tirage, solde }
+        })
       })
       // Le client éventuellement créé reste inscrit même en cas de refus (la transaction est validée).
       if ('refus' in resultat) throw err(409, resultat.refus!)
-      const { lot, code, date } = resultat.tirage!
+      // R3 (burn-on-reveal) : jamais de code dans cette réponse — le gain ne s'utilise qu'à partir de demain, et son code
+      // n'est servi au titulaire que par l'activation (POST …/tirages/:tirageId/activer), 10 minutes à la fois.
+      const { id: tirageId, lot, lotId, typeLot, date, points, pointsDoubles } = resultat.tirage!
+      // Lot physique seulement (R1) : une consolation en points n'a rien à retirer au comptoir — `perdant` reste le
+      // drapeau « pas de code à montrer » des clients existants ; `type` dit si c'est une consolation.
+      const physique = estGainPhysique(typeLot!)
       // Mesure anonyme (P2-Q3) : après le tirage enregistré, sans identité ; un échec ici ne change rien au tirage.
       await compter(id, 'tirage')
-      if (!estPerdant(lot)) await compter(id, 'gain')
-      return { statut: 201, json: { lot, code, date, perdant: estPerdant(lot) } }
+      if (physique) await compter(id, 'gain')
+      // R2 : consolation en points → montant crédité et nouveau solde ; aucun code. D2 : `pointsDoubles` si doublée.
+      const consolation = points ? { points, solde: resultat.solde, ...(pointsDoubles ? { pointsDoubles } : {}) } : {}
+      return { statut: 201, json: { tirageId, lot, lotId, type: typeLot, date, perdant: !physique, ...consolation } }
     }
 
     if (sous === 'evenements' && !sousId && m === 'POST') {
@@ -3785,6 +4361,25 @@ export async function creerServeur(o: OptionsServeur) {
       // Commerce en pause : rien à compter (la page de jeu l'affiche déjà fermé).
       const compte = commerce.actif ? await compter(id, type) : false
       return { statut: 202, json: { ok: true, compte } }
+    }
+
+    if (sous === 'instants-gagnants' && !sousId && m === 'GET') {
+      // Gérant (D1) — preuve et transparence : les instants gagnants du jour DÉJÀ PASSÉS (heure ≤ maintenant), avec leur
+      // issue et le prénom du gagnant. Les instants futurs ne sortent jamais du serveur, pas même leur nombre. Ouvrir le
+      // tableau de bord génère les instants du jour s'ils ne l'étaient pas encore (1re utilisation).
+      await exigerCommercant(req, id)
+      const t = maintenant()
+      const jour = await instantsDuJour(commerce, t)
+      const passes = jour ? instantsPasses(jour.doc, t) : []
+      const gagnes = passes.filter((i) => i.consommePar && i.gagne)
+      const tirages = gagnes.length ? await st.tiragesDepuis(id, debutDuJourParis(t)) : []
+      const instants: InstantPasse[] = []
+      for (const i of passes) {
+        const tirage = i.gagne ? tirages.find((x) => x.id === i.consommePar) : undefined
+        const gagnant = tirage ? (await st.client(id, tirage.clientId))?.prenom : undefined
+        instants.push({ heure: i.heure, lot: i.lot, statut: statutInstant(i, t), ...(gagnant ? { gagnant } : {}) })
+      }
+      return { json: { jour: jourParis(t), instants } }
     }
 
     if (sous === 'mesures' && !sousId && m === 'GET') {
@@ -4011,6 +4606,7 @@ export async function creerServeur(o: OptionsServeur) {
           pathname = '/'
         }
         journaliserRequete({ methode: req.method ?? '?', pathname, statut: res.statusCode, dureeMs: Date.now() - debutRequete, ip: ipRequete, commercesConnus: idsCommercesConnus })
+        alertes5xx.enregistrer(res.statusCode, () => routeMasquee(pathname, idsCommercesConnus))
       } catch {
         // La journalisation ne doit jamais faire échouer une requête.
       }
@@ -4162,6 +4758,17 @@ export async function creerServeur(o: OptionsServeur) {
           'text/csv; charset=utf-8',
           Buffer.from(r.csv.contenu),
         )
+        return
+      }
+      if (r.fichier) {
+        res.writeHead(200, {
+          ...entetes,
+          'Content-Type': r.fichier.type,
+          'Content-Length': String(r.fichier.octets.length),
+          'Content-Disposition': `attachment; filename="${r.fichier.nom.replace(/[^\w.-]/g, '_')}"`,
+          'Cache-Control': 'no-store',
+        })
+        res.end(r.fichier.octets)
         return
       }
       if (r.image) {

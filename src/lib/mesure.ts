@@ -6,7 +6,8 @@
 // Tous les jours sont des jours calendaires à Paris (AAAA-MM-JJ), comme le serveur (index unique des tirages).
 import type { Client, CommercePublic, CompteurEvenement, Lot, TestsAB, Tirage, TypeEvenement } from '../types'
 import { celluleCsv } from './csv.ts'
-import { estPerdant, lotsJouables } from './roulette.ts'
+import { lotsJouables } from './roulette.ts'
+import { estGainPhysique, typeLot, typeTirage } from './lots.ts'
 
 const JOUR_MS = 24 * 60 * 60 * 1000
 
@@ -73,11 +74,11 @@ export function libellePeriode(debut: string, g: Granularite): string {
 
 /**
  * Définitions affichées dans le tableau de bord :
- * • GAGNÉ = tirage dont le lot n'est pas perdant (« Dommage ! »…), retiré ou non au comptoir ;
+ * • GAGNÉ = tirage d'un lot physique (type 'lot' : ni perdant, ni consolation en points), retiré ou non au comptoir ;
  * • DISTRIBUÉ = lot gagné ET remis au comptoir (code vérifié en caisse, P0-U3) — c'est le coût réellement sorti.
  * Le coût appliqué est le coût unitaire ACTUEL du lot (Réglages), y compris pour les tirages passés.
  */
-export const DEFINITION_GAGNE = 'Gagné : le tirage a donné un lot (pas « Dommage ! »), qu’il ait été retiré ou non.'
+export const DEFINITION_GAGNE = 'Gagné : le tirage a donné un lot à retirer (ni perdant, ni points de consolation), qu’il ait été retiré ou non.'
 export const DEFINITION_DISTRIBUE = 'Distribué : lot gagné ET remis au comptoir (code vérifié en caisse) — le coût réellement sorti.'
 
 /** Coût unitaire saisi : absent, ou entier de 0 à 100 000 centimes (1 000 €) — même règle que le serveur. */
@@ -111,7 +112,7 @@ export { dansIntervalle }
 export function coutsParLot(tirages: Tirage[], lots: Lot[], debut: string, fin: string): LigneCoutLot[] {
   const parLot = new Map<string, LigneCoutLot>()
   for (const t of tirages) {
-    if (estPerdant(t.lot) || !dansIntervalle(jourParis(t.date), debut, fin)) continue
+    if (!estGainPhysique(typeTirage(t)) || !dansIntervalle(jourParis(t.date), debut, fin)) continue
     const cout = coutUnitaire(lots, t.lot)
     const l = parLot.get(t.lot) ?? { lot: t.lot, coutUnitaire: cout, gagnes: 0, distribues: 0, coutGagnes: 0, coutDistribues: 0 }
     l.gagnes++
@@ -160,7 +161,7 @@ export function totaux(d: DonneesMesure, debut: string, fin: string): Totaux {
   for (const t of d.tirages) {
     if (!dansIntervalle(jourParis(t.date), debut, fin)) continue
     r.tirages++
-    if (estPerdant(t.lot)) continue
+    if (!estGainPhysique(typeTirage(t))) continue
     const cout = coutUnitaire(d.lots, t.lot)
     r.gains++
     r.coutGagnes += cout ?? 0
@@ -276,7 +277,7 @@ export interface RetourApresGain {
 }
 
 /**
- * Retour après gain : parmi les gains (lots non perdants) de [debut, fin] dont la fenêtre de JOURS_RETOUR jours est
+ * Retour après gain : parmi les gains (lots physiques) de [debut, fin] dont la fenêtre de JOURS_RETOUR jours est
  * close à `aujourdhui`, part des gagnants qui ont fait valider au moins une visite le lendemain du gain ou plus tard,
  * dans les 30 jours. Le jour du gain est exclu (il faut une visite le jour même pour jouer). Calculé à partir des
  * données que le commerce a déjà (tirages + visites) : aucune nouvelle donnée n'est collectée pour cette mesure.
@@ -289,7 +290,7 @@ export function retourApresGain(clients: Pick<Client, 'id' | 'visites'>[], tirag
   let revenus = 0
   for (const t of tirages) {
     const jour = jourParis(t.date)
-    if (estPerdant(t.lot) || !dansIntervalle(jour, debut, borne)) continue
+    if (!estGainPhysique(typeTirage(t)) || !dansIntervalle(jour, debut, borne)) continue
     const jours = visites.get(t.clientId)
     if (!jours) continue // client supprimé (RGPD) : plus rien à mesurer
     gains++
@@ -368,9 +369,9 @@ export function varianteDuJour(jour: string): Variante {
 export const ACCROCHE_GENERIQUE = 'Tournez la roue et gagnez un cadeau !'
 export const ACCROCHE_LOT = 'Tournez la roue : {lot} à gagner !'
 
-/** Lot cité par la variante B : le 1er lot gagnant de la roue (jamais un « Dommage ! »). */
-export function lotAccroche(lots: Pick<Lot, 'libelle'>[]): string | null {
-  return lotsJouables(lots).find((l) => !estPerdant(l.libelle))?.libelle ?? null
+/** Lot cité par la variante B : le 1er lot physique de la roue (jamais un perdant ni une consolation en points). */
+export function lotAccroche(lots: Pick<Lot, 'libelle' | 'type'>[]): string | null {
+  return lotsJouables(lots).find((l) => estGainPhysique(typeLot(l)))?.libelle ?? null
 }
 
 /**
@@ -378,7 +379,7 @@ export function lotAccroche(lots: Pick<Lot, 'libelle'>[]): string | null {
  * (`testAccroche`, mode serveur) ou réglage du commerce (`testsAB`, démo locale).
  */
 export function accrocheJeu(
-  commerce: Pick<CommercePublic, 'lots' | 'testAccroche'> & { testsAB?: TestsAB },
+  commerce: Pick<CommercePublic, 'testAccroche'> & { lots: Pick<Lot, 'libelle' | 'type'>[]; testsAB?: TestsAB },
   jour: string,
 ): { modele: string; valeurs?: { lot: string } } {
   const lot = lotAccroche(commerce.lots)

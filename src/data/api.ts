@@ -1,12 +1,17 @@
 // Client HTTP de l'API /api/v1 (server/). Aucune règle métier ici : le serveur décide de tout
 // (tampons, récompense, tirage). `fetch` est injectable pour les tests (aucun vrai serveur dans `npm test`).
-import type { Avis, Client, Commerce, CommerceCaisse, CommercePublic, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce } from '../types'
+import type { Avis, Client, Commerce, CommerceCaisse, CommercePublic, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce, TypeLot } from '../types'
 import type { StatutGain, StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
 import type { ClientAPurger } from '../lib/rgpd'
-import type { LotHistorique } from '../lib/carte'
+import type { GainEnCours, LotHistorique } from '../lib/carte'
+import type { DonneesReglement } from '../lib/reglement'
 
 export const MESSAGE_HORS_LIGNE = 'Serveur injoignable — vérifiez la connexion.'
+/** Le délai de la requête (`delaiMs`) a expiré : le serveur répond, mais trop lentement (pas une panne réseau). */
+export const MESSAGE_DELAI_REQUETE = 'Délai dépassé : le serveur met trop longtemps à répondre. Réessayez.'
+/** Délai d'un téléchargement binaire (sauvegarde : lecture paginée de toutes les tables + réception du fichier). */
+export const DELAI_TELECHARGEMENT_MS = 120_000
 
 export class ErreurApi extends Error {
   /** Code HTTP ; 0 = serveur injoignable (réseau coupé, serveur arrêté, délai dépassé). */
@@ -77,10 +82,21 @@ export interface MessageCommercant extends MessageClient {
 }
 
 export interface ResultatTirage {
+  /** Id du tirage (R3) : sert à activer le gain plus tard (`activerCode`). Absent d'un serveur d'avant R3. */
+  tirageId?: string
   lot: string
-  code: string
+  /** Id du lot tiré (R1) : la roue retrouve son secteur par cet id. Absent d'un serveur d'avant R1. */
+  lotId?: string
+  /** Type du lot tiré (R1) : 'points' = consolation. Absent d'un serveur d'avant R1. */
+  type?: TypeLot
+  /** Serveur d'avant R3 seulement : depuis R3 (burn-on-reveal), le code ne vient plus que de `activerCode`. */
+  code?: string
   date: string
+  /** Rien à retirer au comptoir (perdant ou consolation en points) : pas de code à montrer. */
   perdant: boolean
+  /** Consolation en points (R2) : points crédités sur la carte par ce tirage, et nouveau solde. */
+  points?: number
+  solde?: number
 }
 
 /** GET …/google : `configure` = variables Google présentes sur le serveur ; `connecte` = consentement donné. */
@@ -121,8 +137,8 @@ export interface AccesCarte {
 interface ReponseCarteCommune {
   /** Vue publique (sans probabilités, règles d'avis, taux de points ni réglages internes du programme). */
   commerce: CommercePublic
-  /** codeDuJour / remisDuJour : absents sur un serveur d'avant P0-U3. P0-S19 : `codeDuJour` n'est servi qu'au titulaire
-   * authentifié (jeton client de la carte, `Authorization: Bearer`) — sans jeton : null, même en vue complète. */
+  /** codeDuJour / remisDuJour : absents sur un serveur d'avant P0-U3. R3 : `codeDuJour` vaut toujours null (le code ne
+   * vient plus que de `activerCode`) ; gardé pour les pages d'avant R3. */
   jeu: { statut: StatutJeu; lotDuJour: string | null; codeDuJour?: string | null; remisDuJour?: boolean }
   menuDisponible?: boolean
 }
@@ -131,10 +147,26 @@ export type ReponseCarteComplete = ReponseCarteCommune & {
   client: CartePublique
   /** P1-C3 : lots gagnés à la roue (sans code), pour l'historique de la carte. Absent sur un serveur plus ancien. */
   historiqueLots?: LotHistorique[]
+  /** R3 : gains non terminaux du client (statut v2, sans code). Absent sur un serveur plus ancien. */
+  gainsEnCours?: GainEnCours[]
   acces?: AccesCarte & { vue: 'complete' }
 }
 
-export type ReponseCarteLimitee = ReponseCarteCommune & { client: CarteLimitee; historiqueLots?: undefined; acces: AccesCarte & { vue: 'limitee' } }
+export type ReponseCarteLimitee = ReponseCarteCommune & {
+  client: CarteLimitee
+  historiqueLots?: undefined
+  gainsEnCours?: undefined
+  acces: AccesCarte & { vue: 'limitee' }
+}
+
+/** Code activé (R3, POST …/tirages/:tirageId/activer) : à montrer en caisse avant `expireActivation` (10 minutes). */
+export interface ActivationCode {
+  tirageId: string
+  lot: string
+  code: string
+  activeLe: string
+  expireActivation: string
+}
 
 export type ReponseCarte = ReponseCarteComplete | ReponseCarteLimitee
 
@@ -159,6 +191,8 @@ export interface GainCaisse {
   statut: StatutGain
   client: { id: string; prenom: string } | null
   remis: { le: string; par: string } | null
+  /** Tirage d'avant la roue v2 (revue Codex R3 F2) : ancienne règle, valable le jour du tirage seulement, sans activation. */
+  ancienneRegle?: true
 }
 
 export type ChampsReglages = Partial<
@@ -183,6 +217,10 @@ export type ChampsReglages = Partial<
     | 'programme'
     | 'relancesAuto'
     | 'conservationMois'
+    | 'modeAccesRoue'
+    | 'limiteGainsMois'
+    | 'plagesOuverture'
+    | 'creneauxCreux'
   >
 > & { testsAB?: { accroche?: { actif: boolean } } }
 
@@ -195,6 +233,12 @@ export function baseApi(valeur: string | undefined): string | null {
   if (!v) return null
   const sansSlash = v.replace(/\/+$/, '')
   return sansSlash.endsWith('/api/v1') ? sansSlash : `${sansSlash}/api/v1`
+}
+
+/** Nom de fichier d'un `Content-Disposition: attachment; filename="…"` ; à défaut (en-tête non exposé en CORS), nom daté. */
+export function nomPieceJointe(disposition: string | null, maintenant = new Date()): string {
+  const nom = /filename="([\w.-]+)"/.exec(disposition ?? '')?.[1]
+  return nom ?? `asian-home-${maintenant.toISOString().slice(0, 19).replace(/:/g, '')}.json.gz`
 }
 
 function entetesAcces(acces: AccesCaisse | null | undefined): Record<string, string> {
@@ -245,7 +289,7 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
   async function requete(
     methode: string,
     chemin: string,
-    options: { acces?: AccesCaisse | null; corps?: unknown; fichier?: Blob; texte?: boolean; delaiMs?: number; jetonClient?: string | null } = {},
+    options: { acces?: AccesCaisse | null; corps?: unknown; fichier?: Blob; texte?: boolean; binaire?: boolean; delaiMs?: number; jetonClient?: string | null } = {},
   ) {
     const entetes: Record<string, string> = { ...entetesAcces(options.acces) }
     // Jeton client de la carte (P0-S7) : prouve que ce téléphone est celui du titulaire.
@@ -253,6 +297,11 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     if (options.corps !== undefined) entetes['Content-Type'] = 'application/json'
     // Fichier brut (logo) : envoyé tel quel ; le serveur lit le format dans les octets, pas dans cet en-tête.
     if (options.fichier) entetes['Content-Type'] = options.fichier.type || 'application/octet-stream'
+    // Pièce jointe binaire (sauvegarde) : délai propre, le serveur lit toutes les tables avant de répondre.
+    const signal = signalDelai(options.delaiMs ?? (options.binaire ? DELAI_TELECHARGEMENT_MS : delaiMs))
+    // Statut 0 dans les deux cas (réessais de réveil inchangés) ; seul le message distingue notre délai expiré
+    // (signal annulé, pendant l'envoi ou la lecture du corps) d'une panne réseau.
+    const injoignable = () => new ErreurApi(0, signal?.aborted ? MESSAGE_DELAI_REQUETE : MESSAGE_HORS_LIGNE)
     let r: Response
     try {
       r = await f(base + chemin, {
@@ -260,10 +309,10 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
         headers: entetes,
         body: options.fichier ?? (options.corps === undefined ? undefined : JSON.stringify(options.corps)),
         cache: 'no-store',
-        signal: signalDelai(options.delaiMs ?? delaiMs),
+        signal,
       })
     } catch {
-      throw new ErreurApi(0, MESSAGE_HORS_LIGNE)
+      throw injoignable()
     }
     if (!r.ok) {
       let message = `Erreur du serveur (${r.status}).`
@@ -277,10 +326,12 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
       throw new ErreurApi(r.status >= 502 && r.status <= 504 ? 0 : r.status, r.status >= 502 && r.status <= 504 ? MESSAGE_HORS_LIGNE : message)
     }
     try {
+      // Pièce jointe binaire (sauvegarde) : octets intacts + nom du fichier donné par le serveur (Content-Disposition).
+      if (options.binaire) return { nom: nomPieceJointe(r.headers.get('content-disposition')), contenu: await r.blob() }
       // `r.text()` retirerait le BOM UTF-8 du CSV, indispensable pour qu'Excel lise les accents.
       return options.texte ? new TextDecoder('utf-8', { ignoreBOM: true }).decode(await r.arrayBuffer()) : await r.json()
     } catch {
-      throw new ErreurApi(0, MESSAGE_HORS_LIGNE)
+      throw injoignable()
     }
   }
 
@@ -304,6 +355,8 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     // Fiches publiques seulement : le commerce complet (réglages) vient de `etat`, avec PIN ou session.
     commerces: async () => ((await requete('GET', '/commerces')) as { commerces: CommercePublic[] }).commerces,
     commerce: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}`)) as { commerce: CommercePublic }).commerce,
+    /** Règlement du jeu (R4, public) : de quoi générer la page #/reglement/<id> (src/lib/reglement.ts). */
+    reglement: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}/reglement`)) as { reglement: DonneesReglement }).reglement,
     /** Vue complète avec le jeton client de cette carte, vue limitée sans (P0-S7). */
     carte: (clientId: string, jeton?: string | null) => requete('GET', `/cartes/${enc(clientId)}`, { jetonClient: jeton }) as Promise<ReponseCarte>,
     /**
@@ -357,6 +410,9 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
         corps: { contact, ...(prenom ? { prenom } : {}), ...(parrain ? { parrain } : {}) },
         jetonClient: jeton,
       }) as Promise<ResultatTirage>,
+    /** R3 — « Utiliser mon gain » : active le code du tirage pour 10 minutes et le renvoie (jeton client exigé). */
+    activerCode: (commerceId: string, tirageId: string, jeton?: string | null) =>
+      requete('POST', `/commerces/${enc(commerceId)}/tirages/${enc(tirageId)}/activer`, { jetonClient: jeton }) as Promise<ActivationCode>,
     /** Profil progressif (client, après sa 2e visite) : anniversaire « JJ/MM » et/ou plat préféré. */
     profil: (commerceId: string, clientId: string, champs: { anniversaire?: string; platPrefere?: string }, jeton?: string | null) =>
       requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/profil`, { corps: champs, jetonClient: jeton }) as Promise<{ client: CartePublique }>,
@@ -406,6 +462,8 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     mesures: (commerceId: string, acces: Acces) =>
       requete('GET', `/commerces/${enc(commerceId)}/mesures`, { acces }) as Promise<{ compteurs: CompteurEvenement[]; migration: boolean; depuis: string; aujourdhui: string }>,
     exportCsv: (commerceId: string, acces: Acces) => requete('GET', `/commerces/${enc(commerceId)}/export.csv`, { acces, texte: true }) as Promise<string>,
+    /** Admin seulement : sauvegarde complète de la base (`.json.gz`, chiffrée si le serveur a la clé), à restaurer avec scripts/restaurer-base.mjs. */
+    sauvegarde: (acces: Acces) => requete('GET', '/admin/sauvegarde', { acces, binaire: true }) as Promise<{ nom: string; contenu: Blob }>,
     majClient: async (commerceId: string, acces: Acces, clientId: string, champs: { anniversaire?: string; platPrefere?: string; consentementRelance?: boolean; exclusPurge?: boolean }) =>
       ((await requete('PATCH', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}`, { acces, corps: champs })) as { client: Client }).client,
     // ---- RGPD (P1-B6) ----

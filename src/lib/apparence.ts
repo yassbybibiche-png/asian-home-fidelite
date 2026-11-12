@@ -37,6 +37,12 @@ export function problemesApparence(a: Apparence): string[] {
   return p
 }
 
+/** Mélange `part` de la couleur `a` avec `b` (teintes claires de la roue, R5). */
+export function melanger(a: string, b: string, part: number): string {
+  const c = [1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * part + parseInt(b.slice(i, i + 2), 16) * (1 - part)))
+  return `#${c.map((x) => x.toString(16).padStart(2, '0')).join('')}`
+}
+
 /** Assombrit une couleur (dégradé du bandeau). */
 export function assombrir(hex: string, facteur = 0.75): string {
   const c = [1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * facteur))

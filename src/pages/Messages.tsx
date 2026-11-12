@@ -72,7 +72,7 @@ function RelancesSmsEmail() {
     )
   }, [api])
 
-  const basculer = (cle: 'inactif' | 'anniversaire', valeur: boolean) =>
+  const basculer = (cle: 'inactif' | 'anniversaire' | 'gainExpire', valeur: boolean) =>
     executer(() => avecPin((a, api) => api.majCommerce(commerce.id, a, { relancesAuto: { ...regles, [cle]: valeur } })))
 
   return (
@@ -99,6 +99,12 @@ function RelancesSmsEmail() {
             <input type="checkbox" className="case-a-cocher" checked={regles.anniversaire} disabled={enCours} onChange={(e) => void basculer('anniversaire', e.target.checked)} />
           </span>
           <span>Message d’anniversaire (si la date est renseignée)</span>
+        </label>
+        <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-gray-700">
+          <span className="zone-case">
+            <input type="checkbox" className="case-a-cocher" checked={regles.gainExpire !== false} disabled={enCours} onChange={(e) => void basculer('gainExpire', e.target.checked)} />
+          </span>
+          <span>« Votre gain expire bientôt » : lot de la roue non retiré, 72 h avant son expiration (une fois par gain)</span>
         </label>
         <p className="text-sm text-gray-600">Seulement vers les clients qui ont consenti, et seulement si le prestataire du canal est configuré.</p>
       </fieldset>

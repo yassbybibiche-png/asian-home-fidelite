@@ -1167,3 +1167,79 @@ de tâches inhérentes au rendu initial.
 consécutifs : **1**. Branche supprimée sans fusion ; seul `BOUCLE.md`
 fusionné (doc). Scripts de diagnostic conservés :
 `node_modules/.cache/profil-t8/tracer.mjs`, `trace.json`, `trace-cpu.json`.
+
+### Roue v2 R5+R8 — son, couleur du commerce, roue premium (12/11/2026) — écart à la cible DA
+
+Note DA de l'écran de jeu : 9/10 → **9,5/10** (captures Pixel 7 avant/après, `SCORES.md`
+§ « écran de jeu après roue v2 R5+R8 »). Cible 10/10 (mandat utilisateur 12/11 09h44)
+**non atteinte** — ce qui manque, à traiter en PHASE 3 (polish visuel) :
+1. Libellés de la moitié gauche de la roue à l'envers au repos (orientation radiale
+   unique) : retourner le texte des secteurs dont le milieu est entre 180° et 360° —
+   à arbitrer, la roue tourne et l'orientation au repos dépend de l'arrêt précédent.
+2. Couleur de commerce : la roue et les pastilles de la légende la prennent, mais le
+   cadre (`ring-magenta-400/30`, ligne épinglée par `roue-p0-u2`/`theme`), le titre
+   « À gagner » et l'anneau des pastilles restent magenta.
+3. Bouton « 🎡 Tourner la roue » : émoji multicolore hors registre noir + magenta
+   (libellé épinglé par plusieurs tests et traduit — à changer avec eux).
+4. Libellés abrégés sur la roue (« Dessert… », « 10 points… ») : règle des 12
+   caractères voulue (légende complète dessous), mais visible.
+5. Budget : JS initial à 76 o du plafond P2-Q2 (481300 / 481376 o) — tout polish qui
+   ajoute du JS au premier affichage de #/jouer impose d'abord un découpage.
+
+### Roue v2 R-t1 — polish visuel de la roue (12/11/2026, branche `boucle/roue-v2`)
+
+**Hypothèse.** Les quatre défauts visibles listés ci-dessus (libellés de gauche à l'envers,
+cadre/légende magenta sur une couleur perso, émoji 🎡, un détail d'harmonie) sont ce qui
+sépare l'écran de jeu (9,5/10) d'un 10/10. Contrainte : JS initial au plafond (481373 /
+481376 o après D2) → CSS d'abord.
+
+**Changements.**
+1. *Libellés de gauche* : le libellé d'un secteur dont le milieu est > 180° tourne de +90°
+   au lieu de −90° (`Roue.tsx`), soit un retournement sur l'axe du secteur, autour de son
+   centre. Géométrie, correspondance secteur/résultat, police et règle des 12 caractères
+   inchangées. Technique SVG (attribut `transform`) et non CSS : une rotation CSS sur un
+   `<text>` s'applique *avant* l'attribut, autour de l'origine de la roue — elle aurait
+   envoyé le libellé dans le secteur opposé.
+2. *Couleur du commerce* : la ligne du cadre (`hero-sombre … ring-magenta-400/30`) et le
+   conteneur de `Cadre` sont épinglés à l'identique (`roue-p0-u2`, `theme`) et les clés de
+   `teintesRoue` aussi (`roue-premium-r58`) ; un enveloppeur `style` dans `Jouer.tsx` coûtait
+   +71 o. Retenu : la racine de `LegendeRoue` porte `styleLegende(couleur)` (teintes de la
+   roue + `--roue-texte`) ; en CSS, son titre et l'anneau des pastilles lisent ces variables,
+   et sous `@supports selector(:has(a))` le cadre devient positionné, perd son fond et son
+   anneau, et la légende le repeint par `::before` (même dégradé nocturne, halo, filet et
+   fond bas à la teinte du commerce) + `::after` pour l'anneau du bouton son allumé. Sans
+   `:has()`, rendu d'avant. `--roue-texte` = teinte claire, éclaircie de moitié si < 4,5:1 sur
+   nuit 900 (le test a d'abord échoué : `#000000` donnait 2,73:1 avec la teinte claire seule).
+   Par défaut : magenta 400, inchangé.
+3. *Émoji 🎡* : le libellé `t('🎡 Tourner la roue{prenom} !')` est épinglé (entree-qr-p1-c1,
+   identite-accessibilite-p2-q1) et l'E2E le cherche par son nom → texte et nom accessible
+   inchangés. Première tentative, une police d'un glyphe (U+1F3A1, `unicode-range`) : bloquée
+   par `securite-s4`, qui interdit tout `@font-face` dans `src/` ; pas contournée par un
+   fichier dans `public/`. Retenu : les trois boutons « Tourner » (`bouton w-full py-4
+   text-lg`, uniquement dans Jouer.tsx) passent en `display: block` (requis par
+   `::first-letter`), et `:enabled::first-letter` (seul l'état actif porte l'émoji) a une taille
+   de police nulle et dessine dans sa boîte un signe de roue à la couleur du texte : anneau
+   (bordure), trois diamètres (six rayons), moyeu.
+4. *Détail relevé sur les captures avant* : le titre « À gagner » de la légende était corail
+   (`magenta-300` #ff4d6d), seule teinte hors palette de la roue à l'écran ; il prend
+   désormais la teinte claire de la roue (magenta 400 par défaut, 5,49:1 sur le noir).
+   NB : le brief citait « À gagner aujourd'hui » ; sur les captures avant, ce titre (carte
+   sous le bouton) est blanc, pas magenta — le titre magenta était celui de la légende.
+
+**Budget.** Les classes utilitaires du pointeur (`absolute top-0 left-1/2 …`), du titre et
+des pastilles de la légende sont passées en `@apply` dans index.css : −200 o de JS, ce qui
+paie les points 1 et 2. JS initial 481373 → **481283 o** (plafond 481376, marge 93 o) ; CSS
+78932 → 82135 o.
+
+**Note DA écran de jeu : 9,5 → 9,7/10** (SCORES.md, table de fin), point par point :
++ libellés de gauche lisibles au repos (captures `*-1-repos`, `*-0-page`) ;
++ sur `#3b2d8f`, plus aucun magenta dans le cadre de la roue (filet, halo, titre, anneaux) ;
++ signe de roue blanc monochrome à la place de l'émoji multicolore ;
++ titre de légende harmonisé avec la roue en mode magenta.
+Pas 10, ce qui reste visible : (a) sur une couleur de commerce, le bouton « Tourner » reste
+magenta, en dehors du cadre et donc des variables (le teinter exige du JS initial ou un
+blanc-sur-teinte non garanti ≥ 4,5:1 pour toute couleur) ; (b) libellés abrégés (« Dessert… »,
+« 10 points… ») par la règle des 12 caractères ; (c) les numéros de secteur (roues > 8 lots)
+ne sont pas retournés en bas de roue ; (d) l'en-tête du jeu (nom, accroche) reste magenta
+sur une couleur perso (hors brief). Après rotation, l'orientation dépend de l'arrêt : le
+retournement vaut pour la roue au repos.

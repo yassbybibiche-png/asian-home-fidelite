@@ -474,7 +474,9 @@ describe('Serveur : événements anonymes, mesures, coût des lots, test A/B', (
         await api('POST', `/commerces/${AH}/clients/${ins.contenu.client.id}/visite`, undefined, PIN)
         const jeu = await api('POST', `/commerces/${AH}/tirages`, { contact: tel })
         assert.equal(jeu.statut, 201)
-        assert.deepEqual(Object.keys(jeu.contenu).sort(), ['code', 'date', 'lot', 'perdant'], 'réponse du tirage inchangée')
+        // Roue v2 R1 (décision utilisateur du 12/11/2026) : la réponse ajoute l'id et le type du lot tiré, rien d'autre.
+        // Roue v2 R3 (même décision) : plus de code (burn-on-reveal, servi seulement par l'activation), l'id du tirage en plus.
+        assert.deepEqual(Object.keys(jeu.contenu).sort(), ['date', 'lot', 'lotId', 'perdant', 'tirageId', 'type'], 'réponse du tirage : sans code, id du tirage en plus')
       }
       // Tirage perdant : compté comme tirage, pas comme gain.
       assert.equal((await api('PATCH', `/commerces/${AH}`, { lots: [{ libelle: 'Dommage !', probabilite: 100 }] }, PIN)).statut, 200)
@@ -504,14 +506,22 @@ describe('Serveur : événements anonymes, mesures, coût des lots, test A/B', (
     try {
       const ok = await api('PATCH', `/commerces/${AH}`, { lots: [{ libelle: 'Nems offerts', probabilite: 50, coutCentimes: 150 }, { libelle: 'Thé glacé', probabilite: 50 }] }, PIN)
       assert.equal(ok.statut, 200)
-      assert.deepEqual(ok.contenu.commerce.lots, [{ libelle: 'Nems offerts', probabilite: 50, coutCentimes: 150 }, { libelle: 'Thé glacé', probabilite: 50 }])
+      // R1 : chaque lot écrit reçoit aussi un id et un type (comparés à part).
+      assert.deepEqual(
+        ok.contenu.commerce.lots.map(({ id, type, ...l }: { id: string; type: string }) => (assert.ok(id && type === 'lot'), l)),
+        [{ libelle: 'Nems offerts', probabilite: 50, coutCentimes: 150 }, { libelle: 'Thé glacé', probabilite: 50 }],
+      )
       for (const coutCentimes of [-1, 1.5, 100_001, '150']) {
         const r = await api('PATCH', `/commerces/${AH}`, { lots: [{ libelle: 'Nems offerts', probabilite: 50, coutCentimes }] }, PIN)
         assert.equal(r.statut, 400, String(coutCentimes))
         assert.match(r.contenu.erreur, /coût/)
       }
       const pub = await api('GET', `/commerces/${AH}`)
-      assert.deepEqual(pub.contenu.commerce.lots, [{ libelle: 'Nems offerts' }, { libelle: 'Thé glacé' }])
+      // R1 : la vue publique publie id + libellé + type, jamais le coût ni la probabilité.
+      assert.deepEqual(
+        pub.contenu.commerce.lots.map((l: { libelle: string; type: string }) => [l.libelle, l.type]),
+        [['Nems offerts', 'lot'], ['Thé glacé', 'lot']],
+      )
       assert.doesNotMatch(JSON.stringify(pub.contenu), /coutCentimes|testsAB/)
     } finally {
       await app.fermer()
@@ -538,7 +548,7 @@ describe('Serveur : événements anonymes, mesures, coût des lots, test A/B', (
   test('vue publique (fonction) : ni coût, ni dates de test', () => {
     const c = { ...nouveauCommerce('Chez Lin', 'restaurant', ''), lots: LOTS, testsAB: { accroche: { actif: true, depuis: '2026-11-10' } } }
     const pub = commercePublic(c)
-    assert.ok(pub.lots.every((l) => Object.keys(l).join() === 'libelle'))
+    assert.ok(pub.lots.every((l) => Object.keys(l).sort().join() === 'id,libelle,type'), 'R1 : id, libellé et type seulement')
     assert.equal(pub.testAccroche, true)
     assert.doesNotMatch(JSON.stringify(pub), /coutCentimes|depuis|testsAB/)
   })

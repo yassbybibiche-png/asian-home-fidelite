@@ -116,8 +116,10 @@ describe('Export individuel (CSV)', () => {
       [],
     )
     assert.ok(csv.startsWith('﻿rubrique;date;libelle;valeur\r\n'))
-    for (const attendu of ['Linh', '0612345678', 'Tampons;3', 'Points;42', 'Visite validée', 'Boisson offerte (code ABC234)', 'Relances SMS / e-mail;oui', 'Bonjour Linh', '03-21']) assert.ok(csv.includes(attendu), attendu)
-    for (const interdit of ['cl-parrain-secret', 'action-technique-123', 'cle-technique', 'Lot d’un autre', 'cl-autre']) assert.ok(!csv.includes(interdit), interdit)
+    // Revue Codex R3 (F1, modèle du 12/11) : plus jamais le code brut dans l'export — il ne circule que par l'activation ;
+    // le statut du gain le remplace (ici un tirage d'avant la roue v2, valable le jour même seulement : expiré).
+    for (const attendu of ['Linh', '0612345678', 'Tampons;3', 'Points;42', 'Visite validée', 'Boisson offerte (gain expiré)', 'Relances SMS / e-mail;oui', 'Bonjour Linh', '03-21']) assert.ok(csv.includes(attendu), attendu)
+    for (const interdit of ['cl-parrain-secret', 'action-technique-123', 'cle-technique', 'Lot d’un autre', 'cl-autre', 'ABC234']) assert.ok(!csv.includes(interdit), interdit)
   })
 })
 

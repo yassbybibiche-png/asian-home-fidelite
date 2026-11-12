@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { useAction, useStore } from '../store'
 import type { TypeCommerce } from '../types'
 import { TYPES_COMMERCE, libelleType } from '../data/defaults'
-import { BadgeDemo, EnTete, LogoCommerce, MessageErreur } from '../components/ui'
+import { BadgeDemo, EnTete, LogoCommerce, MessageErreur, telecharger } from '../components/ui'
 
 export default function Admin() {
   const { etat, commerce: commerceActif, choisirCommerce, basculerActif, reinitialiserDemo, mode, acces, verrouiller } = useStore()
@@ -120,6 +120,8 @@ export default function Admin() {
         })}
       </ul>
 
+      {mode === 'api' && <Sauvegarde />}
+
       {mode === 'local' && (
       <section className="carte">
         <h2 className="titre-carte">Démo</h2>
@@ -132,6 +134,40 @@ export default function Admin() {
       </section>
       )}
     </div>
+  )
+}
+
+/** Sauvegarde complète de la base (même fichier que le script de sauvegarde), à garder hors du serveur. */
+function Sauvegarde() {
+  const { api, acces } = useStore()
+  const [fait, setFait] = useState<string | null>(null)
+  const { executer, enCours, erreur } = useAction()
+
+  async function telechargerSauvegarde() {
+    if (!api || !acces) return
+    setFait(null)
+    const r = await executer(() => api.sauvegarde(acces))
+    if (!r.ok) return
+    telecharger(r.valeur.nom, r.valeur.contenu)
+    setFait(r.valeur.nom)
+  }
+
+  return (
+    <section className="carte space-y-3">
+      <h2 className="titre-carte">Sauvegarde</h2>
+      <p className="text-sm text-gray-600">
+        Toute la base (commerces, clients, tirages, avis, équipe, journal…) en un fichier. À faire chaque jour et à ranger hors du serveur : il se restaure avec le script de restauration.
+      </p>
+      <MessageErreur>{erreur && `Sauvegarde non téléchargée : ${erreur}`}</MessageErreur>
+      {fait && (
+        <p className="alerte-succes" role="status">
+          ✓ Sauvegarde téléchargée : {fait}
+        </p>
+      )}
+      <button className="bouton w-full" disabled={enCours} onClick={() => void telechargerSauvegarde()}>
+        {enCours ? 'Préparation…' : 'Télécharger une sauvegarde'}
+      </button>
+    </section>
   )
 }
 
