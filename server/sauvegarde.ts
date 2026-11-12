@@ -1,6 +1,7 @@
 // Sauvegarde complète de la base (P0-S5, 11/11/2026). Logique pure : aucun accès réseau ni disque ici.
 // Les lectures / écritures sont injectées (`lireTable`, `ecrireTable`) : PostgREST (Supabase) dans
-// `scripts/sauvegarde-base.mjs`, PGlite dans `scripts/restaurer-base.mjs` et dans les tests.
+// `scripts/sauvegarde-base.mjs` et la route admin `GET /admin/sauvegarde` (server/app.ts, via le stockage),
+// PGlite dans `scripts/restaurer-base.mjs` et dans les tests.
 // Procédure complète, RPO / RTO et limites : docs/SAUVEGARDE.md.
 //
 // Règle d'or : JAMAIS de sauvegarde silencieusement incomplète. Une table MÉTIER absente (migration non appliquée)
@@ -134,6 +135,67 @@ export async function restaurerSauvegarde(
     compteurs[nom] = lignes.length ? await ecrireTable(nom, lignes) : 0
   }
   return compteurs
+}
+
+// ---------- Adaptateur PostgREST (Supabase) : le client est injecté, ce module n'ouvre aucune connexion ----------
+
+type ReponsePostgrest = { data: Ligne[] | null; count: number | null; error: { code?: string; message: string } | null }
+interface RequetePostgrest extends PromiseLike<ReponsePostgrest> {
+  order(colonne: string, options: { ascending: boolean }): RequetePostgrest
+  range(debut: number, fin: number): PromiseLike<ReponsePostgrest>
+}
+/** Le strict nécessaire d'un client `@supabase/supabase-js` (clé service_role) pour lire une table entière. */
+export interface ClientPostgrest {
+  from(table: string): { select(colonnes: string, options: { count: 'exact' }): RequetePostgrest }
+}
+
+/** Plafond d'une réponse PostgREST (Supabase) : 1 000 lignes. */
+const PAGE_POSTGREST = 1000
+
+/**
+ * Lecture complète d'une table via PostgREST, utilisée par le CLI (`scripts/sauvegarde-base.mjs`) ET par la route
+ * admin `GET /admin/sauvegarde` (stockage Supabase) : page par page (1 000 lignes), triée sur sa clé pour une
+ * pagination stable, jusqu'à épuisement.
+ * Vérification d'intégrité (revue Codex P0-S5) : chaque page demande le compteur exact (`count: 'exact'`, en-tête
+ * Content-Range de PostgREST). Si le compteur change d'une page à l'autre (écriture / suppression concurrente) ou
+ * si le total lu diffère du compteur (plafond PostgREST configuré sous 1 000, ou ligne perdue entre deux pages),
+ * l'export est REFUSÉ : jamais de sauvegarde silencieusement incomplète.
+ */
+export function lireTablePostgrest(sb: ClientPostgrest): (table: string) => Promise<Ligne[]> {
+  return async (table) => {
+    const { cle } = definition(table)
+    const lignes: Ligne[] = []
+    let totalAttendu: number | undefined
+    for (let debut = 0; ; debut += PAGE_POSTGREST) {
+      let requete = sb.from(table).select(COLONNES_SAUVEGARDE, { count: 'exact' })
+      for (const c of cle) requete = requete.order(c, { ascending: true })
+      const { data, count, error } = await requete.range(debut, debut + PAGE_POSTGREST - 1)
+      if (error) {
+        const e = new Error(error.code === 'PGRST205' || error.code === '42P01'
+          ? `table inconnue « ${table} »` : `Supabase (${table}) : ${error.message}${error.code ? ` [${error.code}]` : ''}`) as Error & { code?: string }
+        e.code = error.code
+        throw e
+      }
+      if (count == null) throw new Error(`table « ${table} » : compteur exact indisponible (en-tête Content-Range absent) — sauvegarde refusée.`)
+      if (totalAttendu === undefined) totalAttendu = count
+      else if (count !== totalAttendu) {
+        throw new Error(`table « ${table} » : ${totalAttendu} lignes comptées puis ${count} — écriture concurrente pendant l'export, sauvegarde refusée (relancer restaurant fermé).`)
+      }
+      const page = data ?? []
+      lignes.push(...page)
+      if (page.length < PAGE_POSTGREST) {
+        if (lignes.length !== totalAttendu) {
+          throw new Error(`table « ${table} » : ${lignes.length} lignes lues pour ${totalAttendu} comptées — plafond PostgREST inférieur à ${PAGE_POSTGREST} ou ligne perdue entre deux pages, sauvegarde refusée.`)
+        }
+        return lignes
+      }
+    }
+  }
+}
+
+/** Nom du fichier de sauvegarde (CLI et route admin) : `asian-home-AAAA-MM-JJTHHMMSS.json.gz`, heure UTC. */
+export function nomFichierSauvegarde(creeLe: string): string {
+  return `asian-home-${new Date(creeLe).toISOString().slice(0, 19).replace(/:/g, '')}.json.gz`
 }
 
 // ---------- Adaptateurs SQL (Postgres / PGlite) : la requête est injectée, ce module n'ouvre aucune base ----------

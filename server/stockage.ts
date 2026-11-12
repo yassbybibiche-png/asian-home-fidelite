@@ -6,6 +6,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { Avis, Client, Commerce, CompteurEvenement, DemandeRattrapage, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, Parrainage, Tirage, TypeEvenement } from '../src/types.ts'
 import { cleContact } from '../src/lib/fidelite.ts'
+import { TABLES_SAUVEGARDE } from './sauvegarde.ts'
 
 export interface Pin {
   hash: string
@@ -218,6 +219,14 @@ export interface Stockage {
    * Tables d'une migration absente (Supabase) : rien à supprimer, comptées 0.
    */
   supprimerClient(commerceId: string, clientId: string): P<BilanSuppression>
+  /**
+   * Sauvegarde téléchargeable par l'admin (`GET /admin/sauvegarde`) : toutes les lignes, toutes les colonnes d'une des
+   * 15 tables de `TABLES_SAUVEGARDE`, sous la forme des lignes Postgres (`donnees` en objet). Supabase : même lecture
+   * que le CLI (`lireTablePostgrest` : pages + compteur exact) ; table absente → erreur (export refusé, jamais partiel).
+   * SQLite (développement) : pas de colonnes `ordre` / `version` — la restauration Postgres les recrée (ordre
+   * d'insertion conservé : lignes lues dans l'ordre `rowid`).
+   */
+  lireTableSauvegarde(table: string): Promise<Record<string, unknown>[]>
   /** Pas d'imbrication. SQLite : vraie transaction. Supabase : voir `stockage-supabase.ts` (pas de transaction multi-requêtes). */
   transaction<T>(fn: () => P<T>): Promise<T>
   fermer(): P<void>
@@ -503,6 +512,19 @@ export function ouvrirStockage(fichier: string) {
         envois: n(q.supprEnvois.run(commerceId, clientId)),
         client: n(q.supprClient.run(commerceId, clientId)) > 0,
       }
+    },
+    lireTableSauvegarde: async (table: string) => {
+      // Nom vérifié contre la liste fermée des tables (jamais interpolé tel quel depuis une requête).
+      if (!TABLES_SAUVEGARDE.some((t) => t.nom === table)) throw new Error(`table inconnue : « ${table} ».`)
+      let lignes: Record<string, unknown>[]
+      try {
+        lignes = db.prepare(`SELECT * FROM "${table}" ORDER BY rowid`).all() as Record<string, unknown>[]
+      } catch (e) {
+        if (e instanceof Error && /no such table/i.test(e.message)) throw new Error(`table inconnue « ${table} »`)
+        throw e
+      }
+      // Même forme que Postgres : `donnees` (texte JSON ici, JSONB là-bas) relu en objet.
+      return lignes.map((l) => (typeof l.donnees === 'string' ? { ...l, donnees: JSON.parse(l.donnees) as unknown } : { ...l }))
     },
 
     /** Exécute `fn` d'un bloc : tout est écrit, ou rien. */

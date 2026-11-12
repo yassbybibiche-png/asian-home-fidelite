@@ -10,11 +10,10 @@ import { randomBytes } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import {
-  COLONNES_SAUVEGARDE, TABLES_SAUVEGARDE, chiffrerSauvegarde, exporterSauvegarde, purgerAnciennesSauvegardes,
+  chiffrerSauvegarde, exporterSauvegarde, lireTablePostgrest, nomFichierSauvegarde, purgerAnciennesSauvegardes,
 } from '../server/sauvegarde.ts'
 
 const RACINE = resolve(import.meta.dirname, '..')
-const PAGE = 1000 // PostgREST (Supabase) plafonne une réponse à 1 000 lignes
 const MOTIF = /^asian-home-(\d{4})-(\d{2})-(\d{2})T(\d{2})(\d{2})(\d{2})\.json\.gz$/
 
 const AIDE = `Sauvegarde complète de la base Supabase (14 tables) — docs/SAUVEGARDE.md
@@ -60,11 +59,6 @@ function entier(env, nom, defaut) {
   return Number(v)
 }
 
-/** AAAA-MM-JJTHHMMSS en UTC. */
-function horodatage(d) {
-  return d.toISOString().slice(0, 19).replace(/:/g, '')
-}
-
 async function principal() {
   const options = lireOptions(process.argv.slice(2))
   if (options.aide) {
@@ -91,43 +85,9 @@ async function principal() {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   })
 
-  /**
-   * Lit une table page par page (1 000 lignes), triée sur sa clé pour une pagination stable, jusqu'à épuisement.
-   * Vérification d'intégrité (revue Codex P0-S5) : chaque page demande le compteur exact (`count: 'exact'`, en-tête
-   * Content-Range de PostgREST). Si le compteur change d'une page à l'autre (écriture / suppression concurrente) ou
-   * si le total lu diffère du compteur (plafond PostgREST configuré sous 1 000, ou ligne perdue entre deux pages),
-   * l'export est REFUSÉ : jamais de sauvegarde silencieusement incomplète.
-   */
-  async function lireTable(table) {
-    const { cle } = TABLES_SAUVEGARDE.find((t) => t.nom === table)
-    const lignes = []
-    let totalAttendu
-    for (let debut = 0; ; debut += PAGE) {
-      let requete = sb.from(table).select(COLONNES_SAUVEGARDE, { count: 'exact' })
-      for (const c of cle) requete = requete.order(c, { ascending: true })
-      const { data, count, error } = await requete.range(debut, debut + PAGE - 1)
-      if (error) {
-        const e = new Error(error.code === 'PGRST205' || error.code === '42P01'
-          ? `table inconnue « ${table} »` : `Supabase (${table}) : ${error.message}${error.code ? ` [${error.code}]` : ''}`)
-        e.code = error.code
-        throw e
-      }
-      if (count == null) throw new Error(`table « ${table} » : compteur exact indisponible (en-tête Content-Range absent) — sauvegarde refusée.`)
-      if (totalAttendu === undefined) totalAttendu = count
-      else if (count !== totalAttendu) {
-        throw new Error(`table « ${table} » : ${totalAttendu} lignes comptées puis ${count} — écriture concurrente pendant l'export, sauvegarde refusée (relancer restaurant fermé).`)
-      }
-      lignes.push(...data)
-      if (data.length < PAGE) {
-        if (lignes.length !== totalAttendu) {
-          throw new Error(`table « ${table} » : ${lignes.length} lignes lues pour ${totalAttendu} comptées — plafond PostgREST inférieur à ${PAGE} ou ligne perdue entre deux pages, sauvegarde refusée.`)
-        }
-        return lignes
-      }
-    }
-  }
-
-  const sauvegarde = await exporterSauvegarde(lireTable)
+  // Lecture page par page avec compteur exact (revue Codex P0-S5) : `lireTablePostgrest`, partagée avec la route
+  // admin `GET /admin/sauvegarde` du serveur.
+  const sauvegarde = await exporterSauvegarde(lireTablePostgrest(sb))
   const json = JSON.stringify(sauvegarde)
   let contenu = json
   if (cleChiffrement && options.sansChiffrement) {
@@ -139,7 +99,7 @@ async function principal() {
   }
 
   mkdirSync(dossier, { recursive: true })
-  const nom = `asian-home-${horodatage(new Date(sauvegarde.creeLe))}.json.gz`
+  const nom = nomFichierSauvegarde(sauvegarde.creeLe)
   const final = join(dossier, nom)
   // Écriture en .tmp (nom unique par processus) puis lien atomique : jamais de fichier final partiel, et deux
   // sauvegardes dans la même seconde ne peuvent plus s'écraser (linkSync échoue EEXIST si le nom existe déjà).

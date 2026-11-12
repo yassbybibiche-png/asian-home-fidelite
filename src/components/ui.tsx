@@ -167,8 +167,8 @@ export function MessageErreur({ children }: { children: ReactNode }) {
 }
 
 /** Propose un fichier au téléchargement (généré dans le navigateur ou reçu du serveur). */
-export function telecharger(nom: string, contenu: string, type = 'text/csv;charset=utf-8') {
-  const url = URL.createObjectURL(new Blob([contenu], { type }))
+export function telecharger(nom: string, contenu: string | Blob, type = 'text/csv;charset=utf-8') {
+  const url = URL.createObjectURL(contenu instanceof Blob ? contenu : new Blob([contenu], { type }))
   const lien = document.createElement('a')
   lien.href = url
   lien.download = nom

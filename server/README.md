@@ -1024,10 +1024,15 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
   sortie 1, aucun fichier. Vérification : `npm run restaurer -- <fichier> --cible pglite --verifier` (base locale
   jetable ; Supabase refusé). Procédure complète, RPO 24 h / RTO 1–2 h, copie hors VM, restauration manuelle vers
   Supabase et limites : **`docs/SAUVEGARDE.md`**.
+- **`GET /api/v1/admin/sauvegarde`** (admin seulement : session admin ou X-Admin-PIN ; session commerce / équipe → 403)
+  — bouton « Télécharger une sauvegarde » de l'écran Admin, routine quotidienne recommandée (12/11/2026). Même export,
+  même `.json.gz`, même nom horodaté et même chiffrement que le script (lecture Supabase partagée : `lireTablePostgrest`
+  de `server/sauvegarde.ts`, via `Stockage.lireTableSauvegarde`) ; chiffré si `SAUVEGARDE_CLE_CHIFFREMENT` est définie
+  sur le service (clé invalide = refus de démarrer), sinon en clair + `[sauvegarde] AVERTISSEMENT` dans le journal.
+  Table métier absente ou illisible → 500 `ERREUR SAUVEGARDE — …`, aucune archive. Fonctionne aussi sous SQLite (dev).
 - SQLite (dev / Render Starter + disque) : copier le fichier `data/fidelite.db` serveur arrêté (ou
-  `sqlite3 fidelite.db ".backup copie.db"`) — le script ci-dessus ne lit que Supabase.
-- Toujours **pas de route HTTP** de sauvegarde ni d'import, et pas de restauration automatique vers Supabase (manuelle,
-  `docs/SAUVEGARDE.md` § 8).
+  `sqlite3 fidelite.db ".backup copie.db"`) — le script ci-dessus ne lit que Supabase (la route admin lit les deux).
+- Pas de route d'**import** ni de restauration automatique vers Supabase (manuelle, `docs/SAUVEGARDE.md` § 8).
 
 ## RGPD (P1-B6)
 
