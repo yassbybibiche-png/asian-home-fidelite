@@ -526,8 +526,11 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
             limiteGainsMois: c.limiteGainsMois,
             // Plages d'ouverture des instants gagnants (D1) : absentes = défaut du serveur, non envoyées.
             plagesOuverture: c.plagesOuverture,
-            // Test A/B (P2-Q3) : seul l'état est envoyé, le serveur pose lui-même les dates.
-            ...(c.testsAB?.accroche ? { testsAB: { accroche: { actif: c.testsAB.accroche.actif } } } : {}),
+            // Créneaux heures creuses (D2) : même forme (absents = non envoyés).
+            creneauxCreux: c.creneauxCreux,
+            // Test A/B (P2-Q3) : seul l'état est envoyé, le serveur pose lui-même les dates. Sans test : `undefined`, non
+            // envoyé (même corps que l'ancien `...(x ? { testsAB } : {})`, plus court : plafond du bundle initial, D2).
+            testsAB: c.testsAB?.accroche && { accroche: { actif: c.testsAB.accroche.actif } },
           })
         }),
       creerCommerce: (n: NouveauCommerce) =>
@@ -562,7 +565,8 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
       majAvis: (avis: Avis, maj: { reponse?: string; brouillon?: string | null }) =>
         avecPin((a) => api.majAvis(avis.commerceId, a, avis.id, maj).then(() => undefined)),
       // PATCH sans champ : le serveur réapplique les règles aux avis en attente.
-      appliquerReglesAvis: (commerceId: string) => avecPin((a) => api.majCommerce(commerceId, a, {}).then(() => undefined)),
+      // `() => {}` (résout `undefined`, comme `() => undefined`) : plus court une fois minifié — plafond du bundle initial (D2).
+      appliquerReglesAvis: (commerceId: string) => avecPin((a) => api.majCommerce(commerceId, a, {}).then(() => {})),
       exporterCsv: async (commerceId: string) => {
         const a = accesRef.current
         if (!a) throw new Error('Déverrouillez d’abord avec votre PIN.')

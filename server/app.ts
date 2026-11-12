@@ -6,7 +6,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, CommerceCaisse, CommercePublic, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, InstantsDuJour, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, CommerceCaisse, CommercePublic, CreneauCreux, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, InstantsDuJour, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
@@ -47,6 +47,7 @@ import { problemesApparence } from '../src/lib/apparence.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
 import { cleInstants, genererInstants, INSTANTS_JOUR_MAX, instantEnCours, instantsPasses, lotsAInstants, plagesOuverture, problemePlages, statutInstant } from '../src/lib/instants.ts'
 import type { InstantPasse } from '../src/lib/instantsTableau.ts'
+import { creneauActif, lotsDuCreneau, nettoyerCreneaux, pointsDuCreneau, problemeCreneaux } from '../src/lib/creneaux.ts'
 import { donneesReglement } from '../src/lib/reglement.ts'
 import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurLogo, LIMITES_LOGO, messageTropLourd, urlLogo, validerLogo, type FormatLogo } from '../src/lib/logo.ts'
@@ -680,6 +681,9 @@ function lots(v: unknown, existants: Lot[] = []): Lot[] {
       }
       if (instants > 0 && type === 'lot') lot.instantsParJour = instants
     }
+    // Heures creuses (D2) : drapeau, tout type de lot ; absent / null / false = toujours tirable (rien d'écrit).
+    if (o.heuresCreuses != null && typeof o.heuresCreuses !== 'boolean') throw err(400, `Lot n° ${i + 1} : « heuresCreuses » doit valoir true ou false.`)
+    if (o.heuresCreuses === true) lot.heuresCreuses = true
     if (type === 'points') {
       const n = o.points ?? actuel?.points
       if (typeof n !== 'number' || !Number.isInteger(n) || n < POINTS_LOT_MIN || n > POINTS_LOT_MAX) {
@@ -698,6 +702,8 @@ function lots(v: unknown, existants: Lot[] = []): Lot[] {
   const doubles = libellesEnDouble(liste)
   if (doubles.length) throw err(400, `Libellé de lot en double : ${doubles.map((d) => `« ${d} »`).join(', ')}. Chaque lot doit avoir un libellé différent (majuscules et espaces ne comptent pas).`)
   if (!lotsJouables(liste).length) throw err(400, 'Il faut au moins un lot avec un libellé et une probabilité > 0.')
+  // D2 : hors créneau, les lots heures creuses sont exclus — il en faut au moins un autre, sinon la roue serait vide.
+  if (!lotsJouables(lotsDuCreneau(liste, false)).length) throw err(400, 'Il faut au moins un lot jouable en dehors des heures creuses (probabilité > 0, case « Heures creuses seulement » décochée).')
   return liste
 }
 
@@ -735,7 +741,7 @@ function apparence(v: unknown): Apparence {
   return a
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB', 'modeAccesRoue', 'limiteGainsMois', 'plagesOuverture']
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB', 'modeAccesRoue', 'limiteGainsMois', 'plagesOuverture', 'creneauxCreux']
 
 /**
  * Tests A/B (P2-Q3) : le navigateur n'envoie que `{ accroche: { actif } }` ; les dates de début et de fin sont posées
@@ -837,6 +843,11 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
     const p = problemePlages(corps.plagesOuverture)
     if (p) throw err(400, `« plagesOuverture » : ${p}.`)
     r.plagesOuverture = (corps.plagesOuverture as Corps[]).map((x) => ({ debut: x.debut as string, fin: x.fin as string }))
+  }
+  if ('creneauxCreux' in corps) {
+    const p = problemeCreneaux(corps.creneauxCreux)
+    if (p) throw err(400, `« creneauxCreux » : ${p}.`)
+    r.creneauxCreux = nettoyerCreneaux(corps.creneauxCreux as CreneauCreux[])
   }
   if ('conservationMois' in corps) {
     const n = corps.conservationMois
@@ -2489,9 +2500,13 @@ export async function creerServeur(o: OptionsServeur) {
     return { cle, brut, doc: JSON.parse(brut) as InstantsDuJour }
   }
 
-  /** Fiche publique (R2) : sans les lots plafonnés du jour — ils disparaissent de la roue et de « À gagner aujourd'hui ». */
+  /**
+   * Fiche publique (R2) : sans les lots plafonnés du jour — ils disparaissent de la roue et de « À gagner aujourd'hui ».
+   * D2 : lots heures creuses et `bonusCreux` seulement pendant un créneau, évalué maintenant (heure de Paris).
+   */
   async function fichePublique(c: Commerce): Promise<CommercePublic> {
-    return commercePublic(c, await plafonnesDuJour(c))
+    const t = maintenant()
+    return commercePublic(c, await plafonnesDuJour(c, t), creneauActif(c.creneauxCreux, t))
   }
 
   /**
@@ -4190,7 +4205,10 @@ export async function creerServeur(o: OptionsServeur) {
         // R2 : ensemble tirable du jour — sans les lots physiques plafonnés aujourd'hui, ni aucun lot physique si le
         // client a atteint sa limite de gains sur 30 jours ; il reste alors points / perdant (repli consolation).
         // Probabilités renormalisées au prorata sur ce qui reste (`tirerLot`).
-        const normalises = normaliserLots(commerce.lots)
+        // D2 : hors créneau heures creuses, les lots marqués sont retirés AVANT tout le reste (instants, plafonds, tirage
+        // pondéré) — exactement comme un lot à 0 % ; pendant un créneau, ils sont tirables et une consolation est doublée.
+        const creux = creneauActif(commerce.creneauxCreux, t)
+        const normalises = lotsDuCreneau(normaliserLots(commerce.lots), creux)
         // Revue Codex R2 point 1 — comptage des plafonds → choix du lot → insertion → crédit : sérialisés PAR COMMERCE.
         // Sous Supabase, `transaction` n'isole rien : sans ce verrou, deux clients distincts lisent « 0 sortie » d'un lot
         // à plafond 1 et le gagnent tous les deux (l'index unique ne protège que le couple client + jour). HYPOTHÈSE :
@@ -4268,10 +4286,11 @@ export async function creerServeur(o: OptionsServeur) {
             }))
           }
           tire ??= jouables[tirerLot(jouables, alea())]
-          const points = tire.type === 'points' ? tire.points : undefined
+          // D2 : consolation doublée pendant un créneau ; le tirage garde le montant EFFECTIF crédité + `pointsDoubles`.
+          const points = tire.type === 'points' && tire.points ? pointsDuCreneau(tire.points, creux) : undefined
           const tirage: Tirage = {
             id: tirageId, commerceId: id, clientId: client.id, lot: tire.libelle, lotId: tire.id, typeLot: tire.type,
-            ...(points ? { points } : {}),
+            ...(points ? { points, ...(creux ? { pointsDoubles: true as const } : {}) } : {}),
             date: t.toISOString(),
             // R2 : aucun code pour une consolation en points (rien à retirer, rien à vérifier au comptoir). Un perdant garde
             // le sien : la caisse le vérifie et répond « perdant » (épinglé par P0-U3).
@@ -4314,15 +4333,15 @@ export async function creerServeur(o: OptionsServeur) {
       if ('refus' in resultat) throw err(409, resultat.refus!)
       // R3 (burn-on-reveal) : jamais de code dans cette réponse — le gain ne s'utilise qu'à partir de demain, et son code
       // n'est servi au titulaire que par l'activation (POST …/tirages/:tirageId/activer), 10 minutes à la fois.
-      const { id: tirageId, lot, lotId, typeLot, date, points } = resultat.tirage!
+      const { id: tirageId, lot, lotId, typeLot, date, points, pointsDoubles } = resultat.tirage!
       // Lot physique seulement (R1) : une consolation en points n'a rien à retirer au comptoir — `perdant` reste le
       // drapeau « pas de code à montrer » des clients existants ; `type` dit si c'est une consolation.
       const physique = estGainPhysique(typeLot!)
       // Mesure anonyme (P2-Q3) : après le tirage enregistré, sans identité ; un échec ici ne change rien au tirage.
       await compter(id, 'tirage')
       if (physique) await compter(id, 'gain')
-      // R2 : consolation en points → montant crédité et nouveau solde ; aucun code.
-      const consolation = points ? { points, solde: resultat.solde } : {}
+      // R2 : consolation en points → montant crédité et nouveau solde ; aucun code. D2 : `pointsDoubles` si doublée.
+      const consolation = points ? { points, solde: resultat.solde, ...(pointsDoubles ? { pointsDoubles } : {}) } : {}
       return { statut: 201, json: { tirageId, lot, lotId, type: typeLot, date, perdant: !physique, ...consolation } }
     }
 

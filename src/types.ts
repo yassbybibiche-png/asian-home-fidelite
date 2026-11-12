@@ -67,6 +67,12 @@ export interface Lot {
    * le 1er tirage dans les 5 minutes qui suivent un instant gagne ce lot. Absent / 0 = désactivé. Jamais publié.
    */
   instantsParJour?: number
+  /**
+   * Heures creuses (D2) : le lot n'est tirable — et visible sur la roue publique — que pendant un créneau
+   * `Commerce.creneauxCreux` ; hors créneau, il est exclu comme un lot à 0 %. Absent / false = toujours tirable.
+   * Le type ne change pas (drapeau, pas un 4e type). Jamais publié tel quel.
+   */
+  heuresCreuses?: boolean
   libelle: string
   /** En %, ex. 30. Si le total ≠ 100, les chances sont recalculées au prorata. */
   probabilite: number
@@ -98,6 +104,16 @@ export interface InstantGagnant {
   lot: string
   consommePar?: string
   gagne?: boolean
+}
+
+/**
+ * Créneau « heures creuses » (D2), heure de Paris : `jours` 0 = dimanche … 6 = samedi ; début inclus, fin exclue, début
+ * avant la fin (ne passe pas minuit). Voir src/lib/creneaux.ts.
+ */
+export interface CreneauCreux {
+  jours: number[]
+  debut: string
+  fin: string
 }
 
 export interface InstantsDuJour {
@@ -141,6 +157,11 @@ export interface Commerce {
    * services d'Asian Home (`PLAGES_OUVERTURE_DEFAUT`, src/lib/instants.ts) ; liste vide = aucun instant.
    */
   plagesOuverture?: PlageOuverture[]
+  /**
+   * Créneaux heures creuses (D2) : pendant l'un d'eux, les lots `heuresCreuses` sont tirables et une consolation en
+   * points est doublée. Absent / vide = aucun créneau (les lots heures creuses ne sortent jamais).
+   */
+  creneauxCreux?: CreneauCreux[]
   reglesReponseAuto: ReglesReponseAuto
   actif: boolean
   creeLe: string
@@ -291,6 +312,11 @@ export interface CommercePublic {
    * Absent d'un serveur d'avant R4 = 'visite' (`modeAccesRoue`, src/lib/roulette.ts).
    */
   modeAccesRoue?: ModeAccesRoue
+  /**
+   * Créneau heures creuses en cours (D2) : présent (true) seulement pendant un créneau — les lots heures creuses sont
+   * alors dans `lots`, et une consolation en points tirée est doublée. Badge sur la page de jeu.
+   */
+  bonusCreux?: true
   actif: boolean
   demo: boolean
   catalogue?: Pick<RecompensePoints, 'nom' | 'cout' | 'description'>[]
@@ -569,6 +595,8 @@ export interface Tirage {
   typeDeduit?: true
   /** Points crédités au client par ce tirage (R2, lot de type 'points' tiré par le serveur) ; absent sinon. */
   points?: number
+  /** Consolation tirée pendant un créneau heures creuses (D2) : `points` est le montant EFFECTIF, déjà doublé. */
+  pointsDoubles?: true
   date: string
   /**
    * Code gagnant à montrer au comptoir (tirages faits par le serveur ; depuis R2, lots de type 'lot' seulement). R3 : le

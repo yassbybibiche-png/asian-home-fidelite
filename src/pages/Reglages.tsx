@@ -19,6 +19,8 @@ import { CHOIX_TYPE_LOT, lotPourEnvoi, problemeLot } from '../lib/reglagesRoue'
 import { ApercuRoue } from '../components/ApercuRoue'
 import type { ModeAccesRoue, PlageOuverture, TypeLot } from '../types'
 import { INSTANTS_JOUR_MAX, PLAGES_MAX, plagesOuverture, problemePlages } from '../lib/instants'
+import { lotsDuCreneau, problemeCreneaux } from '../lib/creneaux'
+import { CaseHeuresCreuses, CreneauxCreux } from '../components/HeuresCreuses'
 
 /** Accès à la roue (R6) : les deux modes du serveur, dans l'ordre affiché. */
 const MODES_ACCES: { valeur: ModeAccesRoue; libelle: string; aide: string }[] = [
@@ -145,6 +147,10 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   // Plages d'ouverture (D1) : absentes = défaut (les deux services) ; mêmes règles que le serveur (`problemePlages`).
   const plages = plagesOuverture(brouillon)
   const erreurPlages = problemePlages(plages)
+  // Heures creuses (D2) : créneaux validés comme le serveur ; hors créneau, la roue doit garder au moins un lot jouable.
+  const creneaux = brouillon.creneauxCreux ?? []
+  const erreurCreneaux = problemeCreneaux(creneaux)
+  const horsCreux = lotsDuCreneau(lots, false).some((l) => Number.isFinite(l.probabilite) && l.probabilite > 0)
   const nomValide = brouillon.nom.trim().length > 0
   const seuilValide = Number.isInteger(brouillon.seuilTampons) && brouillon.seuilTampons >= 2 && brouillon.seuilTampons <= 50
   const [catalogue, setCatalogue] = useState<RecompensePoints[]>(commerce.catalogue ?? [])
@@ -164,8 +170,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   const conservationValide = Number.isInteger(conservation) && conservation >= CONSERVATION_MIN_MOIS && conservation <= CONSERVATION_MAX_MOIS
   // Liens de commande (P1-C5) : vides ou en https (le serveur refuse le reste).
   const liensCommandeValides = [brouillon.lienDeliveroo, brouillon.lienUberEats].every((l) => !l?.trim() || /^https:\/\/\S+$/i.test(l.trim()))
-  const lotsValides = lots.length >= 2 && probasValides && coutsValides && champsTypeValides && !doublons.length && total > 0
-  const valide = nomValide && seuilValide && lotsValides && limiteValide && tauxValide && catalogueValide && !problemes.length && conservationValide && liensCommandeValides && !erreurPlages
+  const lotsValides = lots.length >= 2 && probasValides && coutsValides && champsTypeValides && !doublons.length && total > 0 && horsCreux
+  const valide = nomValide && seuilValide && lotsValides && limiteValide && tauxValide && catalogueValide && !problemes.length && conservationValide && liensCommandeValides && !erreurPlages && !erreurCreneaux
 
   function maj<K extends keyof Commerce>(champ: K, valeur: Commerce[K]) {
     setBrouillon((b) => ({ ...b, [champ]: valeur }))
@@ -719,6 +725,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                     </option>
                   ))}
                 </select>
+                {/* Heures creuses (D2) : tout type de lot ; décochée = rien d'écrit (toujours tirable). */}
+                <CaseHeuresCreuses coche={!!lot.heuresCreuses} desactive={exclu} onChange={(v) => majLot(i, { ...lot, heuresCreuses: v || undefined })} />
                 {type === 'points' && (
                   <>
                     <label className="sr-only" htmlFor={`points-${i}`}>
@@ -831,9 +839,11 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                     ? ` — « ${lotEnErreur.libelle} » : ${problemeLot(lotEnErreur)}`
                     : total <= 0
                       ? ' — au moins un lot doit avoir une chance > 0'
-                      : total !== 100
-                        ? ' — le total ne fait pas 100 % : les chances seront recalculées au prorata'
-                        : ''}
+                      : !horsCreux
+                        ? ' — il faut au moins un lot jouable hors heures creuses (sinon la roue serait vide hors créneau)'
+                        : total !== 100
+                          ? ' — le total ne fait pas 100 % : les chances seront recalculées au prorata'
+                          : ''}
         </p>
         <Interrupteur
           libelle="Test A/B : phrase d’accroche de la page de jeu"
@@ -907,6 +917,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           )}
           {erreurPlages ? <p className="text-sm font-medium text-red-700">Plages d’ouverture : {erreurPlages.replace(/^plages d’ouverture : /, '')}</p> : !plages.length && <p className="text-sm text-gray-600">Aucune plage : aucun instant gagnant ne sera tiré.</p>}
         </div>
+        {/* Créneaux heures creuses (D2) : composant à part (cases des jours, début et fin de chaque créneau). */}
+        <CreneauxCreux creneaux={creneaux} erreur={erreurCreneaux} onChange={(v) => maj('creneauxCreux', v)} />
       </section>
       {/* Aperçu (R6) : roue du brouillon, tirage de test dans le navigateur — rien n'est enregistré. */}
       <section className="carte space-y-3" aria-labelledby="apercu-roue-titre">

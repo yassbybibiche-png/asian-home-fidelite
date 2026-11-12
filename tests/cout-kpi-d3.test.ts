@@ -6,8 +6,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { coutParTirage, formaterParJour, pireCasJour, simulerCout, tiragesParJour } from '../src/lib/coutRoue.ts'
-import { coutDuTirage, etapeGain, kpiGains } from '../src/lib/gainsRoue.ts'
-import { cycleGain, instantParis } from '../src/lib/roulette.ts'
+import { coutDuTirage, estLotPhysique, etapeGain, kpiGains } from '../src/lib/gainsRoue.ts'
+import { cycleGain, instantParis, typeTirage } from '../src/lib/roulette.ts'
 import type { Lot, Tirage } from '../src/types.ts'
 
 const RACINE = join(import.meta.dirname, '..')
@@ -175,6 +175,21 @@ describe('D3 : KPI « Gains de la roue » sur tirages aux statuts v2 (R3)', () =
       }
     }
     assert.ok(comparaisons > 6000)
+  })
+
+  test('estLotPhysique (règle écrite hors bundle initial) = typeTirage(t) === \'lot\', anciens tirages compris', () => {
+    const cas: Pick<Tirage, 'lot' | 'typeLot'>[] = [
+      { lot: 'Nems', typeLot: 'lot' },
+      { lot: 'Perdu', typeLot: 'lot' },
+      { lot: '+10 points', typeLot: 'points' },
+      { lot: 'Nems', typeLot: 'perdant' },
+      { lot: 'Nems' },
+      { lot: 'Pas de chance !' },
+      { lot: 'Dommage, rejouez demain' },
+      { lot: 'Nems', typeLot: 'inconnu' as never },
+      { lot: 'Perdu', typeLot: 'inconnu' as never },
+    ]
+    for (const t of cas) assert.equal(estLotPhysique(t), typeTirage(t) === 'lot', JSON.stringify(t))
   })
 
   test('coût d’un tirage : par id d’abord (lot renommé), puis par libellé (tirage d’avant R1), sinon null', () => {

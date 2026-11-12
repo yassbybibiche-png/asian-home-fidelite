@@ -220,6 +220,7 @@ export type ChampsReglages = Partial<
     | 'modeAccesRoue'
     | 'limiteGainsMois'
     | 'plagesOuverture'
+    | 'creneauxCreux'
   >
 > & { testsAB?: { accroche?: { actif: boolean } } }
 
