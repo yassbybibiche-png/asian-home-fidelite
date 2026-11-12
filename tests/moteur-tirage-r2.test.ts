@@ -11,9 +11,10 @@ import type { AddressInfo } from 'node:net'
 
 import { creerServeur } from '../server/app.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
-import { normaliserLots } from '../src/lib/lots.ts'
+import { normaliserLots, rattachementsTirages } from '../src/lib/lots.ts'
 import {
   debutDuJour,
+  debutDuJourParis,
   gainsSur30Jours,
   LIMITE_GAINS_MOIS_DEFAUT,
   limiteGainsMois,
@@ -400,5 +401,140 @@ describe('R2 : câblage (source)', () => {
     assert.match(jouer, /const mode = modeAccesRoue\(commerce\)/)
     assert.match(jouer, /statutJeu\(joueur, etat\.tirages, commerce\.id, new Date\(\), mode\)/)
     assert.match(jouer, /lotsTirables\(normalises, \{/)
+  })
+})
+
+describe('Revue Codex R2 : journée des plafonds en Europe/Paris (F3), rattrapage des lotId (F4)', () => {
+  test('F3 : minuit à Paris en ISO, quel que soit le fuseau du processus (hiver, été, jours de changement d’heure)', () => {
+    assert.equal(debutDuJourParis(new Date('2026-11-10T00:30:00Z')), '2026-11-09T23:00:00.000Z', '01 h 30 à Paris le 10/11')
+    assert.equal(debutDuJourParis(new Date('2026-11-10T22:59:59Z')), '2026-11-09T23:00:00.000Z', '23 h 59 à Paris le 10/11')
+    assert.equal(debutDuJourParis(new Date('2026-11-10T23:00:00Z')), '2026-11-10T23:00:00.000Z', 'minuit à Paris : nouveau jour')
+    assert.equal(debutDuJourParis(new Date('2026-07-01T10:00:00Z')), '2026-06-30T22:00:00.000Z', 'été : UTC+2')
+    assert.equal(debutDuJourParis(new Date('2026-03-29T12:00:00Z')), '2026-03-28T23:00:00.000Z', 'passage à l’heure d’été (minuit encore en UTC+1)')
+    assert.equal(debutDuJourParis(new Date('2026-10-25T12:00:00Z')), '2026-10-24T22:00:00.000Z', 'retour à l’heure d’hiver (minuit encore en UTC+2)')
+  })
+
+  test('F3 : plafonds comptés sur la journée parisienne — 00 h 30 Paris compte à 01 h 30 Paris, 23 h 30 la veille non', () => {
+    const lots = normaliserLots<Lot>([
+      { id: 'lot-a', type: 'lot', libelle: 'Nems', probabilite: 50, plafondJour: 1 },
+      { id: 'lot-b', type: 'lot', libelle: 'Thé', probabilite: 50, plafondJour: 1 },
+    ])
+    const tirages = [
+      tirage({ lotId: 'lot-a', date: '2026-11-09T23:30:00.000Z' }), // 00 h 30 à Paris le 10/11
+      tirage({ lotId: 'lot-b', date: '2026-11-09T22:30:00.000Z' }), // 23 h 30 à Paris le 09/11
+    ]
+    assert.deepEqual([...lotsPlafonnes(lots, tirages, new Date('2026-11-10T00:30:00Z'))], ['lot-a'])
+  })
+
+  test('F4 : rattachement par libellé exact (espaces de bord + casse) à UN seul lot ; ambigu ou sans correspondance : rien', () => {
+    const lots: Lot[] = [
+      { id: 'lot-nems', type: 'lot', libelle: 'Nems offerts', probabilite: 40 },
+      { id: 'lot-the1', type: 'lot', libelle: 'Thé', probabilite: 20 },
+      { id: 'lot-the2', type: 'lot', libelle: ' thé ', probabilite: 20 }, // config d'avant la validation des doublons
+      { id: 'lot-pts', type: 'points', points: 10, libelle: '+10 points', probabilite: 20 },
+    ]
+    const t = [
+      tirage({ id: 'a', lot: '  NEMS offerts ' }),
+      tirage({ id: 'b', lot: 'Thé' }), // ambigu : deux lots « thé »
+      tirage({ id: 'c', lot: 'Lot disparu' }), // sans correspondance
+      tirage({ id: 'd', lot: 'Nems  offerts' }), // espaces internes : pas exactement le même libellé
+      tirage({ id: 'e', lot: '+10 points', typeLot: 'points' }),
+      tirage({ id: 'f', lot: 'Nems offerts', lotId: 'lot-ancien' }), // déjà rattaché : jamais réécrit
+    ]
+    const r = rattachementsTirages(lots, t)
+    assert.deepEqual(r.map((x) => [x.id, x.lotId, x.typeLot]), [['a', 'lot-nems', 'lot'], ['e', 'lot-pts', 'points']])
+    assert.equal(r[0].lot, '  NEMS offerts ', 'le libellé du tirage n’est pas réécrit')
+    // typeLot déjà présent : conservé tel quel (seul un type absent est complété).
+    assert.equal(rattachementsTirages(lots, [tirage({ lot: 'Nems offerts', typeLot: 'perdant' })])[0].typeLot, 'perdant')
+  })
+
+  describe('serveur (SQLite, processus en UTC, horloge à 01 h 30 Paris)', () => {
+    const dossier = mkdtempSync(join(tmpdir(), 'fidelite-r2-revue-'))
+    const fichierDb = join(dossier, 'r2-revue.db')
+    const HORLOGE = new Date('2026-11-10T00:30:00Z') // 01 h 30 à Paris le 10/11 ; 00 h 30 le 10/11 en UTC
+    let app: Awaited<ReturnType<typeof creerServeur>>
+    let base = ''
+    let n = 0
+    let hasard = 0
+
+    async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = {}) {
+      const r = await fetch(base + chemin, {
+        method: methode,
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': `10.8.0.${++n % 250}`, ...entetes },
+        body: corps === undefined ? undefined : JSON.stringify(corps),
+      })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    const patch = async (corps: object) => assert.equal((await api('PATCH', `/commerces/${AH}`, corps, PIN)).statut, 200)
+    const nouveauContact = () => `06${String(30_000_000 + ++n).padStart(8, '0')}`
+    const inscrire = async () => (await api('POST', `/commerces/${AH}/clients`, { prenom: `F${n}`, contact: nouveauContact() }, PIN)).contenu.client as Client
+    const roue = async () => ((await api('GET', `/commerces/${AH}`)).contenu.commerce as CommercePublic).lots.map((l) => l.id)
+    /** Tirage écrit directement en base (un client par tirage), comme un tirage d'avant R1 quand `lotId` manque. */
+    async function inserer(o: Partial<Tirage>): Promise<Tirage> {
+      const t: Tirage = { id: `ti-revue-${++n}`, commerceId: AH, clientId: (await inscrire()).id, lot: 'Nems offerts', date: HORLOGE.toISOString(), code: 'ABCDEF', ...o }
+      const db = new DatabaseSync(fichierDb)
+      try {
+        db.prepare('INSERT INTO tirages (id, commerce_id, client_id, date, donnees) VALUES (?, ?, ?, ?, ?)').run(t.id, AH, t.clientId, t.date, JSON.stringify(t))
+      } finally {
+        db.close()
+      }
+      return t
+    }
+    function enBase(id: string): Tirage {
+      const db = new DatabaseSync(fichierDb)
+      try {
+        return JSON.parse((db.prepare('SELECT donnees FROM tirages WHERE id = ?').get(id) as { donnees: string }).donnees) as Tirage
+      } finally {
+        db.close()
+      }
+    }
+
+    before(async () => {
+      app = await creerServeur({ fichierDb, adminPin: '98765432', pinInitial: '1234', version: 'test', maintenant: () => HORLOGE, alea: () => hasard, derriereProxy: true })
+      await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+      base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    })
+    after(async () => {
+      await app.fermer()
+      rmSync(dossier, { recursive: true, force: true })
+    })
+
+    test('F3 : un tirage à 00 h 30 (Paris) atteint le plafond de la journée parisienne en cours à 01 h 30 (Paris)', async () => {
+      await patch({
+        modeAccesRoue: 'libre',
+        limiteGainsMois: 0,
+        lots: [
+          { id: 'lot-rare', type: 'lot', libelle: 'Menu offert', probabilite: 40, plafondJour: 1 },
+          { id: 'lot-veille', type: 'lot', libelle: 'Mochi offert', probabilite: 30, plafondJour: 1 },
+          { id: 'lot-the', type: 'lot', libelle: 'Thé glacé', probabilite: 30 },
+        ],
+      })
+      await inserer({ lot: 'Menu offert', lotId: 'lot-rare', typeLot: 'lot', date: '2026-11-09T23:30:00.000Z' }) // 00 h 30 Paris, le 10/11
+      await inserer({ lot: 'Mochi offert', lotId: 'lot-veille', typeLot: 'lot', date: '2026-11-09T22:30:00.000Z' }) // 23 h 30 Paris, le 09/11
+      assert.deepEqual(await roue(), ['lot-veille', 'lot-the'], 'plafond du jour parisien atteint ; la veille parisienne ne compte pas')
+      hasard = 0 // premier secteur : le lot rare… s'il était encore tirable
+      const r = await api('POST', `/commerces/${AH}/tirages`, { contact: nouveauContact() })
+      assert.equal(r.statut, 201)
+      assert.equal(r.contenu.lotId, 'lot-veille')
+    })
+
+    test('F4 : écriture des lots → tirages sans lotId rattachés (libellé exact) ; sans correspondance : intacts ; remise et type gardés ; renommage ensuite sans effet sur le plafond', async () => {
+      const lots = (libelle: string) => [
+        { id: 'lot-nems', type: 'lot', libelle, probabilite: 50, plafondJour: 1 },
+        { id: 'lot-the', type: 'lot', libelle: 'Thé glacé', probabilite: 50 },
+      ]
+      const aujourdhui = await inserer({ lot: 'nems OFFERTS ', date: '2026-11-10T00:00:00.000Z' }) // 01 h Paris : aujourd'hui
+      const remis = await inserer({ lot: 'Nems offerts', typeLot: 'lot', date: '2026-11-05T12:00:00.000Z', remis: { le: '2026-11-05T13:00:00.000Z', par: { type: 'gerant', nom: 'Gérant' } } })
+      const orphelin = await inserer({ lot: 'Lot disparu', date: '2026-11-04T12:00:00.000Z' })
+      await patch({ lots: lots('Nems offerts') })
+      assert.deepEqual([enBase(aujourdhui.id).lotId, enBase(aujourdhui.id).typeLot], ['lot-nems', 'lot'])
+      assert.equal(enBase(aujourdhui.id).lot, 'nems OFFERTS ', 'libellé du tirage inchangé')
+      assert.equal(enBase(remis.id).lotId, 'lot-nems')
+      assert.deepEqual(enBase(remis.id).remis, remis.remis, 'remise conservée')
+      assert.deepEqual(enBase(orphelin.id), orphelin, 'sans correspondance : tirage intact')
+      // Renommé ensuite : le tirage du jour compte toujours pour ce lot (par id) — plafond 1 atteint, absent de la roue.
+      await patch({ lots: lots('Nems maison') })
+      assert.deepEqual(await roue(), ['lot-the'])
+    })
   })
 })

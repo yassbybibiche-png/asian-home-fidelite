@@ -1,7 +1,7 @@
 // Lots de la roue structurés (roue v2, lot R1) : chaque lot a un identifiant stable et un type explicite. Le moteur ne
 // déduit plus jamais « perdant » du libellé — sauf pour les données écrites AVANT ce lot (sans type), normalisées ici
 // (lots) et dans roulette.ts (tirages, même règle `typeDeduitDuLibelle`), partagés par le front et le serveur.
-import type { Lot, TypeLot } from '../types'
+import type { Lot, Tirage, TypeLot } from '../types'
 // Résolution du type au tirage (ancienne règle comprise) : définie dans roulette.ts, que ce module complète — dans ce
 // sens-là seulement (roulette.ts n'importe rien d'ici : un import roulette → lots découpait 3 petits chunks de plus).
 import { estTypeLot, typeDeduitDuLibelle } from './roulette.ts'
@@ -75,4 +75,26 @@ export function nouvelIdLot(): string {
   if (typeof c?.randomUUID === 'function') return `lot-${c.randomUUID().slice(0, 13)}`
   // Contexte non sécurisé (http hors localhost) : pas de randomUUID ; l'unicité dans la liste suffit.
   return `lot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/**
+ * Rattrapage des tirages d'avant R1 (revue Codex R2 point 4) : pour chaque tirage SANS `lotId` dont le libellé
+ * correspond EXACTEMENT (espaces de bord et casse ignorés) à UN SEUL lot de `lots`, le même tirage avec `lotId` (et
+ * `typeLot` s'il manquait) posés. Libellé ambigu (plusieurs lots) ou sans correspondance : tirage ignoré. Renvoie
+ * seulement les tirages à réécrire.
+ */
+export function rattachementsTirages<T extends Pick<Tirage, 'lot' | 'lotId' | 'typeLot'>>(lots: Pick<Lot, 'libelle' | 'id' | 'type'>[], tirages: T[]): T[] {
+  const cle = (s: string) => s.trim().toLocaleLowerCase('fr-FR')
+  const parLibelle = new Map<string, LotNormalise<Pick<Lot, 'libelle' | 'id' | 'type'>>[]>()
+  for (const l of normaliserLots(lots)) {
+    const k = cle(l.libelle)
+    if (k) parLibelle.set(k, [...(parLibelle.get(k) ?? []), l])
+  }
+  const rattaches: T[] = []
+  for (const t of tirages) {
+    if (t.lotId) continue
+    const candidats = parLibelle.get(cle(t.lot ?? '')) ?? []
+    if (candidats.length === 1) rattaches.push({ ...t, lotId: candidats[0].id, typeLot: t.typeLot ?? candidats[0].type })
+  }
+  return rattaches
 }

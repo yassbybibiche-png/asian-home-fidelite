@@ -119,6 +119,15 @@ export interface Stockage {
   /** Tirages du commerce datés de `depuis` (ISO, inclus) ou après, du plus récent au plus ancien (R2 : plafonds du jour). */
   tiragesDepuis(commerceId: string, depuis: string): P<Tirage[]>
   ajouterTirage(t: Tirage): P<void>
+  /** Compensation (revue Codex R2 point 2) : supprime CE tirage (crédit des points échoué juste après son insertion). */
+  supprimerTirage(commerceId: string, id: string): P<void>
+  /** Tirages du commerce sans `lotId` (d'avant R1), pour le rattrapage à l'écriture des lots (revue Codex R2 point 4). */
+  tiragesSansLot(commerceId: string): P<Tirage[]>
+  /**
+   * Écrit `t` (avec `lotId` / `typeLot` posés) seulement si le tirage en base n'a toujours pas de `lotId` et, si `t`
+   * n'est pas remis, ne l'est toujours pas — une remise simultanée n'est jamais écrasée. false = rien écrit.
+   */
+  completerLotTirage(t: Tirage): P<boolean>
   /** Tirages d'un commerce portant ce code gagnant (déjà normalisé), du plus récent au plus ancien. */
   tiragesParCode(commerceId: string, code: string): P<Tirage[]>
   /**
@@ -355,6 +364,11 @@ export function ouvrirStockage(fichier: string) {
     tiragesClient: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? AND client_id = ?'),
     tiragesDepuis: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? AND date >= ? ORDER BY date DESC'),
     ajoutTirage: db.prepare('INSERT INTO tirages (id, commerce_id, client_id, date, donnees) VALUES (?, ?, ?, ?, ?)'),
+    supprTirage: db.prepare('DELETE FROM tirages WHERE commerce_id = ? AND id = ?'),
+    tiragesSansLot: db.prepare("SELECT donnees FROM tirages WHERE commerce_id = ? AND json_extract(donnees, '$.lotId') IS NULL ORDER BY date DESC"),
+    completerLotTirage: db.prepare(
+      "UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.lotId') IS NULL AND (? = 1 OR json_extract(donnees, '$.remis') IS NULL)",
+    ),
     tiragesParCode: db.prepare("SELECT donnees FROM tirages WHERE commerce_id = ? AND json_extract(donnees, '$.code') = ? ORDER BY date DESC"),
     remettreTirage: db.prepare("UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL"),
     avis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? ORDER BY date DESC'),
@@ -444,6 +458,9 @@ export function ouvrirStockage(fichier: string) {
     tiragesClient: (commerceId: string, clientId: string) => lire<Tirage>(q.tiragesClient.all(commerceId, clientId)),
     tiragesDepuis: (commerceId: string, depuis: string) => lire<Tirage>(q.tiragesDepuis.all(commerceId, depuis)),
     ajouterTirage: (t: Tirage) => inserer(q.ajoutTirage, t.id, t.commerceId, t.clientId, t.date, JSON.stringify(t)),
+    supprimerTirage: (commerceId: string, id: string) => void q.supprTirage.run(commerceId, id),
+    tiragesSansLot: (commerceId: string) => lire<Tirage>(q.tiragesSansLot.all(commerceId)),
+    completerLotTirage: (t: Tirage) => Number(q.completerLotTirage.run(JSON.stringify(t), t.id, t.commerceId, t.remis ? 1 : 0).changes) > 0,
     tiragesParCode: (commerceId: string, code: string) => lire<Tirage>(q.tiragesParCode.all(commerceId, code)),
     marquerTirageRemis: (t: Tirage) => Number(q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId).changes) > 0,
 

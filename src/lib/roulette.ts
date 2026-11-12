@@ -86,18 +86,44 @@ export function debutDuJour(maintenant: Date): string {
   return new Date(maintenant.getFullYear(), maintenant.getMonth(), maintenant.getDate()).toISOString()
 }
 
+// Journée des plafonds (revue Codex R2 point 3) : jour calendaire à PARIS, comme l'index unique quotidien des tirages
+// sous Supabase — quel que soit le fuseau du processus (UTC sur Render). Ne concerne que les plafonds R2 :
+// `tirageDuJour` / `aVisiteDuJour` gardent le jour local (hors périmètre).
+const FORMAT_JOUR_PARIS = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' })
+const FORMAT_HEURE_PARIS = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Europe/Paris', hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric',
+})
+const jourParis = (d: Date) => FORMAT_JOUR_PARIS.format(d)
+
+/** Avance de l'heure de Paris sur UTC à cet instant, en ms (+1 h en hiver, +2 h en été). */
+function decalageParis(instant: number): number {
+  const p = Object.fromEntries(FORMAT_HEURE_PARIS.formatToParts(new Date(instant)).map((x) => [x.type, Number(x.value)]))
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - (instant - (instant % 1000))
+}
+
+/** Minuit à Paris du jour parisien de `maintenant`, en ISO : borne de lecture des tirages du jour pour les plafonds. */
+export function debutDuJourParis(maintenant: Date): string {
+  const [a, m, j] = jourParis(maintenant).split('-').map(Number)
+  const minuitUtc = Date.UTC(a, m - 1, j)
+  // Deux passes : le décalage à prendre est celui de minuit à Paris (un changement d'heure a lieu à 2 h / 3 h, jamais à minuit).
+  const approche = minuitUtc - decalageParis(minuitUtc)
+  return new Date(minuitUtc - decalageParis(approche)).toISOString()
+}
+
 type LotType = Pick<Lot, 'libelle' | 'plafondJour'> & { id: string; type: TypeLot }
 
 /** Le tirage `t` a-t-il donné ce lot ? Par id (R1+) ; tirages d'avant R1 (sans id) : par libellé. */
 const tirageDuLot = (t: Tirage, l: LotType) => (t.lotId ? t.lotId === l.id : t.lot === l.libelle)
 
 /**
- * Ids des lots physiques ayant atteint leur `plafondJour` aujourd'hui (tous clients du commerce confondus). `tirages` :
- * au moins ceux du jour du commerce (les autres jours sont ignorés). Lots 'points' / 'perdant' : jamais plafonnés.
+ * Ids des lots physiques ayant atteint leur `plafondJour` aujourd'hui — jour à Paris — (tous clients du commerce
+ * confondus). `tirages` : au moins ceux du jour du commerce (les autres jours sont ignorés). Lots 'points' / 'perdant' :
+ * jamais plafonnés.
  */
 export function lotsPlafonnes(lots: LotType[], tirages: Tirage[], maintenant = new Date()): Set<string> {
   const plafonnes = new Set<string>()
-  const duJour = tirages.filter((t) => memeJour(new Date(t.date), maintenant))
+  const aujourdhui = jourParis(maintenant)
+  const duJour = tirages.filter((t) => jourParis(new Date(t.date)) === aujourdhui)
   for (const l of lots) {
     const plafond = l.plafondJour ?? 0
     if (l.type !== 'lot' || !(plafond > 0)) continue

@@ -249,6 +249,19 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       ),
     ajouterTirage: async (t) =>
       void (await ok('tirages', sb.from('tirages').insert({ id: t.id, commerce_id: t.commerceId, client_id: t.clientId, date: t.date, donnees: t }))),
+    supprimerTirage: async (commerceId, id) => void (await ok('tirages', sb.from('tirages').delete().eq('commerce_id', commerceId).eq('id', id))),
+    tiragesSansLot: (commerceId) =>
+      lirePages<Tirage>('tirages', (debut, fin) =>
+        sb.from('tirages').select('donnees').eq('commerce_id', commerceId).is('donnees->lotId', null).order('date', { ascending: false }).order('id').range(debut, fin),
+      ),
+    // Même procédé que la remise (P0-U3) : UPDATE conditionnel sur le JSONB, sans colonne `version`. Un tirage déjà
+    // remis garde sa remise (`t` la porte, elle ne change plus) ; non remis : la condition empêche d'écraser une remise
+    // arrivée entre la lecture et l'écriture.
+    completerLotTirage: async (t) => {
+      let requete = sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->lotId', null)
+      if (!t.remis) requete = requete.is('donnees->remis', null)
+      return (await ok<unknown[]>('tirages', requete.select('id'))).length > 0
+    },
     // Code gagnant et remise (P0-U3) : dans le JSONB `donnees`, sans migration. La table `tirages` n'a pas de colonne
     // `version` : la garde est la condition « donnees->remis IS NULL » de l'UPDATE lui-même. Postgres verrouille la ligne,
     // et une 2e requête simultanée réévalue la condition après la 1re → 0 ligne → false (jamais deux remises).

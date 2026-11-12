@@ -12,8 +12,8 @@ import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
 import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
-import { debutDuJour, gainsSur30Jours, LIMITE_GAINS_MOIS_MAX, limiteGainsMois, lotsJouables, lotsPlafonnes, lotsTirables, messageGain, modeAccesRoue, normaliserCodeGagnant, PLAFOND_JOUR_MAX, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
-import { cleLibelle, estGainPhysique, estTypeLot, FORMAT_ID_LOT, libellesEnDouble, normaliserLots, POINTS_LOT_MAX, POINTS_LOT_MIN, TYPES_LOT, typeDeduitDuLibelle, typeTirage } from '../src/lib/lots.ts'
+import { debutDuJourParis, gainsSur30Jours, LIMITE_GAINS_MOIS_MAX, limiteGainsMois, lotsJouables, lotsPlafonnes, lotsTirables, messageGain, modeAccesRoue, normaliserCodeGagnant, PLAFOND_JOUR_MAX, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
+import { cleLibelle, estGainPhysique, estTypeLot, FORMAT_ID_LOT, libellesEnDouble, normaliserLots, POINTS_LOT_MAX, POINTS_LOT_MIN, rattachementsTirages, TYPES_LOT, typeDeduitDuLibelle, typeTirage } from '../src/lib/lots.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
 import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePrive.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
@@ -49,7 +49,8 @@ import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase
 import { chiffrerSauvegarde, exporterSauvegarde, nomFichierSauvegarde } from './sauvegarde.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { menuAffichePour, pageMenuIndisponible, pageMenuPrerendue, pageNonTrouvee } from './prerendu.ts'
-import { cheminMasquePourErreur, journaliserRequete, routeMasquee } from './logs.ts'
+import { cheminMasquePourErreur, empreinte, journaliserRequete, routeMasquee } from './logs.ts'
+import { creerFileParCle } from './file-par-cle.ts'
 import { creerAlertes5xx } from './alertes.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
 import { estAbandon } from './notifications/delai.ts'
@@ -1297,6 +1298,8 @@ export async function creerServeur(o: OptionsServeur) {
   }
   const maintenant = o.maintenant ?? (() => new Date())
   const alea = o.alea ?? Math.random
+  // Tirages de la roue sérialisés PAR COMMERCE (revue Codex R2 point 1) — voir POST /commerces/:id/tirages.
+  const fileTirages = creerFileParCle()
   const limiteur = creerLimiteurAuth(st, maintenant)
   // P0-S20 : persistance des compteurs publics (migration 0010). Table absente : `enregistrer` lève
   // ErreurMigrationManquante (avertissement une fois, mémoire seulement) ; `charger` renvoie [].
@@ -2248,17 +2251,51 @@ export async function creerServeur(o: OptionsServeur) {
 
   /**
    * Lots physiques plafonnés aujourd'hui (R2). Les tirages du jour ne sont lus que si un lot a un plafond : une config
-   * sans plafond (toutes celles d'avant R2) ne coûte aucune lecture de plus aux routes publiques.
+   * sans plafond (toutes celles d'avant R2) ne coûte aucune lecture de plus aux routes publiques. Journée : à Paris,
+   * comme l'index unique quotidien des tirages (revue Codex R2 point 3).
    */
   async function plafonnesDuJour(c: Commerce, t = maintenant()): Promise<Set<string>> {
     const lots = normaliserLots(c.lots ?? [])
     if (!lots.some((l) => l.type === 'lot' && (l.plafondJour ?? 0) > 0)) return new Set()
-    return lotsPlafonnes(lots, await st.tiragesDepuis(c.id, debutDuJour(t)), t)
+    return lotsPlafonnes(lots, await st.tiragesDepuis(c.id, debutDuJourParis(t)), t)
   }
 
   /** Fiche publique (R2) : sans les lots plafonnés du jour — ils disparaissent de la roue et de « À gagner aujourd'hui ». */
   async function fichePublique(c: Commerce): Promise<CommercePublic> {
     return commercePublic(c, await plafonnesDuJour(c))
+  }
+
+  /**
+   * Revue Codex R2 point 2 — crédit d'une consolation en points échoué APRÈS l'insertion du tirage. Sous Supabase,
+   * `transaction` n'annule rien : le tirage resterait sans points et l'index unique (client + jour) refuserait le rejeu.
+   * Compensation : le tirage est supprimé, le client peut retenter et sera crédité exactement une fois. 500 (pas
+   * 502–504, que le front affiche « hors ligne ») avec un message lisible. SQLite : la transaction est de toute façon
+   * annulée. Si la suppression échoue aussi : incohérence journalisée explicitement (ligne JSON, client en empreinte).
+   */
+  async function annulerTirageNonCredite(tirage: Tirage, cause: unknown): Promise<never> {
+    const raison = cause instanceof Error ? cause.message : String(cause)
+    try {
+      await st.supprimerTirage(tirage.commerceId, tirage.id)
+    } catch (e) {
+      console.error(JSON.stringify({
+        type: 'incoherence', niveau: 'erreur', horodatage: new Date().toISOString(), evenement: 'tirage-points-non-credites',
+        commerce: tirage.commerceId, tirage: tirage.id, client: empreinte(tirage.clientId), points: tirage.points,
+        causeCredit: raison, causeSuppression: e instanceof Error ? e.message : String(e),
+      }))
+      throw err(500, 'Votre tirage est enregistré mais vos points n’ont pas pu être crédités : montrez cet écran au comptoir.')
+    }
+    console.warn(`[tirage] crédit des points échoué, tirage annulé (le client peut rejouer) : ${raison}`)
+    throw err(500, 'Vos points n’ont pas pu être crédités : votre tirage est annulé, vous pouvez retenter dès maintenant.')
+  }
+
+  /**
+   * Revue Codex R2 point 4 — tirages d'avant R1 (sans `lotId`) rattachés au lot de la nouvelle configuration dont le
+   * libellé est le leur, sans ambiguïté (`rattachementsTirages`) : sinon un renommage casserait le comptage des plafonds
+   * (rapprochement par le libellé courant). Écriture conditionnelle (`lotId` toujours absent, remise inchangée) : une
+   * remise simultanée n'est jamais écrasée.
+   */
+  async function rattraperLotsTirages(c: Commerce): Promise<void> {
+    for (const t of rattachementsTirages(c.lots ?? [], await st.tiragesSansLot(c.id))) await st.completerLotTirage(t)
   }
 
   async function clientOu404(commerceId: string, id: string): Promise<Client> {
@@ -2971,6 +3008,8 @@ export async function creerServeur(o: OptionsServeur) {
             const r = appliquerRegles(a, maj)
             if (r !== a) await st.majAvis(r)
           }
+          // Revue Codex R2 point 4 : lots réécrits → tirages d'avant R1 rattachés à leur lot quand c'est sans ambiguïté.
+          if ('lots' in corps) await rattraperLotsTirages(maj)
           return maj
         })
         return { json: { commerce: maj } }
@@ -3862,50 +3901,63 @@ export async function creerServeur(o: OptionsServeur) {
         // client a atteint sa limite de gains sur 30 jours ; il reste alors points / perdant (repli consolation).
         // Probabilités renormalisées au prorata sur ce qui reste (`tirerLot`).
         const normalises = normaliserLots(commerce.lots)
-        const tirables = lotsTirables(normalises, {
-          plafonnes: await plafonnesDuJour(commerce, t),
-          gainsMois: gainsSur30Jours(tiragesClient, t),
-          limite: limiteGainsMois(commerce),
-        })
-        const jouables = lotsJouables(tirables)
-        if (!jouables.length) {
-          return { refus: lotsJouables(normalises).length ? 'Tous les lots du jour sont partis : revenez demain !' : 'Aucun lot n’est configuré pour le moment.' }
-        }
-        const tire = jouables[tirerLot(jouables, alea())]
-        const points = tire.type === 'points' ? tire.points : undefined
-        const tirage: Tirage = {
-          id: `ti-${randomUUID()}`, commerceId: id, clientId: client.id, lot: tire.libelle, lotId: tire.id, typeLot: tire.type,
-          ...(points ? { points } : {}),
-          date: t.toISOString(),
-          // R2 : aucun code pour une consolation en points (rien à retirer, rien à vérifier au comptoir). Un perdant garde
-          // le sien : la caisse le vérifie et répond « perdant » (épinglé par P0-U3).
-          ...(tire.type !== 'points' ? { code: codeGagnant() } : {}),
-        }
-        try {
-          // Enregistré AVANT le crédit des points : l'index unique (client + jour) fait foi — un double appel simultané
-          // est refusé ici et ne crédite jamais deux fois.
-          await st.ajouterTirage(tirage)
-        } catch (e) {
-          // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e — même message unique.
-          if (e instanceof ErreurConflit) return { refus: refusJeu }
-          throw e
-        }
-        // R2 : consolation en points créditée dans la MÊME transaction (client relu juste avant l'écriture : sous
-        // Supabase, verrou optimiste sur sa version — une écriture concurrente de la caisse fait relire et recommencer).
-        let solde: number | undefined
-        if (points) {
-          for (let essai = 1; ; essai++) {
-            const frais = await clientOu401(id, client.id)
+        // Revue Codex R2 point 1 — comptage des plafonds → choix du lot → insertion → crédit : sérialisés PAR COMMERCE.
+        // Sous Supabase, `transaction` n'isole rien : sans ce verrou, deux clients distincts lisent « 0 sortie » d'un lot
+        // à plafond 1 et le gagnent tous les deux (l'index unique ne protège que le couple client + jour). HYPOTHÈSE :
+        // instance unique du serveur (déploiement réel : un seul service Render) — le verrou est en mémoire du processus,
+        // il ne protégerait plus rien avec deux instances (voir server/file-par-cle.ts). Les autres commerces ne
+        // s'attendent pas entre eux. La lecture du statut (1 tirage par jour) reste avant le verrou : pour un même
+        // client, c'est l'index unique (client + jour) de la base qui tranche entre deux appels simultanés, ci-dessous.
+        return fileTirages(id, async () => {
+          const tirables = lotsTirables(normalises, {
+            plafonnes: await plafonnesDuJour(commerce, t),
+            gainsMois: gainsSur30Jours(tiragesClient, t),
+            limite: limiteGainsMois(commerce),
+          })
+          const jouables = lotsJouables(tirables)
+          if (!jouables.length) {
+            return { refus: lotsJouables(normalises).length ? 'Tous les lots du jour sont partis : revenez demain !' : 'Aucun lot n’est configuré pour le moment.' }
+          }
+          const tire = jouables[tirerLot(jouables, alea())]
+          const points = tire.type === 'points' ? tire.points : undefined
+          const tirage: Tirage = {
+            id: `ti-${randomUUID()}`, commerceId: id, clientId: client.id, lot: tire.libelle, lotId: tire.id, typeLot: tire.type,
+            ...(points ? { points } : {}),
+            date: t.toISOString(),
+            // R2 : aucun code pour une consolation en points (rien à retirer, rien à vérifier au comptoir). Un perdant garde
+            // le sien : la caisse le vérifie et répond « perdant » (épinglé par P0-U3).
+            ...(tire.type !== 'points' ? { code: codeGagnant() } : {}),
+          }
+          try {
+            // Enregistré AVANT le crédit des points : l'index unique (client + jour) fait foi — un double appel simultané
+            // est refusé ici et ne crédite jamais deux fois.
+            await st.ajouterTirage(tirage)
+          } catch (e) {
+            // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e — même message unique.
+            if (e instanceof ErreurConflit) return { refus: refusJeu }
+            throw e
+          }
+          // R2 : consolation en points créditée dans la MÊME transaction (client relu juste avant l'écriture : sous
+          // Supabase, verrou optimiste sur sa version — une écriture concurrente de la caisse fait relire et recommencer).
+          let solde: number | undefined
+          if (points) {
             try {
-              await st.majClient({ ...frais, points: soldePoints(frais) + points })
-              solde = soldePoints(frais) + points
-              break
+              for (let essai = 1; ; essai++) {
+                const frais = await clientOu401(id, client.id)
+                try {
+                  await st.majClient({ ...frais, points: soldePoints(frais) + points })
+                  solde = soldePoints(frais) + points
+                  break
+                } catch (e) {
+                  if (!(e instanceof ErreurConflit) || essai >= 3) throw e
+                }
+              }
             } catch (e) {
-              if (!(e instanceof ErreurConflit) || essai >= 3) throw e
+              await annulerTirageNonCredite(tirage, e)
             }
           }
-        }
-        return { tirage, solde }
+          return { tirage, solde }
+        })
       })
       // Le client éventuellement créé reste inscrit même en cas de refus (la transaction est validée).
       if ('refus' in resultat) throw err(409, resultat.refus!)

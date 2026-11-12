@@ -98,6 +98,9 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
   let compteur = 0
   let panne = false
   let barriere: { methode: string; table: string; n: number; enAttente: (() => void)[] } | undefined
+  // Revue Codex R2 : échecs ponctuels (500, consommés un par un) et lenteur simulée de certaines requêtes.
+  const echecs: { methode: string; table: string }[] = []
+  let lenteur: { ms: number; vise: (methode: string, table: string, params: URLSearchParams) => boolean } | undefined
 
   const json = (statut: number, corps?: unknown) =>
     new Response(corps === undefined ? null : JSON.stringify(corps), { status: statut, headers: { 'content-type': 'application/json' } })
@@ -264,7 +267,16 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
         }
       })
     }
-    return traiter(methode, table, url.searchParams, entetes, corps)
+    const echec = echecs.findIndex((e) => e.methode === methode && e.table === table)
+    if (echec >= 0) {
+      echecs.splice(echec, 1)
+      rejets.push(`${table}:echec-${methode}`)
+      return erreur(500, 'XX000', 'panne ponctuelle')
+    }
+    const reponse = await traiter(methode, table, url.searchParams, entetes, corps)
+    // Lecture lente : l'instantané est pris tout de suite, la réponse n'arrive que `ms` plus tard (latence réseau).
+    if (lenteur?.vise(methode, table, url.searchParams)) await new Promise((ok) => setTimeout(ok, lenteur!.ms))
+    return reponse
   }
 
   return {
@@ -274,6 +286,10 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
     rejets,
     panne: (v: boolean) => void (panne = v),
     barriere: (methode: string, table: string, n = 2) => void (barriere = { methode, table, n, enAttente: [] }),
+    /** La prochaine requête `methode` sur `table` échoue (500), une seule fois par appel. */
+    echouer: (methode: string, table: string) => void echecs.push({ methode, table }),
+    /** Réponses des requêtes visées retardées de `ms` (stockage lent, instantané pris à l'arrivée) ; sans argument : plus de lenteur. */
+    ralentir: (o?: { ms: number; vise: (methode: string, table: string, params: URLSearchParams) => boolean }) => void (lenteur = o),
   }
 }
 
@@ -1660,6 +1676,179 @@ describe('P0-S20 : compteurs publics persistants (Supabase)', () => {
 })
 
 // ---------- Secrets et configuration ----------
+
+describe('Revue Codex R2 : tirages de la roue sous Supabase (plafonds sous concurrence, crédit exactement-une-fois)', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-r2-revue-'))
+  after(() => rmSync(dossier, { recursive: true, force: true }))
+  let hasard = 0
+  let ip = 0
+  const LOTS = [
+    { id: 'lot-rare', type: 'lot', libelle: 'Menu offert', probabilite: 50, plafondJour: 1 },
+    { id: 'lot-pts', type: 'points', points: 10, libelle: '+10 points', probabilite: 50 },
+  ]
+  /** Lecture des compteurs de plafond (`tiragesDepuis` : date >= début du jour) — la seule lecture DANS le verrou. */
+  const lecturePlafonds = (methode: string, table: string, params: URLSearchParams) => methode === 'GET' && table === 'tirages' && (params.get('date') ?? '').startsWith('gte.')
+
+  // Serveur HTTP sur le faux PostgREST, accès libre et lots plafonnés ; hasard du tirage injecté ; une IP par requête.
+  async function demarrer(f: ReturnType<typeof fauxPostgrest>) {
+    const app = await creerServeur({
+      fichierDb: join(dossier, 'ne-doit-pas-exister.db'),
+      supabase: { url: URL_SB, cleServiceRole: CLE, fetch: f.fetch },
+      adminPin: ADMIN,
+      pinInitial: '1234',
+      version: 'test',
+      maintenant: () => new Date(2026, 10, 10, 12),
+      alea: () => hasard,
+      derriereProxy: true,
+    })
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = {}) {
+      const r = await fetch(base + chemin, {
+        method: methode,
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': `10.9.0.${++ip % 250}`, ...entetes },
+        body: corps === undefined ? undefined : JSON.stringify(corps),
+      })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    const r = await api('PATCH', `/commerces/${AH}`, { modeAccesRoue: 'libre', limiteGainsMois: 0, lots: LOTS }, PIN)
+    assert.equal(r.statut, 200, JSON.stringify(r.contenu))
+    return { app, api }
+  }
+  const tiragesDe = (f: ReturnType<typeof fauxPostgrest>, filtre: (t: Tirage) => boolean) => f.tables.tirages.map((l) => l.donnees as Tirage).filter(filtre)
+  const pointsDe = (f: ReturnType<typeof fauxPostgrest>, id: string) => soldePoints(f.tables.clients.find((l) => l.id === id)!.donnees as Client)
+
+  test('F1 : deux clients tirent au même instant un lot à plafond 1 (stockage lent) → un seul gagnant de ce lot', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      hasard = 0 // les deux tombent sur le lot rare… s'ils lisent tous deux « 0 sortie »
+      // Les deux requêtes passent ensemble la lecture de leurs tirages (barrière), puis la lecture des compteurs de
+      // plafond est lente : sans sérialisation, les deux lisent « 0 sortie » avant qu'aucune n'écrive.
+      f.barriere('GET', 'tirages')
+      f.ralentir({ ms: 40, vise: lecturePlafonds })
+      const r = await Promise.all(['0611111111', '0622222222'].map((contact) => api('POST', `/commerces/${AH}/tirages`, { contact })))
+      assert.deepEqual(r.map((x) => x.statut), [201, 201], JSON.stringify(r.map((x) => x.contenu)))
+      assert.deepEqual(r.map((x) => x.contenu.lotId).sort(), ['lot-pts', 'lot-rare'], 'le 2e est servi en consolation')
+      assert.equal(tiragesDe(f, (t) => t.lotId === 'lot-rare').length, 1, 'plafond 1 : au plus 1 gagnant')
+      assert.equal(f.requetes.filter((q) => lecturePlafonds(q.methode, q.table, q.params)).length, 2, 'les deux tirages ont bien compté les plafonds')
+    } finally {
+      f.ralentir()
+      await app.fermer()
+    }
+  })
+
+  test('F1 : même client, trois appels simultanés (stockage lent) → 201 + 409 + 409, un seul tirage, points crédités une fois', async () => {
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const client = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0633333333' }, PIN)).contenu.client as Client
+      const avant = pointsDe(f, client.id)
+      hasard = 0.99 // consolation en points
+      f.barriere('GET', 'tirages', 3)
+      f.ralentir({ ms: 40, vise: lecturePlafonds })
+      const r = await Promise.all([1, 2, 3].map(() => api('POST', `/commerces/${AH}/tirages`, { contact: '0633333333' })))
+      assert.deepEqual(r.map((x) => x.statut).sort(), [201, 409, 409])
+      assert.equal(tiragesDe(f, (t) => t.clientId === client.id).length, 1)
+      assert.equal(pointsDe(f, client.id), avant + 10, 'crédité exactement une fois')
+      assert.ok(f.rejets.includes('tirages:23505'), 'l’index unique client + jour a tranché')
+    } finally {
+      f.ralentir()
+      await app.fermer()
+    }
+  })
+
+  test('F1 : un commerce n’attend pas les tirages d’un autre (verrou par commerce)', async () => {
+    const { creerFileParCle } = await import('../server/file-par-cle.ts')
+    const file = creerFileParCle()
+    const ordre: string[] = []
+    let libererA!: () => void
+    const a = file('c-a', () => new Promise<void>((ok) => (libererA = () => ok(void ordre.push('a1')))))
+    const a2 = file('c-a', async () => void ordre.push('a2'))
+    await file('c-b', async () => void ordre.push('b')) // n'attend pas c-a, toujours bloqué
+    assert.deepEqual(ordre, ['b'])
+    libererA()
+    await Promise.all([a, a2])
+    assert.deepEqual(ordre, ['b', 'a1', 'a2'], 'même commerce : un par un, dans l’ordre d’arrivée')
+    // Une section en échec ne bloque pas la suivante.
+    await assert.rejects(file('c-a', async () => Promise.reject(new Error('boum'))), /boum/)
+    assert.equal(await file('c-a', async () => 42), 42)
+  })
+
+  test('F2 : crédit des points en échec après l’insertion → 500 lisible, tirage supprimé, nouveau tirage crédité une fois', async (t) => {
+    const avertissements = t.mock.method(console, 'warn', () => {})
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const client = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0644444444' }, PIN)).contenu.client as Client
+      const avant = pointsDe(f, client.id)
+      hasard = 0.99 // consolation en points
+      f.echouer('PATCH', 'clients') // le crédit échoue une fois
+      const r1 = await api('POST', `/commerces/${AH}/tirages`, { contact: '0644444444' })
+      assert.equal(r1.statut, 500, 'pas 502–504 : le front les afficherait « hors ligne »')
+      assert.match(r1.contenu.erreur, /points n’ont pas pu être crédités.*tirage est annulé.*retenter/)
+      assert.ok(f.rejets.includes('clients:echec-PATCH'))
+      assert.equal(tiragesDe(f, (x) => x.clientId === client.id).length, 0, 'aucun tirage résiduel')
+      assert.equal(pointsDe(f, client.id), avant, 'aucun point crédité')
+      assert.ok(avertissements.mock.calls.some((c) => /tirage annulé/.test(String(c.arguments[0]))))
+      const r2 = await api('POST', `/commerces/${AH}/tirages`, { contact: '0644444444' })
+      assert.equal(r2.statut, 201, JSON.stringify(r2.contenu))
+      assert.deepEqual([r2.contenu.points, r2.contenu.solde], [10, avant + 10])
+      assert.equal(tiragesDe(f, (x) => x.clientId === client.id).length, 1)
+      assert.equal(pointsDe(f, client.id), avant + 10, 'crédité exactement une fois')
+      assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0644444444' })).statut, 409, 'puis 1 tirage par jour, comme toujours')
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('F2 : crédit ET suppression en échec → incohérence journalisée explicitement (ligne JSON), 500 qui le dit', async (t) => {
+    const erreurs = t.mock.method(console, 'error', () => {})
+    const f = fauxPostgrest()
+    const { app, api } = await demarrer(f)
+    try {
+      const client = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0655555555' }, PIN)).contenu.client as Client
+      hasard = 0.99
+      f.echouer('PATCH', 'clients')
+      f.echouer('DELETE', 'tirages')
+      const r = await api('POST', `/commerces/${AH}/tirages`, { contact: '0655555555' })
+      assert.equal(r.statut, 500)
+      assert.match(r.contenu.erreur, /tirage est enregistré mais vos points n’ont pas pu être crédités/)
+      const restant = tiragesDe(f, (x) => x.clientId === client.id)
+      assert.equal(restant.length, 1)
+      const lignes = erreurs.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.includes('tirage-points-non-credites'))
+      assert.equal(lignes.length, 1)
+      const ligne = JSON.parse(lignes[0])
+      assert.deepEqual([ligne.type, ligne.niveau, ligne.commerce, ligne.tirage, ligne.points], ['incoherence', 'erreur', AH, restant[0].id, 10])
+      assert.doesNotMatch(lignes[0], new RegExp(client.id), 'identifiant client en empreinte seulement')
+    } finally {
+      await app.fermer()
+    }
+  })
+
+  test('F4 : rattrapage du lotId — écriture conditionnelle (lotId déjà posé ou remise arrivée entre-temps : rien écrit)', async () => {
+    const f = fauxPostgrest()
+    const st = ouvrir(f)
+    await st.ajouterCommerce({ ...nouveauCommerce('Chez Lin', 'restaurant', ''), id: 'c-lin' }, { hash: 'h', sel: 's' })
+    const cl = { ...nouveauClient('c-lin', 'Lina', { telephone: '0612345678' }), id: 'cl-lin' }
+    await st.ajouterClient(cl)
+    const ancien = (id: string, date: string): Tirage => ({ id, commerceId: 'c-lin', clientId: cl.id, lot: 'Nems', date, code: 'ABCDEF' })
+    await st.ajouterTirage(ancien('t1', '2026-11-01T12:00:00.000Z'))
+    await st.ajouterTirage(ancien('t2', '2026-11-02T12:00:00.000Z'))
+    await st.ajouterTirage({ ...ancien('t3', '2026-11-03T12:00:00.000Z'), lotId: 'lot-x' })
+    assert.deepEqual((await st.tiragesSansLot('c-lin')).map((t) => t.id).sort(), ['t1', 't2'])
+    // t2 remis entre la lecture (sans remise) et l'écriture du rattrapage : la remise n'est pas écrasée.
+    const lu = (await st.tiragesSansLot('c-lin')).find((t) => t.id === 't2')!
+    assert.equal(await st.marquerTirageRemis({ ...lu, remis: { le: '2026-11-02T13:00:00.000Z', par: { type: 'gerant', nom: 'Gérant' } } }), true)
+    assert.equal(await st.completerLotTirage({ ...lu, lotId: 'lot-nems', typeLot: 'lot' }), false)
+    assert.ok((f.tables.tirages.find((l) => l.id === 't2')!.donnees as Tirage).remis, 'remise conservée')
+    assert.equal(await st.completerLotTirage({ ...ancien('t1', '2026-11-01T12:00:00.000Z'), lotId: 'lot-nems', typeLot: 'lot' }), true)
+    assert.equal(await st.completerLotTirage({ ...ancien('t1', '2026-11-01T12:00:00.000Z'), lotId: 'lot-autre', typeLot: 'lot' }), false, 'déjà rattaché')
+    assert.equal((f.tables.tirages.find((l) => l.id === 't1')!.donnees as Tirage).lotId, 'lot-nems')
+    await st.supprimerTirage('c-lin', 't1')
+    assert.deepEqual(f.tables.tirages.map((l) => l.id).sort(), ['t2', 't3'])
+  })
+})
 
 describe('Supabase : variables d’environnement et secrets', () => {
   const racine = join(import.meta.dirname, '..')
