@@ -331,6 +331,49 @@ describe('R1 : serveur (SQLite) — validation, tirage par id, consolation', () 
     assert.deepEqual([d.type, d.perdant], ['lot', false])
     assert.equal((await api('GET', `/commerces/${AH}/caisse/gains/${d.code}`, undefined, CODE)).contenu.gain.statut, 'valable')
   })
+
+  test('revue Codex : un ancien client (sans type) ne renverse pas un type choisi ; type reçu prioritaire ; lot nouveau déduit', async () => {
+    const config = [
+      { id: 'lot-conso', type: 'points', points: 25, libelle: '+10 points', probabilite: 30 },
+      { id: 'lot-dommage', type: 'lot', libelle: 'Dommage, encore un nem', probabilite: 20 },
+      { id: 'lot-nems', type: 'lot', libelle: 'Nems offerts', probabilite: 50 },
+    ]
+    const etat = async () => (await lotsEnregistres()).map((l) => [l.id, l.libelle, l.type, l.points ?? null])
+    assert.equal((await patchLots(config)).statut, 200)
+    // (a) + (b) Ancien front : renvoie les lots sans type ni points (par id).
+    const sansType = config.map(({ id, libelle, probabilite }) => ({ id, libelle, probabilite }))
+    assert.equal((await patchLots(sansType)).statut, 200)
+    const attendu = [
+      ['lot-conso', '+10 points', 'points', 25],
+      ['lot-dommage', 'Dommage, encore un nem', 'lot', null],
+      ['lot-nems', 'Nems offerts', 'lot', null],
+    ]
+    assert.deepEqual(await etat(), attendu)
+    // Sans id non plus (front encore plus ancien) : le libellé (casse et espaces ignorés) retrouve le lot actuel.
+    assert.equal((await patchLots([
+      { libelle: ' +10 POINTS ', probabilite: 30 },
+      { libelle: 'dommage, encore un nem', probabilite: 20 },
+      { libelle: 'Nems offerts', probabilite: 50 },
+    ])).statut, 200)
+    assert.deepEqual((await etat()).map((l) => [l[2], l[3]]), attendu.map((l) => [l[2], l[3]]))
+    // Montant reçu sans type : il remplace l'ancien, le type reste hérité.
+    const ids = (await lotsEnregistres()).map((l) => l.id)
+    assert.equal((await patchLots([{ id: ids[0], libelle: '+10 points', points: 40, probabilite: 30 }, { id: ids[2], libelle: 'Nems offerts', probabilite: 50 }])).statut, 200)
+    assert.deepEqual((await etat())[0].slice(2), ['points', 40])
+    // (c) Type explicite différent : il gagne, dans les deux sens.
+    assert.equal((await patchLots([
+      { id: ids[0], type: 'perdant', libelle: '+10 points', probabilite: 30 },
+      { id: 'lot-d2', type: 'lot', libelle: 'Dommage !', probabilite: 20 },
+      { id: ids[2], type: 'points', points: 5, libelle: 'Nems offerts', probabilite: 50 },
+    ])).statut, 200)
+    assert.deepEqual((await etat()).map((l) => [l[2], l[3]]), [['perdant', null], ['lot', null], ['points', 5]])
+    // (d) Lot entièrement nouveau (id et libellé inconnus) sans type : déduction depuis le libellé, comme avant.
+    assert.equal((await patchLots([
+      { libelle: 'Pas de chance', probabilite: 50 },
+      { id: 'lot-inconnu', libelle: 'Thé glacé', probabilite: 50 },
+    ])).statut, 200)
+    assert.deepEqual((await etat()).map((l) => [l[1], l[2]]), [['Pas de chance', 'perdant'], ['Thé glacé', 'lot']])
+  })
 })
 
 describe('R1 : seed, défauts et écrans', () => {

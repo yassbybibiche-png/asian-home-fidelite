@@ -13,7 +13,7 @@ import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
 import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
 import { lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
-import { estGainPhysique, estTypeLot, FORMAT_ID_LOT, libellesEnDouble, normaliserLots, POINTS_LOT_MAX, POINTS_LOT_MIN, TYPES_LOT, typeDeduitDuLibelle, typeTirage } from '../src/lib/lots.ts'
+import { cleLibelle, estGainPhysique, estTypeLot, FORMAT_ID_LOT, libellesEnDouble, normaliserLots, POINTS_LOT_MAX, POINTS_LOT_MIN, TYPES_LOT, typeDeduitDuLibelle, typeTirage } from '../src/lib/lots.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
 import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePrive.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
@@ -626,12 +626,15 @@ function typeCommerce(v: unknown): TypeCommerce {
 
 /**
  * Lots de la roue (R1) : chaque lot écrit porte un `id` stable (le sien s'il est valable et unique, sinon un nouveau,
- * aléatoire) et un `type` validé (absent : déduit de l'ancien libellé, pour les clients d'avant R1). Libellés uniques
- * (casse et espaces ignorés) : un libellé en double ne sert plus à rien pour le tirage, mais il tromperait le client
- * et le comptoir.
+ * aléatoire) et un `type` validé. Type absent (client d'avant R1 encore en cache) : celui du lot actuel de même `id`,
+ * sinon de même libellé (casse et espaces ignorés), et seulement à défaut déduit du libellé — un ancien client ne doit
+ * jamais inverser un type choisi (« +10 points » devenu lot physique, lot gagnant « Dommage… » devenu perdant).
+ * Libellés uniques (casse et espaces ignorés) : un libellé en double ne sert plus à rien pour le tirage, mais il
+ * tromperait le client et le comptoir.
  */
-function lots(v: unknown): Lot[] {
+function lots(v: unknown, existants: Lot[] = []): Lot[] {
   if (!Array.isArray(v) || v.length > 12) throw err(400, '« lots » doit être une liste de 12 lots maximum.')
+  const actuels = normaliserLots(existants)
   const ids = new Set<string>()
   const liste = v.map((l: unknown, i) => {
     const o = (l ?? {}) as Corps
@@ -639,13 +642,16 @@ function lots(v: unknown): Lot[] {
     if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 100) throw err(400, `Lot n° ${i + 1} : la probabilité doit être un nombre entre 0 et 100.`)
     const libelle = texte(o.libelle, `lot n° ${i + 1}`, 80)
     if (o.type != null && !estTypeLot(o.type)) throw err(400, `Lot n° ${i + 1} : le type doit valoir ${TYPES_LOT.join(', ')}.`)
-    const type: TypeLot = o.type != null ? (o.type as TypeLot) : typeDeduitDuLibelle(libelle)
+    // Lot actuel dont hérite un lot reçu sans type : même id, sinon même libellé. Type reçu : il fait foi.
+    const actuel = o.type != null ? undefined
+      : actuels.find((a) => typeof o.id === 'string' && a.id === o.id) ?? actuels.find((a) => cleLibelle(a.libelle) === cleLibelle(libelle))
+    const type: TypeLot = actuel ? actuel.type : o.type != null ? (o.type as TypeLot) : typeDeduitDuLibelle(libelle)
     let id = typeof o.id === 'string' && FORMAT_ID_LOT.test(o.id) && !ids.has(o.id) ? o.id : ''
     while (!id || ids.has(id)) id = `lot-${randomUUID().slice(0, 13)}`
     ids.add(id)
     const lot: Lot = { id, type, libelle, probabilite: p }
     if (type === 'points') {
-      const n = o.points
+      const n = o.points ?? actuel?.points
       if (typeof n !== 'number' || !Number.isInteger(n) || n < POINTS_LOT_MIN || n > POINTS_LOT_MAX) {
         throw err(400, `Lot n° ${i + 1} : un lot « points » doit indiquer un nombre entier de points (${POINTS_LOT_MIN} à ${POINTS_LOT_MAX.toLocaleString('fr-FR')}).`)
       }
@@ -744,7 +750,7 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
     if (typeof s !== 'number' || !Number.isInteger(s) || s < 1 || s > 50) throw err(400, '« seuilTampons » doit être un nombre entier entre 1 et 50.')
     r.seuilTampons = s
   }
-  if ('lots' in corps) r.lots = lots(corps.lots)
+  if ('lots' in corps) r.lots = lots(corps.lots, c.lots ?? [])
   if ('testsAB' in corps) r.testsAB = testsAB(corps.testsAB, c.testsAB, aujourdhui)
   if ('reglesReponseAuto' in corps) {
     const o = (corps.reglesReponseAuto ?? {}) as Corps
