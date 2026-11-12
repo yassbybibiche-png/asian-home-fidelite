@@ -135,8 +135,8 @@ describe('P0-U4 : écran d’attente (source)', () => {
     assert.match(jouer, /<a href=\{lienMenu\} className="bouton-secondaire w-full">\n\s*\{t\('📖 Voir le menu en attendant'\)\}/)
     assert.match(jouer, /C’est validé \? Vérifier maintenant/)
     assert.match(jouer, /lienMenu=\{menuDisponible \? `#\/menu\/\$\{commerce\.id\}` : undefined\}/)
-    // Menu toujours là chez Asian Home (vraie carte en repli), sinon selon la réponse du serveur.
-    assert.match(jouer, /useState\(\(\) => estAsianHome\(commerce\)\)/)
+    // Menu là chez Asian Home ou si la fiche publique le signale (déblocage C-bis), sinon selon la réponse du serveur.
+    assert.match(jouer, /useState\(\(\) => estAsianHome\(commerce\) \|\| \('menuDisponible' in commerce && !!commerce\.menuDisponible\)\)/)
     assert.match(jouer, /setMenuDisponible\(\(m\) => m \|\| !!r\.menuDisponible\)/)
   })
 

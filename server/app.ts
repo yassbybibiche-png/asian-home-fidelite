@@ -2506,10 +2506,11 @@ export async function creerServeur(o: OptionsServeur) {
   /**
    * Fiche publique (R2) : sans les lots plafonnés du jour — ils disparaissent de la roue et de « À gagner aujourd'hui ».
    * D2 : lots heures creuses et `bonusCreux` seulement pendant un créneau, évalué maintenant (heure de Paris).
+   * Déblocage C-bis : `menuDisponible` passé par la route qui a lu le menu (GET /commerces/:id) ; ailleurs clé absente.
    */
-  async function fichePublique(c: Commerce): Promise<CommercePublic> {
+  async function fichePublique(c: Commerce, menuDisponible = false): Promise<CommercePublic> {
     const t = maintenant()
-    return commercePublic(c, await plafonnesDuJour(c, t), creneauActif(c.creneauxCreux, t))
+    return commercePublic(c, await plafonnesDuJour(c, t), creneauActif(c.creneauxCreux, t), menuDisponible)
   }
 
   /**
@@ -3224,7 +3225,7 @@ export async function creerServeur(o: OptionsServeur) {
     if (m === 'GET' && (!sous || ((sous === 'menu' || sous === 'reglement') && !sousId))) limiterIp(req, 'lecture', limites.lectureParIp)
 
     if (!id) {
-      if (m === 'GET') return { json: { commerces: await Promise.all((await st.commerces()).map(fichePublique)) } }
+      if (m === 'GET') return { json: { commerces: await Promise.all((await st.commerces()).map((c) => fichePublique(c))) } }
       if (m === 'POST') {
         await exigerAdmin(req)
         const corps = await lireCorps(req)
@@ -3264,7 +3265,11 @@ export async function creerServeur(o: OptionsServeur) {
         })
         return { json: { commerce: maj } }
       }
-      if (m === 'GET') return { json: { commerce: await fichePublique(commerce) } }
+      if (m === 'GET') {
+        // Déblocage C-bis : même calcul que les routes carte — le bouton « Voir le menu » existe dès l'arrivée.
+        const menu = await st.menu(id)
+        return { json: { commerce: await fichePublique(commerce, !!menu?.categories.some((cat) => cat.produits.length)) } }
+      }
       throw err(405, 'Méthode non autorisée.')
     }
 

@@ -34,8 +34,9 @@ export function programmePublic(c: Pick<Commerce, 'programme' | 'seuilTampons'>)
  * serveur) — retirés de la roue et de la liste « À gagner aujourd'hui » jusqu'au lendemain.
  * `creux` (D2) : un créneau heures creuses est en cours (`creneauActif`, calculé par le serveur) — les lots
  * `heuresCreuses` sont publiés et `bonusCreux` est posé ; hors créneau, ces lots sont absents comme un lot à 0 %.
+ * `menuDisponible` (Déblocage C-bis) : le menu public a au moins un produit — seule GET /commerces/:id le calcule.
  */
-export function commercePublic(c: Commerce, plafonnes: ReadonlySet<string> = new Set(), creux = false): CommercePublic {
+export function commercePublic(c: Commerce, plafonnes: ReadonlySet<string> = new Set(), creux = false, menuDisponible = false): CommercePublic {
   const { couleur, fond, banniere } = c.apparence ?? {}
   return {
     id: c.id,
@@ -60,6 +61,8 @@ export function commercePublic(c: Commerce, plafonnes: ReadonlySet<string> = new
     modeAccesRoue: modeAccesRoue(c),
     // D2 : seulement l'indicateur « créneau en cours » — jamais les créneaux eux-mêmes ni le drapeau des lots.
     ...(creux ? { bonusCreux: true as const } : {}),
+    // Déblocage C-bis : seulement « le menu a au moins un produit » (calculé par la route qui a lu le menu).
+    ...(menuDisponible ? { menuDisponible: true as const } : {}),
     actif: c.actif,
     demo: !!c.demo,
     ...(c.catalogue ? { catalogue: c.catalogue.map((r) => ({ nom: r.nom, cout: r.cout, ...(r.description ? { description: r.description } : {}) })) } : {}),

@@ -597,7 +597,7 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
   const [enCours, setEnCours] = useState(false)
   const [accesPerdu, setAccesPerdu] = useState(false)
   const [horsLigne, setHorsLigne] = useState(false)
-  const [menuDisponible, setMenuDisponible] = useState(() => estAsianHome(commerce))
+  const [menuDisponible, setMenuDisponible] = useState(() => estAsianHome(commerce) || ('menuDisponible' in commerce && !!commerce.menuDisponible))
   const minuterie = useRef<number | undefined>(undefined)
   const verifierMaintenant = useRef<() => void>(() => {})
   useEffect(() => () => window.clearTimeout(minuterie.current), [])

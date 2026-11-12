@@ -584,7 +584,12 @@ describe('Déblocage C : « Voir le menu » dans le parcours de jeu (et sur tout
     assert.equal(LIEN_FIN_DE_CADRE.exec(corps(jouer, 'PartieLocale'))?.[1], 'estAsianHome(commerce)')
     // Mode API : état `menuDisponible` (Asian Home d'emblée, puis réponse du serveur) ; pas de doublon à l'écran d'attente.
     assert.equal(LIEN_FIN_DE_CADRE.exec(corps(jouer, 'PartieApi'))?.[1], "menuDisponible && jeu?.statut !== 'sansVisite'")
-    assert.match(corps(jouer, 'PartieApi'), /const \[menuDisponible, setMenuDisponible\] = useState\(\(\) => estAsianHome\(commerce\)\)/)
+    // Déblocage C-bis : d'emblée aussi si la fiche publique porte `menuDisponible` (tous commerces, avant l'identification).
+    assert.match(
+      corps(jouer, 'PartieApi'),
+      /const \[menuDisponible, setMenuDisponible\] = useState\(\(\) => estAsianHome\(commerce\) \|\| \('menuDisponible' in commerce && !!commerce\.menuDisponible\)\)/,
+    )
+    assert.match(corps(jouer, 'PartieApi'), /setMenuDisponible\(\(m\) => m \|\| !!r\.menuDisponible\)/)
   })
 
   test('carte client : bouton menu dans la vue complète ET la vue limitée (même règle de disponibilité)', () => {
