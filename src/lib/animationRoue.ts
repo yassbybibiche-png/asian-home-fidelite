@@ -67,7 +67,8 @@ export function memoriserSon(stockage: Pick<Storage, 'setItem'> | null | undefin
 
 /** Tics, inclinaison du pointeur et motif de gain : `src/lib/sonRoue.ts`, hors bundle initial. */
 export interface SceneRoue {
-  /** Son coupé en cours de partie : les notes se taisent, l'inclinaison du pointeur continue. */
+  /** Son coupé en cours de partie : toutes les notes se taisent (même déjà programmées), l'inclinaison du pointeur
+   *  continue. Réactivé (dans le geste du bouton son) : le contexte audio est ouvert s'il manquait. */
   muet: boolean
   planifier(de: number, a: number, limites: number[], duree: number, pointeur?: Element | null, ecoule?: number): () => void
   fanfare(leger: boolean): void
@@ -77,18 +78,22 @@ type FenetreAudio = { AudioContext?: new () => AudioContext; webkitAudioContext?
 
 /**
  * À appeler UNIQUEMENT dans le clic « Tourner » : crée (ou réveille) l'AudioContext pendant le geste si le son est
- * activé, puis charge la scène. Ne lève jamais ; sans WebAudio, la scène tourne en silence.
+ * activé, puis charge la scène. Ne lève jamais ; sans WebAudio, la scène tourne en silence. `audio` est aussi confié à
+ * la scène : réactiver le son en cours de partie (autre geste, `muet = false`) ouvre le contexte qui manquait.
  */
 export function ouvrirScene(son: boolean, w: FenetreAudio = globalThis as never): Promise<SceneRoue | null> {
-  let ctx: AudioContext | null = null
-  try {
-    const C = w.AudioContext ?? w.webkitAudioContext
-    if (son && C) void (ctx = new C()).resume?.()?.catch?.(() => {})
-  } catch {
-    ctx = null
+  const audio = () => {
+    try {
+      const ctx = new (w.AudioContext ?? w.webkitAudioContext)!()
+      ctx.resume().catch(() => {})
+      return ctx
+    } catch {
+      // WebAudio absent ou refusé : undefined, la scène reste muette.
+    }
   }
+  const ctx = son && audio()
   return import('./sonRoue.ts').then(
-    (m) => m.creerScene(ctx),
+    (m) => m.creerScene(ctx, audio),
     () => null,
   )
 }

@@ -32,12 +32,19 @@ function stockage(init: Record<string, string> = {}) {
   return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), m }
 }
 
-/** Faux AudioContext qui compte ses constructions et les oscillateurs joués. */
+/** Faux AudioContext qui compte ses constructions, les oscillateurs joués, leurs arrêts et les gains créés. */
 function fauxAudio() {
-  const journal = { contextes: 0, reveils: 0, notes: [] as number[] }
+  const journal = {
+    contextes: 0,
+    reveils: 0,
+    notes: [] as number[],
+    oscillateurs: [] as { arrets: (number | undefined)[] }[],
+    gains: [] as { gain: { value: number } }[],
+    destination: {},
+  }
   class Ctx {
     currentTime = 0
-    destination = {}
+    destination = journal.destination
     constructor() {
       journal.contextes++
     }
@@ -46,15 +53,30 @@ function fauxAudio() {
       return Promise.resolve()
     }
     createOscillator() {
-      const o = { type: '', frequency: { setValueAtTime: (f: number) => journal.notes.push(f) }, connect: (g: unknown) => g, start() {}, stop() {} }
+      const o = {
+        type: '',
+        arrets: [] as (number | undefined)[],
+        frequency: { setValueAtTime: (f: number) => journal.notes.push(f) },
+        connect: (g: unknown) => g,
+        start() {},
+        stop(t?: number) {
+          o.arrets.push(t)
+        },
+      }
+      journal.oscillateurs.push(o)
       return o
     }
     createGain() {
-      return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (d: unknown) => d }
+      const g = { gain: { value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (d: unknown) => ((g as { vers?: unknown }).vers = d) }
+      journal.gains.push(g)
+      return g
     }
   }
   return { journal, Ctx: Ctx as unknown as new () => AudioContext }
 }
+
+/** Gain maître = le seul gain branché directement sur la sortie du contexte. */
+const gainMaitre = (j: ReturnType<typeof fauxAudio>['journal']) => j.gains.filter((g) => (g as { vers?: unknown }).vers === j.destination)
 
 describe('R5 : préférence son (par appareil, défaut activé)', () => {
   test('défaut activé ; « 0 » en localStorage = coupé ; clé unique par appareil, pas par commerce', () => {
@@ -293,6 +315,101 @@ describe('R8 : décor premium sur couches fixes', () => {
   test('moyeu : logo du commerce (petite variante du logo par défaut) ou son initiale', () => {
     assert.match(roue, /\{decor\.logo \? <img src=\{decor\.logo\} alt="" \/> : <span className="font-titre">\{decor\.initiale\}<\/span>\}/)
     assert.match(jouer, /logo: logo\.includes\('\/'\) \? \(logo === VISUELS\.logo \? LOGO_DEFAUT_PETIT : logo\) : undefined/)
+  })
+})
+
+describe('R5+R8 revue Codex : couper le son, mouvement réduit en cours, réactivation pendant la partie', () => {
+  const quarts = [0, 90, 180, 270]
+
+  test('F1 : couper le son en plein motif de gain tait aussi les notes déjà programmées (gain maître à 0, oscillateurs arrêtés)', async () => {
+    const { journal, Ctx } = fauxAudio()
+    const scene = (await ouvrirScene(true, { AudioContext: Ctx }))!
+    scene.fanfare(false)
+    assert.equal(journal.oscillateurs.length, 3)
+    const maitre = gainMaitre(journal)
+    assert.equal(maitre.length, 1, 'un seul gain maître, partagé par toutes les notes')
+    // Les notes sont programmées jusqu'à ~0,24 s : seul leur arrêt planifié est connu.
+    for (const o of journal.oscillateurs) assert.equal(o.arrets.length, 1)
+    scene.muet = true
+    assert.equal(maitre[0].gain.value, 0)
+    for (const o of journal.oscillateurs) assert.deepEqual(o.arrets.slice(1), [undefined], 'arrêt immédiat de chaque note programmée')
+    // Réactivé : le même gain maître remonte, les nouvelles notes rejouent.
+    scene.muet = false
+    assert.equal(maitre[0].gain.value, 1)
+    scene.fanfare(true)
+    assert.equal(journal.oscillateurs.length, 5)
+    assert.equal(gainMaitre(journal).length, 1)
+  })
+
+  test('F1 : couper le son en cours de rotation : plus aucun tic sonore, l’inclinaison du pointeur continue', async (t) => {
+    const { journal, Ctx } = fauxAudio()
+    const scene = (await ouvrirScene(true, { AudioContext: Ctx }))!
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    let inclinaisons = 0
+    scene.planifier(0, 1845, quarts, 3600, { animate: () => void inclinaisons++ } as unknown as Element)
+    t.mock.timers.tick(1000)
+    const tics = journal.notes.length
+    assert.ok(tics > 0)
+    scene.muet = true
+    for (const o of journal.oscillateurs) assert.ok(o.arrets.includes(undefined), 'tic en cours arrêté')
+    const avant = inclinaisons
+    t.mock.timers.tick(5000)
+    assert.equal(journal.notes.length, tics, 'aucun nouveau tic sonore')
+    assert.ok(inclinaisons > avant, 'le pointeur bute toujours')
+  })
+
+  test('F2 : l’annulation arrête les tics à venir ET les inclinaisons du pointeur en cours', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const animations: { annulee: boolean }[] = []
+    const pointeur = {
+      animate: () => {
+        const a = { annulee: false, cancel: () => void (a.annulee = true) }
+        animations.push(a)
+        return a
+      },
+    } as unknown as Element
+    const annuler = creerScene(null).planifier(0, 1845, quarts, 3600, pointeur)
+    t.mock.timers.tick(1000)
+    const n = animations.length
+    assert.ok(n > 0)
+    annuler()
+    assert.ok(animations.every((a) => a.annulee), 'inclinaisons en cours annulées')
+    t.mock.timers.tick(5000)
+    assert.equal(animations.length, n, 'plus aucun tic planifié')
+  })
+
+  test('F2 : la roue relance son effet quand le mouvement réduit change : nettoyage (tics + pointeur), rien de replanifié', () => {
+    const effet = roue.slice(roue.indexOf('const de = avant.current'), roue.indexOf('const filets'))
+    assert.match(effet, /\}, \[rotation, reduit\]\)/)
+    // Même rotation (seul `reduit` a changé) : aucune nouvelle planification, poursuite lumineuse arrêtée.
+    assert.match(effet, /if \(rotation === de\) return setPhase\(''\)/)
+    assert.match(effet, /if \(annuler\) annuler\(\)\n\s*annuler = false/)
+  })
+
+  test('F3 : partie lancée en muet, son réactivé pendant la rotation : contexte ouvert, tics restants et motif de gain joués', async (t) => {
+    const { journal, Ctx } = fauxAudio()
+    const scene = (await ouvrirScene(false, { AudioContext: Ctx }))!
+    assert.equal(journal.contextes, 0)
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    scene.planifier(0, 1845, quarts, 3600)
+    t.mock.timers.tick(1000)
+    assert.deepEqual(journal.notes, [], 'muet : silence')
+    // Clic sur le bouton son (un geste) : la page fait `s.muet = son` (son valait faux).
+    scene.muet = false
+    assert.equal(journal.contextes, 1, 'contexte ouvert par le geste du bouton son')
+    assert.equal(journal.reveils, 1)
+    t.mock.timers.tick(5000)
+    assert.ok(journal.notes.length > 0 && journal.notes.every((f) => f === 1500), 'tics restants joués')
+    journal.notes = []
+    scene.fanfare(false)
+    assert.deepEqual(journal.notes, NOTES_GAIN, 'motif de gain joué')
+    // Recouper puis réactiver : le contexte existant est réveillé, jamais recréé.
+    scene.muet = true
+    scene.muet = false
+    assert.equal(journal.contextes, 1)
+    assert.equal(journal.reveils, 2)
+    // Le bouton son de la page passe bien par ce setter, dans son clic.
+    assert.match(corpsDe(jouer, 'useJeuRoue'), /basculer\(\) \{[\s\S]*?scene\.current\?\.then\(\(s\) => s && \(s\.muet = son\)\)/)
   })
 })
 

@@ -61,7 +61,8 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
   useEffect(() => {
     const de = avant.current
     avant.current = rotation
-    if (rotation === de) return
+    // Mouvement réduit activé pendant la rotation : le nettoyage ci-dessous a annulé tics et inclinaisons du pointeur.
+    if (rotation === de) return setPhase('')
     const duree = dureeRotation(reduit)
     const debut = Date.now()
     let annuler: (() => void) | undefined | false
@@ -69,13 +70,13 @@ export function Roue({ lots, rotation }: { lots: LotRoue[]; rotation: number }) 
     void decor.scene?.current?.then((s) => annuler !== false && (annuler = s?.planifier(de, rotation, parts.map((p) => p.debut), duree, pointeur.current, Date.now() - debut)))
     // Mouvement réduit : rien ne tourne, donc ni poursuite ni rebond.
     if (duree) setPhase('roue-tourne')
-    const fin = window.setTimeout(() => duree && setPhase('roue-arret'), duree)
+    const fin = setTimeout(() => duree && setPhase('roue-arret'), duree)
     return () => {
       if (annuler) annuler()
       annuler = false
-      window.clearTimeout(fin)
+      clearTimeout(fin)
     }
-  }, [rotation])
+  }, [rotation, reduit])
   const filets = parts.length > 1 ? parts.map((s) => `M0 0L${point(s.debut, R)}`).join('') : ''
   // Lecteur d'écran : la roue est une image nommée (nombre de lots) ; le détail des lots est dans LegendeRoue.
   return (

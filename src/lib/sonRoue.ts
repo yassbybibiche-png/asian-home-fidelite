@@ -41,10 +41,19 @@ export function ticsRotation(de: number, a: number, limites: number[], duree = D
 /** Motif de gain : trois notes montantes courtes (do, mi, sol) ; allégé (deux notes, plus doux) pour les points. */
 export const NOTES_GAIN = [523.25, 659.25, 783.99]
 
-export function creerScene(ctx: AudioContext | null): SceneRoue {
+/**
+ * `ctx` : contexte ouvert par le clic « Tourner » (null si le son était coupé) ; `ouvrir` : en ouvre un dans le geste
+ * du bouton son (`muet = false` pendant la partie), sinon une partie commencée en muet resterait silencieuse.
+ * Toutes les notes passent par un gain maître : couper le son tait aussi les notes déjà programmées (motif de gain).
+ */
+export function creerScene(ctx?: AudioContext | null | false, ouvrir: () => AudioContext | undefined = () => undefined): SceneRoue {
+  let muet = false
+  let maitre: GainNode | undefined
+  const actifs = new Set<OscillatorNode>()
   function note(frequence: number, debut: number, duree: number, volume: number, forme: OscillatorType) {
-    if (!ctx || scene.muet) return
+    if (!ctx || muet) return
     try {
+      if (!maitre) (maitre = ctx.createGain()).connect(ctx.destination)
       const t = ctx.currentTime + debut
       const o = ctx.createOscillator()
       const g = ctx.createGain()
@@ -53,16 +62,41 @@ export function creerScene(ctx: AudioContext | null): SceneRoue {
       g.gain.setValueAtTime(0.0001, t)
       g.gain.exponentialRampToValueAtTime(volume, t + 0.006)
       g.gain.exponentialRampToValueAtTime(0.0001, t + duree)
-      o.connect(g).connect(ctx.destination)
+      o.connect(g).connect(maitre)
+      o.onended = () => actifs.delete(o)
+      actifs.add(o)
       o.start(t)
       o.stop(t + duree + 0.02)
     } catch {
       // WebAudio refusé ou incomplet : silence, la roue tourne quand même.
     }
   }
-  const scene: SceneRoue = {
-    muet: false,
+  return {
+    get muet() {
+      return muet
+    },
+    set muet(v) {
+      muet = v
+      if (v) {
+        // Silence immédiat : gain maître à zéro et arrêt des oscillateurs déjà programmés.
+        if (maitre) maitre.gain.value = 0
+        for (const o of actifs) {
+          try {
+            o.stop()
+          } catch {
+            // Déjà arrêté.
+          }
+        }
+        actifs.clear()
+        return
+      }
+      if (maitre) maitre.gain.value = 1
+      // Réactivé (dans le geste du bouton son) : ouvre le contexte s'il manquait, sinon le réveille.
+      if (!ctx) ctx = ouvrir()
+      else void ctx.resume?.()?.catch?.(() => {})
+    },
     planifier(de, a, limites, duree, pointeur, ecoule = 0) {
+      const animations: (Animation | undefined)[] = []
       const minuteries = ticsRotation(de, a, limites, duree)
         .filter((t) => t >= ecoule)
         .map((t) =>
@@ -70,17 +104,20 @@ export function creerScene(ctx: AudioContext | null): SceneRoue {
             note(1500, 0, 0.04, 0.09, 'triangle')
             try {
               // Le pointeur bute sur le secteur franchi : brève inclinaison (transform seul, composité).
-              pointeur?.animate?.([{ rotate: '0deg' }, { rotate: '-14deg' }, { rotate: '0deg' }], { duration: 110, easing: 'ease-out' })
+              animations.push(pointeur?.animate?.([{ rotate: '0deg' }, { rotate: '-14deg' }, { rotate: '0deg' }], { duration: 110, easing: 'ease-out' }))
             } catch {
               // Web Animations indisponible : pas d'inclinaison.
             }
           }, t - ecoule),
         )
-      return () => minuteries.forEach(clearTimeout)
+      // Annulation (nouvelle rotation, démontage, mouvement réduit activé en cours) : tics à venir ET inclinaison en cours.
+      return () => {
+        minuteries.forEach(clearTimeout)
+        for (const x of animations) x?.cancel?.()
+      }
     },
     fanfare(leger) {
       for (const [i, f] of NOTES_GAIN.slice(leger ? 1 : 0).entries()) note(f, i * 0.11, 0.22, leger ? 0.1 : 0.16, 'sine')
     },
   }
-  return scene
 }
