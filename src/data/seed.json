@@ -12,23 +12,34 @@
       "seuilTampons": 10,
       "lots": [
         {
+          "id": "lot-nems-offerts",
+          "type": "lot",
           "libelle": "Nems offerts",
           "probabilite": 20
         },
         {
+          "id": "lot-the-glace",
+          "type": "lot",
           "libelle": "Thé glacé",
           "probabilite": 25
         },
         {
+          "id": "lot-mochi-offert",
+          "type": "lot",
           "libelle": "Mochi offert",
           "probabilite": 15
         },
         {
+          "id": "lot-remise-10",
+          "type": "lot",
           "libelle": "Remise 10 %",
           "probabilite": 10
         },
         {
-          "libelle": "Dommage !",
+          "id": "lot-10-points",
+          "type": "points",
+          "points": 10,
+          "libelle": "+10 points",
           "probabilite": 30
         }
       ],
@@ -50,19 +61,28 @@
       "seuilTampons": 8,
       "lots": [
         {
+          "id": "lot-soin-offert",
+          "type": "lot",
           "libelle": "Soin offert",
           "probabilite": 15
         },
         {
+          "id": "lot-10-coupe",
+          "type": "lot",
           "libelle": "-10 % coupe",
           "probabilite": 30
         },
         {
+          "id": "lot-shampoing",
+          "type": "lot",
           "libelle": "Shampoing",
           "probabilite": 25
         },
         {
-          "libelle": "Dommage !",
+          "id": "lot-10-points",
+          "type": "points",
+          "points": 10,
+          "libelle": "+10 points",
           "probabilite": 30
         }
       ],
@@ -84,18 +104,26 @@
       "seuilTampons": 6,
       "lots": [
         {
+          "id": "lot-remise-15",
+          "type": "lot",
           "libelle": "Remise 15 %",
           "probabilite": 10
         },
         {
+          "id": "lot-tote-bag",
+          "type": "lot",
           "libelle": "Tote bag",
           "probabilite": 20
         },
         {
+          "id": "lot-emballage",
+          "type": "lot",
           "libelle": "Emballage",
           "probabilite": 30
         },
         {
+          "id": "lot-remise-5",
+          "type": "lot",
           "libelle": "Remise 5 %",
           "probabilite": 40
         }
@@ -653,13 +681,17 @@
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-3",
       "lot": "-10 % coupe",
+      "lotId": "lot-10-coupe",
+      "typeLot": "lot",
       "date": "2026-11-05T14:04:00.000Z"
     },
     {
       "id": "c-atelier-camille-ti-1",
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-3",
-      "lot": "Dommage !",
+      "lot": "+10 points",
+      "lotId": "lot-10-points",
+      "typeLot": "points",
       "date": "2026-11-04T12:25:00.000Z"
     },
     {
@@ -667,6 +699,8 @@
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-2",
       "lot": "Remise 15 %",
+      "lotId": "lot-remise-15",
+      "typeLot": "lot",
       "date": "2026-11-04T11:17:00.000Z"
     },
     {
@@ -674,6 +708,8 @@
       "commerceId": "c-asian-home-paris",
       "clientId": "c-asian-home-paris-cl-9",
       "lot": "Nems offerts",
+      "lotId": "lot-nems-offerts",
+      "typeLot": "lot",
       "date": "2026-11-03T13:14:00.000Z"
     },
     {
@@ -681,6 +717,8 @@
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-7",
       "lot": "Shampoing",
+      "lotId": "lot-shampoing",
+      "typeLot": "lot",
       "date": "2026-11-01T12:19:00.000Z"
     },
     {
@@ -688,6 +726,8 @@
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-7",
       "lot": "Remise 15 %",
+      "lotId": "lot-remise-15",
+      "typeLot": "lot",
       "date": "2026-10-30T13:51:00.000Z"
     },
     {
@@ -695,6 +735,8 @@
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-9",
       "lot": "Soin offert",
+      "lotId": "lot-soin-offert",
+      "typeLot": "lot",
       "date": "2026-10-28T16:31:00.000Z"
     },
     {
@@ -702,13 +744,17 @@
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-1",
       "lot": "Tote bag",
+      "lotId": "lot-tote-bag",
+      "typeLot": "lot",
       "date": "2026-10-25T11:49:00.000Z"
     },
     {
       "id": "c-atelier-camille-ti-5",
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-6",
-      "lot": "Dommage !",
+      "lot": "+10 points",
+      "lotId": "lot-10-points",
+      "typeLot": "points",
       "date": "2026-10-21T16:16:00.000Z"
     },
     {
@@ -716,6 +762,8 @@
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-1",
       "lot": "Remise 5 %",
+      "lotId": "lot-remise-5",
+      "typeLot": "lot",
       "date": "2026-10-20T16:09:00.000Z"
     },
     {
@@ -723,6 +771,8 @@
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-9",
       "lot": "Remise 5 %",
+      "lotId": "lot-remise-5",
+      "typeLot": "lot",
       "date": "2026-10-20T11:13:00.000Z"
     },
     {
@@ -730,6 +780,8 @@
       "commerceId": "c-asian-home-paris",
       "clientId": "c-asian-home-paris-cl-1",
       "lot": "Nems offerts",
+      "lotId": "lot-nems-offerts",
+      "typeLot": "lot",
       "date": "2026-10-19T12:50:00.000Z"
     },
     {
@@ -737,6 +789,8 @@
       "commerceId": "c-asian-home-paris",
       "clientId": "c-asian-home-paris-cl-6",
       "lot": "Mochi offert",
+      "lotId": "lot-mochi-offert",
+      "typeLot": "lot",
       "date": "2026-10-18T19:58:00.000Z"
     },
     {
@@ -744,6 +798,8 @@
       "commerceId": "c-atelier-camille",
       "clientId": "c-atelier-camille-cl-10",
       "lot": "Shampoing",
+      "lotId": "lot-shampoing",
+      "typeLot": "lot",
       "date": "2026-10-18T17:26:00.000Z"
     },
     {
@@ -751,6 +807,8 @@
       "commerceId": "c-maison-lila",
       "clientId": "c-maison-lila-cl-5",
       "lot": "Emballage",
+      "lotId": "lot-emballage",
+      "typeLot": "lot",
       "date": "2026-10-18T13:10:00.000Z"
     },
     {
@@ -758,6 +816,8 @@
       "commerceId": "c-asian-home-paris",
       "clientId": "c-asian-home-paris-cl-10",
       "lot": "Nems offerts",
+      "lotId": "lot-nems-offerts",
+      "typeLot": "lot",
       "date": "2026-10-17T13:13:00.000Z"
     }
   ],

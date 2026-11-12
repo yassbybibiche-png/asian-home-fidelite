@@ -26,12 +26,14 @@ export function nouveauCommerce(nom: string, type: TypeCommerce, lienGoogle: str
     lienGoogle: lienGoogle.trim(),
     recompense: 'Une récompense offerte au 10e passage',
     seuilTampons: 10,
-    // Libellés ≤ 12 caractères : lisibles en entier sur la roue (src/lib/roue.ts).
+    // Libellés ≤ 12 caractères : lisibles en entier sur la roue (src/lib/roue.ts). Roue v2 (R1) : id + type explicites
+    // (ids fixes, uniques dans la liste et identiques pour tous les secteurs, comme ceux du catalogue ci-dessous) ;
+    // plus de lot perdant par défaut — consolation de 10 points à la place de « Dommage ! » (même probabilité).
     lots: [
-      { libelle: 'Remise 10 %', probabilite: 20 },
-      { libelle: 'Petit cadeau', probabilite: 20 },
-      { libelle: 'Remise 5 %', probabilite: 30 },
-      { libelle: 'Dommage !', probabilite: 30 },
+      { id: 'lot-remise-10', type: 'lot', libelle: 'Remise 10 %', probabilite: 20 },
+      { id: 'lot-petit-cadeau', type: 'lot', libelle: 'Petit cadeau', probabilite: 20 },
+      { id: 'lot-remise-5', type: 'lot', libelle: 'Remise 5 %', probabilite: 30 },
+      { id: 'lot-10-points', type: 'points', points: 10, libelle: '+10 points', probabilite: 30 },
     ],
     reglesReponseAuto: { auto5Etoiles: true, auto4Etoiles: false, brouillonAutres: true },
     // Catalogue d'échange de points pré-rempli (ids stables, conformes à `catalogue()` de server/app.ts).

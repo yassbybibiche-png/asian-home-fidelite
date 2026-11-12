@@ -1,6 +1,6 @@
 // Client HTTP de l'API /api/v1 (server/). Aucune règle métier ici : le serveur décide de tout
 // (tampons, récompense, tirage). `fetch` est injectable pour les tests (aucun vrai serveur dans `npm test`).
-import type { Avis, Client, Commerce, CommerceCaisse, CommercePublic, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce } from '../types'
+import type { Avis, Client, Commerce, CommerceCaisse, CommercePublic, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce, TypeLot } from '../types'
 import type { StatutGain, StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
 import type { ClientAPurger } from '../lib/rgpd'
@@ -82,8 +82,13 @@ export interface MessageCommercant extends MessageClient {
 
 export interface ResultatTirage {
   lot: string
+  /** Id du lot tiré (R1) : la roue retrouve son secteur par cet id. Absent d'un serveur d'avant R1. */
+  lotId?: string
+  /** Type du lot tiré (R1) : 'points' = consolation. Absent d'un serveur d'avant R1. */
+  type?: TypeLot
   code: string
   date: string
+  /** Rien à retirer au comptoir (perdant ou consolation en points) : pas de code à montrer. */
   perdant: boolean
 }
 

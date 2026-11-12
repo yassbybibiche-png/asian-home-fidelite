@@ -6,13 +6,14 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, CommerceCaisse, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commerce, CommerceCaisse, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
 import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
-import { estPerdant, lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
+import { lotsJouables, messageGain, normaliserCodeGagnant, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
+import { estGainPhysique, estTypeLot, FORMAT_ID_LOT, libellesEnDouble, normaliserLots, POINTS_LOT_MAX, POINTS_LOT_MIN, TYPES_LOT, typeDeduitDuLibelle, typeTirage } from '../src/lib/lots.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
 import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePrive.ts'
 import { clientsEnCsv } from '../src/lib/csv.ts'
@@ -623,13 +624,33 @@ function typeCommerce(v: unknown): TypeCommerce {
   return t.valeur
 }
 
+/**
+ * Lots de la roue (R1) : chaque lot écrit porte un `id` stable (le sien s'il est valable et unique, sinon un nouveau,
+ * aléatoire) et un `type` validé (absent : déduit de l'ancien libellé, pour les clients d'avant R1). Libellés uniques
+ * (casse et espaces ignorés) : un libellé en double ne sert plus à rien pour le tirage, mais il tromperait le client
+ * et le comptoir.
+ */
 function lots(v: unknown): Lot[] {
   if (!Array.isArray(v) || v.length > 12) throw err(400, '« lots » doit être une liste de 12 lots maximum.')
+  const ids = new Set<string>()
   const liste = v.map((l: unknown, i) => {
     const o = (l ?? {}) as Corps
     const p = o.probabilite
     if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 100) throw err(400, `Lot n° ${i + 1} : la probabilité doit être un nombre entre 0 et 100.`)
-    const lot: Lot = { libelle: texte(o.libelle, `lot n° ${i + 1}`, 80), probabilite: p }
+    const libelle = texte(o.libelle, `lot n° ${i + 1}`, 80)
+    if (o.type != null && !estTypeLot(o.type)) throw err(400, `Lot n° ${i + 1} : le type doit valoir ${TYPES_LOT.join(', ')}.`)
+    const type: TypeLot = o.type != null ? (o.type as TypeLot) : typeDeduitDuLibelle(libelle)
+    let id = typeof o.id === 'string' && FORMAT_ID_LOT.test(o.id) && !ids.has(o.id) ? o.id : ''
+    while (!id || ids.has(id)) id = `lot-${randomUUID().slice(0, 13)}`
+    ids.add(id)
+    const lot: Lot = { id, type, libelle, probabilite: p }
+    if (type === 'points') {
+      const n = o.points
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < POINTS_LOT_MIN || n > POINTS_LOT_MAX) {
+        throw err(400, `Lot n° ${i + 1} : un lot « points » doit indiquer un nombre entier de points (${POINTS_LOT_MIN} à ${POINTS_LOT_MAX.toLocaleString('fr-FR')}).`)
+      }
+      lot.points = n
+    }
     // Coût unitaire (P2-Q3), en centimes : facultatif ; absent / null = non renseigné.
     const c = o.coutCentimes
     if (c != null) {
@@ -638,6 +659,8 @@ function lots(v: unknown): Lot[] {
     }
     return lot
   })
+  const doubles = libellesEnDouble(liste)
+  if (doubles.length) throw err(400, `Libellé de lot en double : ${doubles.map((d) => `« ${d} »`).join(', ')}. Chaque lot doit avoir un libellé différent (majuscules et espaces ne comptent pas).`)
   if (!lotsJouables(liste).length) throw err(400, 'Il faut au moins un lot avec un libellé et une probabilité > 0.')
   return liste
 }
@@ -2710,7 +2733,7 @@ export async function creerServeur(o: OptionsServeur) {
           // P0-S19 : code gagnant du jour servi UNIQUEMENT au titulaire authentifié (`charge` = jeton client valable
           // de cette carte). Sans jeton : null, même en vue complète (mode transition) — le lot reste affiché, le
           // code, lui, ne quitte jamais le serveur sans preuve. Tirage perdant : null, même avec jeton.
-          codeDuJour: charge && duJour?.code && !estPerdant(duJour.lot) ? duJour.code : null,
+          codeDuJour: charge && duJour?.code && estGainPhysique(typeTirage(duJour)) ? duJour.code : null,
           remisDuJour: !!duJour?.remis,
         }
         const acces = { vue: complete ? 'complete' : 'limitee', jeton: !!charge, ...infosGrace(id) }
@@ -2751,7 +2774,7 @@ export async function creerServeur(o: OptionsServeur) {
             menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
             // P1-C3 : historique des lots de la roue (gagnants seulement), sans aucun code — seul celui du jour est servi ci-dessus.
             historiqueLots: tirages
-              .filter((x) => !estPerdant(x.lot))
+              .filter((x) => estGainPhysique(typeTirage(x)))
               .sort((a, b) => b.date.localeCompare(a.date))
               .slice(0, 20)
               .map((x) => ({ lot: x.lot, date: x.date, statut: statutGain(x, t) })),
@@ -3787,10 +3810,11 @@ export async function creerServeur(o: OptionsServeur) {
         const t = maintenant()
         const statut = statutJeu(client, await st.tiragesClient(id, client.id), id, t)
         if (statut === 'dejaJoue' || statut === 'sansVisite') return { refus: refusJeu }
-        const jouables = lotsJouables(commerce.lots)
+        // R1 : lots normalisés (id + type résolus, mêmes ids que la vue publique) ; le tirage fige l'id et le type du lot.
+        const jouables = lotsJouables(normaliserLots(commerce.lots))
         if (!jouables.length) return { refus: 'Aucun lot n’est configuré pour le moment.' }
-        const lot = jouables[tirerLot(commerce.lots)].libelle
-        const tirage: Tirage = { id: `ti-${randomUUID()}`, commerceId: id, clientId: client.id, lot, date: t.toISOString(), code: codeGagnant() }
+        const tire = jouables[tirerLot(commerce.lots)]
+        const tirage: Tirage = { id: `ti-${randomUUID()}`, commerceId: id, clientId: client.id, lot: tire.libelle, lotId: tire.id, typeLot: tire.type, date: t.toISOString(), code: codeGagnant() }
         try {
           await st.ajouterTirage(tirage)
         } catch (e) {
@@ -3802,11 +3826,14 @@ export async function creerServeur(o: OptionsServeur) {
       })
       // Le client éventuellement créé reste inscrit même en cas de refus (la transaction est validée).
       if ('refus' in resultat) throw err(409, resultat.refus!)
-      const { lot, code, date } = resultat.tirage!
+      const { lot, lotId, typeLot, code, date } = resultat.tirage!
+      // Lot physique seulement (R1) : une consolation en points n'a rien à retirer au comptoir — `perdant` reste le
+      // drapeau « pas de code à montrer » des clients existants ; `type` dit si c'est une consolation.
+      const physique = estGainPhysique(typeLot!)
       // Mesure anonyme (P2-Q3) : après le tirage enregistré, sans identité ; un échec ici ne change rien au tirage.
       await compter(id, 'tirage')
-      if (!estPerdant(lot)) await compter(id, 'gain')
-      return { statut: 201, json: { lot, code, date, perdant: estPerdant(lot) } }
+      if (physique) await compter(id, 'gain')
+      return { statut: 201, json: { lot, lotId, type: typeLot, code, date, perdant: !physique } }
     }
 
     if (sous === 'evenements' && !sousId && m === 'POST') {

@@ -3,7 +3,7 @@
 // Liste BLANCHE, champ par champ : un champ ajouté plus tard à `Commerce` n'est jamais publié par défaut.
 // Le commerçant reçoit le commerce complet via GET /commerces/:id/etat (PIN ou session).
 //
-// Retirés : probabilités des lots, `reglesReponseAuto`, `eurosParPoint`, `messagesAuto`, `creeLe`, identifiants du
+// Retirés : probabilités (et coûts) des lots, `reglesReponseAuto`, `eurosParPoint`, `messagesAuto`, `creeLe`, identifiants du
 // catalogue, et tout le programme qui n'est pas affiché au client (relance des inactifs, bienvenue, anniversaire,
 // réserve, points du parrain, plafond annuel de parrainage).
 // Conservés parce que la carte publique les affiche (CarteFidelite / CartePublique) :
@@ -14,6 +14,7 @@
 import type { Commerce, CommercePublic, ProgrammePublic } from '../types'
 import { configDefi, configNiveaux, configOffreHebdo, configPaliers, configParrainage, configRattrapage } from './programme.ts'
 import { lotsJouables } from './roulette.ts'
+import { normaliserLots } from './lots.ts'
 import { dureeConservationMois } from './rgpd.ts'
 
 export function programmePublic(c: Pick<Commerce, 'programme' | 'seuilTampons'>): ProgrammePublic {
@@ -43,7 +44,9 @@ export function commercePublic(c: Commerce): CommercePublic {
     recompense: c.recompense,
     seuilTampons: c.seuilTampons,
     // Jouables seulement (un lot à 0 % n'apparaît pas sur la roue), dans l'ordre : la roue publique a des secteurs égaux.
-    lots: lotsJouables(c.lots).map((l) => ({ libelle: l.libelle })),
+    // R1 : id (la roue retrouve le lot tiré par son id, jamais par son libellé) + type résolu (consolation affichée
+    // comme telle). Jamais la probabilité, ni le coût, ni le montant de points (liste blanche, audit F-05).
+    lots: lotsJouables(normaliserLots(c.lots)).map((l) => ({ id: l.id, libelle: l.libelle, type: l.type })),
     actif: c.actif,
     demo: !!c.demo,
     ...(c.catalogue ? { catalogue: c.catalogue.map((r) => ({ nom: r.nom, cout: r.cout, ...(r.description ? { description: r.description } : {}) })) } : {}),

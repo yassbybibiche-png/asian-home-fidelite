@@ -1,11 +1,12 @@
 // Logique pure de la roulette : tirage pondéré, anti-abus, géométrie de la roue.
-import type { Client, Lot, Tirage } from '../types'
+import type { Client, Lot, Tirage, TypeLot } from '../types'
 
 /**
  * Lot affichable sur la roue. Vue commerçant : avec sa probabilité. Vue publique (pages client) : libellé seul,
- * le serveur ne publiant que les lots jouables — chaque lot y compte alors pour 1 (secteurs égaux).
+ * le serveur ne publiant que les lots jouables — chaque lot y compte alors pour 1 (secteurs égaux). `id` / `type` :
+ * présents sur la vue publique et sur les lots normalisés (`normaliserLots`), absents d'une config d'avant R1 non normalisée.
  */
-export type LotRoue = Pick<Lot, 'libelle'> & { probabilite?: number }
+export type LotRoue = Pick<Lot, 'libelle'> & { probabilite?: number; id?: string; type?: TypeLot }
 
 const poids = (l: LotRoue) => l.probabilite ?? 1
 
@@ -89,8 +90,31 @@ export function rotationCible(rotationActuelle: number, secteur: Secteur, alea =
   return rotationActuelle + tours * 360 + restant
 }
 
-export function estPerdant(lot: string): boolean {
-  return /pas de chance|perdu|dommage|rejouez/i.test(lot)
+// ---- Type des lots (roue v2, R1 ; le reste de la normalisation : src/lib/lots.ts) ----
+
+export const TYPES_LOT: readonly TypeLot[] = ['lot', 'points', 'perdant']
+export const POINTS_LOT_MIN = 1
+export const POINTS_LOT_MAX = 10_000
+
+/** Ancienne règle (avant R1), réservée aux lots et tirages enregistrés sans type. */
+const ANCIEN_LIBELLE_PERDANT = /pas de chance|perdu|dommage|rejouez/i
+
+export function typeDeduitDuLibelle(libelle: string): TypeLot {
+  return ANCIEN_LIBELLE_PERDANT.test(libelle) ? 'perdant' : 'lot'
+}
+
+export function estTypeLot(v: unknown): v is TypeLot {
+  return TYPES_LOT.includes(v as TypeLot)
+}
+
+/** Type résolu d'un tirage : celui figé au tirage, à défaut l'ancienne règle sur le libellé (tirages d'avant R1). */
+export function typeTirage(t: Pick<Tirage, 'lot' | 'typeLot'>): TypeLot {
+  return estTypeLot(t.typeLot) ? t.typeLot : typeDeduitDuLibelle(t.lot)
+}
+
+/** Lot physique à remettre au comptoir (code gagnant, coût, statistiques de gains) : ni consolation en points, ni perdant. */
+export function estGainPhysique(type: TypeLot): boolean {
+  return type === 'lot'
 }
 
 // ---- Code gagnant vérifié en caisse (P0-U3) ----
@@ -101,11 +125,16 @@ export function normaliserCodeGagnant(saisi: string): string | null {
   return /^[A-Z0-9]{6}$/.test(c) ? c : null
 }
 
-/** valable = gain du jour pas encore remis ; expire = gain d'un autre jour (le code ne vaut que le jour du tirage). */
-export type StatutGain = 'valable' | 'remis' | 'perdant' | 'expire'
+/**
+ * valable = gain du jour pas encore remis ; expire = gain d'un autre jour (le code ne vaut que le jour du tirage) ;
+ * consolation = lot de type « points » (R1) : rien à remettre au comptoir. Le type vient du tirage (`typeTirage`).
+ */
+export type StatutGain = 'valable' | 'remis' | 'perdant' | 'consolation' | 'expire'
 
 export function statutGain(t: Tirage, maintenant = new Date()): StatutGain {
-  if (estPerdant(t.lot)) return 'perdant'
+  const type = typeTirage(t)
+  if (type === 'perdant') return 'perdant'
+  if (type === 'points') return 'consolation'
   if (t.remis) return 'remis'
   return memeJour(new Date(t.date), maintenant) ? 'valable' : 'expire'
 }
@@ -113,7 +142,7 @@ export function statutGain(t: Tirage, maintenant = new Date()): StatutGain {
 /** Parmi les tirages portant ce code (collision possible d'un jour à l'autre), celui du jour d'abord. */
 export function tirageDuCode(tirages: Tirage[], maintenant = new Date()): Tirage | undefined {
   const duJour = tirages.filter((t) => memeJour(new Date(t.date), maintenant))
-  return duJour.find((t) => !t.remis && !estPerdant(t.lot)) ?? duJour[0] ?? tirages[0]
+  return duJour.find((t) => !t.remis && estGainPhysique(typeTirage(t))) ?? duJour[0] ?? tirages[0]
 }
 
 /** « mar. 10 nov. 2026 » : jour de validité affiché à côté du code gagnant. */
@@ -124,6 +153,7 @@ export function jourEnClair(d: Date): string {
 /** Message de la caisse pour un code vérifié (`remis.par` = nom de qui l'a remis). */
 export function messageGain(g: { statut: StatutGain; lot: string; date: string; remis: { le: string; par: string } | null }): string {
   if (g.statut === 'perdant') return `Tirage perdant (« ${g.lot} ») : aucun lot à remettre.`
+  if (g.statut === 'consolation') return `Lot de consolation en points (« ${g.lot} ») : aucun lot à remettre au comptoir.`
   if (g.statut === 'expire') return `Code expiré : il n’était valable que le ${jourEnClair(new Date(g.date))}, jour du tirage. Rien à remettre.`
   if (g.statut === 'remis') {
     const le = g.remis ? new Date(g.remis.le) : null

@@ -37,7 +37,23 @@ export interface ConfigProgramme {
   rattrapage?: { actif?: boolean; delaiJours?: number }
 }
 
+/**
+ * Type d'un lot de la roue (roue v2, R1) : `lot` = lot physique remis au comptoir (code gagnant), `points` = consolation
+ * en points de fidélité (`points`), `perdant` = rien à gagner. Remplace la détection par libellé (« Dommage ! »…).
+ */
+export type TypeLot = 'lot' | 'points' | 'perdant'
+
 export interface Lot {
+  /**
+   * Identifiant stable (R1) : généré à la création, jamais réattribué, conservé quand le lot est renommé. Absent des
+   * configs d'avant R1 : `normaliserLots` (src/lib/lots.ts) en déduit un, stable, de la position et du libellé.
+   * Toujours écrit par le serveur, Réglages, le seed et les défauts.
+   */
+  id?: string
+  /** Type explicite (R1). Absent des configs d'avant R1 : déduit de l'ancien libellé (`typeLot`). Toujours écrit. */
+  type?: TypeLot
+  /** Montant de la consolation (1 à 10 000 points) si `type` vaut 'points' (crédit au tirage : lot R2). */
+  points?: number
   libelle: string
   /** En %, ex. 30. Si le total ≠ 100, les chances sont recalculées au prorata. */
   probabilite: number
@@ -195,8 +211,11 @@ export interface CommercePublic {
   lienUberEats?: string
   recompense: string
   seuilTampons: number
-  /** Libellés des lots jouables, dans l'ordre de la roue — sans probabilité (le tirage est fait par le serveur). */
-  lots: Pick<Lot, 'libelle'>[]
+  /**
+   * Lots jouables, dans l'ordre de la roue : id (la roue retrouve le secteur du lot tiré par cet id), libellé et type
+   * résolu (une consolation s'affiche comme telle) — jamais la probabilité (le tirage est fait par le serveur).
+   */
+  lots: (Pick<Lot, 'libelle'> & { id: string; type: TypeLot })[]
   actif: boolean
   demo: boolean
   catalogue?: Pick<RecompensePoints, 'nom' | 'cout' | 'description'>[]
@@ -464,6 +483,10 @@ export interface Tirage {
   commerceId: string
   clientId: string
   lot: string
+  /** Id du lot tiré (R1) ; absent des tirages d'avant R1. */
+  lotId?: string
+  /** Type du lot figé au tirage (R1) ; absent des tirages d'avant R1 (déduit alors du libellé : `typeTirage`). */
+  typeLot?: TypeLot
   date: string
   /** Code gagnant à montrer au comptoir (tirages faits par le serveur). */
   code?: string

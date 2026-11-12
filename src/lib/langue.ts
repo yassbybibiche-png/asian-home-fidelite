@@ -160,6 +160,8 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'Merci {prenom}, votre carte est à votre nom.': 'Thank you {prenom}, the card is now in your name.',
   // Résultat : gain / perdu.
   '{bravo}, vous avez gagné :': '{bravo}, you won:',
+  '{bravo}, lot de consolation :': '{bravo}, consolation prize:',
+  'Rien à retirer au comptoir : votre visite du jour compte sur votre carte de fidélité.': 'Nothing to collect at the counter: today’s visit counts on your loyalty card.',
   'Bravo': 'Well done',
   'Pas de lot cette fois{prenom}… mais votre visite compte !': 'No prize this time{prenom}… but your visit counts!',
   'Votre visite du jour est bien enregistrée sur votre carte de fidélité : un tampon de plus vers votre récompense.':

@@ -107,8 +107,16 @@ function vuePubliqueAttendue(c: CommercePublic, route: string) {
   assert.equal(c.coordonnees, '12 rue des Lilas, 75011 Paris')
   assert.equal(c.actif, true)
   assert.equal(c.demo, false)
-  // Libellés des lots jouables, dans l'ordre, sans probabilité.
-  assert.deepEqual(c.lots, [{ libelle: 'Nems offerts' }, { libelle: 'Mochi offert' }, { libelle: 'Pas de chance' }])
+  // Libellés des lots jouables, dans l'ordre, sans probabilité. Roue v2 R1 (décision utilisateur du 12/11/2026) : + id
+  // stable et type résolu (« Pas de chance » enregistré sans type → perdant), rien d'autre.
+  assert.deepEqual(
+    c.lots.map((l) => [Object.keys(l).sort().join(), l.libelle, l.type]),
+    [
+      ['id,libelle,type', 'Nems offerts', 'lot'],
+      ['id,libelle,type', 'Mochi offert', 'lot'],
+      ['id,libelle,type', 'Pas de chance', 'perdant'],
+    ],
+  )
   // Catalogue : ce que le client peut échanger (nom, coût, description) — affiché sur sa carte.
   assert.deepEqual(c.catalogue, [
     { nom: 'Boisson offerte', cout: 80, description: 'Soda ou thé glacé' },
@@ -157,7 +165,7 @@ describe('P0-S3 : vue publique minimale (routes HTTP)', () => {
     vuePubliqueAttendue(c, 'GET /commerces')
     // Asian Home Paris (réel) : même vue, mêmes interdits.
     const ah = r.contenu.commerces.find((x: CommercePublic) => x.id === 'c-asian-home-paris')
-    assert.ok(ah.lots.length >= 2 && ah.lots.every((l: object) => Object.keys(l).join() === 'libelle'))
+    assert.ok(ah.lots.length >= 2 && ah.lots.every((l: object) => Object.keys(l).sort().join() === 'id,libelle,type'))
     assert.ok(ah.lienGoogle && ah.coordonnees)
   })
 
@@ -192,7 +200,8 @@ describe('P0-S3 : vue publique minimale (routes HTTP)', () => {
       const r = await srv.api('GET', `/commerces/${commerceId}/etat`, undefined, entetes)
       assert.equal(r.statut, 200)
       const c = r.contenu.commerce as Commerce
-      assert.deepEqual(c.lots, REGLAGES.lots, 'probabilités (et lot à 0 %) présentes')
+      // R1 : chaque lot écrit porte aussi un id et un type, retirés pour comparer au reste.
+      assert.deepEqual(c.lots.map(({ id, type, ...l }) => (assert.ok(id && type), l)), REGLAGES.lots, 'probabilités (et lot à 0 %) présentes')
       assert.deepEqual(c.reglesReponseAuto, REGLAGES.reglesReponseAuto)
       assert.equal(c.eurosParPoint, 2.5)
       assert.deepEqual(c.catalogue, REGLAGES.catalogue, 'catalogue avec ses identifiants')
@@ -264,7 +273,7 @@ describe('P0-S3 : parcours public avec le client du front (fiche publique unique
 
     // Le commerçant garde ses probabilités pour régler la roue.
     const etat = await api.etat(complet.id, acces)
-    assert.deepEqual(etat.commerce.lots, REGLAGES.lots)
+    assert.deepEqual(etat.commerce.lots.map(({ id, type, ...l }) => (assert.ok(id && type), l)), REGLAGES.lots)
   })
 
   test('menu public via le client du front : commerce joint sans configuration privée', async () => {

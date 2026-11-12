@@ -12,6 +12,7 @@ import { JOURS_SEMAINE, PALIERS_DEFAUT } from '../lib/programme'
 import { compteurLibelle, MAX_CARACTERES_ROUE } from '../lib/roue'
 import { CONSERVATION_DEFAUT_MOIS, CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, libelleDuree } from '../lib/rgpd'
 import { basculerAccroche, coutLotValide, jourParis } from '../lib/mesure'
+import { libellesEnDouble, normaliserLots, nouvelIdLot, POINTS_LOT_MAX, POINTS_LOT_MIN } from '../lib/lots'
 
 /** Client fictif de l'aperçu (jamais enregistré). */
 const APERCU_CLIENT: Client = { id: 'apercu', commerceId: '', prenom: 'Aperçu', tampons: 3, points: 42, visites: [], derniereVisite: null, creeLe: '2026-01-01T00:00:00.000Z' }
@@ -75,7 +76,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   const { majCommerce, estDemo } = useStore()
   const { executer, enCours, erreur } = useAction()
   const [brouillon, setBrouillon] = useState<Commerce>(commerce)
-  const [lotsEdites, setLotsEdites] = useState<Lot[]>(commerce.lots)
+  // R1 : lots normalisés dès l'ouverture (id + type résolus) → toujours écrits, et un lot renommé garde son id.
+  const [lotsEdites, setLotsEdites] = useState<Lot[]>(() => normaliserLots(commerce.lots))
   const [enregistre, setEnregistre] = useState(false)
   const [onglet, setOnglet] = useState<OngletReglages>('commerce')
 
@@ -84,6 +86,9 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   // Coût unitaire des lots (P2-Q3) : facultatif, 0 à 1 000 € ; sert au tableau de bord, jamais montré aux clients.
   const coutsValides = lots.every((l) => coutLotValide(l.coutCentimes))
   const total = lots.reduce((s, l) => s + (Number.isFinite(l.probabilite) ? l.probabilite : 0), 0)
+  // R1 : libellés uniques (casse et espaces ignorés), points entiers bornés pour une consolation — comme le serveur.
+  const doublons = libellesEnDouble(lots)
+  const pointsValides = lots.every((l) => l.type !== 'points' || (Number.isInteger(l.points) && l.points! >= POINTS_LOT_MIN && l.points! <= POINTS_LOT_MAX))
   const nomValide = brouillon.nom.trim().length > 0
   const seuilValide = Number.isInteger(brouillon.seuilTampons) && brouillon.seuilTampons >= 2 && brouillon.seuilTampons <= 50
   const [catalogue, setCatalogue] = useState<RecompensePoints[]>(commerce.catalogue ?? [])
@@ -103,7 +108,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   const conservationValide = Number.isInteger(conservation) && conservation >= CONSERVATION_MIN_MOIS && conservation <= CONSERVATION_MAX_MOIS
   // Liens de commande (P1-C5) : vides ou en https (le serveur refuse le reste).
   const liensCommandeValides = [brouillon.lienDeliveroo, brouillon.lienUberEats].every((l) => !l?.trim() || /^https:\/\/\S+$/i.test(l.trim()))
-  const valide = nomValide && seuilValide && lots.length >= 2 && probasValides && coutsValides && total > 0 && tauxValide && catalogueValide && !problemes.length && conservationValide && liensCommandeValides
+  const lotsValides = lots.length >= 2 && probasValides && coutsValides && pointsValides && !doublons.length && total > 0
+  const valide = nomValide && seuilValide && lotsValides && tauxValide && catalogueValide && !problemes.length && conservationValide && liensCommandeValides
 
   function maj<K extends keyof Commerce>(champ: K, valeur: Commerce[K]) {
     setBrouillon((b) => ({ ...b, [champ]: valeur }))
@@ -565,7 +571,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
         <legend className="sr-only">Roulette</legend>
         <h2 className="titre-carte">Lots de la roulette</h2>
         <p className="text-sm text-gray-600">
-          Texte libre + chance de sortir (en %) + coût pour vous (€, facultatif : matière et emballage d’un lot, sert au coût des lots du tableau de bord, jamais montré aux clients). Un lot « Dommage ! » (perdant) est possible. Visez {MAX_CARACTERES_ROUE} caractères au plus : le libellé tient alors en entier sur la roue ; la liste des lots sous la roue l’affiche toujours en entier.
+          Texte libre + chance de sortir (en %) + coût pour vous (€, facultatif : matière et emballage d’un lot, sert au coût des lots du tableau de bord, jamais montré aux clients). Chaque lot garde son type (lot à retirer, points de consolation ou perdant) — le choix du type arrive avec le réglage complet de la roue ; un nouveau lot est un lot à retirer. Chaque libellé doit être différent. Visez {MAX_CARACTERES_ROUE} caractères au plus : le libellé tient alors en entier sur la roue ; la liste des lots sous la roue l’affiche toujours en entier.
         </p>
         <ul className="space-y-2">
           {lotsEdites.map((lot, i) => (
@@ -633,11 +639,11 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
         <button
           type="button"
           className="bouton-secondaire w-full"
-          onClick={() => (setLotsEdites((ls) => [...ls, { libelle: '', probabilite: 10 }]), setEnregistre(false))}
+          onClick={() => (setLotsEdites((ls) => [...ls, { id: nouvelIdLot(), type: 'lot', libelle: '', probabilite: 10 }]), setEnregistre(false))}
         >
           + Ajouter un lot
         </button>
-        <p className={`text-sm ${lots.length >= 2 && probasValides && coutsValides && total > 0 ? 'text-gray-600' : 'text-red-700'}`}>
+        <p className={`text-sm ${lotsValides ? 'text-gray-600' : 'text-red-700'}`}>
           {lots.length} lot{lots.length > 1 ? 's' : ''} · total {total} %
           {lots.length < 2
             ? ' — il en faut au moins 2'
@@ -645,11 +651,15 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
               ? ' — chaque chance doit être entre 0 et 100 %'
               : !coutsValides
                 ? ' — chaque coût doit être entre 0 et 1 000 €'
-                : total <= 0
-                  ? ' — au moins un lot doit avoir une chance > 0'
-                  : total !== 100
-                    ? ' — le total ne fait pas 100 % : les chances seront recalculées au prorata'
-                    : ''}
+                : doublons.length
+                  ? ` — libellé en double : ${doublons.join(', ')}`
+                  : !pointsValides
+                    ? ` — un lot « points » doit offrir entre ${POINTS_LOT_MIN} et ${POINTS_LOT_MAX.toLocaleString('fr-FR')} points`
+                    : total <= 0
+                      ? ' — au moins un lot doit avoir une chance > 0'
+                      : total !== 100
+                        ? ' — le total ne fait pas 100 % : les chances seront recalculées au prorata'
+                        : ''}
         </p>
         <Interrupteur
           libelle="Test A/B : phrase d’accroche de la page de jeu"

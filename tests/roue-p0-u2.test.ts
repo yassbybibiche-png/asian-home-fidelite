@@ -22,7 +22,8 @@ import {
   RAYON_LIBELLE,
   secteursAffiches,
 } from '../src/lib/roue.ts'
-import { estPerdant, lotsJouables, secteurs, tirerLot } from '../src/lib/roulette.ts'
+import { lotsJouables, secteurs, tirerLot } from '../src/lib/roulette.ts'
+import { typeLot } from '../src/lib/lots.ts'
 import type { Commerce } from '../src/types.ts'
 
 const RACINE = join(import.meta.dirname, '..')
@@ -71,7 +72,8 @@ describe('P0-U2 : règle de longueur et abréviation', () => {
 describe('P0-U2 : libellés par défaut ≤ 12 caractères', () => {
   test('nouveau commerce (production, POST /commerces) : avant → après', () => {
     const libelles = nouveauCommerce('Test', 'restaurant', '').lots.map((l) => l.libelle)
-    assert.deepEqual(libelles, ['Remise 10 %', 'Petit cadeau', 'Remise 5 %', 'Dommage !'])
+    // Roue v2 R1 (décision utilisateur du 12/11/2026) : « Dommage ! » devient la consolation « +10 points ».
+    assert.deepEqual(libelles, ['Remise 10 %', 'Petit cadeau', 'Remise 5 %', '+10 points'])
     for (const l of libelles) assert.ok(Array.from(l).length <= MAX_CARACTERES_ROUE, l)
   })
 
@@ -82,7 +84,7 @@ describe('P0-U2 : libellés par défaut ≤ 12 caractères', () => {
     const [asianHome] = seed.commerces as unknown as Commerce[]
     assert.deepEqual(
       asianHome.lots.map((l) => l.libelle),
-      ['Nems offerts', 'Thé glacé', 'Mochi offert', 'Remise 10 %', 'Dommage !'],
+      ['Nems offerts', 'Thé glacé', 'Mochi offert', 'Remise 10 %', '+10 points'],
     )
   })
 
@@ -91,9 +93,16 @@ describe('P0-U2 : libellés par défaut ≤ 12 caractères', () => {
     for (const t of seed.tirages as { commerceId: string; lot: string }[]) assert.ok(lotsParCommerce.get(t.commerceId)?.has(t.lot), t.lot)
   })
 
+  // Roue v2 R1 (décision utilisateur du 12/11/2026) : le type est explicite, plus déduit du libellé. Intention gardée :
+  // un perdant (explicite, ou ancien « Dommage ! » sans type) reste un perdant, les autres lots restent des lots.
   test('le lot perdant raccourci reste reconnu comme perdant (pas de code gagnant)', () => {
-    assert.equal(estPerdant('Dommage !'), true)
-    for (const l of ['Remise 10 %', 'Petit cadeau', 'Remise 5 %', 'Thé glacé', 'Nems offerts']) assert.equal(estPerdant(l), false, l)
+    assert.equal(typeLot({ libelle: 'Dommage !', type: 'perdant' }), 'perdant')
+    assert.equal(typeLot({ libelle: 'Dommage !' }), 'perdant', 'config d’avant R1 sans type')
+    for (const l of ['Remise 10 %', 'Petit cadeau', 'Remise 5 %', 'Thé glacé', 'Nems offerts']) assert.equal(typeLot({ libelle: l }), 'lot', l)
+    assert.deepEqual(
+      nouveauCommerce('Test', 'restaurant', '').lots.map((l) => l.type),
+      ['lot', 'lot', 'lot', 'points'],
+    )
   })
 })
 

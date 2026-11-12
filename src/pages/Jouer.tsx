@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { useRoute } from '../router'
-import type { Client, Commerce, CommercePublic, Tirage } from '../types'
+import type { Client, Commerce, CommercePublic, Tirage, TypeLot } from '../types'
 import { analyserContact } from '../lib/fidelite'
-import { estPerdant, lotsJouables, peutJouer, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
+import { normaliserLots, typeTirage } from '../lib/lots'
+import { lotsJouables, peutJouer, type LotRoue, rotationCible, secteurs, statutJeu, tirageDuJour, tirerLot, type StatutJeu } from '../lib/roulette'
 import {
   apresVerification,
   ETAPES_VALIDATION,
@@ -32,6 +33,7 @@ import {
   NOTE_WALLET,
   TEXTE_CODE_A_MONTRER,
   TEXTE_CODE_UNE_FOIS,
+  TEXTE_CONSOLATION,
   TEXTE_DEJA_JOUE,
   TEXTE_GAIN_SANS_CODE,
   TEXTE_PERDU_PROCHAINE,
@@ -84,7 +86,7 @@ type CommerceJeu = Commerce | CommercePublic
 
 function verifierCommerce(commerce: CommerceJeu): ReactNode {
   if (!commerce.actif) return <MessagePublic titre={commerce.nom}>Le jeu de ce commerce n’est plus disponible.</MessagePublic>
-  if (lotsJouables(commerce.lots).length === 0) return <MessagePublic titre={commerce.nom}>Aucun lot n’est configuré pour le moment.</MessagePublic>
+  if (lotsJouables<LotRoue>(commerce.lots).length === 0) return <MessagePublic titre={commerce.nom}>Aucun lot n’est configuré pour le moment.</MessagePublic>
   return null
 }
 
@@ -324,13 +326,16 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
   function tourner() {
     // Pas de visite validée aujourd'hui ou déjà joué : rien ne se passe (le jeu ne crée jamais de visite).
     if (!joueur || etape !== 'pret' || !peutJouer(joueur, etat.tirages, commerce.id)) return
-    const parts = secteurs(commerce.lots)
+    // R1 : lots normalisés (id + type résolus) ; le tirage fige l'id et le type du lot, comme le serveur.
+    const parts = secteurs(normaliserLots(commerce.lots))
     const secteur = parts[tirerLot(commerce.lots)]
     const tirage: Tirage = {
       id: `ti-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       commerceId: commerce.id,
       clientId: joueur.id,
       lot: secteur.lot.libelle,
+      lotId: secteur.lot.id,
+      typeLot: secteur.lot.type,
       date: new Date().toISOString(),
     }
     // Enregistré dès le lancement : recharger la page pendant l'animation ne permet pas de rejouer.
@@ -364,7 +369,7 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
           />
         )
       ) : etape === 'resultat' && gain ? (
-        <Resultat lot={gain.lot} prenom={joueur.prenom} lienCarte={`#/carte/${joueur.id}`} />
+        <Resultat lot={gain.lot} type={typeTirage(gain)} prenom={joueur.prenom} lienCarte={`#/carte/${joueur.id}`} />
       ) : dejaJoue ? (
         <MessageDejaJoue prenom={joueur.prenom} lot={dejaJoue.lot} />
       ) : statut === 'sansVisite' ? (
@@ -635,7 +640,7 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
         )
       ) : etape !== 'pret' && gain ? (
         etape === 'resultat' ? (
-          <Resultat lot={gain.lot} prenom={joueur.prenom} code={gain.perdant ? undefined : gain.code} lienCarte={`#/carte/${joueur.clientId}`} />
+          <Resultat lot={gain.lot} type={gain.type} prenom={joueur.prenom} code={gain.perdant ? undefined : gain.code} lienCarte={`#/carte/${joueur.clientId}`} />
         ) : (
           <button className="bouton w-full py-4 text-lg" disabled>
             {t('La roue tourne…')}
@@ -965,8 +970,11 @@ export function GarderCarte({ lienCarte }: { lienCarte: string }) {
   )
 }
 
-export function Resultat({ lot, prenom, code, lienCarte }: { lot: string; prenom: string; code?: string; lienCarte: string }) {
-  const perdu = estPerdant(lot)
+/** `type` : type du lot tiré (R1) ; absent (serveur d'avant R1) = déduit de l'ancien libellé, une seule fois, ici. */
+export function Resultat({ lot, type, prenom, code, lienCarte }: { lot: string; type?: TypeLot; prenom: string; code?: string; lienCarte: string }) {
+  const typeResolu = typeTirage({ lot, typeLot: type })
+  const perdu = typeResolu === 'perdant'
+  const consolation = typeResolu === 'points'
   const { langue, t } = useLangue()
   // Retour tactile à l'apparition du résultat (Android ; sans effet sur iPhone, qui n'a pas l'API).
   useEffect(() => void vibrer(perdu ? MOTIF_VIBRATION_PERDU : MOTIF_VIBRATION_GAIN), [perdu])
@@ -988,10 +996,16 @@ export function Resultat({ lot, prenom, code, lienCarte }: { lot: string; prenom
       <p className="text-5xl" aria-hidden>
         🎉
       </p>
-      <p className="mt-2 text-lg font-bold">{t('{bravo}, vous avez gagné :', { bravo: avecPrenom(t('Bravo'), prenom) })}</p>
+      <p className="mt-2 text-lg font-bold">
+        {consolation ? t('{bravo}, lot de consolation :', { bravo: avecPrenom(t('Bravo'), prenom) }) : t('{bravo}, vous avez gagné :', { bravo: avecPrenom(t('Bravo'), prenom) })}
+      </p>
       <p className="mt-1 font-titre text-4xl leading-tight font-bold break-words text-magenta-700">{lot}</p>
       {code ? (
         <CodeGagnant code={code} />
+      ) : consolation ? (
+        <p className="mt-2 text-sm text-gray-600" data-consolation>
+          {t(TEXTE_CONSOLATION)}
+        </p>
       ) : (
         <>
           <p className="mt-2 text-sm text-gray-600">{t(TEXTE_GAIN_SANS_CODE)}</p>
