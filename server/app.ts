@@ -2357,6 +2357,9 @@ export async function creerServeur(o: OptionsServeur) {
         // Une seule relance automatique par client et par tournée : l'anniversaire passe avant, puis le gain.
         for (const modele of ['anniversaire', 'gainExpire', 'inactif'] as const) {
           if (!(modele === 'gainExpire' ? !!gain : regles[modele] && relanceAutoDue(modele, client, deja, t))) continue
+          // Revue Codex, point P1 : `deja` est plafonné à 50 envois — un `incertain` plus ancien n'y figure plus. Une
+          // relance due d'après cette fenêtre est confirmée sur TOUS les envois de ce modèle (comme `envoisDuTirage`).
+          if (modele !== 'gainExpire' && !relanceAutoDue(modele, client, await st.envoisDuModele(commerce.id, client.id, modele), t)) continue
           // Revue Codex finale, point 5 : le modèle retenu a déjà échoué chez le prestataire aujourd'hui (tentative de la
           // tournée interrompue) → client déjà traité, rien de plus (ni ce modèle ni un autre en repli). Filtre posé ici,
           // à côté de la règle « une relance par client et par tournée » qu'il prolonge, et pas dans `relanceAutoDue`.

@@ -485,6 +485,15 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
         ),
         [],
       ),
+    // Revue Codex, point P1 : `inactif` / `anniversaire` sont des valeurs historiques de la colonne `modele` (0007),
+    // rangées telles quelles par `modeleColonneEnvoi` → filtre sur la colonne.
+    envoisDuModele: (commerceId, clientId, modele) =>
+      ouVide(
+        lirePages<EnvoiRelance>('envois', (debut, fin) =>
+          sb.from('envois').select('donnees').eq('commerce_id', commerceId).eq('client_id', clientId).eq('modele', modele).order('date', { ascending: false }).order('id').range(debut, fin),
+        ),
+        [],
+      ),
     schemaRelances: async () => {
       try {
         await ok('envois', sb.from('envois').select('*').limit(0))

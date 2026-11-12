@@ -226,6 +226,11 @@ export interface Stockage {
   envois(commerceId: string, limite: number, clientId?: string): P<EnvoiRelance[]>
   /** Envois portant ce `tirageId` (R7, revue Codex F1) : tous, sans fenêtre de lecture. Supabase sans la 0007 : []. */
   envoisDuTirage(commerceId: string, clientId: string, tirageId: string): P<EnvoiRelance[]>
+  /**
+   * Envois de ce client pour ce modèle `inactif` / `anniversaire` (revue Codex, point P1) : tous, sans fenêtre de lecture —
+   * un envoi `incertain` ancien reste visible pour `relanceAutoDue` même après plus de 50 envois plus récents.
+   */
+  envoisDuModele(commerceId: string, clientId: string, modele: 'inactif' | 'anniversaire'): P<EnvoiRelance[]>
   /** Table de la migration 0007 présente (toujours vrai sous SQLite). */
   schemaRelances(): P<boolean>
   /**
@@ -433,6 +438,7 @@ export function ouvrirStockage(fichier: string) {
     envoisDuTirage: db.prepare(
       "SELECT donnees FROM envois WHERE commerce_id = ? AND client_id = ? AND json_extract(donnees, '$.tirageId') = ? ORDER BY date DESC, rowid DESC",
     ),
+    envoisDuModele: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? AND client_id = ? AND modele = ? ORDER BY date DESC, rowid DESC'),
     compterEvenement: db.prepare(
       'INSERT INTO evenements_jour (commerce_id, jour, type, n) VALUES (?, ?, ?, 1) ON CONFLICT (commerce_id, jour, type) DO UPDATE SET n = n + 1',
     ),
@@ -547,6 +553,7 @@ export function ouvrirStockage(fichier: string) {
     envois: (commerceId: string, limite: number, clientId?: string) =>
       lire<EnvoiRelance>(clientId ? q.envoisClient.all(commerceId, clientId, limite) : q.envois.all(commerceId, limite)),
     envoisDuTirage: (commerceId: string, clientId: string, tirageId: string) => lire<EnvoiRelance>(q.envoisDuTirage.all(commerceId, clientId, tirageId)),
+    envoisDuModele: (commerceId: string, clientId: string, modele: 'inactif' | 'anniversaire') => lire<EnvoiRelance>(q.envoisDuModele.all(commerceId, clientId, modele)),
     schemaRelances: () => true,
     compterEvenement: (commerceId: string, jour: string, type: TypeEvenement) => void q.compterEvenement.run(commerceId, jour, type),
     compteursEvenements: (commerceId: string, depuis: string) =>
