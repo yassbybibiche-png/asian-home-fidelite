@@ -140,6 +140,14 @@ export interface Stockage {
   marquerTirageRemis(t: Tirage, activeApres?: string): P<boolean>
   /** Activation du code par le client (R3, `activeLe`) : même écriture conditionnelle — jamais sur un tirage déjà remis. */
   activerTirage(t: Tirage): P<boolean>
+  tirage(commerceId: string, id: string): P<Tirage | undefined>
+  /**
+   * Réclamation / libération de la relance d'un gain (R7, revue Codex F2) : écrit `t` seulement si, en base, le tirage
+   * n'est pas remis, porte `relanceGainLe` = `attendu` (absent si undefined) et le même `activeLe` que `t` — une seule
+   * requête conditionnelle : une remise ou une activation arrivée entre-temps n'est jamais écrasée, et de deux
+   * réclamations simultanées une seule passe. false = rien écrit.
+   */
+  marquerRelanceGain(t: Tirage, attendu: string | undefined): P<boolean>
   avis(commerceId: string): P<Avis[]>
   unAvis(commerceId: string, id: string): P<Avis | undefined>
   ajouterAvis(a: Avis): P<void>
@@ -215,6 +223,8 @@ export interface Stockage {
   majEnvoi(e: EnvoiRelance): P<void>
   /** Du plus récent au plus ancien ; `clientId` : ceux de ce client seulement. */
   envois(commerceId: string, limite: number, clientId?: string): P<EnvoiRelance[]>
+  /** Envois portant ce `tirageId` (R7, revue Codex F1) : tous, sans fenêtre de lecture. Supabase sans la 0007 : []. */
+  envoisDuTirage(commerceId: string, clientId: string, tirageId: string): P<EnvoiRelance[]>
   /** Table de la migration 0007 présente (toujours vrai sous SQLite). */
   schemaRelances(): P<boolean>
   /**
@@ -378,6 +388,11 @@ export function ouvrirStockage(fichier: string) {
     remettreTirageActif: db.prepare(
       "UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL AND json_extract(donnees, '$.activeLe') > ?",
     ),
+    tirage: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? AND id = ?'),
+    marquerRelanceGain: db.prepare(
+      `UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL
+        AND json_extract(donnees, '$.relanceGainLe') IS ? AND json_extract(donnees, '$.activeLe') IS ?`,
+    ),
     avis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? ORDER BY date DESC'),
     unAvis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? AND id = ?'),
     ajoutAvis: db.prepare('INSERT INTO avis (id, commerce_id, date, donnees) VALUES (?, ?, ?, ?)'),
@@ -417,6 +432,9 @@ export function ouvrirStockage(fichier: string) {
     majEnvoi: db.prepare('UPDATE envois SET statut = ?, donnees = ? WHERE id = ? AND commerce_id = ?'),
     envois: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
     envoisClient: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? AND client_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
+    envoisDuTirage: db.prepare(
+      "SELECT donnees FROM envois WHERE commerce_id = ? AND client_id = ? AND json_extract(donnees, '$.tirageId') = ? ORDER BY date DESC, rowid DESC",
+    ),
     compterEvenement: db.prepare(
       'INSERT INTO evenements_jour (commerce_id, jour, type, n) VALUES (?, ?, ?, 1) ON CONFLICT (commerce_id, jour, type) DO UPDATE SET n = n + 1',
     ),
@@ -472,6 +490,9 @@ export function ouvrirStockage(fichier: string) {
     marquerTirageRemis: (t: Tirage, activeApres?: string) =>
       Number((activeApres === undefined ? q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId) : q.remettreTirageActif.run(JSON.stringify(t), t.id, t.commerceId, activeApres)).changes) > 0,
     activerTirage: (t: Tirage) => Number(q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId).changes) > 0,
+    tirage: (commerceId: string, id: string) => lire<Tirage>(q.tirage.all(commerceId, id))[0],
+    marquerRelanceGain: (t: Tirage, attendu: string | undefined) =>
+      Number(q.marquerRelanceGain.run(JSON.stringify(t), t.id, t.commerceId, attendu ?? null, t.activeLe ?? null).changes) > 0,
 
     avis: (commerceId: string) => lire<Avis>(q.avis.all(commerceId)),
     unAvis: (commerceId: string, id: string) => lire<Avis>(q.unAvis.all(commerceId, id))[0],
@@ -527,6 +548,7 @@ export function ouvrirStockage(fichier: string) {
     majEnvoi: (e: EnvoiRelance) => inserer(q.majEnvoi, e.statut, JSON.stringify(e), e.id, e.commerceId),
     envois: (commerceId: string, limite: number, clientId?: string) =>
       lire<EnvoiRelance>(clientId ? q.envoisClient.all(commerceId, clientId, limite) : q.envois.all(commerceId, limite)),
+    envoisDuTirage: (commerceId: string, clientId: string, tirageId: string) => lire<EnvoiRelance>(q.envoisDuTirage.all(commerceId, clientId, tirageId)),
     schemaRelances: () => true,
     compterEvenement: (commerceId: string, jour: string, type: TypeEvenement) => void q.compterEvenement.run(commerceId, jour, type),
     compteursEvenements: (commerceId: string, depuis: string) =>

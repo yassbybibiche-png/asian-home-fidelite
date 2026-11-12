@@ -195,6 +195,11 @@ export interface EnvoiRelance {
   auteur: string
   /** Raison d'un refus / d'une erreur (texte affichable, sans secret). */
   raison?: string
+  /**
+   * Refus dû à la colonne `modele` partagée sous Supabase (R7, revue Codex F5) : `gainExpire` y est rangé sous `libre`,
+   * donc un message libre et une relance de gain ne partent pas le même jour vers le même client.
+   */
+  motif?: 'collision_libre_gain'
   /** Identifiant du message chez le prestataire (Twilio SID, Brevo messageId). */
   idPrestataire?: string
 }
@@ -535,6 +540,11 @@ export interface Tirage {
   activeLe?: string
   /** Lot remis au comptoir après vérification du code en caisse (P0-U3) : un code = une remise. */
   remis?: { le: string; par: EntreeJournal['auteur'] }
+  /**
+   * Relance « gain bientôt expiré » réclamée (R7, revue Codex F2, ISO) : posé par une écriture conditionnelle (absent en
+   * base) AVANT l'envoi — une seule relance par gain, même entre deux tournées simultanées. Retiré si l'envoi échoue.
+   */
+  relanceGainLe?: string
 }
 
 export interface Avis {

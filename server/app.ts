@@ -12,7 +12,7 @@ import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
 import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
-import { emailGainExpire, gainBientotExpire, gainsARelancer, smsGainExpire } from '../src/lib/relanceGain.ts'
+import { emailGainExpire, gainBientotExpire, gainsARelancer, relanceGainFaite, smsGainExpire } from '../src/lib/relanceGain.ts'
 import {
   debutDuJourParis, DUREE_GAIN_JOURS, finActivation, finGain, gainEnCours, gainsSur30Jours, LIMITE_GAINS_MOIS_MAX, limiteGainsMois, lotsJouables,
   lotsPlafonnes, lotsTirables, messageGain, modeAccesRoue, normaliserCodeGagnant, PLAFOND_JOUR_MAX, refusActivation, statutGain, statutJeu, tirageDuCode, tirageDuJour,
@@ -51,7 +51,7 @@ import { ErreurLogo, LIMITES_LOGO, messageTropLourd, urlLogo, validerLogo, type 
 import { EVENEMENTS_PUBLICS, ajouterJours, basculerAccroche } from '../src/lib/mesure.ts'
 import { CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, dureeConservationMois, estPurgeable, exportClientCsv, libelleDuree, listePurge, nomFichierExportClient } from '../src/lib/rgpd.ts'
 import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSuppression, type CompteurPublic, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
-import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
+import { modeleColonneEnvoi, ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { chiffrerSauvegarde, exporterSauvegarde, nomFichierSauvegarde } from './sauvegarde.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { menuAffichePour, pageMenuIndisponible, pageMenuPrerendue, pageNonTrouvee } from './prerendu.ts'
@@ -2041,6 +2041,19 @@ export async function creerServeur(o: OptionsServeur) {
     envoi: EnvoiRelance
   }
 
+  const LIMITE_LIBRE_GAIN = 'sans migration, la base n’accepte qu’un message libre OU une relance de gain par client et par jour'
+  const COLLISION_GAIN = `Relance « gain bientôt expiré » non envoyée : un message libre est déjà parti aujourd’hui vers ce client (${LIMITE_LIBRE_GAIN}). Nouvel essai à la prochaine tournée.`
+  const COLLISION_LIBRE = `Message libre non envoyé : la relance « gain bientôt expiré » est déjà partie aujourd’hui vers ce client (${LIMITE_LIBRE_GAIN}). Réessayez demain.`
+  /**
+   * Le refus d'unicité vient-il de la colonne `modele` partagée (libre / gainExpire, Supabase) ? Oui si aucune ligne du
+   * MÊME modèle n'occupe le créneau du jour mais qu'une ligne de l'autre modèle (même valeur de colonne) l'occupe.
+   */
+  async function collisionLibreGain(e: EnvoiRelance): Promise<boolean> {
+    if (e.modele !== 'libre' && e.modele !== 'gainExpire') return false
+    const occupe = (await st.envois(e.commerceId, 50, e.clientId)).filter((x) => x.jour === e.jour && (x.statut === 'en_cours' || x.statut === 'envoye'))
+    return !occupe.some((x) => x.modele === e.modele) && occupe.some((x) => modeleColonneEnvoi(x.modele) === modeleColonneEnvoi(e.modele))
+  }
+
   /**
    * Une tentative de relance, tracée dans `envois` quel qu'en soit le résultat :
    * 501 sans prestataire pour ce canal · 409 sans consentement, sans contact, ou déjà envoyée aujourd'hui (même modèle)
@@ -2070,8 +2083,8 @@ export async function creerServeur(o: OptionsServeur) {
       declencheur: demande.declencheur,
       auteur: demande.auteur,
     }
-    async function consigner(statut: StatutEnvoi, http: number, message: string): Promise<Tentative> {
-      const e: EnvoiRelance = { ...envoi, statut, raison: message }
+    async function consigner(statut: StatutEnvoi, http: number, message: string, motif?: EnvoiRelance['motif']): Promise<Tentative> {
+      const e: EnvoiRelance = { ...envoi, statut, raison: message, ...(motif ? { motif } : {}) }
       try {
         await st.ajouterEnvoi(e)
       } catch (err) {
@@ -2092,7 +2105,17 @@ export async function creerServeur(o: OptionsServeur) {
     try {
       await st.ajouterEnvoi(envoi)
     } catch (e) {
-      if (e instanceof ErreurConflit) return consigner('refuse', 409, 'Cette relance a déjà été envoyée à ce client aujourd’hui : rien n’a été renvoyé.')
+      if (e instanceof ErreurConflit) {
+        if (await collisionLibreGain(envoi)) {
+          // Revue Codex F5 — limite sans migration (Supabase) : `gainExpire` est rangé sous `libre` dans la colonne
+          // `envois.modele` (CHECK de 0007), l'index unique (commerce, client, modèle, jour) refuse donc le 2e des deux
+          // le même jour. Refus tracé à part (motif + raison explicites), jamais confondu avec un vrai doublon ; une
+          // relance de gain ainsi refusée est retentée à la tournée suivante (son marqueur est libéré).
+          console.warn(`[relances] ${envoi.modele} refusé : message libre / relance de gain déjà parti aujourd'hui (colonne « modele » partagée, sans migration)`)
+          return consigner('refuse', 409, envoi.modele === 'gainExpire' ? COLLISION_GAIN : COLLISION_LIBRE, 'collision_libre_gain')
+        }
+        return consigner('refuse', 409, 'Cette relance a déjà été envoyée à ce client aujourd’hui : rien n’a été renvoyé.')
+      }
       throw e
     }
 
@@ -2183,6 +2206,53 @@ export async function creerServeur(o: OptionsServeur) {
   // seule relance automatique par client et par tournée, dans l'ordre anniversaire (le jour J seulement), gain (la
   // tournée suivante a encore le temps : fenêtre de 72 h), inactif. La marque du jour porte les règles actives : une
   // règle activée en cours de journée a sa tournée le jour même (les anti-doublons ci-dessus restent les garde-fous).
+  //
+  // Revue Codex R7 — « une seule relance par gain » ne dépend plus d'une fenêtre de lecture ni de la sérialisation des
+  // tournées (en mémoire, par processus) :
+  // • F1 : avant l'envoi, les envois de CE tirage sont relus par `tirageId`, sans limite (`envoisDuTirage`) — les
+  //   50 derniers envois du client ne servent plus qu'à présélectionner ;
+  // • F2 : le tirage est RÉCLAMÉ par une écriture conditionnelle (`relanceGainLe` posé seulement s'il est absent en base,
+  //   tirage non remis, même `activeLe`) : de deux tournées simultanées — deux instances, ou à cheval sur minuit (l'index
+  //   unique des envois est par jour) — une seule passe. Le marqueur est un champ à part : la remise et l'activation
+  //   gardent leurs propres conditions (`remis` absent), et la réclamation ne peut ni effacer une remise ni une activation
+  //   arrivée entre-temps. À l'inverse, une activation lue AVANT la réclamation réécrit le tirage sans le marqueur : la
+  //   relecture F1 des envois (ligne `en_cours` / `envoye` / `test` / `incertain` du tirage) reste alors la garde ;
+  // • F3 : la réclamation relit le tirage et revérifie, à l'heure de l'écriture, qu'il est toujours à relancer
+  //   (`gainBientotExpire` : non remis, pas expiré aux bornes parisiennes, dans les 72 h). Sinon : ni marqueur ni envoi —
+  //   un gain remis ou expiré ne redevient jamais éligible, rien à figer ;
+  // • échec APRÈS réclamation sans rien de parti (`erreur`, `refuse` — dont la collision F5 —, `non_branche`, exception
+  //   avant l'appel) : le marqueur est retiré (écriture conditionnelle sur NOTRE horodatage) et la tournée suivante
+  //   retente, comme le prévoyait R7 (un refus ou une erreur ne comptent pas). `envoye`, `test` et `incertain` (peut-être
+  //   parti) le gardent : jamais de renvoi automatique.
+  async function reclamerRelanceGain(choisi: Tirage): Promise<Tirage | undefined> {
+    if (relanceGainFaite(choisi.id, await st.envoisDuTirage(choisi.commerceId, choisi.clientId, choisi.id))) return undefined
+    const relu = await st.tirage(choisi.commerceId, choisi.id)
+    const quand = maintenant()
+    if (!relu || relu.relanceGainLe || !gainBientotExpire(relu, quand)) return undefined
+    const reclame: Tirage = { ...relu, relanceGainLe: quand.toISOString() }
+    return (await st.marquerRelanceGain(reclame, undefined)) ? reclame : undefined
+  }
+  async function relancerGain(commerce: Commerce, client: Client, reclame: Tirage, site: string) {
+    let parti = true
+    try {
+      const r = await relancer(commerce, client, { modele: 'gainExpire', tirage: reclame, declencheur: 'auto', auteur: 'Automatique' }, site)
+      parti = r.envoi.statut === 'envoye' || r.envoi.statut === 'test' || r.envoi.statut === 'incertain'
+    } catch (e) {
+      parti = false
+      throw e
+    } finally {
+      if (!parti) {
+        const { relanceGainLe, ...libere } = reclame
+        try {
+          // Rien écrit si le tirage a changé entre-temps (remis, réactivé) : le marqueur reste, pas de nouvel essai
+          // automatique pour ce gain — jamais de doublon.
+          await st.marquerRelanceGain(libere, relanceGainLe)
+        } catch (e) {
+          console.warn(`[relances] marqueur de relance du gain non retiré (pas de nouvel essai) : ${e instanceof Error ? e.message : e}`)
+        }
+      }
+    }
+  }
   const tournees = new Map<string, string>()
   const tourneesActives = new Set<string>()
   const tourneesEnCours = new Set<Promise<void>>()
@@ -2219,13 +2289,22 @@ export async function creerServeur(o: OptionsServeur) {
         const deja = await st.envois(commerce.id, 50, client.id)
         const gain = gainsARelancer(gains.get(client.id) ?? [], deja, t)[0]
         // Une seule relance automatique par client et par tournée : l'anniversaire passe avant, puis le gain.
-        const modele = (['anniversaire', 'gainExpire', 'inactif'] as const).find((x) => (x === 'gainExpire' ? !!gain : regles[x] && relanceAutoDue(x, client, deja, t)))
-        // Revue Codex finale, point 5 : le modèle retenu a déjà échoué chez le prestataire aujourd'hui (tentative de la
-        // tournée interrompue) → client déjà traité, rien de plus (ni ce modèle ni un autre en repli). Filtre posé ici,
-        // à côté de la règle « une relance par client et par tournée » qu'il prolonge, et pas dans `relanceAutoDue`.
-        if (!modele || echecAutoDuJour(modele, deja, t)) continue
-        if (modele === 'gainExpire') await relancer(commerce, client, { modele, tirage: gain!, declencheur: 'auto', auteur: 'Automatique' }, site)
-        else await relancer(commerce, client, { modele, declencheur: 'auto', auteur: 'Automatique' }, site)
+        for (const modele of ['anniversaire', 'gainExpire', 'inactif'] as const) {
+          if (!(modele === 'gainExpire' ? !!gain : regles[modele] && relanceAutoDue(modele, client, deja, t))) continue
+          // Revue Codex finale, point 5 : le modèle retenu a déjà échoué chez le prestataire aujourd'hui (tentative de la
+          // tournée interrompue) → client déjà traité, rien de plus (ni ce modèle ni un autre en repli). Filtre posé ici,
+          // à côté de la règle « une relance par client et par tournée » qu'il prolonge, et pas dans `relanceAutoDue`.
+          if (echecAutoDuJour(modele, deja, t)) break
+          if (modele !== 'gainExpire') {
+            await relancer(commerce, client, { modele, declencheur: 'auto', auteur: 'Automatique' }, site)
+            break
+          }
+          // Réclamation refusée (déjà relancé, remis, expiré entre-temps…) : la règle suivante (inactif) peut partir.
+          const reclame = await reclamerRelanceGain(gain!)
+          if (!reclame) continue
+          await relancerGain(commerce, client, reclame, site)
+          break
+        }
       }
       tournees.set(commerce.id, marque)
     })()

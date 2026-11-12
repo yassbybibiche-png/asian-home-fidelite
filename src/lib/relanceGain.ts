@@ -30,10 +30,13 @@ export function relanceGainFaite(tirageId: string, envoisDuClient: Pick<EnvoiRel
   )
 }
 
-/** Gains de ce client à relancer maintenant, l'expiration la plus proche d'abord. */
+/**
+ * Gains de ce client à relancer maintenant, l'expiration la plus proche d'abord (tri préalable : les envois lus ici sont
+ * une fenêtre récente ; la garde qui fait foi est la réclamation du tirage par le serveur, revue Codex F1/F2).
+ */
 export function gainsARelancer(tiragesClient: Tirage[], envoisDuClient: Pick<EnvoiRelance, 'modele' | 'statut' | 'tirageId'>[], maintenant: Date): Tirage[] {
   return tiragesClient
-    .filter((t) => gainBientotExpire(t, maintenant) && !relanceGainFaite(t.id, envoisDuClient))
+    .filter((t) => !t.relanceGainLe && gainBientotExpire(t, maintenant) && !relanceGainFaite(t.id, envoisDuClient))
     .sort((a, b) => finGain(a).getTime() - finGain(b).getTime())
 }
 

@@ -17,7 +17,7 @@ import { cleContact, nouveauClient, offrirRecompense, validerVisite } from '../s
 import { calculerChiffresCartes } from '../src/lib/stats.ts'
 import { soldePoints } from '../src/lib/points.ts'
 import { MESSAGE_ACTIVATION } from '../src/lib/roulette.ts'
-import type { Client, Commerce, Tirage } from '../src/types.ts'
+import type { Client, Commerce, EnvoiRelance, Tirage } from '../src/types.ts'
 
 const URL_SB = 'https://projet-factice.supabase.co'
 const CLE = 'cle-service-role-factice' // pas une vraie clé
@@ -1970,6 +1970,158 @@ describe('Revue Codex R3 (F4) : remise d’un gain — l’heure de vérité est
     assert.equal((f.tables.tirages.find((l) => l.id === 'ti-st')!.donnees as Tirage).remis, undefined)
     assert.equal(await st.marquerTirageRemis(remis, new Date(ACTIVE.getTime() - 1).toISOString()), true)
     assert.equal(await st.marquerTirageRemis(remis, new Date(ACTIVE.getTime() - 1).toISOString()), false, 'déjà remis')
+  })
+})
+
+describe('Revue Codex R7 : relance « gain bientôt expiré » sous Supabase (réclamation, statut revérifié, colonne `libre`)', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-sb-r7-'))
+  after(() => rmSync(dossier, { recursive: true, force: true }))
+  const MAINTENANT = new Date('2026-11-10T11:00:00Z')
+  const JOUR = 24 * 3600_000
+  /** Tirage v2 (lot physique) de Lina, gagné `jours` jours avant MAINTENANT (30 → dernier jour le 10/11, fin à 23 h UTC). */
+  const gain = (jours: number): Tirage => ({
+    id: 'ti-r7', commerceId: AH, clientId: 'cl-r7', lot: 'Un dessert offert', lotId: 'lot-dessert', typeLot: 'lot',
+    date: new Date(MAINTENANT.getTime() - jours * JOUR).toISOString(), code: 'R7SB23',
+  })
+  const lu = (f: ReturnType<typeof fauxPostgrest>) => f.tables.tirages.find((l) => l.id === 'ti-r7')!.donnees as Tirage
+  const envoisGain = (f: ReturnType<typeof fauxPostgrest>) =>
+    f.tables.envois.map((l) => l.donnees as EnvoiRelance).filter((e) => e.modele === 'gainExpire')
+
+  /** Serveur sur le faux PostgREST `f`, horloge propre, SMS simulés (Twilio factice, aucun appel réseau). */
+  async function demarrer(f: ReturnType<typeof fauxPostgrest>, horloge: { t: Date }, sms: URLSearchParams[]) {
+    const fetchSms = (async (_url: string, init: RequestInit) => {
+      sms.push(new URLSearchParams(String(init.body)))
+      return new Response(JSON.stringify({ sid: `SM${sms.length}` }), { status: 201 })
+    }) as unknown as typeof globalThis.fetch
+    const app = await creerServeur({
+      fichierDb: join(dossier, 'ne-doit-pas-exister.db'),
+      supabase: { url: URL_SB, cleServiceRole: CLE, fetch: f.fetch },
+      adminPin: ADMIN,
+      pinInitial: '1234',
+      version: 'test',
+      maintenant: () => horloge.t,
+      notifications: { twilio: { accountSid: 'ACtest', authToken: 'jeton-test', expediteur: '+33700000000' }, fetch: fetchSms },
+    })
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    async function api(methode: string, chemin: string, corps?: unknown) {
+      const r = await fetch(base + chemin, { method: methode, headers: { 'Content-Type': 'application/json', ...PIN }, body: corps === undefined ? undefined : JSON.stringify(corps) })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    const tournee = async () => {
+      await api('GET', `/commerces/${AH}/etat`)
+      await app.relancesEnCours()
+    }
+    return { app, api, tournee }
+  }
+  async function preparer(f: ReturnType<typeof fauxPostgrest>, t: Tirage) {
+    const st = ouvrir(f)
+    await st.ajouterClient({ ...nouveauClient(AH, 'Lina', { telephone: '0612345678' }), id: 'cl-r7', consentementRelance: true })
+    await st.ajouterTirage(t)
+  }
+
+  test('F2 : deux tournées simultanées à cheval sur minuit (deux instances) → une seule réclamation passe, un seul SMS', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    // 23 h 59 min 30 s et 0 h 00 min 30 s à Paris : deux jours différents, l'index unique des envois ne les départage pas.
+    const a = await demarrer(f, { t: new Date('2026-11-10T22:59:30Z') }, sms)
+    const b = await demarrer(f, { t: new Date('2026-11-10T23:00:30Z') }, sms)
+    try {
+      await preparer(f, gain(29))
+      // Les deux réclamations ont relu le tirage (sans marqueur) avant que l'une n'écrive.
+      f.barriere('PATCH', 'tirages')
+      await Promise.all([a.tournee(), b.tournee()])
+      assert.equal(sms.length, 1, 'un seul SMS pour le gain')
+      assert.deepEqual(envoisGain(f).map((e) => e.statut), ['envoye'])
+      const reclamations = f.requetes.filter((q) => q.methode === 'PATCH' && q.table === 'tirages')
+      assert.equal(reclamations.length, 2)
+      for (const q of reclamations) assert.deepEqual([q.params.get('donnees->relanceGainLe'), q.params.get('donnees->remis'), q.params.get('donnees->activeLe')], ['is.null', 'is.null', 'is.null'])
+      assert.ok(lu(f).relanceGainLe)
+    } finally {
+      await a.app.fermer()
+      await b.app.fermer()
+    }
+  })
+
+  /** Lecture de présélection de la tournée (tirages des 32 derniers jours) : instantané pris, puis `pendant` s'exécute. */
+  const selection = (horloge: { t: Date }, pendant: () => void) => {
+    const depuis = `gte.${new Date(horloge.t.getTime() - 32 * JOUR).toISOString()}`
+    return { ms: 20, vise: (m: string, t: string, p: URLSearchParams) => (m === 'GET' && t === 'tirages' && p.get('date') === depuis ? (pendant(), true) : false) }
+  }
+
+  test('F3 : gain remis en caisse entre la sélection et l’envoi → ni SMS, ni marqueur, remise intacte', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: MAINTENANT }
+    const s = await demarrer(f, horloge, sms)
+    try {
+      await preparer(f, gain(28))
+      const remis = { le: MAINTENANT.toISOString(), par: { type: 'gerant' as const, nom: 'Gérant' } }
+      f.ralentir(selection(horloge, () => void ((f.tables.tirages.find((l) => l.id === 'ti-r7')!.donnees as Tirage).remis = remis)))
+      await s.tournee()
+      assert.equal(sms.length, 0)
+      assert.deepEqual(envoisGain(f), [])
+      assert.deepEqual([lu(f).relanceGainLe, lu(f).remis], [undefined, remis])
+    } finally {
+      f.ralentir()
+      await s.app.fermer()
+    }
+  })
+
+  test('F3 : gain expiré (minuit à Paris passé) entre la sélection et l’envoi → ni SMS, ni marqueur, aucune écriture', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: new Date('2026-11-10T22:59:00Z') } // 23 h 59 à Paris, dernier jour du gain
+    const s = await demarrer(f, horloge, sms)
+    try {
+      await preparer(f, gain(30))
+      f.ralentir(selection(horloge, () => void (horloge.t = new Date('2026-11-10T23:01:00Z'))))
+      await s.tournee()
+      assert.equal(sms.length, 0)
+      assert.deepEqual(envoisGain(f), [])
+      assert.equal(lu(f).relanceGainLe, undefined)
+      assert.equal(f.requetes.filter((q) => q.methode === 'PATCH' && q.table === 'tirages').length, 0, 'statut revérifié avant la réclamation')
+    } finally {
+      f.ralentir()
+      await s.app.fermer()
+    }
+  })
+
+  test('F5 : message libre et relance de gain le même jour (colonne `libre` partagée) → refus tracé avec un motif distinct, gain retenté le lendemain', async () => {
+    const f = fauxPostgrest()
+    const sms: URLSearchParams[] = []
+    const horloge = { t: MAINTENANT }
+    const s = await demarrer(f, horloge, sms)
+    try {
+      await preparer(f, gain(28))
+      assert.equal((await s.api('POST', `/commerces/${AH}/clients/cl-r7/relance`, { message: 'Bonjour Lina' })).statut, 200)
+      // Vrai doublon du message libre : refus ordinaire, sans motif.
+      const doublon = await s.api('POST', `/commerces/${AH}/clients/cl-r7/relance`, { message: 'Encore' })
+      assert.equal(doublon.statut, 409)
+      assert.match(doublon.contenu.erreur, /déjà été envoyée à ce client aujourd’hui/)
+
+      await s.tournee()
+      assert.equal(sms.length, 1)
+      const [refus] = envoisGain(f)
+      assert.deepEqual([refus.statut, refus.motif], ['refuse', 'collision_libre_gain'])
+      assert.match(refus.raison!, /^Relance « gain bientôt expiré » non envoyée : un message libre est déjà parti aujourd’hui/)
+      assert.equal(lu(f).relanceGainLe, undefined, 'réclamation libérée : nouvel essai à la tournée suivante')
+      assert.equal(f.tables.envois.filter((l) => (l.donnees as EnvoiRelance).motif).length, 1, 'le vrai doublon n’a pas de motif')
+
+      horloge.t = new Date(MAINTENANT.getTime() + JOUR)
+      await s.tournee()
+      assert.equal(sms.length, 2)
+      assert.deepEqual(envoisGain(f).map((e) => e.statut).sort(), ['envoye', 'refuse'])
+      // L'inverse, le même jour : le message libre est refusé avec le même motif.
+      const libre = await s.api('POST', `/commerces/${AH}/clients/cl-r7/relance`, { message: 'Bonjour' })
+      assert.equal(libre.statut, 409)
+      assert.match(libre.contenu.erreur, /^Message libre non envoyé : la relance « gain bientôt expiré » est déjà partie aujourd’hui/)
+      const dernier = f.tables.envois.map((l) => l.donnees as EnvoiRelance).filter((e) => e.modele === 'libre').at(-1)!
+      assert.deepEqual([dernier.statut, dernier.motif], ['refuse', 'collision_libre_gain'])
+      assert.equal(sms.length, 2)
+    } finally {
+      await s.app.fermer()
+    }
   })
 })
 

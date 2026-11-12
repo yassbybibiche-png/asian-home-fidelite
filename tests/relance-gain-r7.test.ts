@@ -94,11 +94,14 @@ describe('R7 — règle « gain bientôt expiré » (fonctions pures)', () => {
 
 // ---------- Serveur (SQLite) ----------
 
-async function demarrer(nom: string, o: { modeTest?: boolean } = {}) {
+async function demarrer(nom: string, o: { modeTest?: boolean; emailSandbox?: boolean } = {}) {
   const horloge = { t: MAINTENANT }
   const appels: { url: string; corps: string }[] = []
+  /** `panne.active` : le prestataire répond 500 (relance en `erreur`). */
+  const panne = { active: false }
   const fetch = (async (url: string, init: RequestInit) => {
     appels.push({ url, corps: String(init.body) })
+    if (panne.active) return new Response(JSON.stringify({ message: 'panne simulée' }), { status: 500 })
     return new Response(JSON.stringify({ sid: `SM${appels.length}`, messageId: `<m${appels.length}@brevo>` }), { status: 201 })
   }) as unknown as typeof globalThis.fetch
   const fichierDb = join(dossier, nom)
@@ -110,9 +113,11 @@ async function demarrer(nom: string, o: { modeTest?: boolean } = {}) {
     urlPublique: SITE,
     maintenant: () => horloge.t,
     limitesPubliques: { inscriptionParIp: 1000, inscriptionParContact: 1000, ficheClientParIp: 1000, lectureParIp: 1000 },
-    notifications: o.modeTest
-      ? { brevoSms: { cleApi: 'cle-test', expediteurSms: 'ASIANHOME', modeTest: true }, modeTest: true, fetch }
-      : { twilio: { accountSid: 'ACtest', authToken: 'jeton-twilio-test', expediteur: '+33700000000' }, fetch },
+    notifications: o.emailSandbox
+      ? { brevo: { cleApi: 'cle-test', expediteurEmail: 'contact@exemple.fr', expediteurNom: 'Asian Home Paris', bacASable: true }, modeTest: true, fetch }
+      : o.modeTest
+        ? { brevoSms: { cleApi: 'cle-test', expediteurSms: 'ASIANHOME', modeTest: true }, modeTest: true, fetch }
+        : { twilio: { accountSid: 'ACtest', authToken: 'jeton-twilio-test', expediteur: '+33700000000' }, fetch },
   })
   await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
   const racine = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}`
@@ -139,7 +144,16 @@ async function demarrer(nom: string, o: { modeTest?: boolean } = {}) {
   }
   const envoisAuto = async () =>
     ((await api('GET', `/commerces/${AH}/envois`)).contenu.envois as EnvoiRelance[]).filter((e) => e.declencheur === 'auto')
-  return { app, api, inscrire, ajouterTirage, tournee, envoisAuto, appels, horloge }
+  /** Accès direct à la base (comme une autre requête du serveur), fermé après `f`. */
+  function base<T>(f: (st: ReturnType<typeof ouvrirStockage>) => T): T {
+    const st = ouvrirStockage(fichierDb)
+    try {
+      return f(st)
+    } finally {
+      st.fermer()
+    }
+  }
+  return { app, api, inscrire, ajouterTirage, tournee, envoisAuto, appels, horloge, panne, base }
 }
 
 describe('R7 — tournée automatique « gain bientôt expiré »', () => {
@@ -252,6 +266,126 @@ describe('R7 — tournée automatique « gain bientôt expiré »', () => {
       s.horloge.t = new Date(MAINTENANT.getTime() + JOUR)
       await s.tournee()
       assert.deepEqual((await s.envoisAuto()).map((x) => x.modele).sort(), ['anniversaire', 'gainExpire'])
+    } finally {
+      await s.app.fermer()
+    }
+  })
+})
+
+// ---------- Revue Codex R7 (SQLite) : réclamation par tirage, pas de fenêtre de lecture, échec après réclamation, mode test ----------
+
+describe('R7 revue Codex — une seule relance par gain, sans fenêtre de lecture', () => {
+  test('F1 : marqueur effacé par une activation concurrente + 60 tentatives plus récentes → toujours pas de doublon (relecture par tirageId)', async () => {
+    const s = await demarrer('r7-f1.db')
+    try {
+      const lina = await inscrire(s, 'Lina', '0611111111', true)
+      const gain = tirage(lina.id, 28)
+      s.ajouterTirage(gain)
+      await s.tournee()
+      assert.equal(s.appels.length, 1)
+      assert.ok(s.base((st) => st.tirage(AH, gain.id))!.relanceGainLe, 'tirage réclamé avant l’envoi')
+
+      s.base((st) => {
+        // Activation lue AVANT la réclamation : elle réécrit `donnees` sans le marqueur (écriture conditionnelle sur `remis` seulement).
+        assert.equal(st.activerTirage({ ...gain, activeLe: new Date(MAINTENANT.getTime() + 3600_000).toISOString() }), true)
+        assert.equal(st.tirage(AH, gain.id)!.relanceGainLe, undefined)
+        // 60 tentatives plus récentes pour ce client : la trace de la relance du gain sort des 50 derniers envois.
+        for (let i = 0; i < 60; i++) {
+          const date = new Date(MAINTENANT.getTime() + 2 * 3600_000 + i * 1000).toISOString()
+          st.ajouterEnvoi({ id: `en-f1-${i}`, commerceId: AH, clientId: lina.id, clientPrenom: 'Lina', date, jour: '2026-11-10', modele: 'libre', canal: 'sms', statut: 'erreur', declencheur: 'manuel', auteur: 'Gérant' })
+        }
+        assert.equal(st.envois(AH, 50, lina.id).some((e) => e.tirageId === gain.id), false, 'hors de la fenêtre des 50')
+      })
+
+      for (const jours of [1, 2]) {
+        s.horloge.t = new Date(MAINTENANT.getTime() + jours * JOUR)
+        await s.tournee()
+      }
+      assert.equal(s.appels.length, 1, 'aucun 2e SMS pour le même gain')
+      assert.deepEqual((await s.envoisAuto()).map((x) => [x.modele, x.tirageId]), [['gainExpire', gain.id]])
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('F2 (stockage SQLite) : réclamation conditionnelle — une seule passe, ni la remise ni l’activation ne sont effacées ni bloquées', async () => {
+    const s = await demarrer('r7-f2-stockage.db')
+    try {
+      const lina = await inscrire(s, 'Lina', '0611111111', true)
+      const g = tirage(lina.id, 28)
+      s.ajouterTirage(g)
+      s.base((st) => {
+        const a = { ...g, relanceGainLe: '2026-11-10T11:00:00.000Z' }
+        assert.equal(st.marquerRelanceGain(a, undefined), true)
+        assert.equal(st.marquerRelanceGain({ ...g, relanceGainLe: '2026-11-10T11:00:01.000Z' }, undefined), false, 'déjà réclamé : la 2e réclamation échoue')
+        assert.equal(st.tirage(AH, g.id)!.relanceGainLe, a.relanceGainLe)
+        assert.deepEqual(gainsARelancer([st.tirage(AH, g.id)!], [], MAINTENANT), [], 'un tirage réclamé n’est plus présélectionné')
+        // Libération : seulement avec NOTRE horodatage.
+        assert.equal(st.marquerRelanceGain(g, '2026-11-10T09:00:00.000Z'), false)
+        assert.equal(st.marquerRelanceGain(g, a.relanceGainLe), true)
+        assert.equal(st.tirage(AH, g.id)!.relanceGainLe, undefined)
+
+        // Activation APRÈS réclamation : acceptée, garde le marqueur ; la libération (activeLe lu avant) n'efface pas l'activation.
+        assert.equal(st.marquerRelanceGain(a, undefined), true)
+        const activeLe = new Date(MAINTENANT.getTime() + 60_000).toISOString()
+        assert.equal(st.activerTirage({ ...st.tirage(AH, g.id)!, activeLe }), true)
+        assert.equal(st.marquerRelanceGain(g, a.relanceGainLe), false, 'activeLe a changé : rien écrit')
+        assert.deepEqual([st.tirage(AH, g.id)!.activeLe, st.tirage(AH, g.id)!.relanceGainLe], [activeLe, a.relanceGainLe])
+
+        // Remise en caisse APRÈS réclamation : acceptée ; ensuite aucune réclamation ne peut réécrire le tirage remis.
+        const remis = { le: MAINTENANT.toISOString(), par: 'Gérant' as const }
+        assert.equal(st.marquerTirageRemis({ ...st.tirage(AH, g.id)!, remis }), true)
+        assert.equal(st.marquerRelanceGain({ ...g, activeLe, relanceGainLe: 'x' }, a.relanceGainLe), false)
+        assert.equal(st.marquerRelanceGain({ ...g, activeLe }, a.relanceGainLe), false)
+        assert.deepEqual(st.tirage(AH, g.id)!.remis, remis)
+      })
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('échec du prestataire APRÈS réclamation : marqueur retiré, nouvel essai à la tournée suivante ; envoyé → marqueur gardé, plus rien', async () => {
+    const s = await demarrer('r7-echec.db')
+    try {
+      const lina = await inscrire(s, 'Lina', '0611111111', true)
+      const gain = tirage(lina.id, 28)
+      s.ajouterTirage(gain)
+      s.panne.active = true
+      await s.tournee()
+      assert.deepEqual((await s.envoisAuto()).map((x) => x.statut), ['erreur'])
+      assert.equal(s.base((st) => st.tirage(AH, gain.id))!.relanceGainLe, undefined, 'rien de parti : réclamation libérée')
+
+      s.panne.active = false
+      s.horloge.t = new Date(MAINTENANT.getTime() + JOUR)
+      await s.tournee()
+      assert.equal(s.appels.length, 2)
+      assert.deepEqual((await s.envoisAuto()).map((x) => x.statut), ['envoye', 'erreur'])
+      assert.ok(s.base((st) => st.tirage(AH, gain.id))!.relanceGainLe)
+
+      s.horloge.t = new Date(MAINTENANT.getTime() + 2 * JOUR)
+      await s.tournee()
+      assert.equal(s.appels.length, 2)
+    } finally {
+      await s.app.fermer()
+    }
+  })
+
+  test('F4 (hérité) : mode test, relance de gain par e-mail = appel Brevo avec X-Sib-Sandbox (rien livré), journal « test », une seule fois', async () => {
+    const s = await demarrer('r7-sandbox.db', { emailSandbox: true })
+    try {
+      const marc = await inscrire(s, 'Marc', 'marc@exemple.fr', true)
+      const gain = tirage(marc.id, 28)
+      s.ajouterTirage(gain)
+      await s.tournee()
+      assert.equal(s.appels.length, 1)
+      assert.equal(s.appels[0].url, 'https://api.brevo.com/v3/smtp/email')
+      const corps = JSON.parse(s.appels[0].corps)
+      assert.equal(corps.headers['X-Sib-Sandbox'], 'drop', 'même chemin que toutes les relances e-mail en mode test (P1-B7)')
+      assert.equal(corps.subject, 'Asian Home Paris : votre gain expire bientôt')
+      assert.deepEqual((await s.envoisAuto()).map((x) => [x.modele, x.canal, x.statut, x.tirageId]), [['gainExpire', 'email', 'test', gain.id]])
+      s.horloge.t = new Date(MAINTENANT.getTime() + JOUR)
+      await s.tournee()
+      assert.equal(s.appels.length, 1, 'la simulation compte : pas rejouée à chaque tournée')
     } finally {
       await s.app.fermer()
     }
