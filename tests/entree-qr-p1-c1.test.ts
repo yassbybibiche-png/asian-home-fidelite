@@ -1,5 +1,6 @@
 // P1-C1 — Entrée QR → jeu : un seul champ obligatoire (téléphone OU e-mail) avec clavier adapté (inputmode +
-// autocomplete), validation en direct, prénom optionnel partout et demandé APRÈS le tirage, « Continuer en tant que… »
+// autocomplete), validation en direct, prénom proposé dès l'inscription (toujours optionnel) et redemandé après le
+// tirage s'il manque, « Continuer en tant que… »
 // sans saisie, une seule case de consentement. La règle « 1 tirage / jour après visite validée » est revérifiée.
 import { test, describe, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -92,7 +93,7 @@ describe('Page de jeu et inscription en caisse (source)', () => {
 
   test('page de jeu : un seul champ obligatoire, inputmode + autocomplete tel / email, validation en direct', () => {
     const ident = corpsDe(jouer, 'Identification')
-    assert.equal(ident.match(/<input\b/g)?.length, 2, 'le champ contact + la case de consentement, rien d’autre')
+    assert.equal(ident.match(/<input\b/g)?.length, 3, 'le champ contact + le prénom optionnel + la case de consentement, rien d’autre')
     assert.match(ident, /id="j-contact"/)
     assert.match(ident, /inputMode=\{attributs\.inputMode\}/)
     assert.match(ident, /autoComplete=\{attributs\.autoComplete\}/)
@@ -107,10 +108,16 @@ describe('Page de jeu et inscription en caisse (source)', () => {
     assert.match(ident, /aria-describedby="j-contact-aide"/)
   })
 
-  test('page de jeu : prénom NI demandé NI envoyé avant le tirage, demandé après (optionnel)', () => {
+  test('page de jeu : prénom proposé à l’inscription, toujours optionnel, redemandé après le tirage s’il manque', () => {
     const ident = corpsDe(jouer, 'Identification')
-    assert.doesNotMatch(ident, /prenom|Prénom|given-name/, 'aucun prénom dans le formulaire d’entrée')
-    assert.match(ident, /onEnvoyer\(contactSaisi: string, consentementRelance: boolean\)/)
+    const champPrenom = ident.match(/<input\s+id="j-prenom"[\s\S]*?\/>/)?.[0]
+    assert.ok(champPrenom, 'champ prénom id="j-prenom" dans le formulaire d’entrée')
+    assert.match(champPrenom, /autoComplete="given-name"/)
+    assert.doesNotMatch(champPrenom, /required/, 'le prénom n’est jamais obligatoire')
+    assert.match(ident, /if \(!contact \|\| enCours\) return\n/, 'l’envoi ne dépend que du contact')
+    assert.doesNotMatch(ident.match(/if \(!contact[^\n]*/)![0], /prenom/i)
+    assert.match(ident, /onEnvoyer\(contactSaisi: string, prenomSaisi: string, consentementRelance: boolean\)/)
+    assert.match(ident, /await onEnvoyer\(contactSaisi, prenomSaisi\.trim\(\), consentement\)/)
     // Le tirage serveur reçoit toujours le prénom connu (vide) : pas de changement de la route de tirage.
     assert.match(jouer, /lancerTirage\(api, commerce, joueur\.contact, joueur\.prenom\)/)
     // Demande du prénom : seulement dans le bloc affiché après le résultat (ou « déjà joué »), dans les deux modes.
@@ -248,5 +255,30 @@ describe('Serveur : prénom optionnel partout, demandé après le tirage, règle
     const { client } = (await s.api('POST', `/commerces/${AH}/clients`, { prenom: 'Marie', contact })).contenu
     assert.equal((await s.api('POST', `/commerces/${AH}/clients/${client.id}/prenom`, { prenom: 'Pirate', contact })).statut, 409)
     assert.equal(await prenomDe(client.id), 'Marie')
+  })
+
+  test('inscription publique AVEC prénom (proposé dès l’entrée QR) : le client créé le porte', async () => {
+    const r = await s.api('POST', `/commerces/${AH}/clients`, { prenom: ' Linh ', contact: '06 10 00 00 11' })
+    assert.equal(r.statut, 201, JSON.stringify(r.contenu))
+    assert.equal(r.contenu.client.prenom, 'Linh')
+    assert.equal(await prenomDe(r.contenu.client.id), 'Linh')
+  })
+
+  test('inscription publique SANS prénom : prénom vide, inscription OK', async () => {
+    const r = await s.api('POST', `/commerces/${AH}/clients`, { prenom: '', contact: '06 10 00 00 12' })
+    assert.equal(r.statut, 201, JSON.stringify(r.contenu))
+    assert.equal(r.contenu.client.prenom, '')
+    assert.equal(await prenomDe(r.contenu.client.id), '')
+  })
+
+  test('ré-inscription du même contact avec un autre prénom : le prénom d’origine est conservé', async () => {
+    const contact = '06 10 00 00 13'
+    const premier = await s.api('POST', `/commerces/${AH}/clients`, { prenom: 'Mai', contact })
+    assert.equal(premier.statut, 201, JSON.stringify(premier.contenu))
+    const second = await s.api('POST', `/commerces/${AH}/clients`, { prenom: 'Pirate', contact: '+33 6 10 00 00 13' })
+    assert.ok(second.statut < 300, JSON.stringify(second.contenu))
+    assert.equal(second.contenu.client.id, premier.contenu.client.id, 'même carte retrouvée')
+    assert.equal(second.contenu.client.prenom, 'Mai')
+    assert.equal(await prenomDe(premier.contenu.client.id), 'Mai')
   })
 })

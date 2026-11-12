@@ -317,6 +317,8 @@ export interface CommercePublic {
    * alors dans `lots`, et une consolation en points tirée est doublée. Badge sur la page de jeu.
    */
   bonusCreux?: true
+  /** Menu public non vide (Déblocage C-bis) : présent (true) seulement sur GET /commerces/:id — bouton « Voir le menu » dès l'arrivée. */
+  menuDisponible?: true
   actif: boolean
   demo: boolean
   catalogue?: Pick<RecompensePoints, 'nom' | 'cout' | 'description'>[]

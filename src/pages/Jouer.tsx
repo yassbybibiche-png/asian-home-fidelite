@@ -190,6 +190,11 @@ export function InfosJeu({ commerce }: { commerce: CommerceJeu }) {
       <h2 id="a-gagner-titre" className="titre-carte">
         {t('À gagner aujourd’hui')}
       </h2>
+      {'bonusCreux' in commerce && commerce.bonusCreux && (
+        <p className="inline-block rounded-full bg-green-50 px-3 py-1 text-sm font-semibold text-green-900 ring-1 ring-green-200" data-bonus-creux>
+          <span aria-hidden>⏰</span> {t('Bonus heures creuses actif')}
+        </p>
+      )}
       {lots.length > 0 && (
         <ul className="space-y-1">
           {lots.map((l, i) => (
@@ -473,8 +478,8 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
           <Identification
             commerceId={commerce.id}
             nomCommerce={commerce.nom}
-            onEnvoyer={async (contactSaisi, consentementRelance) => {
-              choisirJoueur((await inscrireClient(commerce.id, '', contactSaisi, consentementRelance)).client)
+            onEnvoyer={async (contactSaisi, prenomSaisi, consentementRelance) => {
+              choisirJoueur((await inscrireClient(commerce.id, prenomSaisi, contactSaisi, consentementRelance)).client)
             }}
           />
         )
@@ -501,6 +506,13 @@ function PartieLocale({ commerce }: { commerce: Commerce }) {
             {t('Voir ma carte de fidélité')}
           </a>
         </>
+      )}
+
+      {/* Menu public : proposé à chaque écran du parcours (identification, roue, résultat), pas seulement en attente. */}
+      {estAsianHome(commerce) && (
+        <a href={`#/menu/${commerce.id}`} className="bouton-secondaire w-full">
+          {t('📖 Voir le menu')}
+        </a>
       )}
     </Cadre>
   )
@@ -585,7 +597,7 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
   const [enCours, setEnCours] = useState(false)
   const [accesPerdu, setAccesPerdu] = useState(false)
   const [horsLigne, setHorsLigne] = useState(false)
-  const [menuDisponible, setMenuDisponible] = useState(() => estAsianHome(commerce))
+  const [menuDisponible, setMenuDisponible] = useState(() => estAsianHome(commerce) || ('menuDisponible' in commerce && !!commerce.menuDisponible))
   const minuterie = useRef<number | undefined>(undefined)
   const verifierMaintenant = useRef<() => void>(() => {})
   useEffect(() => () => window.clearTimeout(minuterie.current), [])
@@ -750,8 +762,8 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
             parrain={parrain}
             commerceId={commerce.id}
             nomCommerce={commerce.nom}
-            onEnvoyer={async (contactSaisi, consentementRelance) => {
-              const { client, jeton, expireLe } = await api.inscrirePublic(commerce.id, '', contactSaisi, parrain, consentementRelance)
+            onEnvoyer={async (contactSaisi, prenomSaisi, consentementRelance) => {
+              const { client, jeton, expireLe } = await api.inscrirePublic(commerce.id, prenomSaisi, contactSaisi, parrain, consentementRelance)
               if (jeton && expireLe) jetons.ecrire(client.id, { jeton, expireLe })
               choisirJoueur({ clientId: client.id, prenom: client.prenom, contact: contactSaisi.trim() })
             }}
@@ -824,6 +836,13 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
           </a>
         </>
       )}
+
+      {/* Menu public à chaque écran du parcours ; l'écran d'attente a déjà le sien (« … en attendant »). */}
+      {menuDisponible && jeu?.statut !== 'sansVisite' && (
+        <a href={`#/menu/${commerce.id}`} className="bouton-secondaire w-full">
+          {t('📖 Voir le menu')}
+        </a>
+      )}
     </Cadre>
   )
 }
@@ -832,8 +851,8 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
 
 /**
  * Entrée depuis le QR (P1-C1) : UN seul champ obligatoire, téléphone OU e-mail. Le choix « Téléphone / E-mail » ne
- * change que le clavier du téléphone (inputmode + autocomplete) : le champ accepte toujours les deux. Le prénom n'est
- * pas demandé ici, mais après le tirage (`DemandePrenom`).
+ * change que le clavier du téléphone (inputmode + autocomplete) : le champ accepte toujours les deux. Le prénom est
+ * proposé ici en option (jamais bloquant) et redemandé après le tirage s'il manque (`DemandePrenom`).
  */
 function Identification({
   onEnvoyer,
@@ -841,13 +860,14 @@ function Identification({
   commerceId,
   nomCommerce,
 }: {
-  onEnvoyer(contactSaisi: string, consentementRelance: boolean): Promise<void>
+  onEnvoyer(contactSaisi: string, prenomSaisi: string, consentementRelance: boolean): Promise<void>
   parrain?: string
   commerceId: string
   nomCommerce: string
 }) {
   const [mode, setMode] = useState<ModeContact>('tel')
   const [contactSaisi, setContactSaisi] = useState('')
+  const [prenomSaisi, setPrenomSaisi] = useState('')
   // Relances SMS / e-mail (P1-B3) : case séparée, jamais pré-cochée.
   const [consentement, setConsentement] = useState(false)
   const [essaye, setEssaye] = useState(false)
@@ -871,7 +891,7 @@ function Identification({
     setEnCours(true)
     setErreur(null)
     try {
-      await onEnvoyer(contactSaisi, consentement)
+      await onEnvoyer(contactSaisi, prenomSaisi.trim(), consentement)
     } catch (err) {
       setErreur(err instanceof Error ? err.message : MESSAGE_HORS_LIGNE)
     } finally {
@@ -928,6 +948,20 @@ function Identification({
           {t(saisie.message)}
         </p>
         <p className="mt-1 text-sm text-gray-600">{t('Déjà client ? Le même numéro ou e-mail retrouve votre carte de fidélité.')}</p>
+      </div>
+      <div>
+        <label className="etiquette" htmlFor="j-prenom">
+          {t('Votre prénom (optionnel)')}
+        </label>
+        <input
+          id="j-prenom"
+          className="champ"
+          autoComplete="given-name"
+          autoCapitalize="words"
+          maxLength={40}
+          value={prenomSaisi}
+          onChange={(e) => setPrenomSaisi(e.target.value)}
+        />
       </div>
       <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-gray-700">
         <span className="zone-case">
