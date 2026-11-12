@@ -48,7 +48,8 @@ import { ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase
 import { chiffrerSauvegarde, exporterSauvegarde, nomFichierSauvegarde } from './sauvegarde.ts'
 import { ErreurWallet, lienGoogleWallet, walletConfigure, type ConfigGoogleWallet } from './wallet.ts'
 import { menuAffichePour, pageMenuIndisponible, pageMenuPrerendue, pageNonTrouvee } from './prerendu.ts'
-import { cheminMasquePourErreur, journaliserRequete } from './logs.ts'
+import { cheminMasquePourErreur, journaliserRequete, routeMasquee } from './logs.ts'
+import { creerAlertes5xx } from './alertes.ts'
 import { creerNotifications, ErreurNonBranche, type Canal, type ConfigNotifications, type Message } from './notifications/index.ts'
 import { estAbandon } from './notifications/delai.ts'
 import {
@@ -174,6 +175,8 @@ export interface OptionsServeur {
    * sauvegarde téléchargée par l'admin (`GET /admin/sauvegarde`) est chiffrée AES-256-GCM ; absente = en clair + avertissement.
    */
   cleChiffrementSauvegarde?: string
+  /** Destinataire de l'alerte e-mail sur rafale de 5xx (ALERTE_EMAIL, `server/alertes.ts`) ; absent = alerte désactivée. */
+  alerteEmail?: string
   /** Horloge injectable (tests). */
   maintenant?: () => Date
 }
@@ -1264,6 +1267,8 @@ export async function creerServeur(o: OptionsServeur) {
   // En mémoire seulement : haché directement en scrypt à chaque démarrage.
   const adminPin = await hacherPin(o.adminPin)
   const notifications = creerNotifications(o.notifications)
+  // Item E : alerte e-mail sur rafale de 5xx (inactive sans ALERTE_EMAIL), alimentée à la fin de chaque réponse.
+  const alertes5xx = creerAlertes5xx({ destinataire: o.alerteEmail, notifications, maintenant })
   const integrations = () => ({
     googleWallet: walletConfigure(o.googleWallet),
     appleWallet: 'en_suspens',
@@ -4043,6 +4048,7 @@ export async function creerServeur(o: OptionsServeur) {
           pathname = '/'
         }
         journaliserRequete({ methode: req.method ?? '?', pathname, statut: res.statusCode, dureeMs: Date.now() - debutRequete, ip: ipRequete, commercesConnus: idsCommercesConnus })
+        alertes5xx.enregistrer(res.statusCode, () => routeMasquee(pathname, idsCommercesConnus))
       } catch {
         // La journalisation ne doit jamais faire échouer une requête.
       }

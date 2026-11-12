@@ -124,6 +124,8 @@ try {
     // P1-B4 : GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (+ GOOGLE_REDIRECT_URI, GOOGLE_BUSINESS_LOCATION facultatives).
     googleBusiness: configGoogleBusinessDepuisEnv(env),
     cleChiffrementSauvegarde,
+    // Item E : alerte e-mail sur rafale de 5xx (> 10 en 15 min, 1 par heure max) ; absente ou vide = désactivée.
+    alerteEmail: env.ALERTE_EMAIL?.trim() || undefined,
   })
 } catch (e) {
   arreter(e instanceof Error ? e.message : String(e))
