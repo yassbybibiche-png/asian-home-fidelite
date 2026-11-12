@@ -592,7 +592,9 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           {lotsEdites.map((lot, i) => {
             const type: TypeLot = lot.type ?? 'lot'
             // Erreur affichée sous le lot (R6) : seulement pour un lot gardé à l'envoi (libellé non vide).
-            const erreurLot = !lot.libelle.trim() ? null : problemeLot(lot) ?? (lots.filter((l) => libellesEnDouble([l, lot]).length).length > 1 ? 'libellé déjà utilisé par un autre lot' : null)
+            // Ligne exclue de l'envoi : ses champs chiffrés sont désactivés, leur validation native ne bloque plus l'enregistrement.
+            const exclu = !lot.libelle.trim()
+            const erreurLot = exclu ? null : problemeLot(lot) ?? (lots.filter((l) => libellesEnDouble([l, lot]).length).length > 1 ? 'libellé déjà utilisé par un autre lot' : null)
             return (
             // Téléphone : libellé sur toute la largeur, chance et suppression en dessous ; type, points et plafond ensuite.
             <li key={i} className="space-y-2 border-b border-gray-100 pb-3 last:border-0">
@@ -622,6 +624,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                   inputMode="numeric"
                   min={0}
                   max={100}
+                  disabled={exclu}
                   value={Number.isNaN(lot.probabilite) ? '' : lot.probabilite}
                   onChange={(e) => majLot(i, { ...lot, probabilite: e.target.valueAsNumber })}
                 />
@@ -640,6 +643,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                   max={1000}
                   step={0.01}
                   placeholder="coût"
+                  disabled={exclu}
                   value={lot.coutCentimes === undefined ? '' : lot.coutCentimes / 100}
                   onChange={(e) => majLot(i, { ...lot, coutCentimes: e.target.value === '' ? undefined : Math.round(e.target.valueAsNumber * 100) })}
                 />
@@ -684,6 +688,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                         min={1}
                         max={10000}
                         placeholder="nombre"
+                        disabled={exclu}
                         aria-invalid={!!erreurLot && erreurLot.includes('points')}
                         value={lot.points === undefined || Number.isNaN(lot.points) ? '' : lot.points}
                         onChange={(e) => majLot(i, { ...lot, points: e.target.value === '' ? undefined : e.target.valueAsNumber })}
@@ -706,6 +711,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                         min={0}
                         max={10000}
                         placeholder="illimité"
+                        disabled={exclu}
                         aria-invalid={!!erreurLot && erreurLot.includes('plafond')}
                         value={lot.plafondJour === undefined || Number.isNaN(lot.plafondJour) ? '' : lot.plafondJour}
                         onChange={(e) => majLot(i, { ...lot, plafondJour: e.target.value === '' ? undefined : e.target.valueAsNumber })}

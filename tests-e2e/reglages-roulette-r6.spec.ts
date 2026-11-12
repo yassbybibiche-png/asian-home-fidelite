@@ -97,3 +97,54 @@ test('Réglages → Roulette : points sans montant refusé, champs nouveaux envo
   expect(requetes.filter((q) => /tirage/i.test(q) || q.startsWith('POST') || q.startsWith('PATCH') || q.startsWith('PUT'))).toEqual([])
   expect((await etat()).tirages).toEqual([])
 })
+
+// Revue Codex R6 : une ligne au libellé vide est exclue de l'envoi ; ses champs chiffrés (plafond `min={0}`, points,
+// chance, coût) sont désactivés, sinon leur validation native HTML bloquait la soumission alors que la validation de
+// l'application l'autorisait. Une ligne gardée à l'envoi avec un plafond de -1 reste refusée par l'application.
+test('Réglages → Roulette : une ligne de lot exclue de l’envoi (libellé vide) ne bloque plus l’enregistrement', async ({ page, request }) => {
+  const nom = `E2E Lot exclu ${Date.now()}`
+  const r = await request.post('/api/v1/commerces', {
+    headers: ADMIN,
+    data: { nom, type: 'restaurant', pin: PIN, lots: [{ libelle: 'Nems offerts', type: 'lot', probabilite: 70 }, { libelle: 'Perdu', type: 'perdant', probabilite: 30 }] },
+  })
+  expect(r.status()).toBe(201)
+  const { commerce } = await r.json()
+  const patchReglages = () => page.waitForRequest((q) => q.method() === 'PATCH' && q.url().endsWith(`/commerces/${commerce.id}`), { timeout: 5000 })
+
+  await page.goto('/#/reglages')
+  await page.getByLabel('Commerce', { exact: true }).selectOption({ label: nom })
+  await page.getByLabel('PIN du commerce (4 à 6 chiffres)').fill(PIN)
+  await page.getByRole('button', { name: 'Déverrouiller' }).click()
+  await page.getByRole('tab', { name: 'Roulette' }).click()
+  const enregistrer = page.getByRole('button', { name: 'Enregistrer' })
+
+  // Ligne gardée à l'envoi avec un plafond de -1 : refus de l'application (message + « Enregistrer » désactivé).
+  await page.getByRole('button', { name: '+ Ajouter un lot' }).click()
+  await page.getByLabel('Lot 3', { exact: true }).fill('Café offert')
+  await page.getByLabel('Plafond par jour du lot 3').fill('-1')
+  await expect(page.getByText(/Lot 3 : .*plafond par jour/)).toBeVisible()
+  await expect(enregistrer).toBeDisabled()
+
+  // Libellé vidé : ligne exclue, champs désactivés, l'enregistrement part avec les 2 autres lots.
+  await page.getByLabel('Lot 3', { exact: true }).fill('')
+  await expect(page.getByLabel('Plafond par jour du lot 3')).toBeDisabled()
+  await expect(page.getByLabel('Chance du lot 3 en %')).toBeDisabled()
+  await expect(page.getByLabel('Coût du lot 3 en euros')).toBeDisabled()
+  await expect(enregistrer).toBeEnabled()
+  const envoi = patchReglages()
+  await enregistrer.click()
+  expect((await envoi).postDataJSON().lots.map((l: { libelle: string }) => l.libelle)).toEqual(['Nems offerts', 'Perdu'])
+  await expect(page.getByRole('button', { name: '✓ Enregistré' })).toBeVisible()
+
+  // Même chose pour un lot « points » au montant invalide (champ `min={1}`).
+  await page.getByRole('button', { name: '+ Ajouter un lot' }).click()
+  await page.getByLabel('Lot 3', { exact: true }).fill('Bonus')
+  await page.getByLabel('Type du lot 3').selectOption('points')
+  await page.getByLabel('Points offerts par le lot 3').fill('0')
+  await expect(enregistrer).toBeDisabled()
+  await page.getByLabel('Lot 3', { exact: true }).fill('   ')
+  await expect(page.getByLabel('Points offerts par le lot 3')).toBeDisabled()
+  const envoi2 = patchReglages()
+  await enregistrer.click()
+  expect((await envoi2).postDataJSON().lots.map((l: { libelle: string }) => l.libelle)).toEqual(['Nems offerts', 'Perdu'])
+})

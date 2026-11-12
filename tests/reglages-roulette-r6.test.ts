@@ -128,6 +128,22 @@ describe('R6 : sources (Réglages, aperçu, store)', () => {
     assert.match(reglages, /Réglages non enregistrés : \$\{erreur\}/)
   })
 
+  test('revue Codex : une ligne exclue de l’envoi (libellé vide) a ses champs à validation native désactivés', () => {
+    // Même critère d'exclusion que l'envoi (`lots` filtre les libellés vides après trim).
+    assert.match(reglages, /const lots = lotsEdites\.map\(\(l\) => \(\{ \.\.\.l, libelle: l\.libelle\.trim\(\) \}\)\)\.filter\(\(l\) => l\.libelle\)/)
+    assert.match(reglages, /const exclu = !lot\.libelle\.trim\(\)\n/)
+    const ligne = reglages.slice(reglages.indexOf('{lotsEdites.map((lot, i) => {'), reglages.indexOf('+ Ajouter un lot'))
+    const champs = ligne.match(/<input\b[\s\S]*?\/>/g) ?? []
+    const avecContrainte = champs.filter((c) => /\b(min|max|step|required|pattern|minLength|maxLength)=/.test(c))
+    assert.deepEqual(avecContrainte.map((c) => /id=\{`(\w+)-/.exec(c)?.[1]), ['proba', 'cout', 'points', 'plafond'])
+    for (const c of avecContrainte) assert.match(c, /\n\s+disabled=\{exclu\}\n/, c)
+    // Le libellé reste toujours saisissable (sinon la ligne ne pourrait plus être réactivée).
+    assert.doesNotMatch(champs.find((c) => c.includes('id={`lot-${i}`}')) ?? '', /disabled/)
+    // Une ligne gardée à l'envoi reste soumise à la validation de l'application : plafond -1 → « Enregistrer » désactivé.
+    assert.match(problemeLot({ type: 'lot', plafondJour: -1 }) ?? '', /plafond par jour/)
+    assert.match(reglages, /const champsTypeValides = lots\.every\(\(l\) => !problemeLot\(l\)\)/)
+  })
+
   test('Règles du jeu : mode d’accès (libre / visite) et limite de gains par mois (0 = illimité, défaut 4)', () => {
     assert.match(reglages, /name="modeAccesRoue"/)
     assert.match(reglages, /checked=\{modeAccesRoue\(brouillon\) === m\.valeur\}/)
