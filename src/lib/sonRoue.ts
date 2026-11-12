@@ -2,7 +2,9 @@
 // « Tourner » (`ouvrirScene`, animationRoue.ts) — hors bundle initial. Un tic par secteur franchi sous le pointeur,
 // calculé depuis l'angle animé : même durée et même courbe que la transition CSS de la roue. Aucune logique de
 // tirage ici : le point d'arrêt est celui envoyé par le serveur (ou tiré par la démo), rien n'est fabriqué.
-import { COURBE_ROTATION, DUREE_ROTATION_MS, type SceneRoue } from './animationRoue.ts'
+import type { SceneRoue } from './animationRoue.ts'
+// Directement depuis mouvementRoue.ts (R6) : via animationRoue, le découpage du build sortait roulette et theme de l'index.
+import { COURBE_ROTATION, DUREE_ROTATION_MS } from './mouvementRoue.ts'
 
 /** Deux tics plus rapprochés que ça ne font qu'un (début de rotation) : un cliquetis net, pas un bourdonnement. */
 export const ECART_MIN_TICS_MS = 45

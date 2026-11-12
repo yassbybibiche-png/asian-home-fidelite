@@ -115,7 +115,9 @@ describe('P1-C7 : Réglages découpés en 6 onglets, un seul formulaire', () => 
   })
 
   test('inventaire des champs inchangé : 26 input/select/textarea, comme avant la découpe', () => {
-    assert.equal(s.match(/<(input|select|textarea)[\s>]/g)?.length, 26)
+    // Roue v2 R6 (décision utilisateur du 12/11/2026, brief R6) : +4 champs dans l'onglet Roulette — type du lot
+    // (select), points, plafond par jour, mode d'accès (radio) ; la limite de gains passe par `Nombre`, déjà compté.
+    assert.equal(s.match(/<(input|select|textarea)[\s>]/g)?.length, 26 + 4)
   })
 
   test('validation native : champ invalide dans un onglet masqué → bascule sur son onglet puis focus', () => {

@@ -12,7 +12,17 @@ import { JOURS_SEMAINE, PALIERS_DEFAUT } from '../lib/programme'
 import { compteurLibelle, MAX_CARACTERES_ROUE } from '../lib/roue'
 import { CONSERVATION_DEFAUT_MOIS, CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, libelleDuree } from '../lib/rgpd'
 import { basculerAccroche, coutLotValide, jourParis } from '../lib/mesure'
-import { libellesEnDouble, normaliserLots, nouvelIdLot, POINTS_LOT_MAX, POINTS_LOT_MIN } from '../lib/lots'
+import { libellesEnDouble, normaliserLots, nouvelIdLot } from '../lib/lots'
+import { LIMITE_GAINS_MOIS_DEFAUT, LIMITE_GAINS_MOIS_MAX, modeAccesRoue } from '../lib/roulette'
+import { CHOIX_TYPE_LOT, lotPourEnvoi, problemeLot } from '../lib/reglagesRoue'
+import { ApercuRoue } from '../components/ApercuRoue'
+import type { ModeAccesRoue, TypeLot } from '../types'
+
+/** Accès à la roue (R6) : les deux modes du serveur, dans l'ordre affiché. */
+const MODES_ACCES: { valeur: ModeAccesRoue; libelle: string; aide: string }[] = [
+  { valeur: 'libre', libelle: 'Libre — 1 tirage par jour', aide: 'Le client joue dès qu’il s’est identifié, une fois par jour.' },
+  { valeur: 'visite', libelle: 'Après visite validée au comptoir', aide: 'Il faut en plus une visite validée par vous ou votre équipe le jour même.' },
+]
 
 /** Client fictif de l'aperçu (jamais enregistré). */
 const APERCU_CLIENT: Client = { id: 'apercu', commerceId: '', prenom: 'Aperçu', tampons: 3, points: 42, visites: [], derniereVisite: null, creeLe: '2026-01-01T00:00:00.000Z' }
@@ -88,7 +98,12 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   const total = lots.reduce((s, l) => s + (Number.isFinite(l.probabilite) ? l.probabilite : 0), 0)
   // R1 : libellés uniques (casse et espaces ignorés), points entiers bornés pour une consolation — comme le serveur.
   const doublons = libellesEnDouble(lots)
-  const pointsValides = lots.every((l) => l.type !== 'points' || (Number.isInteger(l.points) && l.points! >= POINTS_LOT_MIN && l.points! <= POINTS_LOT_MAX))
+  // R6 : montant d'un lot « points », plafond par jour d'un lot physique (`problemeLot`, mêmes bornes que le serveur).
+  const champsTypeValides = lots.every((l) => !problemeLot(l))
+  const lotEnErreur = lots.find((l) => problemeLot(l))
+  // Règles du jeu (R2/R6) : limite de lots gagnés par client sur 30 jours, 0 = illimité, absente = 4.
+  const limiteGains = brouillon.limiteGainsMois ?? LIMITE_GAINS_MOIS_DEFAUT
+  const limiteValide = Number.isInteger(limiteGains) && limiteGains >= 0 && limiteGains <= LIMITE_GAINS_MOIS_MAX
   const nomValide = brouillon.nom.trim().length > 0
   const seuilValide = Number.isInteger(brouillon.seuilTampons) && brouillon.seuilTampons >= 2 && brouillon.seuilTampons <= 50
   const [catalogue, setCatalogue] = useState<RecompensePoints[]>(commerce.catalogue ?? [])
@@ -108,8 +123,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
   const conservationValide = Number.isInteger(conservation) && conservation >= CONSERVATION_MIN_MOIS && conservation <= CONSERVATION_MAX_MOIS
   // Liens de commande (P1-C5) : vides ou en https (le serveur refuse le reste).
   const liensCommandeValides = [brouillon.lienDeliveroo, brouillon.lienUberEats].every((l) => !l?.trim() || /^https:\/\/\S+$/i.test(l.trim()))
-  const lotsValides = lots.length >= 2 && probasValides && coutsValides && pointsValides && !doublons.length && total > 0
-  const valide = nomValide && seuilValide && lotsValides && tauxValide && catalogueValide && !problemes.length && conservationValide && liensCommandeValides
+  const lotsValides = lots.length >= 2 && probasValides && coutsValides && champsTypeValides && !doublons.length && total > 0
+  const valide = nomValide && seuilValide && lotsValides && limiteValide && tauxValide && catalogueValide && !problemes.length && conservationValide && liensCommandeValides
 
   function maj<K extends keyof Commerce>(champ: K, valeur: Commerce[K]) {
     setBrouillon((b) => ({ ...b, [champ]: valeur }))
@@ -160,7 +175,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
       coordonnees: brouillon.coordonnees?.trim() || undefined,
       lienDeliveroo: brouillon.lienDeliveroo?.trim() || undefined,
       lienUberEats: brouillon.lienUberEats?.trim() || undefined,
-      lots,
+      lots: lots.map(lotPourEnvoi),
       eurosParPoint: taux,
       catalogue: catalogue.map((r) => ({ ...r, nom: r.nom.trim(), description: r.description?.trim() || undefined })),
       messagesAuto: brouillon.messagesAuto ?? reglesVides(),
@@ -571,12 +586,17 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
         <legend className="sr-only">Roulette</legend>
         <h2 className="titre-carte">Lots de la roulette</h2>
         <p className="text-sm text-gray-600">
-          Texte libre + chance de sortir (en %) + coût pour vous (€, facultatif : matière et emballage d’un lot, sert au coût des lots du tableau de bord, jamais montré aux clients). Chaque lot garde son type (lot à retirer, points de consolation ou perdant) — le choix du type arrive avec le réglage complet de la roue ; un nouveau lot est un lot à retirer. Chaque libellé doit être différent. Visez {MAX_CARACTERES_ROUE} caractères au plus : le libellé tient alors en entier sur la roue ; la liste des lots sous la roue l’affiche toujours en entier.
+          Texte libre + chance de sortir (en %) + coût pour vous (€, facultatif : matière et emballage d’un lot, sert au coût des lots du tableau de bord, jamais montré aux clients). Type de chaque lot : « Lot physique » (à retirer au comptoir, plafond par jour possible), « Points » (consolation créditée sur la carte : indiquez le nombre de points) ou « Perdu ». Chaque libellé doit être différent. Visez {MAX_CARACTERES_ROUE} caractères au plus : le libellé tient alors en entier sur la roue ; la liste des lots sous la roue l’affiche toujours en entier.
         </p>
-        <ul className="space-y-2">
-          {lotsEdites.map((lot, i) => (
-            // Téléphone : libellé sur toute la largeur, chance et suppression en dessous.
-            <li key={i} className="flex flex-wrap items-center gap-2 border-b border-gray-100 pb-2 last:border-0 sm:flex-nowrap sm:items-start sm:border-0 sm:pb-0">
+        <ul className="space-y-3">
+          {lotsEdites.map((lot, i) => {
+            const type: TypeLot = lot.type ?? 'lot'
+            // Erreur affichée sous le lot (R6) : seulement pour un lot gardé à l'envoi (libellé non vide).
+            const erreurLot = !lot.libelle.trim() ? null : problemeLot(lot) ?? (lots.filter((l) => libellesEnDouble([l, lot]).length).length > 1 ? 'libellé déjà utilisé par un autre lot' : null)
+            return (
+            // Téléphone : libellé sur toute la largeur, chance et suppression en dessous ; type, points et plafond ensuite.
+            <li key={i} className="space-y-2 border-b border-gray-100 pb-3 last:border-0">
+              <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:items-start">
               <div className="w-full min-w-0 sm:w-auto sm:flex-1">
                 <label className="sr-only" htmlFor={`lot-${i}`}>
                   Lot {i + 1}
@@ -633,8 +653,76 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
               >
                 ×
               </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="sr-only" htmlFor={`type-${i}`}>
+                  Type du lot {i + 1}
+                </label>
+                <select
+                  id={`type-${i}`}
+                  className="champ min-w-0 flex-1 sm:w-44 sm:flex-none"
+                  value={type}
+                  onChange={(e) => majLot(i, { ...lot, type: e.target.value as TypeLot })}
+                >
+                  {CHOIX_TYPE_LOT.map((c) => (
+                    <option key={c.valeur} value={c.valeur}>
+                      {c.libelle}
+                    </option>
+                  ))}
+                </select>
+                {type === 'points' && (
+                  <>
+                    <label className="sr-only" htmlFor={`points-${i}`}>
+                      Points offerts par le lot {i + 1}
+                    </label>
+                    <div className="relative min-w-0 flex-1 sm:w-36 sm:flex-none">
+                      <input
+                        id={`points-${i}`}
+                        className="champ pr-12 text-right"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={10000}
+                        placeholder="nombre"
+                        aria-invalid={!!erreurLot && erreurLot.includes('points')}
+                        value={lot.points === undefined || Number.isNaN(lot.points) ? '' : lot.points}
+                        onChange={(e) => majLot(i, { ...lot, points: e.target.value === '' ? undefined : e.target.valueAsNumber })}
+                      />
+                      <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-gray-600">pts</span>
+                    </div>
+                  </>
+                )}
+                {type === 'lot' && (
+                  <>
+                    <label className="sr-only" htmlFor={`plafond-${i}`}>
+                      Plafond par jour du lot {i + 1}
+                    </label>
+                    <div className="relative min-w-0 flex-1 sm:w-44 sm:flex-none">
+                      <input
+                        id={`plafond-${i}`}
+                        className="champ pr-16 text-right"
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={10000}
+                        placeholder="illimité"
+                        aria-invalid={!!erreurLot && erreurLot.includes('plafond')}
+                        value={lot.plafondJour === undefined || Number.isNaN(lot.plafondJour) ? '' : lot.plafondJour}
+                        onChange={(e) => majLot(i, { ...lot, plafondJour: e.target.value === '' ? undefined : e.target.valueAsNumber })}
+                      />
+                      <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-gray-600">/ jour</span>
+                    </div>
+                  </>
+                )}
+              </div>
+              {erreurLot && (
+                <p className="text-sm font-medium text-red-700">
+                  Lot {i + 1} : {erreurLot}
+                </p>
+              )}
             </li>
-          ))}
+            )
+          })}
         </ul>
         <button
           type="button"
@@ -653,8 +741,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                 ? ' — chaque coût doit être entre 0 et 1 000 €'
                 : doublons.length
                   ? ` — libellé en double : ${doublons.join(', ')}`
-                  : !pointsValides
-                    ? ` — un lot « points » doit offrir entre ${POINTS_LOT_MIN} et ${POINTS_LOT_MAX.toLocaleString('fr-FR')} points`
+                  : lotEnErreur
+                    ? ` — « ${lotEnErreur.libelle} » : ${problemeLot(lotEnErreur)}`
                     : total <= 0
                       ? ' — au moins un lot doit avoir une chance > 0'
                       : total !== 100
@@ -668,6 +756,47 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           onChange={(v) => maj('testsAB', { ...brouillon.testsAB, accroche: basculerAccroche(brouillon.testsAB?.accroche, v, jourParis(new Date())) })}
         />
       </fieldset>
+      {/* Règles du jeu (R6) : section du même formulaire, sans fieldset — les radios forment leur propre groupe nommé. */}
+      <section className="carte space-y-4" aria-labelledby="regles-jeu-titre">
+        <h2 id="regles-jeu-titre" className="titre-carte">Règles du jeu</h2>
+        <div role="radiogroup" aria-labelledby="acces-roue-titre" className="space-y-2">
+          <p id="acces-roue-titre" className="etiquette">Accès à la roue</p>
+          {MODES_ACCES.map((m) => (
+            <label key={m.valeur} className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl p-3 ring-1 ring-gray-200 has-[:checked]:ring-2 has-[:checked]:ring-magenta-700">
+              <input
+                type="radio"
+                name="modeAccesRoue"
+                className="mt-0.5 h-5 w-5 shrink-0 accent-magenta-700"
+                value={m.valeur}
+                checked={modeAccesRoue(brouillon) === m.valeur}
+                onChange={() => maj('modeAccesRoue', m.valeur)}
+              />
+              <span>
+                <span className="block font-semibold">{m.libelle}</span>
+                <span className="block text-sm text-gray-600">{m.aide}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <Nombre
+          id="limiteGainsMois"
+          libelle="Limite de gains par client (lots par mois)"
+          valeur={brouillon.limiteGainsMois}
+          defaut={LIMITE_GAINS_MOIS_DEFAUT}
+          min={0}
+          max={LIMITE_GAINS_MOIS_MAX}
+          aide={`${limiteValide ? (limiteGains === 0 ? 'Illimité' : `${limiteGains} lot${limiteGains > 1 ? 's' : ''} physique${limiteGains > 1 ? 's' : ''} au plus par client sur 30 jours`) : `entre 0 et ${LIMITE_GAINS_MOIS_MAX}`} — 0 = illimité, ${LIMITE_GAINS_MOIS_DEFAUT} par défaut. Au-delà, la roue ne donne plus que des points ou « perdu » à ce client.`}
+          onChange={(v) => maj('limiteGainsMois', v)}
+        />
+      </section>
+      {/* Aperçu (R6) : roue du brouillon, tirage de test dans le navigateur — rien n'est enregistré. */}
+      <section className="carte space-y-3" aria-labelledby="apercu-roue-titre">
+        <h2 id="apercu-roue-titre" className="titre-carte">Aperçu de la roue</h2>
+        <p className="text-sm text-gray-600">
+          Votre roue telle que configurée ci-dessus (même non enregistrée) : la taille de chaque secteur suit sa chance. Le tirage de test suit les mêmes chances, sans plafond ni limite, et ne crée aucun tirage.
+        </p>
+        <ApercuRoue lots={lots} couleur={apparence.couleur} initiale={brouillon.nom.trim()[0]?.toUpperCase()} />
+      </section>
       </div>
 
       <div id="reglages-messages" role="tabpanel" aria-labelledby="onglet-messages" hidden={onglet !== 'messages'} className="space-y-6">

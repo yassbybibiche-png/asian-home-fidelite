@@ -1,7 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { colorerSecteurs, LONGUEUR_TEXTE_MAX, POLICE_ROUE, RAYON_LIBELLE, largeurEstimee, secteursAffiches, teintesRoue } from '../lib/roue'
 import type { LotRoue } from '../lib/roulette'
-import { dureeRotation, prefereMouvementReduit, REQUETE_MOUVEMENT_REDUIT, transitionRoue, type SceneRoue } from '../lib/animationRoue'
+import type { SceneRoue } from '../lib/animationRoue'
+// Pas animationRoue (→ roulette, theme) : la roue est aussi importée par Réglages (aperçu R6), voir mouvementRoue.ts.
+import { dureeRotation, prefereMouvementReduit, REQUETE_MOUVEMENT_REDUIT, transitionRoue } from '../lib/mouvementRoue'
 import { useLangue } from './Langue'
 import { THEME } from '../theme.ts'
 import type { TypeLot } from '../types'

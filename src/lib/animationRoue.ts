@@ -4,42 +4,21 @@ import { jourEnClair } from './roulette.ts'
 import type { Langue } from './langue.ts'
 import { COULEURS_CONFETTIS } from '../theme.ts'
 
-export { COULEURS_CONFETTIS }
+import { DUREE_ROTATION_MS } from './mouvementRoue.ts'
 
-/** Rotation de la roue : 3,6 s (fourchette demandée 3 à 4 s). Animation CSS de `transform` seul (composité, 60 fps). */
-export const DUREE_ROTATION_MS = 3600
-/** Courbe de décélération : départ vif, longue fin qui ralentit sous le pointeur. */
-export const COURBE_ROTATION = 'cubic-bezier(0.15, 0.85, 0.2, 1)'
+export { COULEURS_CONFETTIS }
+// Durée, courbe et mouvement réduit : définis dans mouvementRoue.ts (sans dépendance, importé par la roue — R6).
+export { COURBE_ROTATION, DUREE_ROTATION_MS, dureeRotation, prefereMouvementReduit, REQUETE_MOUVEMENT_REDUIT, transitionRoue } from './mouvementRoue.ts'
+
 /** Petite pause après l'arrêt de la roue avant l'écran de résultat. */
 export const PAUSE_RESULTAT_MS = 200
 /** Mouvement réduit : la roue saute directement sur le lot, sans tours ; l'écran de résultat suit presque aussitôt. */
 export const DELAI_RESULTAT_REDUIT_MS = 150
 
-export const REQUETE_MOUVEMENT_REDUIT = '(prefers-reduced-motion: reduce)'
-
-/** Vrai si le téléphone demande moins d'animations (réglage d'accessibilité). Sans `matchMedia` : animation normale. */
-export function prefereMouvementReduit(w: { matchMedia?: (q: string) => { matches: boolean } } | undefined = globalThis as never): boolean {
-  try {
-    return !!w?.matchMedia?.(REQUETE_MOUVEMENT_REDUIT).matches
-  } catch {
-    return false
-  }
-}
-
-/** Durée de la rotation affichée. */
-export function dureeRotation(reduit: boolean): number {
-  return reduit ? 0 : DUREE_ROTATION_MS
-}
-
 /** Délai entre le lancement et l'écran de résultat. `avecRoue` = faux si le lot n'est pas sur la roue (rien ne tourne). */
 export function delaiResultat(reduit: boolean, avecRoue = true): number {
   if (!avecRoue) return 0
   return reduit ? DELAI_RESULTAT_REDUIT_MS : DUREE_ROTATION_MS + PAUSE_RESULTAT_MS
-}
-
-/** Transition CSS de la couche qui tourne. */
-export function transitionRoue(reduit: boolean): string {
-  return reduit ? 'none' : `transform ${DUREE_ROTATION_MS}ms ${COURBE_ROTATION}`
 }
 
 /** Nombre de tours complets avant l'arrêt : 5 normalement, 0 en mouvement réduit (le secteur gagnant reste exact). */
