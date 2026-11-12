@@ -12,7 +12,7 @@ import { HorsLignePublic, MessagePublic } from './Jouer'
 /** Traductions de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
 enregistrerTraductions({
   'Chargement du règlement du jeu.': 'Loading the game rules.',
-  'Texte officiel du jeu, en français.': 'Official rules of the game, in French.',
+  'Texte officiel du jeu.': 'Official rules of the game. In case of discrepancy, the French version prevails.',
   '🎡 Retour au jeu': '🎡 Back to the game',
   'Commerce introuvable': 'Business not found',
   'Ce lien ne correspond à aucun commerce.': 'This link does not match any business.',
@@ -21,12 +21,12 @@ enregistrerTraductions({
 /**
  * Page publique #/reglement/<commerceId> (roue v2, R4) : règlement du jeu généré depuis la configuration du commerce
  * (`reglementDuJeu`, src/lib/reglement.ts) — mode d'accès, lots actifs, limite de gains. Liée depuis la page de jeu,
- * avant le tirage. Comme la politique de confidentialité, le texte légal reste en français (lang="fr").
+ * avant le tirage. Texte dans la langue active du client (revue Codex R4, F3) ; la version française fait foi.
  */
 export default function Reglement() {
   const { api, etat } = useStore()
   const { param } = useRoute()
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
   const [donnees, setDonnees] = useState<DonneesReglement | null>(null)
   const [erreur, setErreur] = useState<'introuvable' | 'horsLigne' | null>(null)
   const [essai, setEssai] = useState(0)
@@ -57,18 +57,18 @@ export default function Reglement() {
   if (!vue) return <SqueletteCarte libelle={t('Chargement du règlement du jeu.')} />
   if (!vue.actif) return <MessagePublic titre={vue.nom}>Le jeu de ce commerce n’est plus disponible.</MessagePublic>
 
-  const reglement = reglementDuJeu(vue)
+  const reglement = reglementDuJeu(vue, langue)
   return (
     <div className="mx-auto max-w-md space-y-4 px-4 pt-6 pb-10" data-reglement>
       <header className="hero-sombre rounded-3xl px-5 py-6 text-center shadow-relief">
         <p className="font-semibold text-magenta-300">{t('Règlement du jeu')}</p>
-        <h1 className="titre-magenta mt-1 text-2xl" lang="fr">
+        <h1 className="titre-magenta mt-1 text-2xl" lang={langue}>
           {reglement.titre}
         </h1>
-        <p className="mt-2 text-sm text-white/70">{t('Texte officiel du jeu, en français.')}</p>
+        <p className="mt-2 text-sm text-white/70">{t('Texte officiel du jeu.')}</p>
       </header>
       {reglement.sections.map((s) => (
-        <section key={s.titre} className="carte space-y-2" lang="fr">
+        <section key={s.titre} className="carte space-y-2" lang={langue}>
           <h2 className="titre-carte">{s.titre}</h2>
           {s.contenu.map((bloc, i) =>
             typeof bloc === 'string' ? (

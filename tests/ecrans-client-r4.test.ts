@@ -16,7 +16,18 @@ import { activerCode } from '../src/data/jeuApi.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import { lotsAGagner } from '../src/lib/lots.ts'
 import { donneesReglement, reglementDuJeu, type DonneesReglement } from '../src/lib/reglement.ts'
-import { compteARebours, jourMois, vueGain, type GainEnCours } from '../src/lib/carte.ts'
+import {
+  activationRecue,
+  attenteBorne,
+  compteARebours,
+  intervalleRecalcul,
+  jourMois,
+  prochaineBorne,
+  RECALCUL_GAINS_MS,
+  surveillerBorne,
+  vueGain,
+  type GainEnCours,
+} from '../src/lib/carte.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
 import { lireRoute, PAGES_PUBLIQUES } from '../src/router.ts'
 import { estPageTraduite, traduire } from '../src/lib/langue.ts'
@@ -150,7 +161,7 @@ describe('R4 : règlement du jeu (texte généré)', () => {
     assert.equal(ancien.limiteGainsMois, 4)
   })
 
-  test('route #/reglement/<id> : page publique traduite (chrome), différée, texte légal en français', () => {
+  test('route #/reglement/<id> : page publique traduite, différée, texte dans la langue active', () => {
     assert.deepEqual(lireRoute('#/reglement/c-lin'), { page: 'reglement', param: 'c-lin' })
     assert.ok(PAGES_PUBLIQUES.includes('reglement'))
     assert.ok(estPageTraduite('reglement'))
@@ -160,7 +171,8 @@ describe('R4 : règlement du jeu (texte généré)', () => {
     const page = lire('src/pages/Reglement.tsx')
     assert.match(page, /api\.reglement\(param\)/)
     assert.match(page, /donneesReglement\(local\)/)
-    assert.match(page, /<section key=\{s\.titre\} className="carte space-y-2" lang="fr">/)
+    // Revue Codex R4 (F3) : le texte suit la langue du client (auparavant lang="fr" figé).
+    assert.match(page, /<section key=\{s\.titre\} className="carte space-y-2" lang=\{langue\}>/)
     assert.match(page, /href=\{`#\/jouer\/\$\{vue\.commerceId\}`\}/)
     // La page de jeu n'importe pas le texte du règlement (bundle initial, P2-Q2).
     assert.doesNotMatch(lire('src/pages/Jouer.tsx'), /lib\/reglement/)
@@ -243,6 +255,179 @@ describe('R4 : bloc du gain sur la carte (maquettes §3)', () => {
     clearInterval(minuterie)
     assert.equal(compteARebours(-5), '00:00')
     assert.equal(compteARebours(61_001), '01:02')
+  })
+})
+
+describe('R4 revue Codex : compte à rebours sur l’heure serveur, carte rafraîchie aux bornes, règlement bilingue', () => {
+  // Même tirage que plus haut : mardi 10/11/2026 à 12 h (Paris), utilisable du 11/11 au 10/12 inclus.
+  const le = (jour: number, h = 0, min = 0, s = 0) => new Date(instantParis(2026, 11, 10 + jour, h, min).getTime() + s * 1000)
+  const g: GainEnCours = {
+    tirageId: 'ti-1',
+    lot: 'Nems offerts',
+    date: le(0, 12).toISOString(),
+    statut: 'enAttente',
+    utilisableLe: le(1).toISOString(),
+    expireLe: le(31).toISOString(),
+    expireActivation: null,
+  }
+
+  test('F1 : téléphone décalé de ±5 min → le décompte affiché est celui de la fenêtre serveur (à la seconde près)', () => {
+    const serveur = le(1, 12) // heure du serveur à l'activation
+    const reponse = { code: 'W63ADN', activeLe: serveur.toISOString(), expireActivation: new Date(serveur.getTime() + 10 * 60_000).toISOString() }
+    const inactif = { ...g, statut: 'inactif' as const }
+    for (const decalage of [5 * 60_000, -5 * 60_000]) {
+      // Réponse reçue 300 ms après l'activation, lue sur l'horloge (fausse) du téléphone.
+      const recueLe = new Date(serveur.getTime() + 300 + decalage)
+      const a = activationRecue(reponse, recueLe)
+      assert.equal(a.decalageMs, -decalage - 300)
+      const telephone = (ms: number) => new Date(recueLe.getTime() + ms)
+      // 13 s après réception : 09:47 restantes côté serveur (9 min 46,7 s), quel que soit le décalage.
+      const v = vueGain(inactif, a, telephone(13_000))
+      assert.ok(v?.etat === 'code', String(decalage))
+      assert.equal(compteARebours(v.resteMs), '09:47')
+      assert.ok(Math.abs(v.resteMs - (10 * 60_000 - 13_300)) <= 1000)
+      // Sans correction, le même téléphone afficherait 04:47 (en avance) ou 14:47 (en retard).
+      const brut = vueGain(inactif, { code: a.code, expireActivation: a.expireActivation }, telephone(13_000))
+      assert.ok(brut?.etat === 'code')
+      assert.equal(compteARebours(brut.resteMs), decalage > 0 ? '04:47' : '14:47')
+      // Fenêtre serveur échue → « Utiliser mon gain » à nouveau, même si l'horloge du téléphone dit le contraire.
+      assert.equal(vueGain(inactif, a, telephone(10 * 60_000))?.etat, 'aActiver')
+    }
+    // Page : l'activation est enregistrée avec son décalage, mesuré à la réception.
+    const bloc = corps(lire('src/pages/CartePublique.tsx'), 'GainsRoue')
+    assert.match(bloc, /\[tirageId\]: activationRecue\(issue\.activation, new Date\(\)\)/)
+  })
+
+  test('F2 : page restée ouverte, l’horloge franchit minuit → « Utiliser mon gain » sans rechargement manuel, une seule relecture', (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setInterval', 'setTimeout'], now: le(0, 23, 59, 40) })
+    assert.equal(intervalleRecalcul([], false), null, 'aucun gain : aucun minuteur')
+    assert.equal(intervalleRecalcul([g], true), 1000, 'code affiché : chaque seconde')
+    assert.equal(intervalleRecalcul([g], false), RECALCUL_GAINS_MS)
+    assert.equal(RECALCUL_GAINS_MS, 30_000)
+    // Comme GainsRoue : recalcul local à l'intervalle choisi + rechargement unique à la prochaine borne.
+    let etat = vueGain(g, undefined, new Date())?.etat
+    const recalcul = setInterval(() => (etat = vueGain(g, undefined, new Date())?.etat), intervalleRecalcul([g], false)!)
+    const borne = prochaineBorne([g], new Date())
+    assert.equal(borne?.toISOString(), g.utilisableLe)
+    let rechargements = 0
+    const annuler = surveillerBorne(borne!, () => rechargements++)
+    assert.equal(etat, 'enAttente')
+    t.mock.timers.tick(20_000) // minuit pile à Paris
+    assert.equal(etat, 'enAttente')
+    t.mock.timers.tick(1_000)
+    assert.equal(rechargements, 1, 'carte relue une fois, juste après la borne')
+    t.mock.timers.tick(9_000)
+    assert.equal(etat, 'aActiver', 'le bouton apparaît au recalcul suivant, même sans réponse du serveur')
+    t.mock.timers.tick(24 * 3600_000)
+    assert.equal(rechargements, 1, 'pas de polling réseau')
+    clearInterval(recalcul)
+    annuler()
+    // Borne lointaine (J+30) : attente découpée par tranches de 6 h (setTimeout déborde au-delà de ~24,8 jours).
+    assert.equal(prochaineBorne([g], new Date())?.toISOString(), g.expireLe)
+    assert.equal(attenteBorne(new Date(g.expireLe), new Date()), 6 * 3600_000)
+    let expirations = 0
+    const annulerExpiration = surveillerBorne(new Date(g.expireLe), () => expirations++)
+    t.mock.timers.tick(new Date(g.expireLe).getTime() - Date.now() - 1000)
+    assert.equal(expirations, 0)
+    t.mock.timers.tick(2000)
+    assert.equal(expirations, 1)
+    assert.equal(vueGain(g, undefined, new Date()), null, 'expiré : le bloc disparaît')
+    assert.equal(prochaineBorne([g], new Date()), null)
+    annulerExpiration()
+    // Annulé avant la borne (page quittée, gains relus) : rien n'est rechargé.
+    let apres = 0
+    surveillerBorne(new Date(Date.now() + 60_000), () => apres++)()
+    t.mock.timers.tick(120_000)
+    assert.equal(apres, 0)
+  })
+
+  test('F2 : la carte branche le recalcul et le rechargement aux bornes (source)', () => {
+    const carte = lire('src/pages/CartePublique.tsx')
+    const bloc = corps(carte, 'GainsRoue')
+    assert.match(bloc, /const maintenant = useMaintenant\(intervalleRecalcul\(gains, Object\.keys\(activations\)\.length > 0\)\)/)
+    assert.match(bloc, /useRechargementAuxBornes\(gains, onBorne\)/)
+    assert.match(carte, /gains=\{donnees\.gains\} onBorne=\{charger\} \/>/)
+    const hook = corps(carte, 'useRechargementAuxBornes')
+    // Borne figée à la réception des gains : un recalcul local qui la franchit n'annule pas le rechargement.
+    assert.match(hook, /useMemo\(\(\) => prochaineBorne\(gains, new Date\(\)\)\?\.getTime\(\) \?\? null, \[gains\]\)/)
+    assert.match(hook, /surveillerBorne\(new Date\(borne\), recharger\)/)
+    assert.match(corps(carte, 'useMaintenant'), /window\.setInterval\(\(\) => setMaintenant\(new Date\(\)\), intervalleMs\)/)
+  })
+
+  const base: DonneesReglement = {
+    commerceId: 'c-lin',
+    nom: 'Chez Lin',
+    coordonnees: '12 rue des Lilas, 75011 Paris',
+    actif: true,
+    modeAccesRoue: 'libre',
+    limiteGainsMois: 4,
+    dotations: lotsAGagner(LOTS),
+    secteurPerdant: true,
+  }
+  const texte = (d: DonneesReglement, langue: 'fr' | 'en') => {
+    const r = reglementDuJeu(d, langue)
+    return [r.titre, ...r.sections.flatMap((s) => [s.titre, ...s.contenu.flat()])].join('\n')
+  }
+
+  test('F3 : règlement anglais complet — mêmes sections, dotations listées, gratuité et hasard, aucune probabilité ni promesse', () => {
+    const en = texte(base, 'en')
+    assert.match(en, /^Rules of the game “The Chez Lin wheel”/)
+    assert.deepEqual(
+      reglementDuJeu(base, 'en').sections.map((s) => s.titre),
+      ['1. Organiser', '2. Principle of the game', '3. How to take part', '4. Prizes', '5. Using a prize', '6. Online reviews', '7. Personal data', '8. Duration and changes', '9. Disputes'],
+    )
+    assert.match(en, /organised by Chez Lin \(12 rue des Lilas, 75011 Paris\)/)
+    assert.match(en, /free promotional lottery, based on chance/)
+    assert.match(en, /\nNems offerts\n/)
+    assert.match(en, /\nThé glacé\n/)
+    assert.match(en, /\n10 points offerts \(loyalty points\)\n/)
+    assert.doesNotMatch(en, /Dommage|Lot à 0 %/)
+    assert.match(en, /Only one draw per person per day\./)
+    assert.match(en, /from the day after the draw and for 30 days/)
+    assert.match(en, /for 10 minutes/)
+    assert.match(en, /limited to 4 over a rolling 30 days; beyond that, the draw can only award loyalty points or no prize\./)
+    assert.match(en, /never a condition for playing or winning/)
+    assert.match(en, /the French version prevails/)
+    assert.doesNotMatch(en, /guarantee|for sure|assured|every time|100 ?%|every draw wins|certain to/i)
+    assert.doesNotMatch(en, /€|\d+ ?%|cents|probabilit|ceiling|cost/i)
+    assert.match(en, /usual selling price/)
+    // Aucune phrase restée en français (lots et adresse sans accent : tout accent trahirait un oubli).
+    const neutre = { ...base, coordonnees: '12 Lilac Street', dotations: [{ libelle: 'Spring rolls', type: 'lot' as const }, { libelle: '10 points', type: 'points' as const }] }
+    assert.doesNotMatch(texte(neutre, 'en'), /[éèêàâùûçœ«»]|\b(le|la|les|du|des|est|une?)\b/i)
+    // Le français reste la langue par défaut (serveur, démo).
+    assert.equal(reglementDuJeu(base).titre, reglementDuJeu(base, 'fr').titre)
+  })
+
+  test('F3 : mêmes variantes et mêmes phrases conditionnelles dans les deux langues', () => {
+    const variantes: DonneesReglement[] = [
+      base,
+      { ...base, modeAccesRoue: 'visite' },
+      { ...base, coordonnees: undefined, limiteGainsMois: 0, secteurPerdant: false, dotations: [{ libelle: 'Nems offerts', type: 'lot' }] },
+      { ...base, secteurPerdant: false, dotations: [{ libelle: '10 points offerts', type: 'points' }] },
+    ]
+    for (const d of variantes) {
+      const forme = (langue: 'fr' | 'en') => reglementDuJeu(d, langue).sections.map((s) => s.contenu.map((b) => (typeof b === 'string' ? 1 : b.length)))
+      assert.deepEqual(forme('en'), forme('fr'), JSON.stringify(d))
+    }
+    assert.match(texte(base, 'en'), /no purchase necessary/)
+    assert.doesNotMatch(texte(base, 'en'), /validated at the counter/)
+    const visite = texte({ ...base, modeAccesRoue: 'visite' }, 'en')
+    assert.match(visite, /unlocked after a visit validated at the counter on the same day/)
+    assert.match(visite, /never access to the game, which remains free/)
+    assert.doesNotMatch(visite, /no purchase necessary/)
+    const sobre = texte(variantes[2], 'en')
+    assert.match(sobre, /organised by Chez Lin, hereinafter/)
+    assert.doesNotMatch(sobre, /rolling|loyalty points|no prize at all/)
+  })
+
+  test('F3 : la page affiche la version de la langue active du client (la française fait foi)', () => {
+    const page = lire('src/pages/Reglement.tsx')
+    assert.match(corps(page, 'Reglement'), /const \{ langue, t \} = useLangue\(\)/)
+    assert.match(page, /const reglement = reglementDuJeu\(vue, langue\)/)
+    assert.match(page, /<h1 className="titre-magenta mt-1 text-2xl" lang=\{langue\}>/)
+    assert.doesNotMatch(page, /lang="fr"/)
+    assert.match(page, /'Texte officiel du jeu\.': 'Official rules of the game\. In case of discrepancy, the French version prevails\.'/)
+    assert.match(page, /\{t\('Texte officiel du jeu\.'\)\}/)
   })
 })
 

@@ -11,10 +11,14 @@ import { SqueletteCarte } from '../components/Squelette'
 import { BadgeDemo, BoutonCopier, EncartWallet, LienConfidentialite, LogoCommerce, MessageErreur, PiedPublic, telecharger } from '../components/ui'
 import { dateRelative } from '../lib/format'
 import {
+  activationRecue,
   compteARebours,
   historiqueCarte,
+  intervalleRecalcul,
   jourMois,
   messageRechercheCarte,
+  prochaineBorne,
+  surveillerBorne,
   vueGain,
   type ActivationAffichee,
   type GainDuJour,
@@ -355,7 +359,7 @@ function CarteApi({ api: apiServeur }: { api: ClientApi }) {
       gainDuJour={donnees.gainDuJour}
       lotsRoue={donnees.lots}
       lienCourt={lienCourtCarte(window.location.origin, donnees.client.id)}
-      gains={<GainsRoue api={api} jetons={jetons} commerceId={donnees.commerce.id} clientId={donnees.client.id} gains={donnees.gains} />}
+      gains={<GainsRoue api={api} jetons={jetons} commerceId={donnees.commerce.id} clientId={donnees.client.id} gains={donnees.gains} onBorne={charger} />}
       actions={
         <>
           {donnees.acces?.ancienLien && donnees.acces.graceJusquAu && <BandeauGrace jusquAu={donnees.acces.graceJusquAu} />}
@@ -375,16 +379,26 @@ function CarteApi({ api: apiServeur }: { api: ClientApi }) {
   )
 }
 
-/** Heure courante, rafraîchie chaque seconde tant que `actif` (compte à rebours d'un code affiché). */
-function useMaintenant(actif: boolean): Date {
+/** Heure courante, relue toutes les `intervalleMs` (1 s : compte à rebours d'un code ; 30 s : gains en cours ; null : jamais). */
+function useMaintenant(intervalleMs: number | null): Date {
   const [maintenant, setMaintenant] = useState(() => new Date())
   useEffect(() => {
     setMaintenant(new Date())
-    if (!actif) return
-    const minuterie = window.setInterval(() => setMaintenant(new Date()), 1000)
+    if (intervalleMs === null) return
+    const minuterie = window.setInterval(() => setMaintenant(new Date()), intervalleMs)
     return () => window.clearInterval(minuterie)
-  }, [actif])
+  }, [intervalleMs])
   return maintenant
+}
+
+/**
+ * Rechargement unique de la carte à la prochaine borne de statut (revue Codex R4, F2) : le serveur passe alors le gain
+ * à « inactif » (minuit) ou l'expire (J+30). Borne calculée à la réception des gains : un recalcul local qui la franchit
+ * avant le minuteur n'annule pas ce rechargement.
+ */
+function useRechargementAuxBornes(gains: GainEnCours[], recharger: () => void) {
+  const borne = useMemo(() => prochaineBorne(gains, new Date())?.getTime() ?? null, [gains])
+  useEffect(() => (borne === null ? undefined : surveillerBorne(new Date(borne), recharger)), [borne, recharger])
 }
 
 /**
@@ -398,17 +412,21 @@ function GainsRoue({
   commerceId,
   clientId,
   gains,
+  onBorne,
 }: {
   api: ClientApi
   jetons: ReturnType<typeof memoireJetons>
   commerceId: string
   clientId: string
   gains: GainEnCours[]
+  /** Recharge la carte (une fois par borne de statut franchie, page restée ouverte). */
+  onBorne(): void
 }) {
   const [activations, setActivations] = useState<Record<string, ActivationAffichee>>({})
   const [enCours, setEnCours] = useState<string | null>(null)
   const [erreurs, setErreurs] = useState<Record<string, string>>({})
-  const maintenant = useMaintenant(Object.keys(activations).length > 0)
+  const maintenant = useMaintenant(intervalleRecalcul(gains, Object.keys(activations).length > 0))
+  useRechargementAuxBornes(gains, onBorne)
   const { langue, t } = useLangue()
   const vues = gains.flatMap((g) => {
     const vue = vueGain(g, activations[g.tirageId], maintenant)
@@ -423,7 +441,8 @@ function GainsRoue({
     setErreurs((e) => ({ ...e, [tirageId]: '' }))
     const issue = await activerCode(api, jetons, { commerceId, clientId, tirageId })
     setEnCours(null)
-    if (issue.ok) setActivations((a) => ({ ...a, [tirageId]: { code: issue.activation.code, expireActivation: issue.activation.expireActivation } }))
+    // Décalage d'horloge mesuré à la réception : le compte à rebours suit l'heure du serveur (revue Codex R4, F1).
+    if (issue.ok) setActivations((a) => ({ ...a, [tirageId]: activationRecue(issue.activation, new Date()) }))
     else setErreurs((e) => ({ ...e, [tirageId]: issue.message }))
   }
 

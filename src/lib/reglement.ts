@@ -5,6 +5,7 @@
 // Module chargé avec la page différée #/reglement (et par le serveur) : la page de jeu n'en importe rien — elle
 // utilise `lotsAGagner` (src/lib/lots.ts) — pour garder ce texte hors du bundle initial (P2-Q2).
 import type { Commerce, ModeAccesRoue } from '../types'
+import type { Langue } from './langue.ts'
 import { DUREE_GAIN_JOURS, limiteGainsMois, lotsJouables, modeAccesRoue } from './roulette.ts'
 import { lotsAGagner, normaliserLots, type LotAffiche } from './lots.ts'
 
@@ -43,8 +44,21 @@ export interface SectionReglement {
   contenu: (string | string[])[]
 }
 
-/** Texte du règlement (modèle reglement-modele.md), variantes « libre » / « visite » selon le mode d'accès. */
-export function reglementDuJeu(d: DonneesReglement): { titre: string; sections: SectionReglement[] } {
+export interface TexteReglement {
+  titre: string
+  sections: SectionReglement[]
+}
+
+/**
+ * Texte du règlement (modèle reglement-modele.md), variantes « libre » / « visite » selon le mode d'accès, dans la
+ * langue du client (revue Codex R4, F3) : la version anglaise reprend les mêmes sections et les mêmes faits ; la
+ * version française fait foi. Les libellés des lots (saisis par le commerçant) ne sont pas traduits.
+ */
+export function reglementDuJeu(d: DonneesReglement, langue: Langue = 'fr'): TexteReglement {
+  return langue === 'en' ? reglementAnglais(d) : reglementFrancais(d)
+}
+
+function reglementFrancais(d: DonneesReglement): TexteReglement {
   const physiques = d.dotations.filter((l) => l.type === 'lot')
   const points = d.dotations.some((l) => l.type === 'points')
   const organisateur = `Le jeu est organisé par ${d.nom}${d.coordonnees ? ` (${d.coordonnees})` : ''}, ci-après « l’organisateur ».`
@@ -112,6 +126,80 @@ export function reglementDuJeu(d: DonneesReglement): { titre: string; sections: 
       {
         titre: '9. Litiges',
         contenu: ['Toute difficulté d’interprétation du présent règlement est tranchée par l’organisateur, dans le respect du droit de la consommation.'],
+      },
+    ],
+  }
+}
+
+/** Même règlement en anglais : section pour section, phrase conditionnelle pour phrase conditionnelle. */
+function reglementAnglais(d: DonneesReglement): TexteReglement {
+  const physiques = d.dotations.filter((l) => l.type === 'lot')
+  const points = d.dotations.some((l) => l.type === 'points')
+  const organisateur = `The game is organised by ${d.nom}${d.coordonnees ? ` (${d.coordonnees})` : ''}, hereinafter “the organiser”.`
+  const acces =
+    d.modeAccesRoue === 'libre'
+      ? 'Participation is open to anyone who is a customer of or visitor to the business, with no purchase necessary.'
+      : 'Participation is reserved for customers of the business: it is unlocked after a visit validated at the counter on the same day. Purchases only ever concern the products or services of the business, never access to the game, which remains free.'
+  const dotations: (string | string[])[] = [
+    'The prizes that can be won on the day of the draw are shown on the game page before the draw. The prizes include:',
+    d.dotations.map((l) => (l.type === 'points' ? `${l.libelle} (loyalty points)` : l.libelle)),
+  ]
+  if (physiques.length) dotations.push('The value of a prize is its usual selling price in the business.')
+  if (points) dotations.push('Some draws award loyalty points, credited immediately to the participant’s card.')
+  if (d.secteurPerdant) dotations.push('A draw may also win no prize at all.')
+  dotations.push(
+    'The organiser may limit the number of prizes of the same type awarded each day; a prize whose daily quota has been reached is no longer offered that day. Prizes are awarded while stocks last. No prize can be exchanged for its cash value.',
+  )
+  const utilisation: (string | string[])[] = [
+    [
+      `A prize won can be used from the day after the draw and for ${DUREE_GAIN_JOURS} days (exact dates shown on the winner’s loyalty card).`,
+      'To use it, the winner opens their card in the app and taps “Use my prize”: a single-use code is then displayed for 10 minutes. The prize is handed over at the counter once this code has been checked.',
+      `After ${DUREE_GAIN_JOURS} days, the prize is permanently lost. A code not presented during its 10 minutes on screen can be displayed again from the card as long as the prize is still valid.`,
+    ],
+  ]
+  if (d.limiteGainsMois > 0) {
+    utilisation.push(
+      `The number of prizes won by the same person is limited to ${d.limiteGainsMois} over a rolling 30 days; beyond that, the draw can only award loyalty points${d.secteurPerdant ? ' or no prize' : ''}.`,
+    )
+  }
+  return {
+    titre: `Rules of the game “The ${d.nom} wheel”`,
+    sections: [
+      { titre: '1. Organiser', contenu: [organisateur] },
+      { titre: '2. Principle of the game', contenu: ['The game is a free promotional lottery, based on chance.', acces] },
+      {
+        titre: '3. How to take part',
+        contenu: [
+          [
+            'The participant scans the QR code displayed in the business (or opens the game link) and identifies themselves with their phone number or email address.',
+            'Only one draw per person per day.',
+            'The result of the draw is determined at random by the server at the moment of the spin; it is final. A screenshot of the wheel is not proof of a win: only the recorded result and, for a prize, the winning code activated in the app are authoritative.',
+          ],
+        ],
+      },
+      { titre: '4. Prizes', contenu: dotations },
+      { titre: '5. Using a prize', contenu: utilisation },
+      {
+        titre: '6. Online reviews',
+        contenu: [
+          'The participant may, if they wish, leave a review on the public listing of the business. Leaving a review is never a condition for playing or winning, and changes neither the odds nor the value of the prizes.',
+        ],
+      },
+      {
+        titre: '7. Personal data',
+        contenu: [
+          'The data collected (contact details, history of draws and prizes) is used solely to run the game and the loyalty programme. Marketing messages are only sent to people who have consented to them. See the business’s privacy policy for details (retention period, rights of access and deletion).',
+        ],
+      },
+      {
+        titre: '8. Duration and changes',
+        contenu: [
+          'The game has no predetermined end date. The organiser may change or stop it at any time; prizes already awarded remain usable until their expiry date.',
+        ],
+      },
+      {
+        titre: '9. Disputes',
+        contenu: ['Any difficulty in interpreting these rules is settled by the organiser, in compliance with consumer law. In case of discrepancy between versions, the French version prevails.'],
       },
     ],
   }
