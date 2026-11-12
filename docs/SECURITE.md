@@ -142,12 +142,51 @@ personnes concernées (RGPD, chapitre « RGPD » de `server/README.md`).
 `server/app.ts`, `pinNeuf`) — ou l'écran Réglages, qui appelle cette route. Effet immédiat : l'ancien
 PIN → 401, le nouveau ouvre une session → 201. Le hash scrypt est réécrit en base ; l'ancien hash ne sert plus.
 
-**Nuance à ne pas rater** : changer le PIN **n'invalide pas les sessions existantes**. Les jetons sont
-signés avec `SESSION_SECRET`, pas avec le PIN — une session volée reste valable jusqu'à son expiration
-(8 h gérant/admin, 12 h équipe). Si la compromission peut inclure une session en cours, **combiner
-avec une rotation de `SESSION_SECRET` (§ 2)** — c'est elle qui révoque tout, immédiatement. (La
-révocation unitaire existe aussi : `DELETE /api/v1/sessions` pour sa propre session, et
-`POST /commerces/<id>/clients/<clientId>/revocation-acces` côté client.)
+**Nuance à ne pas rater** (correction Codex point 3) : changer le PIN **invalide immédiatement toutes
+les sessions de rôle « commerce » de CE commerce** — et seulement celles-là. Le jeton gérant porte la
+version du PIN à l'émission (champ `vp`), comparée à chaque requête à la version stockée dans `meta`
+(clé `version_pin:<commerce>`, absente = 0) ; `PUT /pin` l'incrémente, une session antérieure →
+**401** (« le code du commerce a changé »). Les sessions **admin** et **équipe** ne sont **pas**
+touchées (elles ne dépendent pas du PIN commerce), ni celles des autres commerces. La version vit en
+base : elle tient après un redémarrage. Si la compromission peut inclure une session admin ou équipe
+en cours, **combiner avec une rotation de `SESSION_SECRET` (§ 2)** — c'est elle qui révoque tout,
+immédiatement. (La révocation unitaire existe aussi : `DELETE /api/v1/sessions` pour sa propre
+session, et `POST /commerces/<id>/clients/<clientId>/revocation-acces` côté client.)
+
+**Atomicité et concurrence de la rotation** (revue Codex finale, points 1 à 4) — ce qui est garanti, et
+le résidu assumé :
+- *Ordre « fermé »* : la version est écrite **avant** le nouveau PIN, dans `st.transaction(...)`, et
+  chacune des deux écritures est conditionnée à ce qui a été relu dans la transaction (`majMetaSi` :
+  version encore égale à la valeur lue ; `majPinSi` : hash + sel encore égaux à ceux lus). Le scrypt du
+  nouveau PIN est calculé avant d'ouvrir la transaction.
+- *SQLite* : vraie transaction sérialisée — une panne sur l'une ou l'autre écriture annule tout
+  (ancien PIN, anciennes sessions valables) ; deux rotations simultanées passent l'une après l'autre,
+  chacune avec sa propre version (testé : `tests/correction-codex-point3.test.ts`, triggers `RAISE(ABORT)`).
+- *Supabase* : PostgREST n'a **pas** de transaction multi-requêtes (et aucune migration n'est ajoutée
+  pour une fonction SQL). Chaque écriture est atomique à elle seule et conditionnelle : deux rotations
+  qui ont relu la même version → la perdante reçoit **409**, jamais la même version écrite deux fois ;
+  une rotation dont le PIN relu a changé entre-temps → 409, son PIN n'écrase pas l'autre. **Résidu** :
+  une panne (réseau, arrêt du processus) **entre** les deux écritures laisse la version incrémentée et
+  l'**ancien** PIN : toutes les sessions commerce sont fermées, l'ancien PIN rouvre une session, et le
+  gérant refait le changement. C'est l'état « fermé » choisi : jamais « nouveau PIN + anciennes
+  sessions encore valables ». (Testé avec le faux PostgREST : pannes ciblées, barrière, entrelacement.)
+- *Ouverture de session pendant une rotation* : la version tamponnée dans le jeton est lue **avant** la
+  vérification du PIN et relue juste après ; si elle a changé (rotation terminée pendant la
+  vérification), l'ouverture est refusée (**401**, « le code du commerce vient de changer ») — un jeton
+  obtenu avec l'ancien PIN ne peut pas porter la nouvelle version. Le re-hachage d'un PIN ou d'un code
+  équipe à l'ancien format (SHA-256 → scrypt) ne remplace le hash que s'il est encore celui qui vient
+  d'être vérifié : une rotation intercalée n'est jamais écrasée. *Résidu (Supabase seulement)* : si le
+  cache de version de l'instance est froid (redémarrage, ou relecture après une rotation en échec)
+  **pendant** une rotation en cours sur la même instance, une ouverture avec l'ancien PIN peut lire
+  la version déjà incrémentée, avant que le PIN ne soit écrit — fenêtre de quelques millisecondes,
+  rotation et connexion simultanées, pas de cas connu en pratique.
+- *Plusieurs instances* (revue Codex finale, point 5) : la version est gardée en mémoire par instance
+  après la 1re lecture, **même principe que `versionAcces`** (liens d'accès client). Une instance qui a
+  l'ancienne version en cache ne voit pas une rotation faite par une **autre** instance : elle accepte
+  les anciennes sessions commerce jusqu'à son redémarrage. **Sans effet aujourd'hui** : Render ne fait
+  tourner qu'**une** instance (même hypothèse que le cache des révocations, `server/README.md`). À
+  revoir avant tout passage à plusieurs instances (relecture en base ou invalidation entre instances),
+  et pendant un déploiement à chevauchement, redémarrer après une rotation faite au même moment.
 
 **`PIN_ASIAN_HOME` ne sert qu'à l'initialisation.** Changer la variable sur Render **ne remplace pas**
 le PIN enregistré (il n'est lu qu'à la création d'une base vide, `server/app.ts:839`). Après un
@@ -159,7 +198,8 @@ rotation. (Revue Codex du plan, point 10.)
 Variable Render uniquement, lue au démarrage (`server/index.ts`, 4–12 chiffres, prod : ≥ 8, pas tous
 identiques). Rotation : nouvelle valeur sur Render → **« Save and deploy »** (règle Render, § 0) →
 vérifier `POST /api/v1/sessions` (rôle `admin`, nouveau PIN) → **201**, ancien PIN → 401. Même nuance
-que ci-dessus : les sessions admin en cours ne sont pas invalidées par le changement du PIN seul —
+que ci-dessus, pour les sessions admin uniquement : la version de PIN ne concerne que le PIN commerce,
+donc les sessions admin en cours (8 h) ne sont pas invalidées par le changement de `ADMIN_PIN` seul —
 combiner avec § 2 si nécessaire.
 
 ### PIN dans l'historique Git (P0-S6, F-01)
@@ -184,8 +224,8 @@ Si OK un jour, dans cet ordre — **neutralisation d'abord, nettoyage ensuite** 
 
 Gérant authentifié → `PATCH /api/v1/commerces/<id>/equipe/<membreId>` avec `{ code: "<nouveau code
 4 chiffres>" }` (ou `DELETE` le membre puis recréer). Effet immédiat (hash scrypt réécrit) ; le code
-n'est jamais renvoyé ni journalisé en clair. Même nuance qu'au § 4 : les sessions équipe en cours
-(12 h) ne sont pas invalidées par le changement du code seul — combiner avec § 2 si une session
+n'est jamais renvoyé ni journalisé en clair. Nuance (différente du PIN commerce, § 4 : pas de version de code
+équipe) : les sessions équipe en cours (12 h) ne sont pas invalidées par le changement du code seul — combiner avec § 2 si une session
 équipe est compromise. Précision : **supprimer puis recréer** le membre, lui, invalide ses sessions
 (le membre n'existe plus : la session ne vaut plus rien, `server/app.ts`) — contrairement au simple
 changement de code. Le réaffichage unique d'un code (`POST …/equipe/<id>/reaffichage`, PIN gérant
@@ -233,8 +273,9 @@ re-vérifié) n'est pas une rotation : il montre le code saisi par l'appareil, u
   (même commerce, même client avec les mêmes champs : prénom, tampons, points), et retour arrière
   vérifié (l'ancien secret remis rouvre les anciens jetons non expirés). Non testés : les liens
   d'accès émis avant la rotation, les sessions déjà ouvertes côté navigateur du commerçant.
-- Rotation PIN commerce (`PUT /pin`) : ancien PIN → 401, nouveau PIN → 201, **et** la session ouverte
-  avant le changement reste valable (la nuance du § 4, vérifiée, pas supposée).
+- Rotation PIN commerce (`PUT /pin`) : ancien PIN → 401, nouveau PIN → 201, **et** la session commerce ouverte
+  avant le changement → 401 après (la nuance du § 4, vérifiée, pas supposée — aussi par
+  `tests/correction-codex-point3.test.ts`).
 
 **Statut du lot : validation staging restante** (critère `AUDIT.md` § 7 « 1 rotation testée sur
 staging » non satisfait par les tests SQLite locaux — ils prouvent le mécanisme, pas la procédure en
