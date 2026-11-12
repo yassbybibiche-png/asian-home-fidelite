@@ -37,7 +37,42 @@ export interface ConfigProgramme {
   rattrapage?: { actif?: boolean; delaiJours?: number }
 }
 
+/**
+ * Type d'un lot de la roue (roue v2, R1) : `lot` = lot physique remis au comptoir (code gagnant), `points` = consolation
+ * en points de fidélité (`points`), `perdant` = rien à gagner. Remplace la détection par libellé (« Dommage ! »…).
+ */
+export type TypeLot = 'lot' | 'points' | 'perdant'
+
+/** Accès à la roue (R2) : voir `Commerce.modeAccesRoue`. */
+export type ModeAccesRoue = 'libre' | 'visite'
+
 export interface Lot {
+  /**
+   * Identifiant stable (R1) : généré à la création, jamais réattribué, conservé quand le lot est renommé. Absent des
+   * configs d'avant R1 : `normaliserLots` (src/lib/lots.ts) en déduit un, stable, de la position et du libellé.
+   * Toujours écrit par le serveur, Réglages, le seed et les défauts.
+   */
+  id?: string
+  /** Type explicite (R1). Absent des configs d'avant R1 : déduit de l'ancien libellé (`typeLot`). Toujours écrit. */
+  type?: TypeLot
+  /** Montant de la consolation (1 à 10 000 points) si `type` vaut 'points' (crédit au tirage : lot R2). */
+  points?: number
+  /**
+   * Plafond journalier (R2) d'un lot de type 'lot' : au plus N sorties par jour, tous clients confondus ; atteint, le
+   * lot n'est plus tiré ni affiché jusqu'au lendemain. Absent / 0 = illimité. Ignoré pour 'points' et 'perdant'.
+   */
+  plafondJour?: number
+  /**
+   * Instants gagnants (D1) d'un lot de type 'lot' : N instants par jour tirés au hasard dans les plages d'ouverture ;
+   * le 1er tirage dans les 5 minutes qui suivent un instant gagne ce lot. Absent / 0 = désactivé. Jamais publié.
+   */
+  instantsParJour?: number
+  /**
+   * Heures creuses (D2) : le lot n'est tirable — et visible sur la roue publique — que pendant un créneau
+   * `Commerce.creneauxCreux` ; hors créneau, il est exclu comme un lot à 0 %. Absent / false = toujours tirable.
+   * Le type ne change pas (drapeau, pas un 4e type). Jamais publié tel quel.
+   */
+  heuresCreuses?: boolean
   libelle: string
   /** En %, ex. 30. Si le total ≠ 100, les chances sont recalculées au prorata. */
   probabilite: number
@@ -46,6 +81,45 @@ export interface Lot {
    * non renseigné (le tableau de bord le signale, il n'invente rien). Jamais publié aux clients (`commercePublic`).
    */
   coutCentimes?: number
+}
+
+/** Plage d'ouverture (D1), heures « HH:MM » de Paris, début < fin (ne passe pas minuit). */
+export interface PlageOuverture {
+  debut: string
+  fin: string
+}
+
+/**
+ * Instant gagnant (D1), persisté par le serveur dans `meta` (`instants:<commerce>:<jour>`), jamais dans une réponse
+ * avant son heure. `consommePar` : tirage qui l'a déclenché ; `gagne` : ce tirage a reçu le lot (faux = lot
+ * indisponible pour tout le monde, p. ex. au plafond du jour : tirage normal à la place). Un client seulement à sa
+ * limite mensuelle ne consomme pas l'instant (revue Codex D1, F2).
+ */
+export interface InstantGagnant {
+  id: string
+  /** ISO. */
+  heure: string
+  lotId: string
+  /** Libellé du lot à la génération. */
+  lot: string
+  consommePar?: string
+  gagne?: boolean
+}
+
+/**
+ * Créneau « heures creuses » (D2), heure de Paris : `jours` 0 = dimanche … 6 = samedi ; début inclus, fin exclue, début
+ * avant la fin (ne passe pas minuit). Voir src/lib/creneaux.ts.
+ */
+export interface CreneauCreux {
+  jours: number[]
+  debut: string
+  fin: string
+}
+
+export interface InstantsDuJour {
+  /** AAAA-MM-JJ, à Paris. */
+  jour: string
+  instants: InstantGagnant[]
 }
 
 export interface Commerce {
@@ -67,6 +141,27 @@ export interface Commerce {
   seuilTampons: number
   /** Lots de la roulette : texte libre + probabilité simple. */
   lots: Lot[]
+  /**
+   * Accès à la roue (R2) : 'libre' = 1 tirage par jour dès l'identification ; 'visite' = il faut aussi une visite
+   * validée au comptoir le jour même. Absent = 'visite' (configs d'avant R2 : comportement inchangé) ; les nouveaux
+   * commerces sont créés en 'libre' (`nouveauCommerce`).
+   */
+  modeAccesRoue?: ModeAccesRoue
+  /**
+   * Lots physiques (type 'lot') gagnés au plus par client sur 30 jours glissants (R2), remis ou non ; au-delà, la roue
+   * ne tire plus que points / perdant pour ce client. Absent = 4 (`LIMITE_GAINS_MOIS_DEFAUT`), 0 = illimité.
+   */
+  limiteGainsMois?: number
+  /**
+   * Plages d'ouverture du jour, heure de Paris (D1) : les instants gagnants sont tirés dans leur union. Absent = les deux
+   * services d'Asian Home (`PLAGES_OUVERTURE_DEFAUT`, src/lib/instants.ts) ; liste vide = aucun instant.
+   */
+  plagesOuverture?: PlageOuverture[]
+  /**
+   * Créneaux heures creuses (D2) : pendant l'un d'eux, les lots `heuresCreuses` sont tirables et une consolation en
+   * points est doublée. Absent / vide = aucun créneau (les lots heures creuses ne sortent jamais).
+   */
+  creneauxCreux?: CreneauCreux[]
   reglesReponseAuto: ReglesReponseAuto
   actif: boolean
   creeLe: string
@@ -119,14 +214,19 @@ export interface CompteurEvenement {
   n: number
 }
 
-/** Relances automatiques (P1-B3) : « inactif 30 jours » et « anniversaire ». */
+/** Relances automatiques (P1-B3) : « inactif 30 jours » et « anniversaire » ; R7 : « gain bientôt expiré ». */
 export interface ReglesRelancesAuto {
   inactif: boolean
   anniversaire: boolean
+  /** Gain de la roue (lot physique) non retiré, qui expire dans moins de 72 h (R7). Absent = ACTIVÉ ; false = coupé. */
+  gainExpire?: boolean
 }
 
 /** Modèles de relance SMS / e-mail (P1-B3, `src/lib/relances.ts`) ; « libre » = texte saisi par le gérant. */
 export type ModeleRelance = 'bienvenue' | 'proche' | 'inactif' | 'anniversaire'
+
+/** Modèle des relances AUTOMATIQUES seulement (R7, `src/lib/relanceGain.ts`) : jamais proposé en relance manuelle. */
+export type ModeleRelanceAuto = 'gainExpire'
 
 /**
  * Statut d'une tentative de relance : `en_cours` (réservée, envoi en cours), `envoye` (accepté par le prestataire),
@@ -145,7 +245,9 @@ export interface EnvoiRelance {
   date: string
   /** Jour à Paris (AAAA-MM-JJ) : une même relance part au plus une fois par client et par jour. */
   jour: string
-  modele: ModeleRelance | 'libre'
+  modele: ModeleRelance | ModeleRelanceAuto | 'libre'
+  /** Tirage concerné (relance `gainExpire`, R7) : clé de l'idempotence « une relance par gain ». */
+  tirageId?: string
   canal: 'sms' | 'email'
   statut: StatutEnvoi
   declencheur: 'manuel' | 'auto'
@@ -153,6 +255,11 @@ export interface EnvoiRelance {
   auteur: string
   /** Raison d'un refus / d'une erreur (texte affichable, sans secret). */
   raison?: string
+  /**
+   * Refus dû à la colonne `modele` partagée sous Supabase (R7, revue Codex F5) : `gainExpire` y est rangé sous `libre`,
+   * donc un message libre et une relance de gain ne partent pas le même jour vers le même client.
+   */
+  motif?: 'collision_libre_gain'
   /** Identifiant du message chez le prestataire (Twilio SID, Brevo messageId). */
   idPrestataire?: string
 }
@@ -195,8 +302,21 @@ export interface CommercePublic {
   lienUberEats?: string
   recompense: string
   seuilTampons: number
-  /** Libellés des lots jouables, dans l'ordre de la roue — sans probabilité (le tirage est fait par le serveur). */
-  lots: Pick<Lot, 'libelle'>[]
+  /**
+   * Lots jouables, dans l'ordre de la roue : id (la roue retrouve le secteur du lot tiré par cet id), libellé et type
+   * résolu (une consolation s'affiche comme telle) — jamais la probabilité (le tirage est fait par le serveur).
+   */
+  lots: (Pick<Lot, 'libelle'> & { id: string; type: TypeLot })[]
+  /**
+   * Mode d'accès EFFECTIF à la roue (R4) : la page de jeu et le règlement disent « après une visite validée » ou non.
+   * Absent d'un serveur d'avant R4 = 'visite' (`modeAccesRoue`, src/lib/roulette.ts).
+   */
+  modeAccesRoue?: ModeAccesRoue
+  /**
+   * Créneau heures creuses en cours (D2) : présent (true) seulement pendant un créneau — les lots heures creuses sont
+   * alors dans `lots`, et une consolation en points tirée est doublée. Badge sur la page de jeu.
+   */
+  bonusCreux?: true
   actif: boolean
   demo: boolean
   catalogue?: Pick<RecompensePoints, 'nom' | 'cout' | 'description'>[]
@@ -464,11 +584,35 @@ export interface Tirage {
   commerceId: string
   clientId: string
   lot: string
+  /** Id du lot tiré (R1) ; absent des tirages d'avant R1. */
+  lotId?: string
+  /** Type du lot figé au tirage (R1) ; absent des tirages d'avant R1 (déduit alors du libellé : `typeTirage`). */
+  typeLot?: TypeLot
+  /**
+   * `typeLot` posé après coup par le rattachement des tirages d'avant R1 (`rattachementsTirages`), pas au tirage : le
+   * tirage reste sous l'ancienne règle de validité (`tirageHerite`, revue Codex R3 F2).
+   */
+  typeDeduit?: true
+  /** Points crédités au client par ce tirage (R2, lot de type 'points' tiré par le serveur) ; absent sinon. */
+  points?: number
+  /** Consolation tirée pendant un créneau heures creuses (D2) : `points` est le montant EFFECTIF, déjà doublé. */
+  pointsDoubles?: true
   date: string
-  /** Code gagnant à montrer au comptoir (tirages faits par le serveur). */
+  /**
+   * Code gagnant à montrer au comptoir (tirages faits par le serveur ; depuis R2, lots de type 'lot' seulement). R3 : le
+   * client ne le reçoit QUE par l'activation (POST …/tirages/:id/activer), jamais dans une réponse publique.
+   */
   code?: string
+  /** Dernière activation du code par le client (R3, ISO) : le code se remet en caisse dans les 10 minutes qui suivent. */
+  activeLe?: string
   /** Lot remis au comptoir après vérification du code en caisse (P0-U3) : un code = une remise. */
   remis?: { le: string; par: EntreeJournal['auteur'] }
+  /**
+   * Relance « gain bientôt expiré » réclamée (R7, revue Codex F2, ISO) : posé par une écriture conditionnelle (absent en
+   * base) AVANT l'envoi — une seule relance par gain, même entre deux tournées simultanées. Retiré seulement si rien
+   * n'est parti (refus confirmé, gain expiré entre-temps) ; gardé si l'issue est incertaine (revue Codex 2 R7).
+   */
+  relanceGainLe?: string
 }
 
 export interface Avis {

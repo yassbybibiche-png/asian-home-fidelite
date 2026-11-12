@@ -4,32 +4,16 @@ import { jourEnClair } from './roulette.ts'
 import type { Langue } from './langue.ts'
 import { COULEURS_CONFETTIS } from '../theme.ts'
 
-export { COULEURS_CONFETTIS }
+import { DUREE_ROTATION_MS } from './mouvementRoue.ts'
 
-/** Rotation de la roue : 3,6 s (fourchette demandée 3 à 4 s). Animation CSS de `transform` seul (composité, 60 fps). */
-export const DUREE_ROTATION_MS = 3600
-/** Courbe de décélération : départ vif, longue fin qui ralentit sous le pointeur. */
-export const COURBE_ROTATION = 'cubic-bezier(0.15, 0.85, 0.2, 1)'
+export { COULEURS_CONFETTIS }
+// Durée, courbe et mouvement réduit : définis dans mouvementRoue.ts (sans dépendance, importé par la roue — R6).
+export { COURBE_ROTATION, DUREE_ROTATION_MS, dureeRotation, prefereMouvementReduit, REQUETE_MOUVEMENT_REDUIT, transitionRoue } from './mouvementRoue.ts'
+
 /** Petite pause après l'arrêt de la roue avant l'écran de résultat. */
 export const PAUSE_RESULTAT_MS = 200
 /** Mouvement réduit : la roue saute directement sur le lot, sans tours ; l'écran de résultat suit presque aussitôt. */
 export const DELAI_RESULTAT_REDUIT_MS = 150
-
-export const REQUETE_MOUVEMENT_REDUIT = '(prefers-reduced-motion: reduce)'
-
-/** Vrai si le téléphone demande moins d'animations (réglage d'accessibilité). Sans `matchMedia` : animation normale. */
-export function prefereMouvementReduit(w: { matchMedia?: (q: string) => { matches: boolean } } | undefined = globalThis as never): boolean {
-  try {
-    return !!w?.matchMedia?.(REQUETE_MOUVEMENT_REDUIT).matches
-  } catch {
-    return false
-  }
-}
-
-/** Durée de la rotation affichée. */
-export function dureeRotation(reduit: boolean): number {
-  return reduit ? 0 : DUREE_ROTATION_MS
-}
 
 /** Délai entre le lancement et l'écran de résultat. `avecRoue` = faux si le lot n'est pas sur la roue (rien ne tourne). */
 export function delaiResultat(reduit: boolean, avecRoue = true): number {
@@ -37,14 +21,60 @@ export function delaiResultat(reduit: boolean, avecRoue = true): number {
   return reduit ? DELAI_RESULTAT_REDUIT_MS : DUREE_ROTATION_MS + PAUSE_RESULTAT_MS
 }
 
-/** Transition CSS de la couche qui tourne. */
-export function transitionRoue(reduit: boolean): string {
-  return reduit ? 'none' : `transform ${DUREE_ROTATION_MS}ms ${COURBE_ROTATION}`
-}
-
 /** Nombre de tours complets avant l'arrêt : 5 normalement, 0 en mouvement réduit (le secteur gagnant reste exact). */
 export function toursRotation(reduit: boolean): number {
   return reduit ? 0 : 5
+}
+
+// ---- Son (R5) : préférence de l'appareil, AudioContext ouvert dans le geste, synthèse chargée à la demande ----
+
+/** Clé par appareil (pas par commerce) ; absente = son activé. */
+export const CLE_SON = 'fidelite:son-roue'
+
+/** Accès au stockage déjà protégé par l'appelant (`stockageLocal`) ; sans stockage : son activé. */
+export function sonActive(stockage: Pick<Storage, 'getItem'> | null | undefined): boolean {
+  return stockage?.getItem(CLE_SON) !== '0'
+}
+
+export function memoriserSon(stockage: Pick<Storage, 'setItem'> | null | undefined, actif: boolean): void {
+  try {
+    stockage?.setItem(CLE_SON, actif ? '1' : '0')
+  } catch {
+    // Stockage indisponible : le choix vaut pour cette page seulement.
+  }
+}
+
+/** Tics, inclinaison du pointeur et motif de gain : `src/lib/sonRoue.ts`, hors bundle initial. */
+export interface SceneRoue {
+  /** Son coupé en cours de partie : toutes les notes se taisent (même déjà programmées), l'inclinaison du pointeur
+   *  continue. Réactivé (dans le geste du bouton son) : le contexte audio est ouvert s'il manquait. */
+  muet: boolean
+  planifier(de: number, a: number, limites: number[], duree: number, pointeur?: Element | null, ecoule?: number): () => void
+  fanfare(leger: boolean): void
+}
+
+type FenetreAudio = { AudioContext?: new () => AudioContext; webkitAudioContext?: new () => AudioContext }
+
+/**
+ * À appeler UNIQUEMENT dans le clic « Tourner » : crée (ou réveille) l'AudioContext pendant le geste si le son est
+ * activé, puis charge la scène. Ne lève jamais ; sans WebAudio, la scène tourne en silence. `audio` est aussi confié à
+ * la scène : réactiver le son en cours de partie (autre geste, `muet = false`) ouvre le contexte qui manquait.
+ */
+export function ouvrirScene(son: boolean, w: FenetreAudio = globalThis as never): Promise<SceneRoue | null> {
+  const audio = () => {
+    try {
+      const ctx = new (w.AudioContext ?? w.webkitAudioContext)!()
+      ctx.resume().catch(() => {})
+      return ctx
+    } catch {
+      // WebAudio absent ou refusé : undefined, la scène reste muette.
+    }
+  }
+  const ctx = son && audio()
+  return import('./sonRoue.ts').then(
+    (m) => m.creerScene(ctx, audio),
+    () => null,
+  )
 }
 
 // ---- Vibration ----
@@ -66,6 +96,8 @@ export function vibrer(motif: number[], nav: { vibrate?: (m: number[]) => boolea
 // ---- Confettis (CSS maison, aucune dépendance) ----
 
 export const NOMBRE_CONFETTIS = 36
+/** Consolation en points (R5) : même pluie, allégée. */
+export const NOMBRE_CONFETTIS_LEGER = 14
 
 export interface Confetti {
   /** Position de départ horizontale, en % de la largeur. */
@@ -106,6 +138,10 @@ export const TITRE_PERDU = 'Pas de lot cette fois'
 export const TEXTE_PERDU_TAMPON = 'Votre visite du jour est bien enregistrée sur votre carte de fidélité : un tampon de plus vers votre récompense.'
 export const TEXTE_PERDU_PROCHAINE = 'Prochaine chance à votre prochaine visite validée au comptoir, dès demain.'
 export const TEXTE_GAIN_SANS_CODE = 'Montrez cet écran au comptoir pour profiter de votre lot.'
+/** Gain physique (R4) : utilisable de J+1 à J+30, code affiché 10 minutes depuis la carte (« Utiliser mon gain »). */
+export const TEXTE_GAIN_ACTIVATION = 'Le jour venu, ouvrez votre carte au comptoir et appuyez sur « Utiliser mon gain » : votre code s’affiche pendant 10 minutes.'
+/** Consolation en points (R1) : rien à retirer au comptoir ; la visite compte toujours. */
+export const TEXTE_CONSOLATION = 'Rien à retirer au comptoir : votre visite du jour compte sur votre carte de fidélité.'
 export const TEXTE_CODE_A_MONTRER = 'Montrez ce code au serveur :'
 export const TEXTE_CODE_UNE_FOIS = 'Le code est vérifié en caisse et ne sert qu’une fois.'
 export const TEXTE_DEJA_JOUE = '1 tirage par personne et par jour. Prochaine chance à votre prochaine visite validée, dès demain.'

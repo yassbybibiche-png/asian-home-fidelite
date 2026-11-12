@@ -32,6 +32,7 @@ const IMPORTS = {
   menuCarte: () => import('./pages/MenuCarte'),
   desinscription: () => import('./pages/Desinscription'),
   confidentialite: () => import('./pages/Confidentialite'),
+  reglement: () => import('./pages/Reglement'),
 } satisfies Partial<Record<Page, () => Promise<{ default: ComponentType }>>>
 
 const TableauDeBord = lazy(IMPORTS.accueil)
@@ -50,15 +51,16 @@ const Messages = lazy(IMPORTS.messages)
 const MenuCarte = lazy(IMPORTS.menuCarte)
 const Desinscription = lazy(IMPORTS.desinscription)
 const Confidentialite = lazy(IMPORTS.confidentialite)
+const Reglement = lazy(IMPORTS.reglement)
 
-const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidentialite']
+const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidentialite', 'reglement']
 
 /**
  * Pages client à corps sombres (P1-D2, AUDIT.md §6.2/§6.3) : fond noir, surfaces sombres
  * (règles `.page-client`, `src/index.css`, correspondances `src/theme.ts` PAGE_CLIENT_SOMBRE).
  * #/roulette n'en fait PAS partie : c'est une page commerçant (configuration de la roue), elle
  * reste claire — comme la caisse (#/caisse, pourtant publique, car utilisée au comptoir) et les
- * pages de texte (#/desinscription, #/confidentialite, lecture longue sur fond clair).
+ * pages de texte (#/desinscription, #/confidentialite, #/reglement, lecture longue sur fond clair).
  */
 const PAGES_CLIENT_SOMBRES: Page[] = ['jouer', 'carte', 'menu']
 
@@ -165,6 +167,7 @@ const COMPOSANTS: Record<Page, ComponentType> = {
   menuCarte: MenuCarte,
   desinscription: Desinscription,
   confidentialite: Confidentialite,
+  reglement: Reglement,
 }
 
 /** Onglet surligné pour les sous-pages (fiche client → Clients, QR vitrine → Roulette). */

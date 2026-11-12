@@ -23,7 +23,7 @@ after(() => rmSync(dossier, { recursive: true, force: true }))
 const INITIAL_AVANT_OCTETS = 601_720
 
 /** Pages du back-office et pages publiques secondaires : chacune dans son propre fichier, hors bundle initial. */
-const PAGES_DIFFEREES = ['TableauDeBord', 'Clients', 'Roulette', 'Avis', 'Reglages', 'Offre', 'Admin', 'Plus', 'FicheClient', 'QrVitrine', 'MenuPublic', 'Equipe', 'Messages', 'MenuCarte', 'Desinscription', 'Confidentialite']
+const PAGES_DIFFEREES = ['TableauDeBord', 'Clients', 'Roulette', 'Avis', 'Reglages', 'Offre', 'Admin', 'Plus', 'FicheClient', 'QrVitrine', 'MenuPublic', 'Equipe', 'Messages', 'MenuCarte', 'Desinscription', 'Confidentialite', 'Reglement']
 
 // ---------- Source : App.tsx ----------
 

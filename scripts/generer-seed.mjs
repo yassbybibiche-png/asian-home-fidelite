@@ -59,11 +59,12 @@ const commerces = [
     recompense: 'Un plat offert au 10e repas',
     seuilTampons: 10,
     lots: [
-      { libelle: 'Nems offerts', probabilite: 20 },
-      { libelle: 'Thé glacé', probabilite: 25 },
-      { libelle: 'Mochi offert', probabilite: 15 },
-      { libelle: 'Remise 10 %', probabilite: 10 },
-      { libelle: 'Dommage !', probabilite: 30 },
+      { id: 'lot-nems-offerts', type: 'lot', libelle: 'Nems offerts', probabilite: 20 },
+      { id: 'lot-the-glace', type: 'lot', libelle: 'Thé glacé', probabilite: 25 },
+      { id: 'lot-mochi-offert', type: 'lot', libelle: 'Mochi offert', probabilite: 15 },
+      { id: 'lot-remise-10', type: 'lot', libelle: 'Remise 10 %', probabilite: 10 },
+      // Roue v2 (R1) : consolation en points à la place de « Dommage ! » (même probabilité).
+      { id: 'lot-10-points', type: 'points', points: 10, libelle: '+10 points', probabilite: 30 },
     ],
     reglesReponseAuto: { auto5Etoiles: true, auto4Etoiles: false, brouillonAutres: true },
     actif: true,
@@ -78,10 +79,10 @@ const commerces = [
     recompense: '-20 % sur la 8e prestation',
     seuilTampons: 8,
     lots: [
-      { libelle: 'Soin offert', probabilite: 15 },
-      { libelle: '-10 % coupe', probabilite: 30 },
-      { libelle: 'Shampoing', probabilite: 25 },
-      { libelle: 'Dommage !', probabilite: 30 },
+      { id: 'lot-soin-offert', type: 'lot', libelle: 'Soin offert', probabilite: 15 },
+      { id: 'lot-10-coupe', type: 'lot', libelle: '-10 % coupe', probabilite: 30 },
+      { id: 'lot-shampoing', type: 'lot', libelle: 'Shampoing', probabilite: 25 },
+      { id: 'lot-10-points', type: 'points', points: 10, libelle: '+10 points', probabilite: 30 },
     ],
     reglesReponseAuto: { auto5Etoiles: true, auto4Etoiles: true, brouillonAutres: true },
     actif: true,
@@ -96,10 +97,10 @@ const commerces = [
     recompense: 'Bon d’achat de 15 € après 6 achats',
     seuilTampons: 6,
     lots: [
-      { libelle: 'Remise 15 %', probabilite: 10 },
-      { libelle: 'Tote bag', probabilite: 20 },
-      { libelle: 'Emballage', probabilite: 30 },
-      { libelle: 'Remise 5 %', probabilite: 40 },
+      { id: 'lot-remise-15', type: 'lot', libelle: 'Remise 15 %', probabilite: 10 },
+      { id: 'lot-tote-bag', type: 'lot', libelle: 'Tote bag', probabilite: 20 },
+      { id: 'lot-emballage', type: 'lot', libelle: 'Emballage', probabilite: 30 },
+      { id: 'lot-remise-5', type: 'lot', libelle: 'Remise 5 %', probabilite: 40 },
     ],
     reglesReponseAuto: { auto5Etoiles: false, auto4Etoiles: false, brouillonAutres: true },
     actif: true,
@@ -198,8 +199,8 @@ for (const commerce of commerces) {
 /** Lot tiré selon les mêmes probabilités que l'app. */
 function lotPondere(lots) {
   let seuil = alea() * lots.reduce((s, l) => s + l.probabilite, 0)
-  for (const l of lots) if ((seuil -= l.probabilite) < 0) return l.libelle
-  return lots[lots.length - 1].libelle
+  for (const l of lots) if ((seuil -= l.probabilite) < 0) return l
+  return lots[lots.length - 1]
 }
 
 // Un tirage a lieu pendant une visite (le client scanne le QR sur place), 1 max par client et par jour,
@@ -218,11 +219,15 @@ for (const commerce of commerces) {
     if (deja.has(cle)) continue
     deja.add(cle)
     const date = Math.min(new Date(v.date).getTime() + entre(2, 40) * 60 * 1000, REF - 60 * 1000)
+    const lot = lotPondere(commerce.lots)
     tirages.push({
       id: `${commerce.id}-ti-${deja.size}`,
       commerceId: commerce.id,
       clientId: v.clientId,
-      lot: lotPondere(commerce.lots),
+      // R1 : le tirage fige l'id et le type du lot (le type ne se déduit plus du libellé).
+      lot: lot.libelle,
+      lotId: lot.id,
+      typeLot: lot.type,
       date: new Date(date).toISOString(),
     })
   }

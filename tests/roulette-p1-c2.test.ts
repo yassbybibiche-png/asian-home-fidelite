@@ -200,7 +200,10 @@ describe('P1-C2 : écran de gain', () => {
     assert.match(code, /<BoutonCopier texte=\{code\}/)
     const resultat = corpsDe(jouer, 'Resultat')
     assert.match(resultat, /font-titre text-4xl/)
-    assert.equal(resultat.match(/texteValiditeLangue\(new Date\(\), langue, texteValidite\)/g)?.length, 1)
+    // Roue v2 R4 (décision utilisateur du 12/11) : sans code, un gain physique n'est plus « valable aujourd’hui » mais
+    // utilisable de J+1 à J+30 — la validité affichée sans code donne ces dates (maquettes §2), plus « aujourd’hui ».
+    assert.doesNotMatch(resultat, /texteValiditeLangue\(new Date\(\), langue, texteValidite\)/)
+    assert.match(resultat, /data-validite>\n\s*🗓️ \{t\('À utiliser dès demain et jusqu’au \{date\} au comptoir\.', \{ date: jourMois\(dernierJourGain\(/)
     assert.match(resultat, /\{code \? \(\n\s*<CodeGagnant code=\{code\} \/>/)
   })
 

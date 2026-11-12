@@ -116,15 +116,39 @@ export interface Stockage {
   majClient(c: Client): P<void>
   tirages(commerceId: string): P<Tirage[]>
   tiragesClient(commerceId: string, clientId: string): P<Tirage[]>
+  /** Tirages du commerce datés de `depuis` (ISO, inclus) ou après, du plus récent au plus ancien (R2 : plafonds du jour). */
+  tiragesDepuis(commerceId: string, depuis: string): P<Tirage[]>
   ajouterTirage(t: Tirage): P<void>
+  /** Compensation (revue Codex R2 point 2) : supprime CE tirage (crédit des points échoué juste après son insertion). */
+  supprimerTirage(commerceId: string, id: string): P<void>
+  /** Tirages du commerce sans `lotId` (d'avant R1), pour le rattrapage à l'écriture des lots (revue Codex R2 point 4). */
+  tiragesSansLot(commerceId: string): P<Tirage[]>
+  /**
+   * Écrit `t` (avec `lotId` / `typeLot` posés) seulement si le tirage en base n'a toujours pas de `lotId` et, si `t`
+   * n'est pas remis, ne l'est toujours pas — une remise simultanée n'est jamais écrasée. false = rien écrit.
+   */
+  completerLotTirage(t: Tirage): P<boolean>
   /** Tirages d'un commerce portant ce code gagnant (déjà normalisé), du plus récent au plus ancien. */
   tiragesParCode(commerceId: string, code: string): P<Tirage[]>
   /**
    * Remise d'un gain (P0-U3) : écrit `t` (avec `remis`) seulement si le tirage en base n'est PAS déjà remis — une seule
    * requête conditionnelle, atomique pour la base (UPDATE … WHERE remis IS NULL). false = déjà remis, y compris par une
-   * requête simultanée : un code ne peut jamais être remis deux fois.
+   * requête simultanée : un code ne peut jamais être remis deux fois. `activeApres` (revue Codex R3 F4) : la condition
+   * exige EN PLUS `activeLe > activeApres` en base (fenêtre d'activation encore ouverte à l'heure de l'écriture ; ISO
+   * `toISOString`, comparables comme texte). false = déjà remis ou fenêtre échue. Revue Codex 2 R7 (F1) : `t` est la
+   * ligne lue + la remise, et l'écriture est la comparaison-échange de `majTirageSi` (`activeLe` / `relanceGainLe` de
+   * `t` toujours en base) — une remise partie d'une lecture ancienne n'efface ni une activation ni un marqueur récents.
    */
-  marquerTirageRemis(t: Tirage): P<boolean>
+  marquerTirageRemis(t: Tirage, activeApres?: string): P<boolean>
+  tirage(commerceId: string, id: string): P<Tirage | undefined>
+  /**
+   * Écriture d'un tirage par comparaison-échange (revue Codex 2 R7, F1) — activation, remise, réclamation et libération
+   * de la relance du gain : écrit `t` seulement si, en base, le tirage n'est pas remis et porte encore `activeLe` et
+   * `relanceGainLe` tels que `lu` les a lus (absents si undefined) ; `activeApres` : comme `marquerTirageRemis`. Une
+   * seule requête conditionnelle : `donnees` étant réécrit en entier, aucune écriture partie d'une lecture ancienne ne
+   * peut effacer un champ posé entre-temps par une autre (0 ligne → false ; l'appelant relit et réapplique son patch).
+   */
+  majTirageSi(t: Tirage, lu: Pick<Tirage, 'activeLe' | 'relanceGainLe'>, activeApres?: string): P<boolean>
   avis(commerceId: string): P<Avis[]>
   unAvis(commerceId: string, id: string): P<Avis | undefined>
   ajouterAvis(a: Avis): P<void>
@@ -200,6 +224,13 @@ export interface Stockage {
   majEnvoi(e: EnvoiRelance): P<void>
   /** Du plus récent au plus ancien ; `clientId` : ceux de ce client seulement. */
   envois(commerceId: string, limite: number, clientId?: string): P<EnvoiRelance[]>
+  /** Envois portant ce `tirageId` (R7, revue Codex F1) : tous, sans fenêtre de lecture. Supabase sans la 0007 : []. */
+  envoisDuTirage(commerceId: string, clientId: string, tirageId: string): P<EnvoiRelance[]>
+  /**
+   * Envois de ce client pour ce modèle `inactif` / `anniversaire` (revue Codex, point P1) : tous, sans fenêtre de lecture —
+   * un envoi `incertain` ancien reste visible pour `relanceAutoDue` même après plus de 50 envois plus récents.
+   */
+  envoisDuModele(commerceId: string, clientId: string, modele: 'inactif' | 'anniversaire'): P<EnvoiRelance[]>
   /** Table de la migration 0007 présente (toujours vrai sous SQLite). */
   schemaRelances(): P<boolean>
   /**
@@ -351,9 +382,20 @@ export function ouvrirStockage(fichier: string) {
     majClient: db.prepare('UPDATE clients SET donnees = ? WHERE id = ?'),
     tirages: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? ORDER BY date DESC'),
     tiragesClient: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? AND client_id = ?'),
+    tiragesDepuis: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? AND date >= ? ORDER BY date DESC'),
     ajoutTirage: db.prepare('INSERT INTO tirages (id, commerce_id, client_id, date, donnees) VALUES (?, ?, ?, ?, ?)'),
+    supprTirage: db.prepare('DELETE FROM tirages WHERE commerce_id = ? AND id = ?'),
+    tiragesSansLot: db.prepare("SELECT donnees FROM tirages WHERE commerce_id = ? AND json_extract(donnees, '$.lotId') IS NULL ORDER BY date DESC"),
+    completerLotTirage: db.prepare(
+      "UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.lotId') IS NULL AND (? = 1 OR json_extract(donnees, '$.remis') IS NULL)",
+    ),
     tiragesParCode: db.prepare("SELECT donnees FROM tirages WHERE commerce_id = ? AND json_extract(donnees, '$.code') = ? ORDER BY date DESC"),
-    remettreTirage: db.prepare("UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL"),
+    tirage: db.prepare('SELECT donnees FROM tirages WHERE commerce_id = ? AND id = ?'),
+    majTirageSi: db.prepare(
+      `UPDATE tirages SET donnees = ? WHERE id = ? AND commerce_id = ? AND json_extract(donnees, '$.remis') IS NULL
+        AND json_extract(donnees, '$.activeLe') IS ? AND json_extract(donnees, '$.relanceGainLe') IS ?
+        AND (? IS NULL OR json_extract(donnees, '$.activeLe') > ?)`,
+    ),
     avis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? ORDER BY date DESC'),
     unAvis: db.prepare('SELECT donnees FROM avis WHERE commerce_id = ? AND id = ?'),
     ajoutAvis: db.prepare('INSERT INTO avis (id, commerce_id, date, donnees) VALUES (?, ?, ?, ?)'),
@@ -393,6 +435,10 @@ export function ouvrirStockage(fichier: string) {
     majEnvoi: db.prepare('UPDATE envois SET statut = ?, donnees = ? WHERE id = ? AND commerce_id = ?'),
     envois: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
     envoisClient: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? AND client_id = ? ORDER BY date DESC, rowid DESC LIMIT ?'),
+    envoisDuTirage: db.prepare(
+      "SELECT donnees FROM envois WHERE commerce_id = ? AND client_id = ? AND json_extract(donnees, '$.tirageId') = ? ORDER BY date DESC, rowid DESC",
+    ),
+    envoisDuModele: db.prepare('SELECT donnees FROM envois WHERE commerce_id = ? AND client_id = ? AND modele = ? ORDER BY date DESC, rowid DESC'),
     compterEvenement: db.prepare(
       'INSERT INTO evenements_jour (commerce_id, jour, type, n) VALUES (?, ?, ?, 1) ON CONFLICT (commerce_id, jour, type) DO UPDATE SET n = n + 1',
     ),
@@ -411,6 +457,9 @@ export function ouvrirStockage(fichier: string) {
   // P0-S11 : c'est pourquoi SQLite n'a ni colonne `version` ni verrou optimiste (commerces, clients, avis) — BEGIN
   // IMMEDIATE … COMMIT est déjà « tout ou rien » et sérialisé ; le verrou n'existe que sous Supabase.
   let file: Promise<unknown> = Promise.resolve()
+
+  const majTirageSi = (t: Tirage, lu: Pick<Tirage, 'activeLe' | 'relanceGainLe'>, activeApres?: string) =>
+    Number(q.majTirageSi.run(JSON.stringify(t), t.id, t.commerceId, lu.activeLe ?? null, lu.relanceGainLe ?? null, activeApres ?? null, activeApres ?? null).changes) > 0
 
   return {
     type: 'sqlite' as const,
@@ -439,9 +488,15 @@ export function ouvrirStockage(fichier: string) {
 
     tirages: (commerceId: string) => lire<Tirage>(q.tirages.all(commerceId)),
     tiragesClient: (commerceId: string, clientId: string) => lire<Tirage>(q.tiragesClient.all(commerceId, clientId)),
+    tiragesDepuis: (commerceId: string, depuis: string) => lire<Tirage>(q.tiragesDepuis.all(commerceId, depuis)),
     ajouterTirage: (t: Tirage) => inserer(q.ajoutTirage, t.id, t.commerceId, t.clientId, t.date, JSON.stringify(t)),
+    supprimerTirage: (commerceId: string, id: string) => void q.supprTirage.run(commerceId, id),
+    tiragesSansLot: (commerceId: string) => lire<Tirage>(q.tiragesSansLot.all(commerceId)),
+    completerLotTirage: (t: Tirage) => Number(q.completerLotTirage.run(JSON.stringify(t), t.id, t.commerceId, t.remis ? 1 : 0).changes) > 0,
     tiragesParCode: (commerceId: string, code: string) => lire<Tirage>(q.tiragesParCode.all(commerceId, code)),
-    marquerTirageRemis: (t: Tirage) => Number(q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId).changes) > 0,
+    marquerTirageRemis: (t: Tirage, activeApres?: string) => majTirageSi(t, t, activeApres),
+    tirage: (commerceId: string, id: string) => lire<Tirage>(q.tirage.all(commerceId, id))[0],
+    majTirageSi,
 
     avis: (commerceId: string) => lire<Avis>(q.avis.all(commerceId)),
     unAvis: (commerceId: string, id: string) => lire<Avis>(q.unAvis.all(commerceId, id))[0],
@@ -497,6 +552,8 @@ export function ouvrirStockage(fichier: string) {
     majEnvoi: (e: EnvoiRelance) => inserer(q.majEnvoi, e.statut, JSON.stringify(e), e.id, e.commerceId),
     envois: (commerceId: string, limite: number, clientId?: string) =>
       lire<EnvoiRelance>(clientId ? q.envoisClient.all(commerceId, clientId, limite) : q.envois.all(commerceId, limite)),
+    envoisDuTirage: (commerceId: string, clientId: string, tirageId: string) => lire<EnvoiRelance>(q.envoisDuTirage.all(commerceId, clientId, tirageId)),
+    envoisDuModele: (commerceId: string, clientId: string, modele: 'inactif' | 'anniversaire') => lire<EnvoiRelance>(q.envoisDuModele.all(commerceId, clientId, modele)),
     schemaRelances: () => true,
     compterEvenement: (commerceId: string, jour: string, type: TypeEvenement) => void q.compterEvenement.run(commerceId, jour, type),
     compteursEvenements: (commerceId: string, depuis: string) =>

@@ -1,8 +1,8 @@
 // Page de jeu en mode API : le tirage est fait par le SERVEUR (POST /tirages). Le navigateur n'envoie
 // qu'un contact et se contente d'animer la roue jusqu'au lot reçu. Logique pure, testée avec une API simulée.
 import type { CommercePublic } from '../types'
-import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ResultatTirage } from './api.ts'
-import { secteurs, type Secteur } from '../lib/roulette.ts'
+import { ErreurApi, MESSAGE_HORS_LIGNE, type ActivationCode, type ClientApi, type ResultatTirage } from './api.ts'
+import { secteurs, type LotRoue, type Secteur } from '../lib/roulette.ts'
 import { estIdClientActuel } from '../lib/fidelite.ts'
 import type { memoireJetons } from '../lib/jetonCarte.ts'
 
@@ -17,6 +17,18 @@ export type IssueTirage =
       accesRefuse?: true
     }
 
+/**
+ * Secteur du lot tiré (R1) : retrouvé par l'id du lot que le serveur renvoie, jamais par son libellé — un lot renommé
+ * entre le chargement de la page et le tirage, ou deux libellés proches, ne trompent pas la roue. Id inconnu de cette
+ * roue (lots changés entre-temps) : null, la roue ne vise rien. Seule exception : réponse SANS id (serveur d'avant R1,
+ * le temps d'un déploiement), où le libellé reste le seul repère.
+ */
+export function secteurDuLot(lots: LotRoue[], resultat: Pick<ResultatTirage, 'lot' | 'lotId'>): Secteur | null {
+  const parts = secteurs(lots)
+  if (resultat.lotId) return parts.find((s) => s.lot.id === resultat.lotId) ?? null
+  return parts.find((s) => s.lot.libelle === resultat.lot) ?? null
+}
+
 /** `jeton` : jeton client du joueur (P0-S7) ; sans lui, un serveur en mode strict refuse le tirage (401). */
 export async function lancerTirage(
   api: Pick<ClientApi, 'tirer'>,
@@ -27,7 +39,7 @@ export async function lancerTirage(
 ): Promise<IssueTirage> {
   try {
     const resultat = await api.tirer(commerce.id, contact, prenom, undefined, jeton)
-    return { ok: true, resultat, secteur: secteurs(commerce.lots).find((s) => s.lot.libelle === resultat.lot) ?? null }
+    return { ok: true, resultat, secteur: secteurDuLot(commerce.lots, resultat) }
   } catch (e) {
     if (e instanceof ErreurApi) return { ok: false, message: e.message, horsLigne: e.horsLigne, refus: e.statut === 409, ...(e.statut === 401 ? { accesRefuse: true as const } : {}) }
     return { ok: false, message: MESSAGE_HORS_LIGNE, horsLigne: true, refus: false }
@@ -115,6 +127,41 @@ export function marquerScanSignale(session: Stockage | null, commerceId: string)
     session?.setItem(cle, '1')
   } catch {
     // Stockage indisponible : la garde mémoire ci-dessus suffit pour cet affichage.
+  }
+}
+
+// ---------- Activation du code gagnant (R3, burn-on-reveal) ----------
+
+export type IssueActivation =
+  | { ok: true; activation: ActivationCode }
+  | {
+      ok: false
+      message: string
+      horsLigne: boolean
+      /** 409 / 410 : pas encore utilisable (dès demain), expiré, déjà remis — le message du serveur le dit. */
+      refus: boolean
+      /** 401 : plus de jeton valable sur ce téléphone pour cette carte → « Retrouver ma carte ». */
+      accesRefuse?: true
+    }
+
+/**
+ * « Utiliser mon gain » : demande au serveur le code du tirage, valable 10 minutes en caisse, avec le jeton client de
+ * la carte rangé sur ce téléphone (seule façon d'obtenir un code depuis R3). Sans jeton : refus d'accès, sans appel.
+ */
+export async function activerCode(
+  api: Pick<ClientApi, 'activerCode'>,
+  jetons: Pick<Jetons, 'lire'>,
+  gain: { commerceId: string; clientId: string; tirageId: string },
+): Promise<IssueActivation> {
+  const jeton = jetons.lire(gain.clientId)?.jeton
+  if (!jeton) return { ok: false, message: 'Ouvrez votre carte sur ce téléphone pour utiliser votre gain.', horsLigne: false, refus: false, accesRefuse: true }
+  try {
+    return { ok: true, activation: await api.activerCode(gain.commerceId, gain.tirageId, jeton) }
+  } catch (e) {
+    if (e instanceof ErreurApi) {
+      return { ok: false, message: e.message, horsLigne: e.horsLigne, refus: e.statut === 409 || e.statut === 410, ...(e.statut === 401 ? { accesRefuse: true as const } : {}) }
+    }
+    return { ok: false, message: MESSAGE_HORS_LIGNE, horsLigne: true, refus: false }
   }
 }
 

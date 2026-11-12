@@ -10,6 +10,7 @@ import { creerServeur, type OptionsServeur } from '../server/app.ts'
 import type { Client, Commerce } from '../src/types.ts'
 import { creerClientApi, type ClientApi, type ErreurApi } from '../src/data/api.ts'
 import { lancerTirage } from '../src/data/jeuApi.ts'
+import { codeEnBase } from './code-en-base.ts'
 
 const ADMIN = '98765432'
 const ASIAN_HOME = 'c-asian-home-paris'
@@ -87,7 +88,7 @@ describe('Serveur /api/v1', () => {
   })
 
   test('création d’un commerce : PIN admin obligatoire', async () => {
-    const corps = { nom: 'Chez Lin', type: 'restaurant', lienGoogle: 'https://g.page/r/x/review', pin: '4321', seuilTampons: 3, recompense: 'Un dessert offert' }
+    const corps = { nom: 'Chez Lin', type: 'restaurant', lienGoogle: 'https://g.page/r/x/review', pin: '4321', seuilTampons: 3, recompense: 'Un dessert offert', modeAccesRoue: 'visite' }
     assert.equal((await srv.api('POST', '/commerces', corps)).statut, 401)
     assert.equal((await srv.api('POST', '/commerces', corps, { 'X-Admin-PIN': '11111111' })).statut, 401)
     assert.equal((await srv.api('POST', '/commerces', { ...corps, pin: '12' }, { 'X-Admin-PIN': ADMIN })).statut, 400)
@@ -98,6 +99,8 @@ describe('Serveur /api/v1', () => {
     assert.equal(r.contenu.commerce.seuilTampons, 3)
     // Les défauts de `nouveauCommerce` sont repris (lots, règles).
     assert.ok(r.contenu.commerce.lots.length >= 2)
+    // R2 : un nouveau commerce est en accès libre par défaut ; ce parcours décrit l'accès « visite », demandé ici.
+    assert.equal(r.contenu.commerce.modeAccesRoue, 'visite')
     assert.equal(r.contenu.commerce.reglesReponseAuto.auto5Etoiles, true)
     assert.doesNotMatch(JSON.stringify(r.contenu), /4321/)
   })
@@ -173,9 +176,15 @@ describe('Serveur /api/v1', () => {
     const etat = await srv.api('GET', `/commerces/${commerceId}/etat`, undefined, pin)
     const libelles = etat.contenu.commerce.lots.map((l: { libelle: string }) => l.libelle)
     assert.ok(libelles.includes(r.contenu.lot))
-    assert.match(r.contenu.code, /^[A-Z2-9]{6}$/)
+    // R3 (burn-on-reveal, décision du 12/11) : la réponse du tirage ne porte plus jamais de code ; le code est en base
+    // et ne sera servi au client que par l'activation — revue Codex R3 (F1) : l'état commerçant ne le porte pas non
+    // plus. R2 : aucun code pour une consolation.
+    assert.equal(r.contenu.code, undefined)
     assert.equal(etat.contenu.tirages.length, 1)
-    assert.equal(etat.contenu.tirages[0].code, r.contenu.code)
+    assert.equal(etat.contenu.tirages[0].id, r.contenu.tirageId)
+    assert.equal(etat.contenu.tirages[0].code, undefined)
+    if (r.contenu.type === 'points') assert.equal(codeEnBase(fichierDb, r.contenu.tirageId), undefined)
+    else assert.match(codeEnBase(fichierDb, r.contenu.tirageId) ?? '', /^[A-Z2-9]{6}$/)
 
     const r2 = await srv.api('POST', `/commerces/${commerceId}/tirages`, { contact: '06 12 34 56 78' })
     assert.equal(r2.statut, 409)
@@ -318,6 +327,8 @@ describe('V2 : front ↔ serveur (contrat) et carte publique', () => {
   test('parcours complet avec le client du front : création → inscription → visite → tirage → refus → CSV', async () => {
     const commerce = await api.creerCommerce(ADMIN, { nom: 'Chez Lin', type: 'restaurant', lienGoogle: '', pin: '5555' })
     const acces = { role: 'commerce' as const, commerceId: commerce.id, pin: '5555' }
+    // R2 : nouveau commerce en accès libre par défaut — ce parcours décrit l'accès « visite ».
+    await api.majCommerce(commerce.id, acces, { modeAccesRoue: 'visite' })
     await assert.rejects(api.etat(commerce.id, { ...acces, pin: '0000' }), (e: ErreurApi) => e.statut === 401 && /PIN/.test(e.message))
 
     const { client } = await api.inscrirePublic(commerce.id, 'Linh', '06 12 34 56 78')
@@ -353,7 +364,12 @@ describe('V2 : front ↔ serveur (contrat) et carte publique', () => {
 
     const etat = await api.etat(commerce.id, { role: 'admin', pin: ADMIN })
     assert.equal(etat.tirages.length, 1)
-    assert.equal(etat.tirages[0].code, gagne.resultat.code, 'le commerçant voit le code pour le vérifier')
+    // R3 : le client ne reçoit plus le code au tirage (seulement à l'activation). Revue Codex R3 (F1) : le commerçant non
+    // plus — la caisse vérifie le code que le client montre, elle n'a pas à le connaître d'avance.
+    assert.equal(gagne.resultat.code, undefined, 'aucun code dans la réponse du tirage')
+    assert.equal(etat.tirages[0].id, gagne.resultat.tirageId)
+    assert.equal(etat.tirages[0].code, undefined, 'pas de code dans l’état commerçant')
+    if (!gagne.resultat.perdant) assert.match(codeEnBase(join(dossier, 'v2.db'), gagne.resultat.tirageId) ?? '', /^[A-Z2-9]{6}$/, 'code créé en base')
   })
 
   test('carte publique : inconnue → 404 ; commerce inactif → 409', async () => {

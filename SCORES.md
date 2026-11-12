@@ -108,7 +108,7 @@ l'AUDIT §7, sur le staging (jamais la production) :
 5. Relever les erreurs console via le navigateur distant (Chrome DevTools USB) ou,
    à défaut, noter tout écran blanc / blocage visible.
 
-## Bundle (build frais, mode par défaut, 11/11/2026 — boucle t1)
+## Bundle (build frais, mode par défaut, 12/11/2026 — roue v2 R-t1 polish visuel)
 
 Définition unique : **JS initial non gzipé** = script d'entrée de `index.html` +
 ses imports statiques (méthode `fichiersInitiaux` de
@@ -121,12 +121,34 @@ référence P1-U1 est conservée verbatim juste après (titre et chiffres), comm
 archive historique — le test `tests/mesure-p1-u1.test.ts` y lit ses chiffres
 figés ; elle ne doit pas être modifiée.
 
-- JS initial non gzipé : 454357 o (443,7 Ko) — `index-D45UlNII.js` 355234 o +
-  `ui-QUCFVz_5.js` 98524 o + `rolldown-runtime-WkwZ5CU-.js` 599 o.
-- CSS non gzipé : 70766 o (69,1 Ko) — `index-BAxqKb1k.css`.
-- Total initial : 525123 o (512,8 Ko).
-- JS total (tous chunks) : 804719 o (785,9 Ko) ; 24 chunks ; plus gros chunk : 355234 o
+- JS initial non gzipé : 481283 o (470,0 Ko) — `index-C4Xor2bi.js` 369504 o +
+  `ui-ZIVMaRXG.js` 102937 o + `jsx-runtime-CkXRJ162.js` 8243 o +
+  `rolldown-runtime-WkwZ5CU-.js` 599 o.
+- CSS non gzipé : 82135 o (80,2 Ko) — `index-DRZsZD6q.css`.
+- Total initial : 563418 o (550,2 Ko).
+- JS total (tous chunks) : 859828 o (839,7 Ko) ; 26 chunks ; plus gros chunk : 369504 o
   (limite test : 500 000 o — respectée).
+- Roue v2 R-t1 (polish visuel) : JS initial 481373 o (après D2, a3e2290) → 481283 o (−90 o ;
+  plafond 481376 o, marge 93 o). Les classes utilitaires du pointeur, du titre et des pastilles
+  de la légende sont passées en CSS (−200 o de JS), ce qui paie le retournement des libellés de
+  gauche et `styleLegende` (teintes du commerce sur la légende). CSS 78932 o → 82135 o (+3 203 o,
+  replis `color-mix` générés compris).
+- Roue v2 R5+R8 (son, couleur du commerce, roue premium) : JS initial 479360 o → 481300 o
+  (+1 940 o) — plafond P2-Q2 481376 o (< 80 % de 601720 o) respecté avec **76 o de marge
+  seulement** : le prochain lot qui ajoute du code au premier affichage de #/jouer devra
+  d'abord découper (ex. bloc « À gagner aujourd’hui », « Garder ma carte »). Le décor
+  premium (anneau, reflet, moyeu, ampoules, rayons, pointeur) est en CSS (+5 843 o de CSS,
+  hors plafond JS) ; la synthèse sonore est un chunk à la demande, `sonRoue-*.js` 1278 o
+  (+1 chunk), chargé au clic « Tourner ». Mesure « avant » (R4 + revue Codex, 4db69b4) :
+  479360 o ; la valeur 478582 o ci-dessous date de R4 avant sa revue Codex.
+- Roue v2 (12/11/2026) : après R3 (mesuré au commit f1bf0fd, build frais) JS initial
+  470200 o, CSS 71129 o, total 541329 o, JS total 813761 o, 24 chunks, plus gros
+  360485 o — soit +15 843 o de JS initial pour R1–R3 (types de lots, moteur v2, cycle
+  du gain) depuis la mesure t10 ci-dessous. R4 (écrans client + règlement) : JS
+  initial 478582 o (+8 382 o, +1,8 % vs R3 — bloc « À gagner aujourd’hui », écran
+  résultat v2, gains et compte à rebours sur la carte, ~25 traductions), total
+  549711 o ; 25 chunks (+1 : page différée `Reglement-*.js`, 6958 o — le texte du
+  règlement reste hors du bundle initial). Seuil P2-Q2 (< 80 % de 601720 o) : respecté.
 - Différé (boucle t1) : `QrCode-D610mFEe.js` 21182 o (`qrcode-generator` + composant),
   chargé à la demande par la carte de fidélité ; `jsx-runtime-CkXRJ162.js` est un
   nouveau fichier partagé sorti par le découpage (runtime JSX, auparavant dans `ui-*.js`).
@@ -215,8 +237,8 @@ ses imports statiques (méthode `fichiersInitiaux` de
 
 ## Couverture de tests
 
-Suite verte : **1333/1333** (`npm test`, typechecks inclus — 1090 après P2-Q2, +73 tests
-P2-Q3 à P2-Q6, +3 tests boucle t1, +4 tests boucle t2, +1 test SW boucle t2, +4 tests boucle t4, +1 test auto (nouvelle entrée VISUELS), +4 tests boucle t5, +3 tests boucle t6, +1 test auto (nouvelle entrée VISUELS), +10 tests boucle t10, +6 tests auto (nouvelles entrées VISUELS), +4 tests correction Codex point 5, +13 tests correction Codex point 11, +8 tests correction Codex point 6, +5 tests correction Codex point 9, +15 tests correction Codex point 10, +4 tests correction Codex point 2, +7 tests correction Codex point 4, +6 tests correction Codex point 7, +3 tests correction Codex point 8, +9 tests revue Codex finale, +2 tests correction Codex point 1, +2 tests correction Codex point 3, +8 tests revue Codex finale points 1-3, +5 tests item B catalogue par défaut, +4 tests auto item C (2 vignettes de galerie : fichiers WebP et entrées VISUELS), +13 tests item D sauvegarde téléchargeable par l'admin, +12 tests item E alerte e-mail sur rafale de 5xx, +6 tests revue Codex nov12 (1/2) délai propre de la sauvegarde, +7 tests revue Codex nov12 (2/2) reprise après échec d'une alerte 5xx ; voir `JOURNAL.md`).
+Suite verte : **1555/1555** (`npm test`, typechecks inclus — 1090 après P2-Q2, +73 tests
+P2-Q3 à P2-Q6, +3 tests boucle t1, +4 tests boucle t2, +1 test SW boucle t2, +4 tests boucle t4, +1 test auto (nouvelle entrée VISUELS), +4 tests boucle t5, +3 tests boucle t6, +1 test auto (nouvelle entrée VISUELS), +10 tests boucle t10, +6 tests auto (nouvelles entrées VISUELS), +4 tests correction Codex point 5, +13 tests correction Codex point 11, +8 tests correction Codex point 6, +5 tests correction Codex point 9, +15 tests correction Codex point 10, +4 tests correction Codex point 2, +7 tests correction Codex point 4, +6 tests correction Codex point 7, +3 tests correction Codex point 8, +9 tests revue Codex finale, +2 tests correction Codex point 1, +2 tests correction Codex point 3, +8 tests revue Codex finale points 1-3, +5 tests item B catalogue par défaut, +4 tests auto item C (2 vignettes de galerie : fichiers WebP et entrées VISUELS), +13 tests item D sauvegarde téléchargeable par l'admin, +12 tests item E alerte e-mail sur rafale de 5xx, +6 tests revue Codex nov12 (1/2) délai propre de la sauvegarde, +7 tests revue Codex nov12 (2/2) reprise après échec d'une alerte 5xx, +21 tests roue v2 R1 lots structurés (id + type), +1 test revue Codex R1 (écriture sans type), +17 tests roue v2 R2 moteur de tirage (accès libre, plafonds, limite mensuelle, consolation points), +11 tests revue Codex R2 (tirages sérialisés par commerce, crédit de consolation exactement-une-fois, journée des plafonds à Paris, rattrapage des lotId), +12 tests roue v2 R3 cycle de vie du gain (J+1 à J+30, code burn-on-reveal 10 min), +12 tests revue Codex R3 (code seulement par l'activation, bornes en jours de Paris, anciens tirages sous l'ancienne règle, remise conditionnelle à l'heure de l'écriture ; 2 tests R3 remplacés), +20 tests roue v2 R4 écrans client (lots du jour, règlement généré, gains sur la carte et compte à rebours, écran résultat v2, route publique du règlement), +6 tests revue Codex R4 (compte à rebours sur l'heure du serveur, carte rafraîchie aux bornes de statut, règlement bilingue), +21 tests roue v2 R5+R8 (préférence son par appareil, AudioContext seulement dans le geste et synthèse chargée à la demande, tics depuis l’angle animé et aucun tic en mouvement réduit, couleur du commerce lisible sur toute couleur acceptée, décor premium sur couches fixes animé en opacity/transform seulement, célébration allégée pour des points), +5 tests revue Codex R5+R8 (couper le son tait aussi les notes déjà programmées, mouvement réduit activé en cours de rotation, réactivation du son pendant une partie lancée en muet), +15 tests roue v2 R6 Réglages → Roulette (type / points / plafond par lot, refus front d'un lot « points » sans montant, règles du jeu envoyées et relues, tirage de test de l'aperçu sans réseau ni tirage enregistré), +9 tests roue v2 R7 relance « gain bientôt expiré » (72 h avant la fin de J+30, une fois par tirage, mode test compris, consentement exigé, réglage actif par défaut), +1 test revue Codex R6 (ligne de lot exclue de l'envoi), +8 tests revue Codex R7 (réclamation atomique par tirage, pas de doublon au-delà de 50 envois, statut revérifié avant envoi, échec après réclamation retenté, sandbox e-mail hérité, collision `libre` / gain tracée), +14 tests roue v2 D1 instants gagnants (génération paresseuse persistée dans les plages d'ouverture, fenêtre de 5 min, consommation unique sous concurrence, plafond et limite prioritaires, instant rendu si le tirage échoue, aucun instant futur dans une réponse), +4 tests revue Codex 2 R7 (activation appliquée sur la ligne fraîche sans effacer la réclamation, issue ambiguë après émission = incertain, libération malgré une activation concurrente, expiration revérifiée après la réclamation), +8 tests revue Codex D1 (restitution d'un instant réessayée sur le document frais avec incohérence journalisée en dernier recours, instant préservé quand seul le client est à sa limite, aucun instant dans l'heure inexistante du passage à l'heure d'été), +14 tests roue v2 D3 simulateur de coût et KPI des gains (coût attendu = Σ chance normalisée × coût, coût partiel listé, projection et pire cas des plafonds sans NaN, taux d'utilisation = remis ÷ (remis + expirés) sur tirages v2, bornes identiques à `cycleGain` heure par heure), +12 tests roue v2 D2 créneaux heures creuses (matrice jours / heures avec début inclus et fin exclue en heure de Paris, lot creux absent hors créneau même avec le hasard forcé, consolation doublée et tracée pendant le créneau, `bonusCreux` présent / absent dans la fiche publique, réglages validés ; +1 dans cout-kpi-d3 : règle « lot physique » de la carte des gains réécrite hors bundle initial, égale à `typeTirage`), +6 tests boucle roue v2 R-t1 polish visuel (libellés de gauche retournés, teintes du commerce sur la légende et le cadre avec titre ≥ 4,5:1 pour toute couleur acceptée, émoji du bouton « Tourner » remplacé à l'affichage par un signe CSS sans toucher au libellé), +5 tests revue Codex P1 (relance inactif / anniversaire `incertain` jamais renvoyée même au-delà de 50 envois plus récents, lecture par modèle sans plafond sous SQLite et Supabase) ; voir `JOURNAL.md`).
 
 - Couverture globale : 97,90 % lignes / 91,49 % branches / 93,06 % fonctions
   (`node --test --experimental-test-coverage`, suite verte, 11/11/2026 —
@@ -1424,3 +1446,31 @@ lots de modification issus de la boucle.
 
 Un tour de la boucle d'amélioration ne fusionne que s'il améliore au moins une
 de ces métriques sans régresser les autres (AUDIT.md §7, boucle continue).
+
+## Cohérence DA /10 — écran de jeu après roue v2 R5+R8 (re-mesure 12/11/2026 ~14:00 UTC, 1 passe)
+
+Méthode identique aux notations précédentes : captures Playwright Pixel 7 (Chromium, build API,
+serveur E2E local), commerce de test 6 lots en accès libre, magenta par défaut ET couleur de
+commerce `#3b2d8f` ; roue au repos, en rotation (2 instants), à l'arrêt sur le gain, rayons
+ouverts. Captures avant/après : `node_modules/.cache/boucle-roue/captures-R58-avant/` et
+`captures-R58-apres/` (non versionnées).
+
+| Écran | Avant | Après | Justification |
+| --- | --- | --- | --- |
+| Jouer (roue) | 9/10 | **9,5/10** | Roue « casino » réussie : anneau en relief (reflet haut, ombre basse, filet), 16 ampoules en poursuite pendant la rotation, brillant bombé et ombre interne du moyeu, filets nets, moyeu à initiale serif, pointeur goutte qui rebondit, rayons discrets au gain, couleur du commerce reprise par la roue et la légende ; reste visible : libellés de la moitié gauche à l'envers au repos, légende et cadre restés magenta sur une couleur perso, émoji 🎡 multicolore du bouton « Tourner », libellés abrégés (« Dessert… », règle des 12 caractères). |
+
+Cible 10/10 **non atteinte** : note non gonflée ; ce qui manque est listé dans `BOUCLE.md`
+(roue v2 R5+R8).
+
+## Cohérence DA /10 — écran de jeu après roue v2 R-t1 polish visuel (re-mesure 12/11/2026 ~17:40 UTC, 1 passe)
+
+Même méthode et même harnais que R5+R8 (Playwright Pixel 7, build API, serveur E2E local,
+6 lots en accès libre, magenta par défaut ET couleur de commerce `#3b2d8f`). Captures :
+`node_modules/.cache/boucle-roue/captures-polish1-avant/` et `captures-polish1-apres/`
+(non versionnées).
+
+| Écran | Avant | Après | Justification |
+| --- | --- | --- | --- |
+| Jouer (roue) | 9,5/10 | **9,7/10** | Corrigé et visible sur les captures : libellés de la moitié gauche lisibles au repos (« Café offert », « Dommage », « 10 points… » ne sont plus tête en bas) ; sur `#3b2d8f`, le cadre (filet, halo, fond bas), le titre « À gagner » et l'anneau des pastilles prennent la teinte du commerce (plus aucun magenta dans le cadre de la roue) ; émoji 🎡 multicolore remplacé par un signe de roue blanc dessiné en CSS ; titre « À gagner » corail (#ff4d6d) ramené au magenta clair de la roue en mode par défaut. Reste visible, d'où pas 10 : sur une couleur de commerce, le bouton « Tourner » reste magenta (fond blanc-sur-teinte non garanti ≥ 4,5:1 pour toute couleur, et hors de portée des variables sans JS initial) ; libellés abrégés (« Dessert… », règle des 12 caractères) ; numéros de secteur (roues > 8 lots) non retournés en bas de roue. |
+
+Cible 10/10 **non atteinte** : note non gonflée ; détail dans `BOUCLE.md` (R-t1).

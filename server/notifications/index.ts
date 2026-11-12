@@ -36,6 +36,27 @@ export class ErreurNonBranche extends Error {
   }
 }
 
+/**
+ * Réponse non 2xx du prestataire, avec son code HTTP (revue Codex 2 R7, F2). Seul un 4xx est un refus CONFIRMÉ (la
+ * requête est arrivée et a été rejetée : rien n'est parti) ; un 5xx ne dit pas si le message a été pris en charge.
+ */
+export class ErreurPrestataire extends Error {
+  readonly http: number
+  constructor(prestataire: string, http: number) {
+    super(`${prestataire} a refusé l’envoi (HTTP ${http}).`)
+    this.http = http
+  }
+}
+
+/**
+ * Échec d'envoi dont on SAIT que rien n'est parti : prestataire non branché (aucun appel), ou refus 4xx explicite.
+ * Toute autre erreur levée par `envoyer` (délai dépassé, coupure réseau, 5xx, corps de réponse illisible après un
+ * succès…) survient après l'émission de la requête : le message est peut-être parti.
+ */
+export function echecConfirme(e: unknown): boolean {
+  return e instanceof ErreurNonBranche || (e instanceof ErreurPrestataire && e.http >= 400 && e.http < 500)
+}
+
 export interface ConfigNotifications {
   twilio?: ConfigTwilio
   brevo?: ConfigBrevo

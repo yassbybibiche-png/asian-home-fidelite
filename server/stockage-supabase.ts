@@ -56,6 +56,18 @@ const PAGE = 1000
 const STATUTS_COLONNE_0007: readonly string[] = ['en_cours', 'envoye', 'refuse', 'erreur', 'non_branche']
 export const statutColonneEnvoi = (s: EnvoiRelance['statut']): string => (STATUTS_COLONNE_0007.includes(s) ? s : 'erreur')
 
+/**
+ * Valeur de la COLONNE `envois.modele` (R7, sans migration) : la contrainte CHECK de 0007 n'accepte que bienvenue /
+ * proche / inactif / anniversaire / libre. Le modèle automatique `gainExpire` est rangé sous `libre` dans la colonne ;
+ * le vrai modèle (et le `tirageId`) restent dans `donnees`, seule source relue. Effet de bord connu : l'index unique
+ * (commerce, client, modèle, jour) fait qu'un message libre manuel et une relance de gain ne partent pas le même jour
+ * vers le même client (le 2e est refusé, rien n'est envoyé en double). Limite assumée tant que la contrainte reste :
+ * le refus est tracé à part (revue Codex F5 : `motif: 'collision_libre_gain'` dans le journal des envois, voir
+ * `relancer` dans app.ts), et une relance de gain ainsi refusée est retentée à la tournée suivante.
+ */
+const MODELES_COLONNE_0007: readonly string[] = ['bienvenue', 'proche', 'inactif', 'anniversaire', 'libre']
+export const modeleColonneEnvoi = (m: EnvoiRelance['modele']): string => (MODELES_COLONNE_0007.includes(m) ? m : 'libre')
+
 /** Lecture d'une table de la migration 0003 : vide tant que la migration n'est pas appliquée (l'existant continue de marcher). */
 async function ouVide<T>(lecture: Promise<T>, vide: T): Promise<T> {
   try {
@@ -165,6 +177,19 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     }
   }
 
+  /**
+   * UPDATE de `donnees` d'un tirage par comparaison-échange (`tirages` n'a pas de colonne version) : non remis, et
+   * `activeLe` / `relanceGainLe` toujours tels que `lu` les a lus (revue Codex 2 R7, F1 — voir `Stockage.majTirageSi`).
+   */
+  async function majTirageSi(t: Tirage, lu: Pick<Tirage, 'activeLe' | 'relanceGainLe'>, activeApres?: string): Promise<boolean> {
+    let requete = sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->remis', null)
+    // Revue Codex R3 F4 : fenêtre d'activation vérifiée par la base, à l'écriture (texte ISO : ordre = ordre chronologique).
+    if (activeApres !== undefined) requete = requete.gt('donnees->>activeLe', activeApres)
+    requete = lu.activeLe === undefined ? requete.is('donnees->activeLe', null) : requete.eq('donnees->>activeLe', lu.activeLe)
+    requete = lu.relanceGainLe === undefined ? requete.is('donnees->relanceGainLe', null) : requete.eq('donnees->>relanceGainLe', lu.relanceGainLe)
+    return (await ok<unknown[]>('tirages', requete.select('id'))).length > 0
+  }
+
   const AVEC_VERSION = 'id,version,donnees'
 
   return {
@@ -243,8 +268,25 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       lirePages<Tirage>('tirages', (debut, fin) =>
         sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('client_id', clientId).order('date', { ascending: true }).order('id').range(debut, fin),
       ),
+    tiragesDepuis: (commerceId, depuis) =>
+      lirePages<Tirage>('tirages', (debut, fin) =>
+        sb.from('tirages').select('donnees').eq('commerce_id', commerceId).gte('date', depuis).order('date', { ascending: false }).order('id').range(debut, fin),
+      ),
     ajouterTirage: async (t) =>
       void (await ok('tirages', sb.from('tirages').insert({ id: t.id, commerce_id: t.commerceId, client_id: t.clientId, date: t.date, donnees: t }))),
+    supprimerTirage: async (commerceId, id) => void (await ok('tirages', sb.from('tirages').delete().eq('commerce_id', commerceId).eq('id', id))),
+    tiragesSansLot: (commerceId) =>
+      lirePages<Tirage>('tirages', (debut, fin) =>
+        sb.from('tirages').select('donnees').eq('commerce_id', commerceId).is('donnees->lotId', null).order('date', { ascending: false }).order('id').range(debut, fin),
+      ),
+    // Même procédé que la remise (P0-U3) : UPDATE conditionnel sur le JSONB, sans colonne `version`. Un tirage déjà
+    // remis garde sa remise (`t` la porte, elle ne change plus) ; non remis : la condition empêche d'écraser une remise
+    // arrivée entre la lecture et l'écriture.
+    completerLotTirage: async (t) => {
+      let requete = sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->lotId', null)
+      if (!t.remis) requete = requete.is('donnees->remis', null)
+      return (await ok<unknown[]>('tirages', requete.select('id'))).length > 0
+    },
     // Code gagnant et remise (P0-U3) : dans le JSONB `donnees`, sans migration. La table `tirages` n'a pas de colonne
     // `version` : la garde est la condition « donnees->remis IS NULL » de l'UPDATE lui-même. Postgres verrouille la ligne,
     // et une 2e requête simultanée réévalue la condition après la 1re → 0 ligne → false (jamais deux remises).
@@ -252,8 +294,11 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       lirePages<Tirage>('tirages', (debut, fin) =>
         sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('donnees->>code', code).order('date', { ascending: false }).order('id').range(debut, fin),
       ),
-    marquerTirageRemis: async (t) =>
-      (await ok<unknown[]>('tirages', sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->remis', null).select('id'))).length > 0,
+    marquerTirageRemis: (t, activeApres) => majTirageSi(t, t, activeApres),
+    tirage: async (commerceId, id) => (await lire<Tirage>('tirages', sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('id', id)))[0],
+    // R7, revues Codex F2 et F1 (2e revue) : même procédé (UPDATE conditionnel sur le JSONB, sans migration) pour toute
+    // écriture d'un tirage qui part d'une lecture : activation, remise, réclamation et libération de la relance du gain.
+    majTirageSi,
 
     avis: (commerceId) =>
       lirePages<Avis>('avis', (debut, fin) => sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).order('date', { ascending: false }).order('id').range(debut, fin)),
@@ -424,7 +469,7 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     ajouterEnvoi: async (e) =>
       void (await ok(
         'envois',
-        sb.from('envois').insert({ id: e.id, commerce_id: e.commerceId, client_id: e.clientId, modele: e.modele, canal: e.canal, statut: statutColonneEnvoi(e.statut), jour: e.jour, date: e.date, donnees: e }),
+        sb.from('envois').insert({ id: e.id, commerce_id: e.commerceId, client_id: e.clientId, modele: modeleColonneEnvoi(e.modele), canal: e.canal, statut: statutColonneEnvoi(e.statut), jour: e.jour, date: e.date, donnees: e }),
       )),
     majEnvoi: async (e) => void (await ok('envois', sb.from('envois').update({ statut: statutColonneEnvoi(e.statut), donnees: e }).eq('id', e.id).eq('commerce_id', e.commerceId))),
     envois: (commerceId, limite, clientId) => {
@@ -432,6 +477,23 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       if (clientId) requete = requete.eq('client_id', clientId)
       return ouVide(lire<EnvoiRelance>('envois', requete.order('date', { ascending: false }).limit(limite)), [])
     },
+    // R7, revue Codex F1 : filtre sur `donnees->>tirageId` (aucune colonne dédiée sans migration) ; quelques lignes au plus.
+    envoisDuTirage: (commerceId, clientId, tirageId) =>
+      ouVide(
+        lirePages<EnvoiRelance>('envois', (debut, fin) =>
+          sb.from('envois').select('donnees').eq('commerce_id', commerceId).eq('client_id', clientId).eq('donnees->>tirageId', tirageId).order('date', { ascending: false }).order('id').range(debut, fin),
+        ),
+        [],
+      ),
+    // Revue Codex, point P1 : `inactif` / `anniversaire` sont des valeurs historiques de la colonne `modele` (0007),
+    // rangées telles quelles par `modeleColonneEnvoi` → filtre sur la colonne.
+    envoisDuModele: (commerceId, clientId, modele) =>
+      ouVide(
+        lirePages<EnvoiRelance>('envois', (debut, fin) =>
+          sb.from('envois').select('donnees').eq('commerce_id', commerceId).eq('client_id', clientId).eq('modele', modele).order('date', { ascending: false }).order('id').range(debut, fin),
+        ),
+        [],
+      ),
     schemaRelances: async () => {
       try {
         await ok('envois', sb.from('envois').select('*').limit(0))

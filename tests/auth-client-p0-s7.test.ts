@@ -259,7 +259,10 @@ describe('P0-S7 : serveur en mode strict', () => {
     // Contact de B dans le corps, jeton de A : c'est A qui joue (le contact n'est plus lu).
     const r = await s.api('POST', `/commerces/${AH}/tirages`, { contact: '0667676767' }, s.bearer(a.jeton))
     assert.equal(r.statut, 201)
-    assert.match(r.contenu.code, /^[A-Z2-9]{6}$/)
+    // R3 (burn-on-reveal, décision du 12/11) : plus jamais de code dans la réponse du tirage, quel que soit le lot —
+    // le titulaire l'obtient par l'activation (tests/cycle-gain-r3.test.ts).
+    assert.equal(r.contenu.code, undefined)
+    assert.match(r.contenu.tirageId, /^ti-/)
     assert.equal((await s.api('POST', `/commerces/${AH}/tirages`, {}, s.bearer(a.jeton))).statut, 409, '1 tirage par jour')
     const tirages = (await s.etat()).tirages
     assert.deepEqual(tirages.filter((t: { clientId: string }) => [a.client.id, b.client.id].includes(t.clientId)).map((t: { clientId: string }) => t.clientId), [a.client.id])

@@ -544,7 +544,7 @@ export default function FicheClient() {
           </div>
         </dl>
         <ul className="mt-3 divide-y divide-gray-100 text-sm">
-          {[...(client.recompensesOffertes ?? []).map((r) => ({ date: r.date, texte: `🎁 Récompense offerte : ${r.libelle}` })), ...gains.map((g) => ({ date: g.date, texte: `🎡 Roulette : ${g.lot}${g.code ? ` (code ${g.code})` : ''}` }))]
+          {[...(client.recompensesOffertes ?? []).map((r) => ({ date: r.date, texte: `🎁 Récompense offerte : ${r.libelle}` })), ...gains.map((g) => ({ date: g.date, texte: `🎡 Roulette : ${g.lot}${g.remis ? ' (remis)' : ''}` }))]
             .sort((a, b) => b.date.localeCompare(a.date))
             .slice(0, 10)
             .map((l, i) => (
