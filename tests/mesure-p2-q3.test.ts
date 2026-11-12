@@ -475,7 +475,8 @@ describe('Serveur : événements anonymes, mesures, coût des lots, test A/B', (
         const jeu = await api('POST', `/commerces/${AH}/tirages`, { contact: tel })
         assert.equal(jeu.statut, 201)
         // Roue v2 R1 (décision utilisateur du 12/11/2026) : la réponse ajoute l'id et le type du lot tiré, rien d'autre.
-        assert.deepEqual(Object.keys(jeu.contenu).sort(), ['code', 'date', 'lot', 'lotId', 'perdant', 'type'], 'réponse du tirage : id + type en plus')
+        // Roue v2 R3 (même décision) : plus de code (burn-on-reveal, servi seulement par l'activation), l'id du tirage en plus.
+        assert.deepEqual(Object.keys(jeu.contenu).sort(), ['date', 'lot', 'lotId', 'perdant', 'tirageId', 'type'], 'réponse du tirage : sans code, id du tirage en plus')
       }
       // Tirage perdant : compté comme tirage, pas comme gain.
       assert.equal((await api('PATCH', `/commerces/${AH}`, { lots: [{ libelle: 'Dommage !', probabilite: 100 }] }, PIN)).statut, 200)

@@ -348,7 +348,11 @@ describe('R2 : serveur (SQLite) — accès libre, plafonds, limite mensuelle, co
     tiragesPasses(a3.client.id, [{ date: ilYa(1) }, { date: ilYa(10) }, { date: ilYa(20) }, { date: ilYa(31) }, { date: ilYa(3), typeLot: 'perdant', lot: 'Raté' }])
     const r3 = await tirer(a3.contact)
     assert.equal(r3.contenu.lotId, 'lot-nems', '3 gains sur 30 jours : un lot est encore possible')
-    assert.match(r3.contenu.code, /^[A-Z2-9]{6}$/, 'lot physique : code à montrer au comptoir')
+    // R3 (burn-on-reveal, décision du 12/11) : le code du lot physique est créé en base mais n'est plus dans la réponse
+    // du tirage — le client l'obtient par l'activation, à partir du lendemain.
+    assert.equal(r3.contenu.code, undefined)
+    const enBase3 = ((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.tirages as Tirage[]).find((t) => t.id === r3.contenu.tirageId)
+    assert.match(enBase3?.code ?? '', /^[A-Z2-9]{6}$/, 'lot physique : code à montrer au comptoir')
     await patch({ limiteGainsMois: 0 })
     const illimite = await inscrire()
     tiragesPasses(illimite.client.id, [1, 2, 3, 4, 5, 6].map((j) => ({ date: ilYa(j) })))

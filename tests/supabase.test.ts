@@ -675,9 +675,8 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
 
       const jeu = await api('POST', `/commerces/${AH}/tirages`, { contact: '0033612345678' })
       assert.equal(jeu.statut, 201)
-      // R2 : pas de code pour une consolation en points (seed : « +10 points » à 30 %).
-      if (jeu.contenu.type === 'points') assert.equal(jeu.contenu.code, undefined)
-      else assert.match(jeu.contenu.code, /^[A-Z2-9]{6}$/)
+      // R3 (burn-on-reveal, décision du 12/11) : plus de code dans la réponse du tirage (servi par l'activation seulement).
+      assert.equal(jeu.contenu.code, undefined)
       assert.equal((await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).statut, 409)
       assert.equal(f.tables.tirages.length, 1)
 
@@ -938,46 +937,63 @@ describe('Supabase : serveur /api/v1 complet (règles métier inchangées)', () 
   })
 
   test('P0-U3 : code gagnant remis une seule fois (UPDATE conditionnel), même simultanément ; persistant ; sans 0005/0006', async () => {
+    // R3 (décision du 12/11) : le gain s'utilise à partir de J+1, et le code ne vient que de l'activation par le titulaire
+    // (jeton client) — d'où le secret de session, le jeton et le lendemain ; l'intention (une seule remise) est inchangée.
     const f = fauxPostgrest({ sans0005: true, sans0006: true })
     const CODE = { 'X-Equipe-Code': '2468' }
     let code = ''
-    {
-      const { app, api } = await demarrer(f)
+    try {
+      {
+        const { app, api } = await demarrer(f, { secretSession: SECRET })
+        try {
+          assert.equal((await api('POST', `/commerces/${AH}/equipe`, { nom: 'Mai', code: '2468' }, PIN)).statut, 201)
+          assert.equal((await api('PATCH', `/commerces/${AH}`, { lots: [{ libelle: 'Nems offerts', probabilite: 100 }] }, PIN)).statut, 200)
+          const ins = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' })).contenu as { client: Client; jeton: string }
+          const bearer = { Authorization: `Bearer ${ins.jeton}` }
+          await api('POST', `/commerces/${AH}/clients/${ins.client.id}/visite`, undefined, PIN)
+          const tirage = (await api('POST', `/commerces/${AH}/tirages`, {}, bearer)).contenu
+          assert.equal(tirage.code, undefined)
+          horloge = new Date(horloge.getTime() + 24 * 3600 * 1000)
+          const activation = await api('POST', `/commerces/${AH}/tirages/${tirage.tirageId}/activer`, undefined, bearer)
+          assert.equal(activation.statut, 200, JSON.stringify(activation.contenu))
+          code = activation.contenu.code
+          assert.ok(code)
+          const patchActivation = f.requetes.findLast((r) => r.table === 'tirages' && r.methode === 'PATCH')!
+          assert.equal(patchActivation.params.get('donnees->remis'), 'is.null', 'activation : même garde que la remise')
+
+          const verif = await api('GET', `/commerces/${AH}/caisse/gains/${code.toLowerCase()}`, undefined, CODE)
+          assert.deepEqual([verif.statut, verif.contenu.gain.statut, verif.contenu.gain.lot, verif.contenu.gain.client.prenom], [200, 'utilisable', 'Nems offerts', 'Lina'])
+          const lecture = f.requetes.findLast((r) => r.table === 'tirages' && r.methode === 'GET')!
+          assert.equal(lecture.params.get('donnees->>code'), `eq.${code}`)
+
+          // Deux caisses valident le même code au même instant : les deux lisent « utilisable », la base n'en laisse passer qu'une.
+          const avant = f.requetes.filter((r) => r.table === 'tirages' && r.methode === 'PATCH').length
+          f.barriere('PATCH', 'tirages')
+          const remises = await Promise.all([1, 2].map(() => api('POST', `/commerces/${AH}/caisse/gains/${code}/remise`, undefined, CODE)))
+          assert.deepEqual(remises.map((r) => r.statut).sort(), [200, 409])
+          assert.match(remises.find((r) => r.statut === 409)!.contenu.erreur, /déjà remis/)
+          const maj = f.requetes.filter((r) => r.table === 'tirages' && r.methode === 'PATCH').slice(avant)
+          assert.equal(maj.length, 2)
+          for (const r of maj) assert.equal(r.params.get('donnees->remis'), 'is.null', 'garde dans la requête elle-même')
+          assert.equal(f.tables.tirages.length, 1)
+          assert.equal((f.tables.tirages[0].donnees as Tirage).remis?.par.nom, 'Mai')
+          // Une activation après la remise est refusée (409), rien n'est réécrit.
+          assert.equal((await api('POST', `/commerces/${AH}/tirages/${tirage.tirageId}/activer`, undefined, bearer)).statut, 409)
+        } finally {
+          await app.fermer()
+        }
+      }
+      // Redémarrage (Render qui se réveille) : le statut est en base, pas en mémoire.
+      const { app, api } = await demarrer(f, { secretSession: SECRET })
       try {
-        assert.equal((await api('POST', `/commerces/${AH}/equipe`, { nom: 'Mai', code: '2468' }, PIN)).statut, 201)
-        assert.equal((await api('PATCH', `/commerces/${AH}`, { lots: [{ libelle: 'Nems offerts', probabilite: 100 }] }, PIN)).statut, 200)
-        const c = (await api('POST', `/commerces/${AH}/clients`, { prenom: 'Lina', contact: '0612345678' }, PIN)).contenu.client as Client
-        await api('POST', `/commerces/${AH}/clients/${c.id}/visite`, undefined, PIN)
-        code = (await api('POST', `/commerces/${AH}/tirages`, { contact: '0612345678' })).contenu.code
-        assert.ok(code)
-
-        const verif = await api('GET', `/commerces/${AH}/caisse/gains/${code.toLowerCase()}`, undefined, CODE)
-        assert.deepEqual([verif.statut, verif.contenu.gain.statut, verif.contenu.gain.lot, verif.contenu.gain.client.prenom], [200, 'valable', 'Nems offerts', 'Lina'])
-        const lecture = f.requetes.findLast((r) => r.table === 'tirages' && r.methode === 'GET')!
-        assert.equal(lecture.params.get('donnees->>code'), `eq.${code}`)
-
-        // Deux caisses valident le même code au même instant : les deux lisent « valable », la base n'en laisse passer qu'une.
-        f.barriere('PATCH', 'tirages')
-        const remises = await Promise.all([1, 2].map(() => api('POST', `/commerces/${AH}/caisse/gains/${code}/remise`, undefined, CODE)))
-        assert.deepEqual(remises.map((r) => r.statut).sort(), [200, 409])
-        assert.match(remises.find((r) => r.statut === 409)!.contenu.erreur, /déjà remis/)
-        const maj = f.requetes.filter((r) => r.table === 'tirages' && r.methode === 'PATCH')
-        assert.equal(maj.length, 2)
-        for (const r of maj) assert.equal(r.params.get('donnees->remis'), 'is.null', 'garde dans la requête elle-même')
-        assert.equal(f.tables.tirages.length, 1)
-        assert.equal((f.tables.tirages[0].donnees as Tirage).remis?.par.nom, 'Mai')
+        const r = await api('POST', `/commerces/${AH}/caisse/gains/${code}/remise`, undefined, CODE)
+        assert.equal(r.statut, 409)
+        assert.equal((await api('GET', `/commerces/${AH}/caisse/gains/${code}`, undefined, CODE)).contenu.gain.statut, 'remis')
       } finally {
         await app.fermer()
       }
-    }
-    // Redémarrage (Render qui se réveille) : le statut est en base, pas en mémoire.
-    const { app, api } = await demarrer(f)
-    try {
-      const r = await api('POST', `/commerces/${AH}/caisse/gains/${code}/remise`, undefined, CODE)
-      assert.equal(r.statut, 409)
-      assert.equal((await api('GET', `/commerces/${AH}/caisse/gains/${code}`, undefined, CODE)).contenu.gain.statut, 'remis')
     } finally {
-      await app.fermer()
+      horloge = new Date(2026, 10, 9, 12, 0)
     }
   })
 

@@ -89,14 +89,16 @@ describe('R1 : type et id résolus à la lecture (rétro-compatibilité)', () =>
     assert.deepEqual(libellesEnDouble([{ libelle: '' }, { libelle: ' ' }, { libelle: 'Thé' }]), [])
   })
 
-  test('statut en caisse : perdant / consolation / valable selon le type figé du tirage, jamais selon le libellé', () => {
+  test('statut en caisse : perdant / consolation / gain (en attente le jour même, R3) selon le type figé du tirage, jamais selon le libellé', () => {
     const midi = new Date(2026, 10, 10, 12)
     const t: Tirage = { id: 't', commerceId: AH, clientId: 'c', lot: 'Dommage !', lotId: 'x', typeLot: 'lot', date: new Date(2026, 10, 10, 9).toISOString(), code: 'ABCD23' }
-    assert.equal(statutGain(t, midi), 'valable', 'type explicite « lot » : le libellé « Dommage ! » ne le rend plus perdant')
+    // R3 (décision du 12/11) : un gain du jour est « enAttente » (utilisable dès demain), plus « valable ».
+    assert.equal(statutGain(t, midi), 'enAttente', 'type explicite « lot » : le libellé « Dommage ! » ne le rend plus perdant')
     assert.equal(statutGain({ ...t, lot: 'Nems offerts', typeLot: 'perdant' }, midi), 'perdant')
     assert.equal(statutGain({ ...t, lot: '+10 points', typeLot: 'points' }, midi), 'consolation')
     assert.equal(statutGain({ id: 'v', commerceId: AH, clientId: 'c', lot: 'Dommage !', date: t.date }, midi), 'perdant', 'ancien tirage')
-    assert.match(messageGain({ statut: 'consolation', lot: '+10 points', date: t.date, remis: null }), /consolation.*aucun lot à remettre/)
+    // R3 : message v2 des maquettes (§4) pour un tirage points / perdant.
+    assert.match(messageGain({ statut: 'consolation', lot: '+10 points', date: t.date, remis: null }), /pas de lot à remettre \(\+10 points\)/)
     // Même code le même jour : le lot physique passe avant la consolation.
     const conso: Tirage = { ...t, id: 'p', lot: '+10 points', typeLot: 'points' }
     assert.equal(tirageDuCode([conso, { ...t, id: 'l', lot: 'Nems offerts' }], midi)?.id, 'l')
@@ -270,7 +272,8 @@ describe('R1 : serveur (SQLite) — validation, tirage par id, consolation', () 
     assert.equal(secteur?.lot.id, 'lot-a', 'secteur du lot tiré (par libellé, la roue aurait visé « Thé glacé » = lot-b)')
     // Le tirage enregistré fige l'id et le type.
     const etat = (await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu as { tirages: Tirage[] }
-    const enBase = etat.tirages.find((t) => t.code === tirage.code)!
+    // R3 : la réponse du tirage ne porte plus de code (burn-on-reveal) — le tirage est retrouvé par son id.
+    const enBase = etat.tirages.find((t) => t.id === tirage.tirageId)!
     assert.deepEqual([enBase.lotId, enBase.typeLot], ['lot-a', 'lot'])
   })
 
@@ -329,7 +332,9 @@ describe('R1 : serveur (SQLite) — validation, tirage par id, consolation', () 
     ])
     const d = (await tirer()).tirage
     assert.deepEqual([d.type, d.perdant], ['lot', false])
-    assert.equal((await api('GET', `/commerces/${AH}/caisse/gains/${d.code}`, undefined, CODE)).contenu.gain.statut, 'valable')
+    // R3 : code lu côté commerçant (plus dans la réponse du tirage) ; un gain du jour est « enAttente » (dès demain).
+    const codeD = ((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu as { tirages: Tirage[] }).tirages.find((t) => t.id === d.tirageId)!.code
+    assert.equal((await api('GET', `/commerces/${AH}/caisse/gains/${codeD}`, undefined, CODE)).contenu.gain.statut, 'enAttente')
   })
 
   test('revue Codex : un ancien client (sans type) ne renverse pas un type choisi ; type reçu prioritaire ; lot nouveau déduit', async () => {

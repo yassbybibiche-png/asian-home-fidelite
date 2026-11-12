@@ -4,7 +4,7 @@ import type { Avis, Client, Commerce, CommerceCaisse, CommercePublic, CompteurEv
 import type { StatutGain, StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
 import type { ClientAPurger } from '../lib/rgpd'
-import type { LotHistorique } from '../lib/carte'
+import type { GainEnCours, LotHistorique } from '../lib/carte'
 
 export const MESSAGE_HORS_LIGNE = 'Serveur injoignable — vérifiez la connexion.'
 /** Le délai de la requête (`delaiMs`) a expiré : le serveur répond, mais trop lentement (pas une panne réseau). */
@@ -81,12 +81,14 @@ export interface MessageCommercant extends MessageClient {
 }
 
 export interface ResultatTirage {
+  /** Id du tirage (R3) : sert à activer le gain plus tard (`activerCode`). Absent d'un serveur d'avant R3. */
+  tirageId?: string
   lot: string
   /** Id du lot tiré (R1) : la roue retrouve son secteur par cet id. Absent d'un serveur d'avant R1. */
   lotId?: string
   /** Type du lot tiré (R1) : 'points' = consolation. Absent d'un serveur d'avant R1. */
   type?: TypeLot
-  /** Code à montrer au comptoir : lot physique seulement (depuis R2, absent pour une consolation ou un perdant). */
+  /** Serveur d'avant R3 seulement : depuis R3 (burn-on-reveal), le code ne vient plus que de `activerCode`. */
   code?: string
   date: string
   /** Rien à retirer au comptoir (perdant ou consolation en points) : pas de code à montrer. */
@@ -134,8 +136,8 @@ export interface AccesCarte {
 interface ReponseCarteCommune {
   /** Vue publique (sans probabilités, règles d'avis, taux de points ni réglages internes du programme). */
   commerce: CommercePublic
-  /** codeDuJour / remisDuJour : absents sur un serveur d'avant P0-U3. P0-S19 : `codeDuJour` n'est servi qu'au titulaire
-   * authentifié (jeton client de la carte, `Authorization: Bearer`) — sans jeton : null, même en vue complète. */
+  /** codeDuJour / remisDuJour : absents sur un serveur d'avant P0-U3. R3 : `codeDuJour` vaut toujours null (le code ne
+   * vient plus que de `activerCode`) ; gardé pour les pages d'avant R3. */
   jeu: { statut: StatutJeu; lotDuJour: string | null; codeDuJour?: string | null; remisDuJour?: boolean }
   menuDisponible?: boolean
 }
@@ -144,10 +146,26 @@ export type ReponseCarteComplete = ReponseCarteCommune & {
   client: CartePublique
   /** P1-C3 : lots gagnés à la roue (sans code), pour l'historique de la carte. Absent sur un serveur plus ancien. */
   historiqueLots?: LotHistorique[]
+  /** R3 : gains non terminaux du client (statut v2, sans code). Absent sur un serveur plus ancien. */
+  gainsEnCours?: GainEnCours[]
   acces?: AccesCarte & { vue: 'complete' }
 }
 
-export type ReponseCarteLimitee = ReponseCarteCommune & { client: CarteLimitee; historiqueLots?: undefined; acces: AccesCarte & { vue: 'limitee' } }
+export type ReponseCarteLimitee = ReponseCarteCommune & {
+  client: CarteLimitee
+  historiqueLots?: undefined
+  gainsEnCours?: undefined
+  acces: AccesCarte & { vue: 'limitee' }
+}
+
+/** Code activé (R3, POST …/tirages/:tirageId/activer) : à montrer en caisse avant `expireActivation` (10 minutes). */
+export interface ActivationCode {
+  tirageId: string
+  lot: string
+  code: string
+  activeLe: string
+  expireActivation: string
+}
 
 export type ReponseCarte = ReponseCarteComplete | ReponseCarteLimitee
 
@@ -385,6 +403,9 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
         corps: { contact, ...(prenom ? { prenom } : {}), ...(parrain ? { parrain } : {}) },
         jetonClient: jeton,
       }) as Promise<ResultatTirage>,
+    /** R3 — « Utiliser mon gain » : active le code du tirage pour 10 minutes et le renvoie (jeton client exigé). */
+    activerCode: (commerceId: string, tirageId: string, jeton?: string | null) =>
+      requete('POST', `/commerces/${enc(commerceId)}/tirages/${enc(tirageId)}/activer`, { jetonClient: jeton }) as Promise<ActivationCode>,
     /** Profil progressif (client, après sa 2e visite) : anniversaire « JJ/MM » et/ou plat préféré. */
     profil: (commerceId: string, clientId: string, champs: { anniversaire?: string; platPrefere?: string }, jeton?: string | null) =>
       requete('POST', `/commerces/${enc(commerceId)}/clients/${enc(clientId)}/profil`, { corps: champs, jetonClient: jeton }) as Promise<{ client: CartePublique }>,

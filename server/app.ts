@@ -12,7 +12,11 @@ import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
 import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
-import { debutDuJourParis, gainsSur30Jours, LIMITE_GAINS_MOIS_MAX, limiteGainsMois, lotsJouables, lotsPlafonnes, lotsTirables, messageGain, modeAccesRoue, normaliserCodeGagnant, PLAFOND_JOUR_MAX, statutGain, statutJeu, tirageDuCode, tirageDuJour, tirerLot } from '../src/lib/roulette.ts'
+import {
+  debutDuJourParis, finActivation, finGain, gainEnCours, gainsSur30Jours, LIMITE_GAINS_MOIS_MAX, limiteGainsMois, lotsJouables,
+  lotsPlafonnes, lotsTirables, messageGain, modeAccesRoue, normaliserCodeGagnant, PLAFOND_JOUR_MAX, refusActivation, statutGain, statutJeu, tirageDuCode, tirageDuJour,
+  tirerLot, utilisableLe,
+} from '../src/lib/roulette.ts'
 import { cleLibelle, estGainPhysique, estTypeLot, FORMAT_ID_LOT, libellesEnDouble, normaliserLots, POINTS_LOT_MAX, POINTS_LOT_MIN, rattachementsTirages, TYPES_LOT, typeDeduitDuLibelle, typeTirage } from '../src/lib/lots.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
 import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePrive.ts'
@@ -895,6 +899,29 @@ function gainCaisse(t: Tirage, client: Client | undefined, maintenant: Date) {
     client: client ? { id: client.id, prenom: client.prenom } : null,
     remis: t.remis ? { le: t.remis.le, par: t.remis.par.nom } : null,
   }
+}
+
+/**
+ * Gains non terminaux d'un client, vus par sa carte (R3) : statut v2, dates d'utilisation, fin de la fenêtre
+ * d'activation en cours — jamais le code. Du plus ancien au plus récent (le premier à expirer d'abord).
+ */
+function gainsEnCoursDe(tirages: Tirage[], maintenant: Date) {
+  return tirages
+    .filter((x) => estGainPhysique(typeTirage(x)) && gainEnCours(statutGain(x, maintenant)))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((x) => {
+      const statut = statutGain(x, maintenant)
+      return {
+        tirageId: x.id,
+        lot: x.lot,
+        date: x.date,
+        statut,
+        utilisableLe: utilisableLe(x).toISOString(),
+        // Premier instant expiré : minuit à la fin de J+30.
+        expireLe: finGain(x).toISOString(),
+        expireActivation: statut === 'utilisable' ? finActivation(x) : null,
+      }
+    })
 }
 
 // ---------- Initialisation de la base ----------
@@ -2812,10 +2839,10 @@ export async function creerServeur(o: OptionsServeur) {
         const jeu = {
           statut: statutJeu(client, tirages, c.id, t, modeAccesRoue(c)),
           lotDuJour: duJour?.lot ?? null,
-          // P0-S19 : code gagnant du jour servi UNIQUEMENT au titulaire authentifié (`charge` = jeton client valable
-          // de cette carte). Sans jeton : null, même en vue complète (mode transition) — le lot reste affiché, le
-          // code, lui, ne quitte jamais le serveur sans preuve. Tirage perdant : null, même avec jeton.
-          codeDuJour: charge && duJour?.code && estGainPhysique(typeTirage(duJour)) ? duJour.code : null,
+          // R3 (burn-on-reveal) : toujours null — champ gardé pour les pages d'avant R3. Le gain du jour ne s'utilise
+          // qu'à partir de demain et le code n'est plus servi que par l'activation (POST …/tirages/:id/activer), au
+          // titulaire authentifié (P0-S19 resserré), 10 minutes à la fois.
+          codeDuJour: null,
           remisDuJour: !!duJour?.remis,
         }
         const acces = { vue: complete ? 'complete' : 'limitee', jeton: !!charge, ...infosGrace(id) }
@@ -2854,12 +2881,15 @@ export async function creerServeur(o: OptionsServeur) {
             commerce: await fichePublique(c),
             jeu,
             menuDisponible: !!menu?.categories.some((cat) => cat.produits.length),
-            // P1-C3 : historique des lots de la roue (gagnants seulement), sans aucun code — seul celui du jour est servi ci-dessus.
+            // P1-C3 : historique des lots de la roue (gagnants seulement), sans aucun code. R3 : statut v2 (`statutGain`).
             historiqueLots: tirages
               .filter((x) => estGainPhysique(typeTirage(x)))
               .sort((a, b) => b.date.localeCompare(a.date))
               .slice(0, 20)
               .map((x) => ({ lot: x.lot, date: x.date, statut: statutGain(x, t) })),
+            // R3 : gains non terminaux (en attente, utilisables, code activé ou non), sans code — de quoi afficher
+            // « Utiliser mon gain » ; le code vient de l'activation, qui exige le jeton client.
+            gainsEnCours: gainsEnCoursDe(tirages, t),
             acces,
           },
         }
@@ -3363,9 +3393,10 @@ export async function creerServeur(o: OptionsServeur) {
       return { json: { client: clientCaisseEquipe(resultat.client), dejaTraite: resultat.dejaTraite } }
     }
 
-    // ---------- Code gagnant de la roue (P0-U3) : vérifié puis marqué « remis » en caisse ----------
-    // GET  /commerces/:id/caisse/gains/:code         → le gain (lot, client, date, statut) ; 404 code inconnu.
-    // POST /commerces/:id/caisse/gains/:code/remise  → 200 remis ; 409 déjà remis / perdant ; 410 expiré (pas du jour).
+    // ---------- Code gagnant de la roue (P0-U3, cycle de vie R3) : vérifié puis marqué « remis » en caisse ----------
+    // GET  /commerces/:id/caisse/gains/:code         → le gain (lot, client, date, statut v2) ; 404 code inconnu.
+    // POST /commerces/:id/caisse/gains/:code/remise  → 200 remis ; 409 pas encore utilisable / code non activé ou fenêtre
+    //      de 10 min échue (« inactif ») / déjà remis / perdant ; 410 expiré (après J+30).
 
     if (sous === 'caisse' && sousId === 'gains' && action && ((!extra && m === 'GET') || (extra === 'remise' && m === 'POST'))) {
       const { auteur } = await exigerAuteur(req, id)
@@ -3378,10 +3409,11 @@ export async function creerServeur(o: OptionsServeur) {
       const gain = async (x: Tirage) => gainCaisse(x, await st.client(id, x.clientId), t)
       if (m === 'GET') return { json: { gain: await gain(trouve) } }
 
-      // Perdant / déjà remis : 409 ; expiré (tirage d'un autre jour) : 410.
+      // R3 : remise seulement si le gain est utilisable (J+1 à J+30) ET son code activé il y a moins de 10 minutes
+      // (statut 'utilisable'). Expiré : 410 ; tout le reste (en attente, inactif, remis, perdant, consolation) : 409.
       const refus = (x: Tirage) => {
         const g = gainCaisse(x, undefined, t)
-        if (g.statut !== 'valable') throw err(g.statut === 'expire' ? 410 : 409, messageGain(g))
+        if (g.statut !== 'utilisable') throw err(g.statut === 'expire' ? 410 : 409, messageGain(g))
       }
       refus(trouve)
       const remis: Tirage = { ...trouve, remis: { le: t.toISOString(), par: auteur } }
@@ -3869,6 +3901,34 @@ export async function creerServeur(o: OptionsServeur) {
       return { xml: '<?xml version="1.0" encoding="UTF-8"?><Response></Response>' }
     }
 
+    if (sous === 'tirages' && sousId && action === 'activer' && !extra && m === 'POST') {
+      // PUBLIC, titulaire seulement (R3, burn-on-reveal) — « Utiliser mon gain » : pose `activeLe` et renvoie le code,
+      // valable 10 minutes en caisse. SEULE route qui sert un code gagnant au client, et seulement avec le jeton client
+      // (P0-S7) de la carte qui a gagné — jamais par contact, même en mode transition. Chaque appel écrase l'activation
+      // précédente (le client peut ré-appuyer une fois la fenêtre échue). Refus : 409 pas encore utilisable (le jour du
+      // tirage) ou déjà remis / sans lot ; 410 expiré (après J+30) ; 404 tirage inconnu de CETTE carte.
+      limiterIp(req, 'lecture', limites.lectureParIp)
+      if (!o.secretSession) throw err(503, 'Accès client non configuré sur ce serveur (SESSION_SECRET absente) : le code ne peut pas être activé.')
+      const charge = await jetonClient(req, { commerceId: id })
+      if (!charge) {
+        await verifierBlocageClient(req)
+        return refusCarte(req)
+      }
+      compteurs.consommer(`carte:${charge.cid}`, limites.lectureParCarte, TROP)
+      exigerActif(commerce)
+      await clientOu401(id, charge.cid)
+      // Lu parmi les tirages du titulaire : l'id d'un tirage d'un autre client donne le même 404 qu'un id inconnu.
+      const tirage = (await st.tiragesClient(id, charge.cid)).find((x) => x.id === sousId)
+      if (!tirage) throw err(404, 'Gain introuvable sur cette carte.')
+      const t = maintenant()
+      const refus = refusActivation(tirage, t)
+      if (refus) throw err(refus.statut, refus.message)
+      const active: Tirage = { ...tirage, activeLe: t.toISOString() }
+      // Même écriture conditionnelle que la remise : une caisse qui vient de remettre le lot gagne, l'activation échoue.
+      if (!(await st.activerTirage(active))) throw err(409, 'Ce gain a déjà été remis au comptoir.')
+      return { json: { tirageId: active.id, lot: active.lot, code: active.code, activeLe: active.activeLe, expireActivation: finActivation(active) } }
+    }
+
     if (sous === 'tirages' && !sousId && m === 'POST') {
       // PUBLIC : tout est décidé ici (visite du jour, 1 tirage par jour, lot tiré) — rien ne vient du navigateur.
       // P0-S7 : le joueur est le titulaire du jeton client (Authorization) de CE commerce, jamais « celui qui connaît le
@@ -3961,7 +4021,9 @@ export async function creerServeur(o: OptionsServeur) {
       })
       // Le client éventuellement créé reste inscrit même en cas de refus (la transaction est validée).
       if ('refus' in resultat) throw err(409, resultat.refus!)
-      const { lot, lotId, typeLot, code, date, points } = resultat.tirage!
+      // R3 (burn-on-reveal) : jamais de code dans cette réponse — le gain ne s'utilise qu'à partir de demain, et son code
+      // n'est servi au titulaire que par l'activation (POST …/tirages/:tirageId/activer), 10 minutes à la fois.
+      const { id: tirageId, lot, lotId, typeLot, date, points } = resultat.tirage!
       // Lot physique seulement (R1) : une consolation en points n'a rien à retirer au comptoir — `perdant` reste le
       // drapeau « pas de code à montrer » des clients existants ; `type` dit si c'est une consolation.
       const physique = estGainPhysique(typeLot!)
@@ -3970,7 +4032,7 @@ export async function creerServeur(o: OptionsServeur) {
       if (physique) await compter(id, 'gain')
       // R2 : consolation en points → montant crédité et nouveau solde ; aucun code.
       const consolation = points ? { points, solde: resultat.solde } : {}
-      return { statut: 201, json: { lot, lotId, type: typeLot, code, date, perdant: !physique, ...consolation } }
+      return { statut: 201, json: { tirageId, lot, lotId, type: typeLot, date, perdant: !physique, ...consolation } }
     }
 
     if (sous === 'evenements' && !sousId && m === 'POST') {

@@ -1,7 +1,7 @@
 // Page de jeu en mode API : le tirage est fait par le SERVEUR (POST /tirages). Le navigateur n'envoie
 // qu'un contact et se contente d'animer la roue jusqu'au lot reçu. Logique pure, testée avec une API simulée.
 import type { CommercePublic } from '../types'
-import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ResultatTirage } from './api.ts'
+import { ErreurApi, MESSAGE_HORS_LIGNE, type ActivationCode, type ClientApi, type ResultatTirage } from './api.ts'
 import { secteurs, type LotRoue, type Secteur } from '../lib/roulette.ts'
 import { estIdClientActuel } from '../lib/fidelite.ts'
 import type { memoireJetons } from '../lib/jetonCarte.ts'
@@ -127,6 +127,41 @@ export function marquerScanSignale(session: Stockage | null, commerceId: string)
     session?.setItem(cle, '1')
   } catch {
     // Stockage indisponible : la garde mémoire ci-dessus suffit pour cet affichage.
+  }
+}
+
+// ---------- Activation du code gagnant (R3, burn-on-reveal) ----------
+
+export type IssueActivation =
+  | { ok: true; activation: ActivationCode }
+  | {
+      ok: false
+      message: string
+      horsLigne: boolean
+      /** 409 / 410 : pas encore utilisable (dès demain), expiré, déjà remis — le message du serveur le dit. */
+      refus: boolean
+      /** 401 : plus de jeton valable sur ce téléphone pour cette carte → « Retrouver ma carte ». */
+      accesRefuse?: true
+    }
+
+/**
+ * « Utiliser mon gain » : demande au serveur le code du tirage, valable 10 minutes en caisse, avec le jeton client de
+ * la carte rangé sur ce téléphone (seule façon d'obtenir un code depuis R3). Sans jeton : refus d'accès, sans appel.
+ */
+export async function activerCode(
+  api: Pick<ClientApi, 'activerCode'>,
+  jetons: Pick<Jetons, 'lire'>,
+  gain: { commerceId: string; clientId: string; tirageId: string },
+): Promise<IssueActivation> {
+  const jeton = jetons.lire(gain.clientId)?.jeton
+  if (!jeton) return { ok: false, message: 'Ouvrez votre carte sur ce téléphone pour utiliser votre gain.', horsLigne: false, refus: false, accesRefuse: true }
+  try {
+    return { ok: true, activation: await api.activerCode(gain.commerceId, gain.tirageId, jeton) }
+  } catch (e) {
+    if (e instanceof ErreurApi) {
+      return { ok: false, message: e.message, horsLigne: e.horsLigne, refus: e.statut === 409 || e.statut === 410, ...(e.statut === 401 ? { accesRefuse: true as const } : {}) }
+    }
+    return { ok: false, message: MESSAGE_HORS_LIGNE, horsLigne: true, refus: false }
   }
 }
 

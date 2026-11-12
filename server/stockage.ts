@@ -136,6 +136,8 @@ export interface Stockage {
    * requête simultanée : un code ne peut jamais être remis deux fois.
    */
   marquerTirageRemis(t: Tirage): P<boolean>
+  /** Activation du code par le client (R3, `activeLe`) : même écriture conditionnelle — jamais sur un tirage déjà remis. */
+  activerTirage(t: Tirage): P<boolean>
   avis(commerceId: string): P<Avis[]>
   unAvis(commerceId: string, id: string): P<Avis | undefined>
   ajouterAvis(a: Avis): P<void>
@@ -463,6 +465,7 @@ export function ouvrirStockage(fichier: string) {
     completerLotTirage: (t: Tirage) => Number(q.completerLotTirage.run(JSON.stringify(t), t.id, t.commerceId, t.remis ? 1 : 0).changes) > 0,
     tiragesParCode: (commerceId: string, code: string) => lire<Tirage>(q.tiragesParCode.all(commerceId, code)),
     marquerTirageRemis: (t: Tirage) => Number(q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId).changes) > 0,
+    activerTirage: (t: Tirage) => Number(q.remettreTirage.run(JSON.stringify(t), t.id, t.commerceId).changes) > 0,
 
     avis: (commerceId: string) => lire<Avis>(q.avis.all(commerceId)),
     unAvis: (commerceId: string, id: string) => lire<Avis>(q.unAvis.all(commerceId, id))[0],

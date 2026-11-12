@@ -1,6 +1,7 @@
 // Carte de fidélité côté client (P1-C3) : textes et calculs de la page #/carte, testables sans React.
 import type { Client, Commerce, CommercePublic, RecompenseEnAttente } from '../types'
 import { recompensesEnAttenteValables } from './programme.ts'
+import type { StatutGain } from './roulette.ts'
 
 type CommerceCarte = Pick<Commerce | CommercePublic, 'type' | 'recompense'>
 
@@ -75,11 +76,27 @@ export function texteExpiration(expireLe: string | undefined, maintenant: Date):
 
 // ---- Historique des visites et des lots ----
 
-/** Lot gagné à la roue, vu par son titulaire (GET /cartes/:id `historiqueLots`) : jamais le code d'un autre jour. */
+/** Lot gagné à la roue, vu par son titulaire (GET /cartes/:id `historiqueLots`) : jamais de code. Statut v2 (R3). */
 export interface LotHistorique {
   lot: string
   date: string
-  statut: 'valable' | 'remis' | 'expire'
+  statut: StatutGain
+}
+
+/**
+ * Gain non terminal du client (R3, GET /cartes/:id `gainsEnCours`), sans code : enAttente (utilisable dès `utilisableLe`),
+ * inactif (utilisable, code à activer), utilisable (code activé jusqu'à `expireActivation`). Le code ne vient que de
+ * l'activation (`activerCode`, src/data/jeuApi.ts).
+ */
+export interface GainEnCours {
+  tirageId: string
+  lot: string
+  date: string
+  statut: Extract<StatutGain, 'enAttente' | 'inactif' | 'utilisable'>
+  utilisableLe: string
+  /** Premier instant expiré (fin de J+30). */
+  expireLe: string
+  expireActivation: string | null
 }
 
 export interface LigneHistorique {

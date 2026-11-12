@@ -175,11 +175,13 @@ describe('Serveur /api/v1', () => {
     const etat = await srv.api('GET', `/commerces/${commerceId}/etat`, undefined, pin)
     const libelles = etat.contenu.commerce.lots.map((l: { libelle: string }) => l.libelle)
     assert.ok(libelles.includes(r.contenu.lot))
-    // R2 : pas de code pour une consolation en points (rien à retirer au comptoir).
-    if (r.contenu.type === 'points') assert.equal(r.contenu.code, undefined)
-    else assert.match(r.contenu.code, /^[A-Z2-9]{6}$/)
+    // R3 (burn-on-reveal, décision du 12/11) : la réponse du tirage ne porte plus jamais de code ; le code est en base
+    // (vu par le commerçant) et ne sera servi au client que par l'activation. R2 : aucun code pour une consolation.
+    assert.equal(r.contenu.code, undefined)
     assert.equal(etat.contenu.tirages.length, 1)
-    assert.equal(etat.contenu.tirages[0].code, r.contenu.code)
+    assert.equal(etat.contenu.tirages[0].id, r.contenu.tirageId)
+    if (r.contenu.type === 'points') assert.equal(etat.contenu.tirages[0].code, undefined)
+    else assert.match(etat.contenu.tirages[0].code, /^[A-Z2-9]{6}$/)
 
     const r2 = await srv.api('POST', `/commerces/${commerceId}/tirages`, { contact: '06 12 34 56 78' })
     assert.equal(r2.statut, 409)
@@ -359,7 +361,10 @@ describe('V2 : front ↔ serveur (contrat) et carte publique', () => {
 
     const etat = await api.etat(commerce.id, { role: 'admin', pin: ADMIN })
     assert.equal(etat.tirages.length, 1)
-    assert.equal(etat.tirages[0].code, gagne.resultat.code, 'le commerçant voit le code pour le vérifier')
+    // R3 : le client ne reçoit plus le code au tirage (seulement à l'activation) ; le commerçant, lui, le voit toujours.
+    assert.equal(gagne.resultat.code, undefined, 'aucun code dans la réponse du tirage')
+    assert.equal(etat.tirages[0].id, gagne.resultat.tirageId)
+    if (!gagne.resultat.perdant) assert.match(etat.tirages[0].code!, /^[A-Z2-9]{6}$/, 'le commerçant voit le code pour le vérifier')
   })
 
   test('carte publique : inconnue → 404 ; commerce inactif → 409', async () => {

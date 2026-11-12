@@ -509,8 +509,13 @@ export interface Tirage {
   /** Points crédités au client par ce tirage (R2, lot de type 'points' tiré par le serveur) ; absent sinon. */
   points?: number
   date: string
-  /** Code gagnant à montrer au comptoir (tirages faits par le serveur ; depuis R2, lots de type 'lot' seulement). */
+  /**
+   * Code gagnant à montrer au comptoir (tirages faits par le serveur ; depuis R2, lots de type 'lot' seulement). R3 : le
+   * client ne le reçoit QUE par l'activation (POST …/tirages/:id/activer), jamais dans une réponse publique.
+   */
   code?: string
+  /** Dernière activation du code par le client (R3, ISO) : le code se remet en caisse dans les 10 minutes qui suivent. */
+  activeLe?: string
   /** Lot remis au comptoir après vérification du code en caisse (P0-U3) : un code = une remise. */
   remis?: { le: string; par: EntreeJournal['auteur'] }
 }

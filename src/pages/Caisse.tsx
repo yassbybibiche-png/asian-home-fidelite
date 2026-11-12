@@ -945,7 +945,7 @@ function CodeGagnantCaisse({ onGain }: { onGain(quoi: 'verifier' | 'remettre', c
         </button>
       </form>
       <p id="caisse-code-aide" className="text-sm text-gray-600">
-        6 lettres ou chiffres, affichés sur le téléphone du client. Majuscules et espaces sans importance. Valable le jour du tirage seulement.
+        6 lettres ou chiffres, affichés sur le téléphone du client. Majuscules et espaces sans importance. Gain utilisable du lendemain du tirage à 30 jours, code valable 10 minutes après activation par le client.
       </p>
       <MessageErreur>{erreur}</MessageErreur>
       {gain && date && (
@@ -955,7 +955,7 @@ function CodeGagnantCaisse({ onGain }: { onGain(quoi: 'verifier' | 'remettre', c
             {gain.client ? <strong>{nomAffiche(gain.client.prenom)}</strong> : 'Client supprimé'} · tiré le {date.toLocaleDateString('fr-FR')} à{' '}
             {date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · code <span className="font-mono">{gain.code}</span>
           </p>
-          {gain.statut === 'valable' ? (
+          {gain.statut === 'utilisable' ? (
             <button className="bouton min-h-14 w-full bg-green-700 text-lg hover:bg-green-800 active:bg-green-900" disabled={enCours} onClick={() => void appeler('remettre', gain.code)}>
               🎁 Marquer remis
             </button>

@@ -165,6 +165,11 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     }
   }
 
+  /** UPDATE de `donnees` d'un tirage seulement s'il n'est pas déjà remis (`tirages` n'a pas de colonne version). */
+  async function majTirageNonRemis(t: Tirage): Promise<boolean> {
+    return (await ok<unknown[]>('tirages', sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->remis', null).select('id'))).length > 0
+  }
+
   const AVEC_VERSION = 'id,version,donnees'
 
   return {
@@ -269,8 +274,8 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
       lirePages<Tirage>('tirages', (debut, fin) =>
         sb.from('tirages').select('donnees').eq('commerce_id', commerceId).eq('donnees->>code', code).order('date', { ascending: false }).order('id').range(debut, fin),
       ),
-    marquerTirageRemis: async (t) =>
-      (await ok<unknown[]>('tirages', sb.from('tirages').update({ donnees: t }).eq('id', t.id).eq('commerce_id', t.commerceId).is('donnees->remis', null).select('id'))).length > 0,
+    marquerTirageRemis: (t) => majTirageNonRemis(t),
+    activerTirage: (t) => majTirageNonRemis(t),
 
     avis: (commerceId) =>
       lirePages<Avis>('avis', (debut, fin) => sb.from('avis').select(AVEC_VERSION).eq('commerce_id', commerceId).order('date', { ascending: false }).order('id').range(debut, fin)),

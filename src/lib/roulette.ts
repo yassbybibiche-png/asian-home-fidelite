@@ -212,40 +212,120 @@ export function normaliserCodeGagnant(saisi: string): string | null {
   return /^[A-Z0-9]{6}$/.test(c) ? c : null
 }
 
-/**
- * valable = gain du jour pas encore remis ; expire = gain d'un autre jour (le code ne vaut que le jour du tirage) ;
- * consolation = lot de type « points » (R1) : rien à remettre au comptoir. Le type vient du tirage (`typeTirage`).
- */
-export type StatutGain = 'valable' | 'remis' | 'perdant' | 'consolation' | 'expire'
+// ---- Cycle de vie d'un gain (roue v2, R3) : utilisable de J+1 à J+30, code activé 10 minutes (burn-on-reveal) ----
 
-export function statutGain(t: Tirage, maintenant = new Date()): StatutGain {
+/** Dernier jour d'utilisation, compté depuis le jour du tirage (J+30 inclus). */
+export const DUREE_GAIN_JOURS = 30
+/** Durée de validité du code après chaque activation par le client (« Utiliser mon gain »). */
+export const FENETRE_ACTIVATION_MS = 10 * 60 * 1000
+
+/** Minuit (jour calendaire local, comme `memeJour`) du jour de `d` décalé de `n` jours — changements d'heure compris. */
+export function ajouterJours(d: Date, n: number): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+}
+
+/** Premier instant où le gain s'utilise : minuit au début de J+1. */
+export function utilisableLe(t: Pick<Tirage, 'date'>): Date {
+  return ajouterJours(new Date(t.date), 1)
+}
+
+/** Dernier jour d'utilisation (J+30), à minuit : le gain expire à la fin de ce jour-là. */
+export function dernierJourGain(t: Pick<Tirage, 'date'>): Date {
+  return ajouterJours(new Date(t.date), DUREE_GAIN_JOURS)
+}
+
+/** Premier instant où le gain est expiré : minuit à la fin de J+30. */
+export function finGain(t: Pick<Tirage, 'date'>): Date {
+  return ajouterJours(new Date(t.date), DUREE_GAIN_JOURS + 1)
+}
+
+/** Fin de la fenêtre d'activation en cours (ISO), ou null si le code n'a jamais été activé. */
+export function finActivation(t: Pick<Tirage, 'activeLe'>): string | null {
+  return t.activeLe ? new Date(new Date(t.activeLe).getTime() + FENETRE_ACTIVATION_MS).toISOString() : null
+}
+
+/** Code activé il y a moins de 10 minutes. */
+export function fenetreActive(t: Pick<Tirage, 'activeLe'>, maintenant = new Date()): boolean {
+  if (!t.activeLe) return false
+  const debut = new Date(t.activeLe).getTime()
+  return debut <= maintenant.getTime() && maintenant.getTime() < debut + FENETRE_ACTIVATION_MS
+}
+
+/**
+ * Cycle de vie d'un tirage (R3) — enAttente : le jour du tirage ; utilisable : de J+1 à J+30 inclus ; remis : remis en
+ * caisse (terminal) ; expire : après J+30 sans remise. perdant / consolation (lot « points ») : rien à remettre. Le
+ * type vient du tirage (`typeTirage`). S'applique à tous les tirages, ceux d'avant R3 compris.
+ */
+export type CycleGain = 'enAttente' | 'utilisable' | 'remis' | 'expire' | 'perdant' | 'consolation'
+
+export function cycleGain(t: Tirage, maintenant = new Date()): CycleGain {
   const type = typeTirage(t)
   if (type === 'perdant') return 'perdant'
   if (type === 'points') return 'consolation'
   if (t.remis) return 'remis'
-  return memeJour(new Date(t.date), maintenant) ? 'valable' : 'expire'
+  if (maintenant < utilisableLe(t)) return 'enAttente'
+  return maintenant < finGain(t) ? 'utilisable' : 'expire'
 }
 
-/** Parmi les tirages portant ce code (collision possible d'un jour à l'autre), celui du jour d'abord. */
+/**
+ * Statut v2 d'un gain, vu par la caisse ET par la carte : le cycle de vie, où « utilisable » exige en plus une fenêtre
+ * d'activation en cours — sinon `inactif` (gain utilisable, mais code pas activé ou activé il y a 10 minutes ou plus :
+ * le client doit appuyer sur « Utiliser mon gain »). Seul `utilisable` se remet en caisse.
+ */
+export type StatutGain = CycleGain | 'inactif'
+
+export function statutGain(t: Tirage, maintenant = new Date()): StatutGain {
+  const cycle = cycleGain(t, maintenant)
+  return cycle === 'utilisable' && !fenetreActive(t, maintenant) ? 'inactif' : cycle
+}
+
+/** Gain encore en jeu (rien de terminal) : à afficher sur la carte du client. */
+export function gainEnCours(s: StatutGain): boolean {
+  return s === 'enAttente' || s === 'utilisable' || s === 'inactif'
+}
+
+/**
+ * Parmi les tirages portant ce code (collision possible d'un tirage à l'autre) : celui dont le code est activé en ce
+ * moment d'abord, puis un gain physique encore en jeu, sinon le plus récent (`tirages` : du plus récent au plus ancien).
+ */
 export function tirageDuCode(tirages: Tirage[], maintenant = new Date()): Tirage | undefined {
-  const duJour = tirages.filter((t) => memeJour(new Date(t.date), maintenant))
-  return duJour.find((t) => !t.remis && estGainPhysique(typeTirage(t))) ?? duJour[0] ?? tirages[0]
+  const physiques = tirages.filter((t) => estGainPhysique(typeTirage(t)) && !t.remis)
+  return (
+    physiques.find((t) => statutGain(t, maintenant) === 'utilisable') ??
+    physiques.find((t) => gainEnCours(statutGain(t, maintenant))) ??
+    tirages[0]
+  )
 }
 
-/** « mar. 10 nov. 2026 » : jour de validité affiché à côté du code gagnant. */
+/** « mar. 10 nov. 2026 » : jour en clair des messages du gain. */
 export function jourEnClair(d: Date): string {
   return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-/** Message de la caisse pour un code vérifié (`remis.par` = nom de qui l'a remis). */
+export const MESSAGE_ACTIVATION =
+  'Demandez au client d’appuyer sur « Utiliser mon gain » dans son application : le code n’est valable que 10 minutes après activation.'
+
+/** Message de la caisse pour un code vérifié, v2 (maquettes R3 §4 ; `remis.par` = nom de qui l'a remis). */
 export function messageGain(g: { statut: StatutGain; lot: string; date: string; remis: { le: string; par: string } | null }): string {
-  if (g.statut === 'perdant') return `Tirage perdant (« ${g.lot} ») : aucun lot à remettre.`
-  if (g.statut === 'consolation') return `Lot de consolation en points (« ${g.lot} ») : aucun lot à remettre au comptoir.`
-  if (g.statut === 'expire') return `Code expiré : il n’était valable que le ${jourEnClair(new Date(g.date))}, jour du tirage. Rien à remettre.`
+  const gagneLe = jourEnClair(new Date(g.date))
+  if (g.statut === 'perdant' || g.statut === 'consolation') return `Ce tirage n’a pas de lot à remettre (${g.lot}).`
+  if (g.statut === 'enAttente') return `Pas encore utilisable : ce gain gagné le ${gagneLe} s’utilise à partir du ${jourEnClair(utilisableLe(g))}.`
+  if (g.statut === 'expire') return `Gain expiré le ${jourEnClair(dernierJourGain(g))} : rien à remettre.`
+  if (g.statut === 'inactif') return MESSAGE_ACTIVATION
   if (g.statut === 'remis') {
     const le = g.remis ? new Date(g.remis.le) : null
     const quand = le ? ` le ${le.toLocaleDateString('fr-FR')} à ${le.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} par ${g.remis!.par}` : ''
     return `Lot déjà remis${quand} : un code ne sert qu’une fois.`
   }
-  return `Gain du jour à remettre : ${g.lot}.`
+  return `Gain à remettre : ${g.lot} (gagné le ${gagneLe}).`
+}
+
+/** Refus d'activation vu par le CLIENT (route …/activer) : null = le gain peut être activé maintenant. */
+export function refusActivation(t: Tirage, maintenant = new Date()): { statut: 409 | 410; message: string } | null {
+  const cycle = cycleGain(t, maintenant)
+  if (cycle === 'utilisable' && t.code) return null
+  if (cycle === 'enAttente') return { statut: 409, message: `Votre gain sera utilisable dès demain, ${jourEnClair(utilisableLe(t))}, et jusqu’au ${jourEnClair(dernierJourGain(t))}.` }
+  if (cycle === 'expire') return { statut: 410, message: `Gain expiré le ${jourEnClair(dernierJourGain(t))} : il n’est plus utilisable.` }
+  if (cycle === 'remis') return { statut: 409, message: 'Ce gain a déjà été remis au comptoir.' }
+  return { statut: 409, message: 'Ce tirage n’a pas de lot à retirer au comptoir.' }
 }
