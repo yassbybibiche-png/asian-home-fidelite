@@ -709,13 +709,16 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                 ×
               </button>
               </div>
+              {/* Largeurs minimales (min-w-36 / min-w-32) : avec les cases « Heures creuses » et « Instant gagnant » sur la même
+                  ligne, un champ en `min-w-0` était écrasé sous son propre padding et débordait de l'écran du téléphone
+                  (page plus large que l'écran, vue dézoomée, clics décalés) ; il passe maintenant à la ligne. */}
               <div className="flex flex-wrap items-center gap-2">
                 <label className="sr-only" htmlFor={`type-${i}`}>
                   Type du lot {i + 1}
                 </label>
                 <select
                   id={`type-${i}`}
-                  className="champ min-w-0 flex-1 sm:w-44 sm:flex-none"
+                  className="champ min-w-36 flex-1 sm:w-44 sm:flex-none"
                   value={type}
                   onChange={(e) => majLot(i, { ...lot, type: e.target.value as TypeLot })}
                 >
@@ -732,7 +735,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                     <label className="sr-only" htmlFor={`points-${i}`}>
                       Points offerts par le lot {i + 1}
                     </label>
-                    <div className="relative min-w-0 flex-1 sm:w-36 sm:flex-none">
+                    <div className="relative min-w-32 flex-1 sm:w-36 sm:flex-none">
                       <input
                         id={`points-${i}`}
                         className="champ pr-12 text-right"
@@ -755,7 +758,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                     <label className="sr-only" htmlFor={`plafond-${i}`}>
                       Plafond par jour du lot {i + 1}
                     </label>
-                    <div className="relative min-w-0 flex-1 sm:w-44 sm:flex-none">
+                    <div className="relative min-w-32 flex-1 sm:w-44 sm:flex-none">
                       <input
                         id={`plafond-${i}`}
                         className="champ pr-16 text-right"
@@ -789,7 +792,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                         <label className="sr-only" htmlFor={`instants-${i}`}>
                           Instants gagnants par jour du lot {i + 1}
                         </label>
-                        <div className="relative min-w-0 flex-1 sm:w-40 sm:flex-none">
+                        <div className="relative min-w-32 flex-1 sm:w-40 sm:flex-none">
                           <input
                             id={`instants-${i}`}
                             className="champ pr-20 text-right"
