@@ -384,4 +384,19 @@ transitions de statut échouent pour l'instant ; le parcours complet reste prouv
 (lot 3) et en E2E locale. À corriger avant l'usage en salle ; la commande TEST se fermera (acceptée →
 préparation → servie) dès le correctif en place.
 
+**6. FIX-409 — corrigé et prouvé le soir même (13/11).** Diagnostic par élimination sur données réelles :
+les valeurs production et staging, comparées octet par octet, sont deux chaînes canoniques de 373
+caractères ; avec une colonne `text`, l'UPDATE conditionnel ne peut pas matcher 0 ligne sans écriture
+concurrente (exclue). Cause : dans le projet Supabase de **production**, `meta.valeur` est `jsonb` (projet
+créé le 09/11 avant la 0001 actuelle, qui la définit en `text` ; le projet test, créé le 11/11, est en
+`text`) — PostgREST y convertit le littéral du filtre `eq` en jsonb : le texte JSON relu devient un objet,
+jamais égal à la chaîne stockée. Correctif code seul, sans migration (`majMetaSi`, adaptateur Supabase) :
+0 ligne ou 22P02 → relecture ; si la valeur est toujours celle attendue, réessai avec la forme
+JSON-encodée de la chaîne ; sinon conflit réel, `false`. Le faux PostgREST apprend le mode
+`metaValeurJsonb` ; sans correctif, le 409 exact de production se reproduit en local ; 3 mutations de
+contre-épreuve détectées ; suite complète **1684/1684**. Déployé (staging vérifié sans régression, puis
+production `69e2143`) ; sauvegarde ciblée avant écriture ; la commande TEST est passée
+`recue → acceptee → en_preparation → servie` par les vraies routes (200/200/200) — **le parcours commande
+complet est prouvé en production**, 0 commande en attente. Détail : `FIX-409-RAPPORT.md`.
+
 ---
