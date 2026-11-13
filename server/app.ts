@@ -4349,6 +4349,10 @@ export async function creerServeur(o: OptionsServeur) {
       if (charge) compteurs.consommer(`tirage:${id}:${charge.cid}`, limites.tirageParContact, 'Trop de tentatives pour ce contact.')
       else limiterContact('tirage', id, corps.contact, limites.tirageParContact)
       const prenom = corps.prenom == null ? '' : texte(corps.prenom, 'prenom', 40)
+      // R3 — QR de table (#/jouer/<id>/<jetonTable>) : le nom de la table est résolu ICI depuis le jeton, parmi les tables
+      // configurées (même si la commande à table est éteinte : le QR imprimé reste valable pour jouer). Jeton inconnu
+      // ou absent : tirage normal, sans table, jamais d'erreur — et jamais un nom envoyé par le navigateur.
+      const table = typeof corps.jetonTable === 'string' ? commerce.commande?.tables.find((x) => x.jeton === corps.jetonTable)?.nom : undefined
       // P2-S13 — message de refus uniformisé : UN SEUL message (409), identique que le client ait déjà joué
       // aujourd'hui ou n'ait pas encore validé sa visite — LE MESSAGE ne distingue plus les deux cas. Le
       // titulaire, lui, connaît déjà la raison précise via `jeu.statut` de GET /cartes/:id (MessageSansVisite /
@@ -4456,6 +4460,7 @@ export async function creerServeur(o: OptionsServeur) {
             id: tirageId, commerceId: id, clientId: client.id, lot: tire.libelle, lotId: tire.id, typeLot: tire.type,
             ...(points ? { points, ...(creux ? { pointsDoubles: true as const } : {}) } : {}),
             date: t.toISOString(),
+            ...(table ? { table } : {}),
             // R2 : aucun code pour une consolation en points (rien à retirer, rien à vérifier au comptoir). Un perdant garde
             // le sien : la caisse le vérifie et répond « perdant » (épinglé par P0-U3).
             ...(tire.type !== 'points' ? { code: codeGagnant() } : {}),

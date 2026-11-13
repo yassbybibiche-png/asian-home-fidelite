@@ -25,3 +25,8 @@ export function problemeTables(noms: readonly string[]): string | null {
 export function lienTable(base: string, commerceId: string, jeton: string): string {
   return `${base}#/commande/${encodeURIComponent(commerceId)}/${encodeURIComponent(jeton)}`
 }
+
+/** Lien du jeu depuis une table (R3) : #/jouer/<commerceId>/<jeton> — le tirage retient la table d'origine. */
+export function lienJeuTable(base: string, commerceId: string, jeton: string): string {
+  return `${base}#/jouer/${encodeURIComponent(commerceId)}/${encodeURIComponent(jeton)}`
+}

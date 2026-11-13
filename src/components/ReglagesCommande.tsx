@@ -8,7 +8,7 @@ import { MESSAGE_MODE_SERVEUR, useAction, useStore } from '../store'
 import type { TableCommande } from '../types'
 import { BoutonCopier, Interrupteur, MessageErreur, Vide } from './ui'
 import { QrCode } from './QrCode'
-import { lienTable, NOM_TABLE_MAX, problemeTables, TABLES_MAX } from '../lib/tablesCommande'
+import { lienJeuTable, lienTable, NOM_TABLE_MAX, problemeTables, TABLES_MAX } from '../lib/tablesCommande'
 
 /** Table en cours d'édition : `jeton` = celui d'une table déjà enregistrée (renommer garde le QR). */
 type TableEditee = { cle: string; nom: string; jeton?: string }
@@ -158,6 +158,7 @@ export function ReglagesCommande() {
                     <QrCode texte={lien} className="h-36 w-36" titre={`QR code de commande : ${t.nom}`} />
                   </div>
                   <BoutonCopier texte={lien} libelle="Copier le lien" className="bouton-secondaire w-full min-h-11 py-2 text-sm" />
+                  <BoutonCopier texte={lienJeuTable(baseApp(), commerce.id, t.jeton)} libelle="Copier le lien du jeu" className="bouton-secondaire w-full min-h-11 py-2 text-sm" />
                 </li>
               )
             })}

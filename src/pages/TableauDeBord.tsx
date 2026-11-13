@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useDonneesCommerce, useStore } from '../store'
-import { calculerChiffres, calculerChiffresCartes, noteMoyenne } from '../lib/stats'
+import { calculerChiffres, calculerChiffresCartes, compterPartiesParTable, noteMoyenne } from '../lib/stats'
 import { listePurge, resumeRappelPurge } from '../lib/rgpd'
 import { dateRelative } from '../lib/format'
 import { Etoiles, Vide } from '../components/ui'
 import { Mesure } from '../components/Mesure'
 import { InstantsGagnants } from '../components/InstantsGagnants'
 import { DEFINITION_TAUX_UTILISATION, JOURS_KPI_GAINS, kpiGains, type KpiGains } from '../lib/gainsRoue'
-import { formaterEuros } from '../lib/mesure'
+import { formaterEuros, jourParis } from '../lib/mesure'
 import type { ActionJournal } from '../types'
 
 const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
@@ -84,6 +84,8 @@ export default function TableauDeBord() {
   // fictives). Rien n'est jamais purgé ici : le lien mène à l'écran Clients, où la purge se lance après saisie
   // de « PURGER ».
   const rappelPurge = mode === 'api' ? resumeRappelPurge(listePurge(clients, commerce, new Date())) : null
+  // R3 : parties du jour (jour de Paris, comme les KPI de la roue) venues d'un QR de table.
+  const parTable = compterPartiesParTable(tirages, jourParis(new Date()))
 
   return (
     <div className="space-y-6">
@@ -156,6 +158,19 @@ export default function TableauDeBord() {
       </section>
 
       <GainsRoue kpi={kpiGains(tirages, commerce.lots)} />
+
+      {parTable.length > 0 && (
+        <section className="carte space-y-1" aria-labelledby="parties-table-titre">
+          <h2 id="parties-table-titre" className="titre-carte">Parties par table (aujourd’hui)</h2>
+          <ul className="tabular-nums">
+            {parTable.map(([nom, n]) => (
+              <li key={nom}>
+                {nom} — {n} partie{n > 1 ? 's' : ''}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <Mesure />
 

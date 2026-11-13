@@ -198,13 +198,14 @@ type AppelsCarte = Pick<
 /**
  * La même API, dont chaque appel « carte » porte le jeton client rangé sur ce téléphone (P0-S7) : celui de la carte
  * visée, ou — pour le tirage, qui ne nomme pas de carte — celui du joueur actif. Un jeton passé explicitement prime.
+ * R3 : `jetonTable` (QR de table, #/jouer/<id>/<jeton>) accompagne le tirage ; le serveur en déduit la table, ou l'ignore.
  */
-export function avecJetonClient<A extends AppelsCarte>(api: A, jetons: Pick<Jetons, 'lire'>, joueurActif: () => string | null = () => null): A {
+export function avecJetonClient<A extends AppelsCarte>(api: A, jetons: Pick<Jetons, 'lire'>, joueurActif: () => string | null = () => null, jetonTable?: string): A {
   const de = (clientId: string | null | undefined) => (clientId ? (jetons.lire(clientId)?.jeton ?? null) : null)
   return {
     ...api,
     carte: (clientId, jeton) => api.carte(clientId, jeton ?? de(clientId)),
-    tirer: (commerceId, contact, prenom, parrain, jeton) => api.tirer(commerceId, contact, prenom, parrain, jeton ?? de(joueurActif())),
+    tirer: (commerceId, contact, prenom, parrain, jeton) => api.tirer(commerceId, contact, prenom, parrain, jeton ?? de(joueurActif()), ...(jetonTable ? [jetonTable] : [])),
     prenomCarte: (commerceId, clientId, contact, prenom, jeton) => api.prenomCarte(commerceId, clientId, contact, prenom, jeton ?? de(clientId)),
     messagePrive: (commerceId, clientId, contact, note, texte, jeton) => api.messagePrive(commerceId, clientId, contact, note, texte, jeton ?? de(clientId)),
     profil: (commerceId, clientId, champs, jeton) => api.profil(commerceId, clientId, champs, jeton ?? de(clientId)),
