@@ -32,4 +32,10 @@ _Méthode et limite : pages publiques consultées par extraction de texte et doc
 
 ## Cycles
 
-_(Un paragraphe par cycle : signature, référence, mesures avant/après, vidéo, verdict de la critique.)_
+### Cycle 1 — « Univers par catégorie » (menu Découverte) — référence : Ciao Kombucha
+
+L'ambiance du menu change avec la famille de plats affichée : deux calques fixes derrière le contenu se croisent en opacité (900 ms), 6 univers sombres (magenta de base, braise, vert nuit, bleu encre, ambre, prune) attribués par rang de catégorie — stable pour une catégorie, y compris via les onglets filtrés ; l'en-tête de la catégorie active se pose (scale 1,04 → 1) et sa photo zoome très lentement (20 s) tant qu'elle est active. Mode Commande intact (autre page). Branche `anim/cycle1-univers` (`749b60a`), 11 tests ajoutés, suite **1721/1721** (115 fichiers).
+
+Mesures (protocole SCORES.md, avant/après alternés puis confirmées au calme) : bundle initial **inchangé** 484 259 o (CSS +1 969 o) ; FCP menu 692–704 ms ; LCP 2 368–2 524 ms au calme — élément LCP = photo du héros, intacte : niveau de la baseline pré-boucle (déjà frontalière à ~2,5 s selon la charge), **aucune régression du cycle** ; CLS **0**. Mouvement réduit : tout coupé, testé et vérifié en Chromium.
+
+Vidéos : `captures-animations/avant.webm` → `captures-animations/cycle1.webm`. **Verdict de la critique (détail au journal §8) : gain réel mais modéré** — la teinte fond visiblement d'une famille à l'autre en défilement, mais les cartes couvrent l'écran et les halos restent aux bords ; DA menu Découverte 8,6 → **8,9/10**. Le manque n°1 devient l'intensité : titres de catégorie encore modestes et pas de plat-star plein cadre → cycle 2.
