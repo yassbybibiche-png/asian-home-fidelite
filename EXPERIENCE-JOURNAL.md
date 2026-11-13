@@ -332,3 +332,56 @@ sur le staging ; le staging reste en état de démo prête (une commande de dém
 cuisine du jour).
 
 ---
+
+## Lot 4 — Déploiement et activation en PRODUCTION (autorisation explicite de l'utilisateur, 13/11 20:47)
+
+Ordre imposé : sauvegarde d'abord, fusion master, menu + descriptifs, activation, UNE commande test contrôlée.
+
+**1. Sauvegarde production (avant tout changement).** `GET /admin/sauvegarde` (admin) : 200 en 2,4 s, archive
+`asian-home-sauvegarde` v1 du 13/11/2026 19:50 UTC, **non chiffrée** (la clé de chiffrement n'est pas posée dans
+l'environnement production — le serveur l'a signalé ; archive conservée hors dépôt, dans
+`node_modules/.cache/cycle3/sauvegarde-prod-avant-lot4.json.gz`, 5 372 octets). Comptages vérifiés, compteurs
+cohérents avec les lignes (0 incohérence) : meta 3, commerces 1, clients 4, tirages 4, avis 0, equipe 0,
+journal 5, menus 1, parrainages 0, demandes_rattrapage 1, sessions_revoquees 0, tentatives_auth 0, envois 0,
+evenements_jour 3, compteurs_publics 0 — **22 lignes au total**.
+
+**2. Fusion et déploiement.** `autonome/integration` fusionnée (`--no-ff`) dans `master` : `608752f → 71b3d42`,
+push ; l'arbre déployé est identique à l'octet près à l'arbre testé (diff integration ↔ master : 0 fichier).
+Render a redéployé : nouvel asset **`index-BuSbPAP7.js`** — le même hachage que le staging (construction
+déterministe du même arbre). Santé : 200, Supabase, migrations 4/4, Brevo en mode test. Contrôles sans
+régression sur les données publiques existantes : fiche commerce 200, menu public 200 (81 plats, encore 32
+descriptions à ce stade), règlement du jeu 200, carte d'un client existant 200. La route cuisine répond
+désormais 200 (0 commande) là où elle valait 404 avant la fusion.
+
+**3. Menu et descriptifs (production).** Même payload que le staging (même fichier, descriptifs identiques).
+Le premier PUT a dépassé 240 s sans aboutir (état revérifié : 32 descriptions, rien d'écrit) — même signature
+que l'incident du lot 2 ; la même séquence de déblocage (PATCH sans effet 1,2 s, PUT du menu actuel 0,7 s) a
+rétabli des écritures immédiates, puis le PUT réel : **200, vérification 81 plats / 81/81 descriptions /
+0 dérive nom-prix**. Les prix non confirmés (Riz Thaï, Maki Gold) restent `null` → « Prix sur place », comme en
+staging ; rien n'a été tranché à leur place.
+
+**4. Activation (production).** PATCH : `commande.active = true`, tables « Table 1 » à « Table 8 » (+ table
+« TEST » temporaire, voir §5) ; fiche publique `commandeActive = true`. Après l'essai, la table TEST a été
+retirée par un second PATCH renvoyant les jetons des tables 1 à 8 (**préservés à l'identique**, vérifié) :
+configuration finale = module actif + tables 1 à 8, ancien jeton TEST en 404.
+
+**5. Commande test unique — ÉCHEC PARTIEL, rapporté tel quel.** Une seule commande créée, sur la table TEST :
+`01c587bf-5457-43a9-9a2d-dffa44fa0da5`, 1× Pad Thaï, total **1 390 centimes** recalculé par le serveur,
+instructions « TEST — ne pas préparer », visible en cuisine au statut `recue`. **La transition
+`recue → acceptee` renvoie 409** (« La commande vient d'être modifiée par ailleurs ») — deux essais espacés,
+même résultat ; la commande reste donc `recue`, seule commande du jour en cuisine, étiquetée TEST. Diagnostic
+mené sans forcer : la commande est unique et sa donnée intègre (dump meta : 8 lignes, aucune cle en double) ;
+la valeur stockée (373 caractères) est **structurellement identique** à une commande jumelle créée sur le
+staging pour le diagnostic (même plat, mêmes instructions avec tiret cadratin) qui, elle, enchaîne les trois
+transitions en 200. Le défaut est donc spécifique à l'environnement production : l'UPDATE conditionnel du CAS
+(`majMetaSi` : `update … eq('valeur', <valeur lue>)` via PostgREST) n'y matche aucune ligne, alors que la
+lecture de la même valeur réussit. Cause racine non identifiable de l'extérieur — pistes à vérifier dans le
+tableau de bord Supabase du projet production (type exact de la colonne `meta.valeur` et son histoire depuis la
+0001, version de PostgREST, journaux PostgREST au moment d'une transition). **Aucun contournement appliqué**
+(pas d'écriture directe en base, pas de nouvel essai en boucle) conformément à la règle « ne force jamais ».
+Conséquence concrète : en production, une commande client peut être CRÉÉE et lue (cuisine, suivi) mais ses
+transitions de statut échouent pour l'instant ; le parcours complet reste prouvé de bout en bout sur le staging
+(lot 3) et en E2E locale. À corriger avant l'usage en salle ; la commande TEST se fermera (acceptée →
+préparation → servie) dès le correctif en place.
+
+---
