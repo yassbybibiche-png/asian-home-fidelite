@@ -199,6 +199,14 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     majMeta: async (cle, valeur) => void (await ok('meta', sb.from('meta').upsert({ cle, valeur }, { onConflict: 'cle' }))),
     // Revue Codex (rotation du PIN) : clé absente → INSERT (la clé primaire refuse le 2e : ErreurConflit → false) ;
     // présente → UPDATE … WHERE valeur = <attendue> (0 ligne → false). Une requête, atomique pour Postgres.
+    // FIX-409 : sur un projet où `meta.valeur` est jsonb (projet créé avant la 0001 actuelle, qui la définit en
+    // `text`), PostgREST convertit le littéral du filtre en jsonb : un texte JSON relu devient un objet, jamais
+    // égal à la chaîne stockée (0 ligne à tort), et un texte non-JSON est rejeté (22P02). Donc : 0 ligne ou 22P02
+    // → on RELIT la ligne ; si la valeur en base est toujours exactement `attendue`, le 0 n'était qu'un écart de
+    // format et on réessaie avec la forme JSON-encodée de la chaîne (l'égalité jsonb d'une chaîne) ; si la
+    // relecture diffère, le conflit est réel → false. Sur une colonne `text`, la forme encodée ne peut matcher
+    // que la valeur confirmée par la relecture : la sémantique du CAS est inchangée, aucun des deux mondes ne
+    // peut écrire à l'aveugle.
     majMetaSi: async (cle, attendue, valeur) => {
       if (attendue === undefined) {
         try {
@@ -209,7 +217,17 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
           throw e
         }
       }
-      return (await ok<unknown[]>('meta', sb.from('meta').update({ valeur }).eq('cle', cle).eq('valeur', attendue).select('cle'))).length > 0
+      const maj = (filtre: string) => sb.from('meta').update({ valeur }).eq('cle', cle).eq('valeur', filtre).select('cle')
+      const premier = await maj(attendue)
+      if (!premier.error) {
+        if ((premier.data as unknown[]).length > 0) return true
+      } else if (premier.error.code !== '22P02') {
+        // Même traitement que `ok` : seule la conversion jsonb impossible (22P02) relève du repli ci-dessous.
+        throw new Error(`Supabase (meta) : ${premier.error.message}${premier.error.code ? ` [${premier.error.code}]` : ''}`)
+      }
+      const relue = (await ok<{ valeur: string }[]>('meta', sb.from('meta').select('valeur').eq('cle', cle)))[0]?.valeur
+      if (relue !== attendue) return false
+      return (await ok<unknown[]>('meta', maj(JSON.stringify(attendue)))).length > 0
     },
     supprimerMeta: async (cle) => void (await ok('meta', sb.from('meta').delete().eq('cle', cle))),
 
