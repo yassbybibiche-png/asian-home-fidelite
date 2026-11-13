@@ -120,3 +120,76 @@ site comme « très animé » ; c'est sa référence d'ambition, pas une mesure.
   cas échéant, avec contre-épreuves. Aucun autre test existant modifié.
 
 ---
+
+## Cycle 1 — construit (lots 1, 1b, 2, 3)
+
+- **Lot 1 (serveur)** : types commande, `src/lib/commande.ts` (calcul du panier relu du
+  menu en base, transitions), `server/commandes.ts` (stockage `meta`, CAS, idempotence),
+  4 routes + résolution publique de table, jetons de table générés à la sauvegarde,
+  `commandeActive` sur la fiche publique. Écarts documentés : insert-if-absent =
+  `majMetaSi(cle, undefined, …)` ; limite d'envoi en constante séparée (test épinglé) ;
+  `validerMenu` apprend `indisponible`/`options`. 32 mutations testées.
+- **Lot 1b (reprise)** : le secret de suivi est **généré par le client** avant l'envoi
+  (trouvé en relecture coordinateur : une réponse 201 perdue rendait le suivi à jamais
+  illisible). Doublon d'idempotence + même secret → suivi lisible. 1597 tests.
+- **Lot 2 (écrans client + réglages)** : `#/bienvenue` immersif, menu v2 (marquee du rail
+  « En photos », révélations au défilement via `src/lib/revelation.ts`, en-têtes
+  « moment », dépliage fluide), `#/commande` (mode Commande : panier `src/lib/panier.ts`,
+  options seulement si les données en ont, suivi à polling 10 s, reprise après
+  rechargement), Réglages « Commande à table » (composant séparé `ReglagesCommande` :
+  activation, tables, QR par table, planche imprimable), case « Indisponible » dans
+  l'éditeur de menu. Bundle initial 483 644 o.
+- **Lot 3 (cuisine + E2E + mesures)** : `#/cuisine` (sections par statut, actions à
+  grands boutons, conflit multi-appareils relu en silence, pastille « Nouveau »,
+  historique hier), E2E « deux téléphones » (deux contextes Chromium, **étiquetée
+  simulation**) 3 tests + parcours complet vert, mesures de laboratoire : menu v2 sans
+  régression (FCP ≈ 676 ms, LCP ≈ 2 424–2 476 ms), `#/bienvenue` LCP ≈ 1,9 s,
+  `#/commande` premier bouton « Ajouter » ≈ 1,98 s, **CLS mesuré 0** partout.
+- **Totaux cycle 1 : 1651/1651 tests unitaires, E2E 12/12, bundle initial 483 925 o
+  (plafond 484 422 o, marge 497 o).**
+- Adaptations de tests existants (registres imposés, chacune avec contre-épreuve) :
+  `tests/corps-sombres-p1-d2.test.ts:23-24`, `tests/performance-bundle-p2-q2.test.ts:33`
+  (pages différées : Bienvenue, Commande, puis Cuisine). Aucun autre test existant modifié.
+
+## Cycle 1 — critique (10 questions, coordinateur)
+
+1. **Visuellement meilleur ?** Oui, démontré par captures locales (Pixel 7 simulé) :
+   accueil immersif nouveau, menu en « moments », rail photos vivant. NON démontré sur
+   appareil réel ni par un humain sur le staging.
+2. **Parcours client plus simple ?** Le parcours commande est minimal (scanner → ajouter
+   → panier → confirmer → suivi) et prouvé en E2E. Friction restante : un client
+   anglophone arrivant par le QR ne peut pas changer la langue sur `#/bienvenue` et
+   `#/commande` (test existant réserve le commutateur à 3 pages ; les pages suivent la
+   langue choisie ailleurs et tout est traduit).
+3. **Animations fluides ?** CLS mesuré à 0 et aucun débordement ; MAIS les animations
+   elles-mêmes n'ont jamais été vues en mouvement : les captures des lots 2–3 sont en
+   `prefers-reduced-motion`. Fluidité réelle = **à vérifier** (cycle 2 : captures avec
+   animations activées).
+4. **Menu plus agréable à explorer ?** Oui : marquee, révélations, en-têtes photo en
+   typographie logo, dépliage sans saut ; mesures identiques à la v1 dans la variance.
+   Les 70 plats sans photo gardent une présentation graphique sobre — assumé, pas un défaut
+   corrigeable sans le restaurant.
+5. **Commande plus rapide ?** Fonction nouvelle (pas d'« avant ») : premier bouton
+   « Ajouter » à ≈ 1,98 s en laboratoire Slow 4G, 4 gestes pour commander, aucun effet
+   décoratif sur le chemin d'action (mode Commande tenu).
+6. **Performances préservées ?** Oui : bundle sous le plafond (marge 497 o — faible,
+   toute retouche front du cycle 2 sera mesurée avant/après), FCP/LCP du menu stables.
+7. **Identité Asian Home respectée ?** Oui : aucune couleur, image ou graphisme de la
+   référence ; DA nuit/magenta, typographie logo, photos authentiques uniquement.
+8. **Régression introduite ?** Aucune détectée : suite complète verte à chaque lot,
+   E2E complet 12/12 relancé deux fois, mesures du menu inchangées. Une instabilité
+   connue a resurgi une fois (`cartiz.test.ts`, passé seul et aux relances) : sans lien
+   avec ce chantier, déjà consignée les 11–12/11.
+9. **Qu'est-ce qui empêche encore l'excellence ?** (a) animations non vues en mouvement ;
+   (b) pas de purge : les commandes (et leurs secrets) s'accumulent dans `meta` et dans
+   les sauvegardes ; (c) onglet « Cuisine » visible même module désactivé ; (d) écran
+   Réglages « Commande à table » jamais capturé connecté (vérifié par tests seulement) ;
+   (e) commutateur de langue (bloqué par un test existant — hors périmètre sans
+   autorisation) ; (f) Asian Home doit enregistrer son menu pour que la commande ait des
+   plats (action commerçant, pas du code).
+10. **Plus de valeur au cycle suivant ?** Dans l'ordre : purge des commandes anciennes
+    (hygiène + sauvegardes, petit et testable) ; captures AVEC animations + corrections
+    des défauts vus ; capture des Réglages commande connecté ; masquage de l'onglet
+    Cuisine si le budget bundle le permet (sinon abandon documenté).
+
+---
