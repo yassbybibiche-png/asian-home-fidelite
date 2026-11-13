@@ -293,6 +293,8 @@ export default function App() {
   }
   if (mode === 'api' && !accesPret) return <SqueletteCommercant libelle="Chargement…" />
   if (mode === 'api' && (!acces || !commerce)) return <Verrou />
+  // Onglet Cuisine masqué tant que la commande à table est désactivée (#/cuisine reste ouvrable par son URL).
+  const onglets = ONGLETS.filter((o) => o.page != 'cuisine' || commerce.commande?.active)
 
   return (
     <div className="min-h-dvh pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8">
@@ -311,7 +313,7 @@ export default function App() {
           )}
         </div>
         <nav className="mx-auto hidden max-w-5xl gap-1 overflow-x-auto px-3 md:flex" aria-label="Navigation principale">
-          {ONGLETS.map((o) => o.page == 'cuisine' && !commerce.commande?.active ? null : (
+          {onglets.map((o) => (
             <a
               key={o.page}
               href={`#/${o.page}`}

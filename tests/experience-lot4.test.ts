@@ -16,9 +16,10 @@ describe('Lot 4 — onglet Cuisine masqué si le module est désactivé', () => 
   const plus = lire('src/pages/Plus.tsx')
 
   test('bureau : l’onglet Cuisine n’est rendu que si commerce.commande?.active', () => {
-    assert.match(app, /\{ONGLETS\.map\(\(o\) => o\.page == 'cuisine' && !commerce\.commande\?\.active \? null : \(\s*<a/)
-    // Un seul rendu des onglets bureau, et c'est celui-là (pas de seconde liste qui afficherait Cuisine sans condition).
-    assert.equal(app.match(/ONGLETS\.map\(/g)?.length, 1)
+    assert.match(app, /const onglets = ONGLETS\.filter\(\(o\) => o\.page != 'cuisine' \|\| commerce\.commande\?\.active\)/)
+    assert.match(app, /aria-label="Navigation principale">\s*\{onglets\.map\(\(o\) => \(/)
+    // Aucun autre rendu de la liste complète (qui afficherait Cuisine sans condition).
+    assert.doesNotMatch(app, /ONGLETS\.map\(/)
   })
 
   test('téléphone : l’entrée Cuisine de l’écran Plus n’est listée que si le module est actif', () => {
