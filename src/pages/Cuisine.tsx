@@ -302,7 +302,7 @@ function SectionCommandes({
 }) {
   if (!commandes.length) return null
   const cartes = (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
       {commandes.map((c) => (
         <CarteCommande key={c.id} commande={c} nouvelle={signalees.has(c.id) && c.statut === 'recue'} envoi={enCours.has(c.id)} maintenant={maintenant} onAction={onAction} />
       ))}
