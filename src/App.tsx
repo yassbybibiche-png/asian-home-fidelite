@@ -311,7 +311,7 @@ export default function App() {
           )}
         </div>
         <nav className="mx-auto hidden max-w-5xl gap-1 overflow-x-auto px-3 md:flex" aria-label="Navigation principale">
-          {ONGLETS.map((o) => (
+          {ONGLETS.map((o) => o.page == 'cuisine' && !commerce.commande?.active ? null : (
             <a
               key={o.page}
               href={`#/${o.page}`}
