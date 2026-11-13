@@ -18,6 +18,7 @@ import { defilerRail } from '../lib/defilementRail'
 import { activerParallaxe } from '../lib/parallaxe'
 import { motsUniques } from '../lib/bandeau'
 import { BandeauDefilant } from '../components/BandeauDefilant'
+import { croiserCouches, universCategorie, type Couches } from '../lib/univers'
 
 /** Traductions des badges de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
 enregistrerTraductions({
@@ -137,6 +138,11 @@ export function MenuAffiche({
     return () => obs.disconnect()
   }, [active, visibles.length, recherche])
   const ongletIndique = active === 'toutes' ? enVue : active
+  // Univers par catégorie (boucle animations, cycle 1) : l'ambiance suit l'onglet indiqué — la section à l'écran
+  // en « Toutes », la catégorie filtrée sinon ; univers 0 (magenta) en haut de page. Rang pris sur la carte
+  // complète (hors recherche) : une catégorie garde toujours le même univers.
+  const idsCategories = useMemo(() => menuAffiche.categories.filter((c) => c.produits.length).map((c) => c.id), [menuAffiche])
+  const univers = universCategorie(idsCategories, ongletIndique)
   // Menu v2 (Expérience 10/10) : rail « En photos » qui défile seul, lentement (pause au toucher / survol / focus,
   // jamais en mouvement réduit), et cartes qui se révèlent au défilement (contenu visible par défaut).
   const rail = useRef<HTMLDivElement>(null)
@@ -168,7 +174,9 @@ export function MenuAffiche({
   }
 
   return (
-    <div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
+    <>
+    <AmbianceUnivers univers={univers} />
+    <div className="relative z-[1] mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
       <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-2 pb-6 text-center shadow-relief">
         <CommutateurLangue sombre />
         <div className="flex justify-center">
@@ -292,7 +300,7 @@ export function MenuAffiche({
               {visibles.map((c) => {
                 const photo = photoCategorie(c.nom)
                 return (
-                  <section key={c.id} id={`m-${c.id}`} data-categorie={c.id} className="apparition scroll-mt-36 space-y-2">
+                  <section key={c.id} id={`m-${c.id}`} data-categorie={c.id} data-univers-actif={ongletIndique === c.id || undefined} className="apparition scroll-mt-36 space-y-2">
                     {/* Avec une photo, la catégorie devient un « moment » : le nom en typographie logo sur la photo
                         (le titre h2 reste dans le document pour les lecteurs d'écran et le plan de la page). */}
                     <div className={photo ? 'sr-only' : 'flex flex-wrap items-center gap-2'}>
@@ -431,6 +439,19 @@ export function MenuAffiche({
         </a>
       </p>
       <PiedPublic commerceId={commerce.id} />
+    </div>
+    </>
+  )
+}
+
+/** Couche d'ambiance fixe derrière le menu Découverte : deux calques d'univers qui se croisent en opacité (~900 ms). */
+function AmbianceUnivers({ univers }: { univers: number }) {
+  const [couches, setCouches] = useState<Couches>({ a: univers, b: univers, devant: 'a' })
+  useEffect(() => setCouches((c) => croiserCouches(c, univers)), [univers])
+  return (
+    <div aria-hidden="true" className="ambiance-univers" data-ambiance>
+      <div className={`ambiance-couche univers-${couches.a}`} data-visible={couches.devant === 'a'} />
+      <div className={`ambiance-couche univers-${couches.b}`} data-visible={couches.devant === 'b'} />
     </div>
   )
 }
