@@ -1126,6 +1126,95 @@ h3 {
   }
 }
 
+/* Boucle animations, cycle 1 : univers par catégorie du menu Découverte (MenuPublic.tsx, jamais la Commande).
+   Couche fixe derrière le contenu (le contenu est en `relative z-[1]`), deux calques qui se croisent en opacité.
+   Teintes SOMBRES posées sur la nuit (noir dominant, aucune couleur de texte changée), attribuées par rang de
+   catégorie (src/lib/univers.ts) : 0 magenta (base), 1 braise/bordeaux, 2 vert nuit, 3 bleu encre, 4 ambre, 5 prune. */
+.ambiance-univers {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: var(--color-nuit-950);
+}
+.ambiance-couche {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.9s ease-in-out;
+}
+.ambiance-couche[data-visible='true'] {
+  opacity: 1;
+}
+/* Opacité ≤ 0,46 au cœur du halo : un texte gris-400 posé à même le fond garde ≥ 4,5:1 sur la teinte la plus claire (ambre). */
+.univers-0 {
+  background-image:
+    radial-gradient(130% 70% at 100% 0%, color-mix(in srgb, var(--color-magenta-700) 42%, transparent), transparent 70%),
+    radial-gradient(110% 60% at 0% 100%, color-mix(in srgb, var(--color-violet-nuit) 34%, transparent), transparent 70%);
+}
+.univers-1 {
+  background-image:
+    radial-gradient(130% 70% at 100% 0%, rgb(150 45 12 / 0.42), transparent 70%),
+    radial-gradient(110% 60% at 0% 100%, rgb(110 14 30 / 0.44), transparent 70%);
+}
+.univers-2 {
+  background-image:
+    radial-gradient(130% 70% at 100% 0%, rgb(14 96 62 / 0.42), transparent 70%),
+    radial-gradient(110% 60% at 0% 100%, rgb(8 66 58 / 0.4), transparent 70%);
+}
+.univers-3 {
+  background-image:
+    radial-gradient(130% 70% at 100% 0%, rgb(26 56 140 / 0.46), transparent 70%),
+    radial-gradient(110% 60% at 0% 100%, rgb(16 34 90 / 0.44), transparent 70%);
+}
+.univers-4 {
+  background-image:
+    radial-gradient(130% 70% at 100% 0%, rgb(140 86 8 / 0.4), transparent 70%),
+    radial-gradient(110% 60% at 0% 100%, rgb(96 50 6 / 0.4), transparent 70%);
+}
+.univers-5 {
+  background-image:
+    radial-gradient(130% 70% at 100% 0%, rgb(96 30 118 / 0.44), transparent 70%),
+    radial-gradient(110% 60% at 0% 100%, rgb(70 18 70 / 0.42), transparent 70%);
+}
+/* En-tête « moment » de la catégorie active : le titre se pose (scale 1,04 → 1 — propriété `scale`, distincte du
+   `transform` de sa révélation) ; la photo zoome très lentement (20 s, 1 → 1,06) tant que la catégorie est active,
+   puis revient doucement. Les en-têtes inactifs du menu restent fixes (le ken burns 16 s permanent reste à l'accueil). */
+@keyframes univers-pose {
+  from {
+    scale: 1.04;
+  }
+  to {
+    scale: 1;
+  }
+}
+[data-univers-actif] .titre-logo {
+  transform-origin: left bottom;
+  animation: univers-pose 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+[data-categorie] .ken-burns img {
+  animation: none;
+  transition: transform 1.5s ease-out;
+}
+[data-univers-actif] .ken-burns img {
+  transform: scale(1.06);
+  transition: transform 20s linear;
+}
+/* Mouvement réduit : univers changé sans fondu, ni pose du titre, ni zoom. */
+@media (prefers-reduced-motion: reduce) {
+  .ambiance-couche {
+    transition: none;
+  }
+  [data-univers-actif] .titre-logo {
+    animation: none;
+  }
+  [data-categorie] .ken-burns img,
+  [data-univers-actif] .ken-burns img {
+    transform: none;
+    transition: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .revelation-attente,
   .revelation-attente .titre-logo {

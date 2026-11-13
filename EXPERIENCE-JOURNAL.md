@@ -428,3 +428,57 @@ Suite finale : **1710/1710** (114 fichiers). Aucune probabilité, aucune règle,
 aucun envoi réel ; aucune dépense.
 
 ---
+## 8. Boucle animations (13/11 au soir) — Découverte (#/bienvenue, #/menu)
+
+Ordre de l'utilisateur (21:11) : Claude Code à fond sur les animations, en boucle ; consigne
+additionnelle (21:36) : s'inspirer des meilleurs concurrents. Rapport de boucle tenu dans
+`ANIMATIONS-BOUCLE-RAPPORT.md` ; vidéos dans `captures-animations/`.
+
+### Inspiration concurrents (passe préalable au cycle 1)
+
+Catalogue complet dans `ANIMATIONS-BOUCLE-RAPPORT.md` (méthode : pages publiques par extraction de
+texte + documentation des éditeurs ; le mouvement n'est pas observable par extraction — limite
+assumée, comme pour Ciao). En résumé : Ciao (univers par saveur), Drimify (roue 3D cinématique,
+geste et révélation), menus « vivants » Menu.AI/CartaNova (une animation par plat), Socialshaker
+(habillage par thème), Hey Pongo (actes numérotés), Fideliz (rail à défilement), SpinLocal/SpinDine
+(parcours en étapes, révélation), Qualifio (roue décorative d'accueil). Principes uniquement.
+
+Manques chez nous, par visibilité : (1) aucune transition d'univers par catégorie dans le menu ;
+(2) titres de catégorie statiques ; (3) rail photos sans inertie ; (4) pas de plat-star plein cadre
+au défilement ; (5) aucune transition de page. Vidéo de l'état actuel : `captures-animations/avant.webm`.
+
+### Cycle 1 — « Univers par catégorie » (menu Découverte) — référence : Ciao Kombucha
+
+Signature : l'ambiance du menu change avec la famille de plats affichée. Deux calques fixes derrière
+le contenu se croisent en opacité (900 ms) ; 6 univers sombres (magenta de base, braise, vert nuit,
+bleu encre, ambre, prune) attribués par rang de catégorie (stable, hors recherche) ; l'en-tête de la
+catégorie active se pose (scale 1,04 → 1) et sa photo zoome très lentement (20 s) tant qu'elle est
+active. Branche `anim/cycle1-univers` (749b60a) ; logique pure dans `src/lib/univers.ts`, palettes en
+CSS. Vidéos : `captures-animations/avant.webm` → `captures-animations/cycle1.webm`.
+
+Critique aux 10 questions :
+1. **La signature est-elle visible dès le premier défilement ?** En vidéo, oui : la teinte de fond
+   fond d'un univers à l'autre au passage des catégories. En capture fixe, elle est discrète — les
+   cartes couvrent presque tout l'écran, les halos vivent aux bords.
+2. **Le mouvement sert-il le contenu ?** Oui : il signale le changement de famille avant même qu'on
+   lise le titre, et il ne distrait pas de la lecture des plats.
+3. **L'identité est-elle intacte ?** Oui : noir dominant partout, univers 0 = magenta de la maison,
+   aucune couleur de texte touchée.
+4. **Performance ?** Bundle initial inchangé (484 259 o), CSS +1 969 o. FCP menu 692–704 ms ; CLS 0
+   (mesuré, animations actives et mouvement réduit) ; LCP 2 368–2 524 ms au calme — l'élément LCP est
+   la photo du héros, intacte : c'est le niveau de la baseline (2,4–2,6 s selon la charge, déjà
+   frontalier avant la boucle), le cycle ne le dégrade pas.
+5. **Mouvement réduit ?** Tout est coupé (fondu instantané, ni pose ni zoom), couvert par les tests
+   et vérifié en Chromium.
+6. **Charge mentale ?** Aucune interaction ajoutée ; le défilement reste le seul geste.
+7. **Le gain est-il net par rapport à l'avant ?** Réel mais modéré : la page « respire » d'une
+   famille à l'autre, sans le plein cadre photo de Ciao. DA menu Découverte : 8,6 → 8,9/10 (pas plus :
+   l'intensité n'y est pas encore).
+8. **La référence est-elle atteinte ?** Le principe Ciao (un univers par famille) est là ; son
+   intensité (visuel géant qui EST l'univers) reste le manque n°1.
+9. **Risques ?** Contraste : halos ≤ 0,46 d'opacité, le texte le plus faible garde ≥ 4,5:1 sur la
+   teinte la plus claire (ambre) — documenté dans le CSS. Le ken burns permanent des en-têtes inactifs
+   du menu est retiré (seul l'actif zoome) : moins de mouvement parasite, choix assumé.
+10. **Que manque-t-il encore ?** Des titres de catégorie à la hauteur de l'ambition (typo géante
+    cinétique) et un plat-star plein cadre. → Cycle 2 : typographie cinétique des « moments ».
+
