@@ -603,3 +603,88 @@ describe('Déblocage C : « Voir le menu » dans le parcours de jeu (et sur tout
     }
   })
 })
+
+describe('Recommandation R1 : le règlement couvre les instants gagnants (D1) et les heures creuses (D2)', () => {
+  const LOTS_R1: Commerce['lots'] = [
+    { id: 'lot-nems', type: 'lot', libelle: 'Nems offerts', probabilite: 50 },
+    { id: 'lot-the', type: 'lot', libelle: ' Thé glacé ', probabilite: 10, instantsParJour: 2 },
+    { id: 'lot-mochi', type: 'lot', libelle: 'Mochi offert', probabilite: 10, heuresCreuses: true },
+    { id: 'lot-p', type: 'points', points: 10, libelle: '10 points offerts', probabilite: 30 },
+  ]
+  const CRENEAUX: Commerce['creneauxCreux'] = [{ jours: [1, 2, 3, 4], debut: '15:00', fin: '18:00' }]
+  const commerce = (lots: Commerce['lots'], creneauxCreux: Commerce['creneauxCreux'] = []): Commerce => ({
+    ...nouveauCommerce('Chez Lin', 'restaurant', ''),
+    lots,
+    creneauxCreux,
+  })
+  const texte = (c: Commerce, langue: 'fr' | 'en') => {
+    const r = reglementDuJeu(donneesReglement(c), langue)
+    return [r.titre, ...r.sections.flatMap((s) => [s.titre, ...s.contenu.flat()])].join('\n')
+  }
+  const sansMecanique = LOTS_R1.map(({ instantsParJour: _i, heuresCreuses: _h, ...l }) => l)
+
+  test('donneesReglement : instantsGagnants présent seulement avec un lot à instants (libellé, nombre par jour)', () => {
+    assert.deepEqual(donneesReglement(commerce(LOTS_R1)).instantsGagnants, [{ lot: 'Thé glacé', parJour: 2 }])
+    assert.equal(donneesReglement(commerce(sansMecanique)).instantsGagnants, undefined)
+    assert.ok(!('instantsGagnants' in donneesReglement(commerce(sansMecanique))))
+  })
+
+  test('donneesReglement : heuresCreuses présent seulement avec créneaux ET lot marqué', () => {
+    assert.deepEqual(donneesReglement(commerce(LOTS_R1, CRENEAUX)).heuresCreuses, { lots: ['Mochi offert'], creneaux: CRENEAUX })
+    assert.equal(donneesReglement(commerce(LOTS_R1, [])).heuresCreuses, undefined)
+    assert.equal(donneesReglement(commerce(LOTS_R1, undefined)).heuresCreuses, undefined)
+    assert.equal(donneesReglement(commerce(sansMecanique, CRENEAUX)).heuresCreuses, undefined)
+    assert.ok(!('heuresCreuses' in donneesReglement(commerce(sansMecanique, CRENEAUX))))
+  })
+
+  test('texte : instants gagnants décrits en français et en anglais (lot, 5 minutes)', () => {
+    const fr = texte(commerce(LOTS_R1), 'fr')
+    assert.match(fr, /Instants gagnants/)
+    assert.match(fr, /5 minutes/)
+    assert.match(fr, /chaque jour, 2 instants sont tirés au hasard/)
+    assert.match(fr, /remporte le lot « Thé glacé »/)
+    const en = texte(commerce(LOTS_R1), 'en')
+    assert.match(en, /Winning moments/)
+    assert.match(en, /wins the prize “Thé glacé”/)
+    assert.doesNotMatch(texte(commerce(sansMecanique), 'fr'), /Instants gagnants|Heures creuses/)
+    assert.doesNotMatch(texte(commerce(sansMecanique), 'en'), /Winning moments|Off-peak hours/)
+  })
+
+  test('texte : heures creuses (créneaux formatés, lot, consolation doublée) en français et en anglais', () => {
+    const fr = texte(commerce(LOTS_R1, CRENEAUX), 'fr')
+    assert.match(fr, /Heures creuses — pendant les créneaux du lundi au jeudi de 15 h à 18 h \(heure de Paris\), le lot « Mochi offert »/)
+    assert.match(fr, /doublés/)
+    const en = texte(commerce(LOTS_R1, CRENEAUX), 'en')
+    assert.match(en, /Off-peak hours — during the slots from Monday to Thursday from 15:00 to 18:00 \(Paris time\), the prize “Mochi offert”/)
+    assert.match(en, /doubled/)
+    // Autres formes : jour seul, énumération, minutes, plusieurs créneaux.
+    const divers = commerce(LOTS_R1, [
+      { jours: [3], debut: '14:30', fin: '16:00' },
+      { jours: [6, 0, 2], debut: '09:00', fin: '10:15' },
+    ])
+    assert.match(texte(divers, 'fr'), /créneaux le mercredi de 14 h 30 à 16 h ; les dimanche, mardi et samedi de 9 h à 10 h 15 \(heure/)
+    assert.match(texte(divers, 'en'), /slots on Wednesday from 14:30 to 16:00 ; Sunday, Tuesday and Saturday from 09:00 to 10:15 \(Paris/)
+  })
+
+  test('parité FR/EN de forme et règles de sobriété avec instants ET heures creuses', () => {
+    const d = donneesReglement(commerce(LOTS_R1, CRENEAUX))
+    const forme = (langue: 'fr' | 'en') => reglementDuJeu(d, langue).sections.map((s) => s.contenu.map((b) => (typeof b === 'string' ? 1 : b.length)))
+    assert.deepEqual(forme('en'), forme('fr'))
+    // Deux blocs de plus en section 4 que sans mécanique.
+    const sans = reglementDuJeu(donneesReglement(commerce(sansMecanique)), 'fr').sections[3].contenu.length
+    assert.equal(reglementDuJeu(d, 'fr').sections[3].contenu.length, sans + 2)
+    for (const langue of ['fr', 'en'] as const) {
+      const t = texte(commerce(LOTS_R1, CRENEAUX), langue)
+      assert.doesNotMatch(t, /€|\d+ ?%|centimes|probabilit|plafond/i)
+      assert.doesNotMatch(t, /garanti|à coup sûr|assuré|à tous les coups|chaque tirage gagne|forcément/i)
+    }
+  })
+
+  test('aucune fuite D1 : les données publiées ne portent ni réglage des instants, ni plages, ni « instants: »', () => {
+    const c = { ...commerce(LOTS_R1, CRENEAUX), plagesOuverture: [{ debut: '11:00', fin: '22:00' }] }
+    const json = JSON.stringify(donneesReglement(c))
+    assert.doesNotMatch(json, /instantsParJour|plagesOuverture|probabilite|cout|plafond|"points":/)
+    assert.ok(!json.includes('instants:'))
+    assert.ok(!json.includes('11:00'))
+  })
+})

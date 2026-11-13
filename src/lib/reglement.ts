@@ -4,7 +4,7 @@
 // lots n'ont pas de champ « valeur » : libellés seuls, la valeur étant le prix habituel en boutique.
 // Module chargé avec la page différée #/reglement (et par le serveur) : la page de jeu n'en importe rien — elle
 // utilise `lotsAGagner` (src/lib/lots.ts) — pour garder ce texte hors du bundle initial (P2-Q2).
-import type { Commerce, ModeAccesRoue } from '../types'
+import type { Commerce, CreneauCreux, ModeAccesRoue } from '../types'
 import type { Langue } from './langue.ts'
 import { DUREE_GAIN_JOURS, limiteGainsMois, lotsJouables, modeAccesRoue } from './roulette.ts'
 import { lotsAGagner, normaliserLots, type LotAffiche } from './lots.ts'
@@ -22,10 +22,24 @@ export interface DonneesReglement {
   dotations: LotAffiche[]
   /** Un secteur de la roue ne fait rien gagner. */
   secteurPerdant: boolean
+  /**
+   * Instants gagnants (recommandation R1) : un item par lot à instants (D1), dans l'ordre de la config. Seulement le
+   * nombre par jour — jamais les heures tirées ni les plages d'ouverture. Absent si aucun lot n'en a.
+   */
+  instantsGagnants?: { lot: string; parJour: number }[]
+  /** Heures creuses (R1, mécanique D2) : lots réservés aux créneaux et créneaux du commerce. Absent si non configuré. */
+  heuresCreuses?: { lots: string[]; creneaux: CreneauCreux[] }
 }
 
 export function donneesReglement(c: Commerce): DonneesReglement {
-  const jouables = lotsJouables(normaliserLots(c.lots ?? []))
+  const normalises = normaliserLots(c.lots ?? [])
+  const jouables = lotsJouables(normalises)
+  const physiques = normalises.filter((l) => l.type === 'lot')
+  const instants = physiques
+    .filter((l) => (l.instantsParJour ?? 0) > 0)
+    .map((l) => ({ lot: l.libelle.trim(), parJour: l.instantsParJour as number }))
+  const creux = physiques.filter((l) => l.heuresCreuses === true).map((l) => l.libelle.trim())
+  const creneaux = c.creneauxCreux ?? []
   return {
     commerceId: c.id,
     nom: c.nom,
@@ -35,7 +49,38 @@ export function donneesReglement(c: Commerce): DonneesReglement {
     limiteGainsMois: limiteGainsMois(c),
     dotations: lotsAGagner(c.lots ?? []),
     secteurPerdant: jouables.some((l) => l.type === 'perdant'),
+    ...(instants.length ? { instantsGagnants: instants } : {}),
+    ...(creneaux.length && creux.length
+      ? { heuresCreuses: { lots: creux, creneaux: creneaux.map((cr) => ({ jours: [...cr.jours], debut: cr.debut, fin: cr.fin })) } }
+      : {}),
   }
+}
+
+const JOURS_FR = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi']
+const JOURS_EN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+/** Jours d'un créneau triés : suite consécutive (≥ 2), jour seul, ou énumération. */
+function joursCreneau(jours: number[], noms: string[], fr: boolean): string {
+  const tries = [...new Set(jours)].sort((a, b) => a - b)
+  const j = tries.map((n) => noms[n] ?? String(n))
+  if (tries.length === 1) return fr ? `le ${j[0]}` : `on ${j[0]}`
+  if (tries.every((n, i) => i === 0 || n === tries[i - 1] + 1)) return fr ? `du ${j[0]} au ${j.at(-1)}` : `from ${j[0]} to ${j.at(-1)}`
+  const enum_ = `${j.slice(0, -1).join(', ')} ${fr ? 'et' : 'and'} ${j.at(-1)}`
+  return fr ? `les ${enum_}` : enum_
+}
+
+/** « 15:00 » → « 15 h », « 15:30 » → « 15 h 30 ». */
+function heureFr(h: string): string {
+  const [hh, mm] = h.split(':')
+  return `${Number(hh)} h${mm && mm !== '00' ? ` ${mm}` : ''}`
+}
+
+function creneauFr(c: CreneauCreux): string {
+  return `${joursCreneau(c.jours, JOURS_FR, true)} de ${heureFr(c.debut)} à ${heureFr(c.fin)}`
+}
+
+function creneauEn(c: CreneauCreux): string {
+  return `${joursCreneau(c.jours, JOURS_EN, false)} from ${c.debut} to ${c.fin}`
 }
 
 /** Une section : paragraphes (texte) et listes à puces (tableau de textes), dans l'ordre. */
@@ -76,6 +121,17 @@ function reglementFrancais(d: DonneesReglement): TexteReglement {
   dotations.push(
     'L’organisateur peut limiter le nombre de lots d’un même type attribués chaque jour ; un lot dont le quota quotidien est atteint n’est plus proposé ce jour-là. Les lots sont attribués dans la limite des stocks disponibles. Aucun lot ne peut être échangé contre sa valeur en espèces.',
   )
+  for (const i of d.instantsGagnants ?? []) {
+    dotations.push(
+      `Instants gagnants — chaque jour, ${i.parJour} instants sont tirés au hasard pendant les horaires d’ouverture, sans être annoncés à l’avance : le premier tirage effectué dans les 5 minutes qui suivent l’un de ces instants remporte le lot « ${i.lot} » (un seul lot par instant).`,
+    )
+  }
+  if (d.heuresCreuses) {
+    const liste = d.heuresCreuses.creneaux.map(creneauFr).join(' ; ')
+    dotations.push(
+      `Heures creuses — pendant les créneaux ${liste} (heure de Paris), le lot « ${d.heuresCreuses.lots.join(' », « ')} » entre dans la roue et les points de fidélité attribués en consolation sont doublés.`,
+    )
+  }
   const utilisation: (string | string[])[] = [
     [
       `Un lot gagné est utilisable à partir du lendemain du tirage et pendant ${DUREE_GAIN_JOURS} jours (dates exactes affichées sur la carte de fidélité du gagnant).`,
@@ -150,6 +206,17 @@ function reglementAnglais(d: DonneesReglement): TexteReglement {
   dotations.push(
     'The organiser may limit the number of prizes of the same type awarded each day; a prize whose daily quota has been reached is no longer offered that day. Prizes are awarded while stocks last. No prize can be exchanged for its cash value.',
   )
+  for (const i of d.instantsGagnants ?? []) {
+    dotations.push(
+      `Winning moments — each day, ${i.parJour} moments are drawn at random during opening hours, without being announced in advance: the first draw made within 5 minutes after one of these moments wins the prize “${i.lot}” (only one prize per moment).`,
+    )
+  }
+  if (d.heuresCreuses) {
+    const liste = d.heuresCreuses.creneaux.map(creneauEn).join(' ; ')
+    dotations.push(
+      `Off-peak hours — during the slots ${liste} (Paris time), the prize “${d.heuresCreuses.lots.join('”, “')}” joins the wheel and the loyalty points awarded as consolation are doubled.`,
+    )
+  }
   const utilisation: (string | string[])[] = [
     [
       `A prize won can be used from the day after the draw and for ${DUREE_GAIN_JOURS} days (exact dates shown on the winner’s loyalty card).`,
