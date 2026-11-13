@@ -162,3 +162,41 @@ l'inventaire du 10/11/2026 — aucune photo de plat supplémentaire n'est rattac
 (les deux photos « Spécialités » de la page 6 ne sont pas légendées individuellement,
 les deux bocaux « Desserts » restent indiscernables, les boissons ne sont pas
 identifiables plat par plat). Compte inchangé : 11 plats avec photo vérifiée, 70 sans.
+
+---
+
+## Extension du 13/11/2026 — inventaire élargi (Instagram, fiche Google, linktr.ee)
+
+Décision de l'utilisateur : « Récupère les photos d'Instagram, de Google, etc.,
+retravaille-les de façon pro. » Rejeu complet le 13/11/2026, photo par photo :
+
+- **PDF officiel** : les 6 pages ont été ré-extraites et ré-examinées — la page 5
+  « MENU MIDI » ne contient aucune photo (texte seul) ; inventaire inchangé
+  (11 plats avec photo, 70 sans).
+- **linktr.ee/asianhomefrance** : 3 visuels du restaurant examinés en pleine taille —
+  le logo (avatar), le logo + 5 étoiles du lien d'avis, et un logo de marque tierce
+  (livraison). **Aucune photo de plat** ; la seule autre image est la vignette du PDF
+  de la carte, déjà la source des photos actuelles.
+- **Instagram @asianhomeparis** : **accès public bloqué sans connexion** — page profil
+  (mur de connexion), API publique du profil (réponse vide), page « embed » d'une
+  publication (coquille bloquée), lecture de page externe (métadonnées seules) :
+  aucune photo de publication récupérable, aucun contournement tenté. Les seuls
+  médias Instagram accessibles sont ceux de la galerie de la fiche Google ci-dessous.
+- **Fiche Google du restaurant** (galerie lue via le connecteur Places, sources
+  Google/Facebook/Instagram agrégées ; la galerie est plafonnée à 5 médias, la
+  source TripAdvisor du connecteur n'en renvoie aucun) :
+  - 2 vidéos (reels) : leurs affiches sont déjà exploitées (`table-sushis.jpg`,
+    `cocktails.jpg`) ;
+  - photo Facebook 474696354 (1024×683, bannière de la fiche) : plateau de plats vu
+    de dessus — **doublon de `hero-plats.jpg`** (même photo), non retenue ;
+  - photo Facebook 310145732 (600×600) : logo « ASIAN HOUSE » — déjà possédé
+    (`logo.png`), non retenue ;
+  - photo Instagram 468303134 (publication DCxJgxusyvd, « La meilleure façon de
+    découvrir l'Asie, c'est à travers ses plats ») : **personne identifiable au
+    premier plan** — écartée, comme le 09/11/2026.
+
+**Bilan : 0 nouvelle photo récupérée, 0 nouveau rattachement.** L'inventaire reste
+11 plats avec photo vérifiée et 70 sans photo (liste dans `docs/PHOTOS-MANQUANTES.md`,
+à compléter par le commerçant). Le retravail « pro » de cette mission porte sur le
+stock existant : variante WebP du Loc Lac ci-dessus, grandes cartes et rail
+« En photos » dans la page menu (mission « menu visuel », voir MENU-VISUEL-RAPPORT.md).
