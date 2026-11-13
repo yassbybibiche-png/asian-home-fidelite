@@ -67,7 +67,7 @@ async function ajouterAIndex(st: Stockage, commerceId: string, jour: string, id:
 }
 
 /**
- * Crée la commande (`commande.secret` déjà tiré par l'appelant). Clé d'idempotence déjà posée → aucune écriture : la
+ * Crée la commande (`commande.secret` fourni par le navigateur). Clé d'idempotence déjà posée → aucune écriture : la
  * commande existante est rendue avec `doublon: true` (ConflitCommande si elle est encore en cours d'écriture par la
  * première requête). Échec après la pose de la clé → clé et commande retirées (au mieux) : un nouvel essai recrée.
  */

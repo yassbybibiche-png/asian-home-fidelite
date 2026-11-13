@@ -203,10 +203,14 @@ describe('Commande à table : vrai serveur HTTP (SQLite)', () => {
   const etat = async (id = AH, pin = PIN) => (await api('GET', `/commerces/${id}/etat`, undefined, pin)).contenu.commerce as Commerce
   const fiche = async (id = AH) => (await api('GET', `/commerces/${id}`)).contenu.commerce as { commandeActive?: true }
   const cle = () => `cle-test-${++n}-aaaa`
+  // Secret de suivi tiré par le navigateur (lot 1b) : le serveur le stocke, ne le renvoie jamais.
+  const secretClient = () => `secret-client-${++n}-aaaaaaaa`
   const jetonDe = async (nom: string, id = AH, pin = PIN) => (await etat(id, pin)).commande!.tables.find((t) => t.nom === nom)!.jeton
   async function commander(lignes: unknown, extra: Record<string, unknown> = {}, id = AH, table = 'Table 1', pin = PIN) {
-    return api('POST', `/commerces/${id}/commandes`, { jetonTable: await jetonDe(table, id, pin), lignes, cleIdempotence: cle(), ...extra })
+    const corps = { jetonTable: await jetonDe(table, id, pin), lignes, cleIdempotence: cle(), secret: secretClient(), ...extra }
+    return { ...(await api('POST', `/commerces/${id}/commandes`, corps)), secret: corps.secret as string }
   }
+  const suivi = (id: string, secret: string, commerce = AH) => api('GET', `/commerces/${commerce}/commandes/${id}`, undefined, { 'X-Secret-Commande': secret })
 
   before(async () => {
     app = await creerServeur({ fichierDb, adminPin: '98765432', pinInitial: '1234', version: 'test', maintenant: () => MIDI, derriereProxy: true, limiteCommandesParIp: LIMITE_TEST })
@@ -299,8 +303,50 @@ describe('Commande à table : vrai serveur HTTP (SQLite)', () => {
     assert.equal((await commander([{ produitId: 'p-nems', quantite: 1 }], { cleIdempotence: 'court' })).statut, 400)
   })
 
+  test('secret de suivi (lot 1b) : absent, trop court, trop long, caractères interdits ou pas une chaîne → 400, rien d’écrit', async () => {
+    const avant = ((await api('GET', `/commerces/${AH}/commandes`, undefined, PIN)).contenu.commandes as Commande[]).length
+    for (const secret of [undefined, 'x'.repeat(15), 'x'.repeat(101), 'secret avec espaces', 'secret/avec+slash=aaaa', 'sécret-accentué-aaaaaa', 12345678901234567, null]) {
+      const r = await commander([{ produitId: 'p-nems', quantite: 1 }], { secret })
+      assert.equal(r.statut, 400, String(secret))
+      assert.match(r.contenu.erreur, /« secret » manquant ou invalide/)
+    }
+    assert.equal(((await api('GET', `/commerces/${AH}/commandes`, undefined, PIN)).contenu.commandes as Commande[]).length, avant)
+    // Bornes acceptées : 16 et 100 caractères.
+    for (const secret of ['a'.repeat(16), `${'b'.repeat(98)}-_`]) assert.equal((await commander([{ produitId: 'p-nems', quantite: 1 }], { secret })).statut, 201)
+  })
+
+  test('secret du client stocké : suivi avec CE secret → 200, avec un autre secret valide → 404', async () => {
+    const r = await commander([{ produitId: 'p-nems', quantite: 1 }])
+    assert.equal(r.statut, 201, JSON.stringify(r.contenu))
+    const { id } = r.contenu.commande
+    assert.equal('secret' in r.contenu, false, 'le serveur ne renvoie plus de secret : le navigateur l’a déjà')
+    assert.equal(JSON.stringify(r.contenu).includes(r.secret), false)
+    const lu = await suivi(id, r.secret)
+    assert.equal(lu.statut, 200)
+    assert.equal(lu.contenu.commande.id, id)
+    assert.equal((await suivi(id, secretClient())).statut, 404)
+  })
+
+  test('réponse 201 perdue : même clé + même secret → 200 doublon sans secret, le suivi marche avec le secret du client', async () => {
+    const jeton = await jetonDe('Terrasse')
+    const secret = secretClient()
+    const corps = { jetonTable: jeton, lignes: [{ produitId: 'p-nems', quantite: 2 }], cleIdempotence: cle(), secret }
+    const r1 = await api('POST', `/commerces/${AH}/commandes`, corps)
+    assert.equal(r1.statut, 201)
+    // Le navigateur n'a jamais lu r1 (réseau coupé) : il ne connaît que son panier, sa clé et son secret.
+    const r2 = await api('POST', `/commerces/${AH}/commandes`, corps)
+    assert.equal(r2.statut, 200, JSON.stringify(r2.contenu))
+    assert.equal(r2.contenu.doublon, true)
+    assert.equal('secret' in r2.contenu, false)
+    assert.equal(JSON.stringify(r2.contenu).includes(secret), false)
+    const lu = await suivi(r2.contenu.commande.id, secret)
+    assert.equal(lu.statut, 200)
+    assert.equal(lu.contenu.commande.id, r1.contenu.commande.id)
+    assert.equal(lu.contenu.commande.total, 1300)
+  })
+
   test('prix envoyé par le client ignoré : total recalculé depuis le menu, commande « recue » avec un secret', async () => {
-    const r = await commander([{ produitId: 'p-nems', quantite: 2, prix: 1, prixUnitaire: 1, nom: 'Gratuit' }], { total: 1, statut: 'servie', secret: 'choisi', instructions: ' Table près de la fenêtre ' })
+    const r = await commander([{ produitId: 'p-nems', quantite: 2, prix: 1, prixUnitaire: 1, nom: 'Gratuit' }], { total: 1, statut: 'servie', instructions: ' Table près de la fenêtre ' })
     assert.equal(r.statut, 201, JSON.stringify(r.contenu))
     const c = r.contenu.commande as Commande
     assert.equal(c.total, 1300)
@@ -311,8 +357,8 @@ describe('Commande à table : vrai serveur HTTP (SQLite)', () => {
     assert.equal(c.instructions, 'Table près de la fenêtre')
     assert.equal(c.creeLe, MIDI.toISOString())
     assert.equal('secret' in c, false, 'la commande renvoyée ne porte pas son secret')
-    assert.match(r.contenu.secret, /^[A-Za-z0-9_-]{32}$/)
-    assert.notEqual(r.contenu.secret, 'choisi')
+    assert.equal('secret' in r.contenu, false)
+    assert.equal((await suivi(c.id, r.secret)).statut, 200, 'commande lisible avec le secret du client')
   })
 
   test('refus : prix null, indisponible, option inconnue, quantités 0 et 21, panier vide, instructions trop longues → 400', async () => {
@@ -342,7 +388,7 @@ describe('Commande à table : vrai serveur HTTP (SQLite)', () => {
 
   test('doublon de clé d’idempotence : même commande, une seule entrée d’index, pas de second secret', async () => {
     const jeton = await jetonDe('Terrasse')
-    const corps = { jetonTable: jeton, lignes: [{ produitId: 'p-nems', quantite: 1 }], cleIdempotence: 'cle-doublon-aaaa' }
+    const corps = { jetonTable: jeton, lignes: [{ produitId: 'p-nems', quantite: 1 }], cleIdempotence: 'cle-doublon-aaaa', secret: secretClient() }
     const r1 = await api('POST', `/commerces/${AH}/commandes`, corps)
     assert.equal(r1.statut, 201)
     const r2 = await api('POST', `/commerces/${AH}/commandes`, { ...corps, lignes: [{ produitId: 'p-nems', quantite: 5 }] })
@@ -365,7 +411,7 @@ describe('Commande à table : vrai serveur HTTP (SQLite)', () => {
   test('lecture publique : sans secret ou secret faux → 404, avec secret (en-tête ou paramètre) → 200 sans le champ secret', async () => {
     const r = await commander([{ produitId: 'p-nems', quantite: 1 }])
     const { id } = r.contenu.commande
-    const secret = r.contenu.secret as string
+    const secret = r.secret
     assert.equal((await api('GET', `/commerces/${AH}/commandes/${id}`)).statut, 404)
     assert.equal((await api('GET', `/commerces/${AH}/commandes/${id}`, undefined, { 'X-Secret-Commande': secret.slice(1) })).statut, 404)
     assert.equal((await api('GET', `/commerces/${AH}/commandes/${id}?secret=${'x'.repeat(32)}`)).statut, 404)
@@ -430,7 +476,7 @@ describe('Commande à table : vrai serveur HTTP (SQLite)', () => {
     } finally {
       db.close()
     }
-    const lu = await api('GET', `/commerces/${AH}/commandes/${id}`, undefined, { 'X-Secret-Commande': r.contenu.secret })
+    const lu = await api('GET', `/commerces/${AH}/commandes/${id}`, undefined, { 'X-Secret-Commande': r.secret })
     assert.equal(lu.contenu.commande.statut, 'recue')
     assert.equal((await api('POST', `/commerces/${AH}/commandes/${id}/statut`, { vers: 'acceptee' }, PIN)).statut, 200)
   })
@@ -440,7 +486,7 @@ describe('Commande à table : vrai serveur HTTP (SQLite)', () => {
     assert.equal((await api('PATCH', `/commerces/${B}`, { commande: { active: true, tables: [{ nom: 'Table 1' }] } }, PIN_B)).statut, 200)
     const r = await commander([{ produitId: 'p-nems', quantite: 1 }])
     const { id } = r.contenu.commande
-    const secret = r.contenu.secret as string
+    const secret = r.secret
     // Public : même secret, commerce B → 404.
     assert.equal((await api('GET', `/commerces/${B}/commandes/${id}`, undefined, { 'X-Secret-Commande': secret })).statut, 404)
     // Commerçant B : absente de sa liste, transition → 404, statut inchangé chez A.
@@ -457,8 +503,8 @@ describe('Commande à table : vrai serveur HTTP (SQLite)', () => {
     // Même clé d'idempotence dans deux commerces : deux commandes distinctes (les clés sont rangées par commerce).
     await api('PUT', `/commerces/${B}/menu`, MENU, PIN_B)
     const commune = 'cle-commune-aaaa'
-    const rA = await api('POST', `/commerces/${AH}/commandes`, { jetonTable: await jetonDe('Table 1'), lignes: [{ produitId: 'p-nems', quantite: 1 }], cleIdempotence: commune })
-    const rB = await api('POST', `/commerces/${B}/commandes`, { jetonTable: await jetonDe('Table 1', B, PIN_B), lignes: [{ produitId: 'p-nems', quantite: 1 }], cleIdempotence: commune })
+    const rA = await api('POST', `/commerces/${AH}/commandes`, { jetonTable: await jetonDe('Table 1'), lignes: [{ produitId: 'p-nems', quantite: 1 }], cleIdempotence: commune, secret: secretClient() })
+    const rB = await api('POST', `/commerces/${B}/commandes`, { jetonTable: await jetonDe('Table 1', B, PIN_B), lignes: [{ produitId: 'p-nems', quantite: 1 }], cleIdempotence: commune, secret: secretClient() })
     assert.equal(rA.statut, 201)
     assert.equal(rB.statut, 201)
     assert.notEqual(rA.contenu.commande.id, rB.contenu.commande.id)

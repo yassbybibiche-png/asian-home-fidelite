@@ -131,6 +131,11 @@ export const LIMITE_COMMANDES_PAR_IP = 10
 export const TABLES_COMMANDE_MAX = 50
 /** Clé d'idempotence d'une commande (tirée par le navigateur à chaque panier validé). */
 const FORMAT_CLE_IDEMPOTENCE = /^[\w-]{8,100}$/
+/**
+ * Secret de suivi d'une commande, tiré par le navigateur avec le panier (pas par le serveur) : si la réponse 201 se
+ * perd, le nouvel essai reçoit le doublon sans secret, mais le navigateur d'origine le connaît déjà.
+ */
+const FORMAT_SECRET_COMMANDE = /^[\w-]{16,100}$/
 
 /**
  * PIN / codes faux (anti-bruteforce, persistant en base : table `tentatives_auth`). Deux compteurs par échec :
@@ -4120,8 +4125,11 @@ export async function creerServeur(o: OptionsServeur) {
       if (!table) throw err(404, 'Table introuvable : scannez à nouveau le QR code de votre table.')
       const cle = corps.cleIdempotence
       if (typeof cle !== 'string' || !FORMAT_CLE_IDEMPOTENCE.test(cle)) throw err(400, '« cleIdempotence » manquante ou invalide (8 à 100 caractères : lettres, chiffres, - et _).')
+      const secret = corps.secret
+      if (typeof secret !== 'string' || !FORMAT_SECRET_COMMANDE.test(secret)) throw err(400, '« secret » manquant ou invalide (16 à 100 caractères : lettres, chiffres, - et _).')
       // Panier déjà reçu (réseau coupé avant la réponse, double appui) : la commande existante, même si le menu a
-      // changé depuis — sans son secret, que le navigateur d'origine a déjà. Le cas simultané est tranché par creerCommande.
+      // changé depuis — sans son secret, que le navigateur d'origine a déjà puisqu'il l'a tiré lui-même (corps.secret).
+      // Le cas simultané est tranché par creerCommande.
       const nouvelle = async () => {
         const calcul = calculerCommande(await st.menu(id), corps.lignes)
         if (!calcul.ok) throw err(400, calcul.message)
@@ -4138,7 +4146,7 @@ export async function creerServeur(o: OptionsServeur) {
           statut: 'recue',
           creeLe: t,
           majLe: t,
-          secret: randomBytes(24).toString('base64url'),
+          secret,
         }
         try {
           return await creerCommande(st, neuve, cle)
@@ -4149,7 +4157,7 @@ export async function creerServeur(o: OptionsServeur) {
       const deja = await commandeDejaCreee(st, id, cle)
       const r = deja ? { commande: deja, doublon: true } : await nouvelle()
       if (r.doublon) return { json: { commande: sansSecret(r.commande), doublon: true } }
-      return { statut: 201, json: { commande: sansSecret(r.commande), secret: r.commande.secret } }
+      return { statut: 201, json: { commande: sansSecret(r.commande) } }
     }
 
     if (sous === 'commandes' && sousId && !action && m === 'GET') {

@@ -233,7 +233,7 @@ export interface Commande {
   statut: StatutCommande
   creeLe: string
   majLe: string
-  /** Secret de suivi du client : jamais renvoyé, sauf une fois à la création. */
+  /** Secret de suivi, tiré par le navigateur et envoyé avec le panier : jamais renvoyé par le serveur. */
   secret: string
 }
 
