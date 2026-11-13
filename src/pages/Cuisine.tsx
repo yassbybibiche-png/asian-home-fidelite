@@ -178,11 +178,11 @@ function EcranCuisine({ base, commerceId, acces, sansTable }: { base: string; co
       setListe((l) => l && { ...l, commandes: remplacerCommande(l.commandes, maj) })
     } else if (r.statut === 400 || r.statut === 404 || r.statut === 409) {
       // Un autre membre de l'équipe vient de faire la transition : on relit, sans erreur bloquante.
-      setNote(`Table ${c.table} : déjà mise à jour sur un autre appareil. Liste actualisée.`)
+      setNote(`${c.table} : commande déjà mise à jour sur un autre appareil. Liste actualisée.`)
       void charger()
     } else {
       setListe((l) => l && { ...l, commandes: remplacerCommande(l.commandes, c) })
-      setNote(`Table ${c.table} : action non enregistrée. ${messageErreur(r)}`)
+      setNote(`${c.table} : action non enregistrée. ${messageErreur(r)}`)
     }
   }
 
@@ -340,18 +340,11 @@ function CarteCommande({
   onAction?: (c: CommandeCuisine, vers: StatutCommande) => void
 }) {
   const actions = onAction ? actionsCuisine(c.statut) : []
-  const terminee = c.statut === 'servie' || c.statut === 'refusee'
   return (
-    <article
-      className={`carte flex flex-col gap-3 ${nouvelle ? 'ring-4 ring-magenta-500' : ''} ${terminee ? 'bg-gray-50' : ''}`}
-      aria-label={`Table ${c.table}, ${heureCommande(c.creeLe)}`}
-      data-commande={c.id}
-    >
+    <article className={`carte flex flex-col gap-3 ${nouvelle ? 'ring-4 ring-magenta-500' : ''}`} aria-label={`${c.table}, commande de ${heureCommande(c.creeLe)}`} data-commande={c.id}>
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-600">Table</p>
-          <p className="font-titre text-3xl leading-tight font-bold break-words text-gray-900">{c.table}</p>
-        </div>
+        {/* Nom de la table tel que saisi dans les Réglages (« Table 4 », « Terrasse 2 ») : lisible de loin. */}
+        <p className="min-w-0 font-titre text-3xl leading-tight font-bold break-words text-gray-900">{c.table}</p>
         <div className="shrink-0 text-right">
           {nouvelle && <span className="mb-1 inline-block rounded-full bg-magenta-500 px-3 py-1 text-sm font-bold text-white">Nouveau</span>}
           <p className="text-lg font-semibold tabular-nums">{heureCommande(c.creeLe)}</p>
