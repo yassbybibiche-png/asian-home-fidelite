@@ -22,6 +22,7 @@ import { INSTANTS_JOUR_MAX, PLAGES_MAX, plagesOuverture, problemePlages } from '
 import { lotsDuCreneau, problemeCreneaux } from '../lib/creneaux'
 import { CaseHeuresCreuses, CreneauxCreux } from '../components/HeuresCreuses'
 import { ReglagesCommande } from '../components/ReglagesCommande'
+import { urlAbsolue } from '../router'
 
 /** Accès à la roue (R6) : les deux modes du serveur, dans l'ordre affiché. */
 const MODES_ACCES: { valeur: ModeAccesRoue; libelle: string; aide: string }[] = [
@@ -1034,6 +1035,17 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           />
         </div>
       </fieldset>
+      {/* Écran vitrine (R4) : page plein écran pour une TV en salle — rien à régler, juste l'adresse à ouvrir. */}
+      <section className="carte space-y-3" aria-labelledby="vitrine-titre">
+        <h2 id="vitrine-titre" className="titre-carte">Écran vitrine (TV)</h2>
+        <p className="text-sm text-gray-600">
+          À ouvrir en plein écran sur une TV en salle : roue et lots du jour, derniers gagnants (prénoms seuls), plats photographiés du menu, QR pour jouer. Défilement et mise à jour automatiques, aucun clic.
+        </p>
+        <p className="break-all rounded-xl bg-gray-50 px-3 py-2 font-mono text-sm text-gray-800">{urlAbsolue('vitrine', brouillon.id)}</p>
+        <a href={urlAbsolue('vitrine', brouillon.id)} target="_blank" rel="noreferrer" className="bouton-secondaire w-full">
+          Ouvrir l’écran vitrine
+        </a>
+      </section>
       </div>
 
       <div id="reglages-donnees" role="tabpanel" aria-labelledby="onglet-donnees" hidden={onglet !== 'donnees'} className="space-y-6">

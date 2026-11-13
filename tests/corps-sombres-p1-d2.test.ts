@@ -21,7 +21,7 @@ const theme = lire('src/theme.ts')
 
 describe('P1-D2 : périmètre — jouer / carte / menu sombres, roulette et caisse claires', () => {
   test('App.tsx : exactement ces pages (jouer, carte, menu + accueil et commande, Expérience 10/10), branchées dans la branche publique', () => {
-    assert.match(app, /const PAGES_CLIENT_SOMBRES: Page\[\] = \['jouer', 'carte', 'menu', 'bienvenue', 'commande'\]/)
+    assert.match(app, /const PAGES_CLIENT_SOMBRES: Page\[\] = \['jouer', 'carte', 'menu', 'bienvenue', 'commande', 'vitrine'\]/)
     // La bascule est sur <main>, autour de la frontière d'erreur : la vue d'erreur de
     // chargement (import différé en échec) reste sombre, elle aussi.
     assert.match(app, /<main className=\{PAGES_CLIENT_SOMBRES\.includes\(page\) \? 'page-client' : 'min-h-dvh'\}>/)
