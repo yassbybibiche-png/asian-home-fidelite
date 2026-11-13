@@ -21,6 +21,7 @@ import type { ModeAccesRoue, PlageOuverture, TypeLot } from '../types'
 import { INSTANTS_JOUR_MAX, PLAGES_MAX, plagesOuverture, problemePlages } from '../lib/instants'
 import { lotsDuCreneau, problemeCreneaux } from '../lib/creneaux'
 import { CaseHeuresCreuses, CreneauxCreux } from '../components/HeuresCreuses'
+import { ReglagesCommande } from '../components/ReglagesCommande'
 
 /** Accès à la roue (R6) : les deux modes du serveur, dans l'ordre affiché. */
 const MODES_ACCES: { valeur: ModeAccesRoue; libelle: string; aide: string }[] = [
@@ -346,6 +347,8 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
           )}
         </div>
       </fieldset>
+      {/* Expérience 10/10 : section à part, enregistrée par son propre bouton (le formulaire n'envoie pas `commande`). */}
+      <ReglagesCommande />
       </div>
 
       <div id="reglages-fidelite" role="tabpanel" aria-labelledby="onglet-fidelite" hidden={onglet !== 'fidelite'} className="space-y-6">
