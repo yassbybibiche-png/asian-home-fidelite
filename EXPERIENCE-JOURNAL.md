@@ -248,3 +248,87 @@ site comme « très animé » ; c'est sa référence d'ambition, pas une mesure.
     **arrêt de la boucle après le cycle 2**, conformément au master prompt.
 
 ---
+
+---
+
+# Cycle 3 — Animations « niveau Ciao », descriptifs complets, activation (13/11, soir)
+
+Déclencheur : retour de l'utilisateur sur le staging — « Je ne retrouve pas les animations de Ciao Kombucha du
+tout — active-moi la commande et remplis tous les descriptifs correctement, je veux que tout soit bien animé. »
+Branche `experience/cycle3-animations-activation` (base `autonome/integration`, 1666/1666 au départ). Production
+intouchée pendant les lots 1 à 3 ; le lot 4 (déploiement + activation production) fait l'objet d'une autorisation
+explicite séparée, reçue le 13/11 à 20:47, et d'une section dédiée ci-dessous.
+
+## Lot 1 — Passe animations sur les surfaces Découverte (#/bienvenue, #/menu)
+
+Commit 935e774. Périmètre strict : Bienvenue.tsx, MenuPublic.tsx, src/index.css, nouveaux modules
+`src/lib/parallaxe.ts`, `src/lib/bandeau.ts`, `src/components/BandeauDefilant.tsx` (importés uniquement par les
+deux pages différées) et `tests/experience-cycle3.test.ts` (+15 tests, **aucun test existant adapté**). Commande,
+Cuisine, Jouer et écrans commerçant : inchangés.
+
+Ajouts : deux bandeaux défilants continus sur l'accueil (plats signatures, 36 s linéaire, piste dupliquée sans
+couture, pause au survol ; familles de la carte avant la section finale, sens inverse) et un sur le menu (noms des
+plats photographiés, avant le rail) ; deux pastilles photo flottantes aux coins du héros (lévitation ±8 px, 6 s et
+7,5 s) ; ken burns 16 s (scale 1 → 1,07) sur les photos « moment » et les en-têtes de catégorie ; parallaxe léger
+(±28 px, force 0,12, rAF + écouteur passif, cadres avec marge) sur le héros et les en-têtes photo ; titres
+« moment » qui glissent en scène avec leur révélation ; cartes plats révélées en cascade (60 → 240 ms selon le
+rang, en CSS `:nth-child` pour ne pas casser la forme du `<li>` épinglée par les tests) ; micro-interactions
+(onglets `active:scale-95`, carte plat `active:scale-[0.99]`, boutons de l'accueil enfoncés à 0,96 via la classe
+locale `presse`). Mouvement réduit : tout est coupé (bloc `prefers-reduced-motion` étendu, parallaxe inactif) —
+vérifié au navigateur : 0 animation sur l'accueil en `reduce`.
+
+**Preuves (coordinateur, même protocole que le cycle 1 — Pixel 7 simulé, Slow 4G + CPU ×4, 2 passes, même
+session)** : mesures labo avant → après. Menu : FCP 696/672 → 692/692 ms ; LCP 2428/2396 → 2440/2368 ms ; CLS 0
+des deux côtés. Accueil : FCP 668/668 → 720/716 ms (+~50 ms : les deux vignettes du héros et le bandeau entrent
+dans le premier écran) ; LCP 1864/1884 → 1920/1932 ms (≤ 2,5 s). Page Commande (témoin non touché) : stable à
+la mesure près. Bundle initial : 484 018 → **484 017 o** (plafond 484 422) — tout le nouveau JS vit dans les
+chunks différés. Captures avant/après (même script, animations activées) : animations Web Animations en cours
+7 → 14 sur l'accueil (ajouts : flottement ×2, bandeau-defilement ×2, ken-burns ×3), 16 → 27 sur le menu ; rail
+photos toujours à +56 px/2 s ; largeur document 412/412 partout (aucun débordement). Critique du coordinateur :
+diff relu ligne à ligne ; 3 mutations (borne du parallaxe retirée, `.bandeau-piste` hors du bloc mouvement
+réduit, durée du bandeau 36 s → 10 s) **toutes détectées** par les nouveaux tests, fichiers restaurés. Points
+faibles assumés : le bandeau du menu se fond dans le fond nuit (il se lit par sa typographie) ; pastilles du
+héros non capturées sur écran de moins de 600 px de haut ; fluidité (images/seconde) toujours non mesurée dans
+cet environnement ; Playwright juge les en-têtes animés « instables » pour ses clics (effet d'outil, pas
+d'utilisateur — la suite E2E reste 12/12).
+
+## Lot 2 — Carte officielle + 81 descriptifs (staging)
+
+Avant : le menu **enregistré** du commerce Asian Home de staging comptait 81 plats mais 32 descriptions
+seulement (le public affichait le repli). Payload construit depuis `menuReelAsianHome()` (16 catégories,
+81 plats) + `node_modules/.cache/cycle3/descriptions.json` : un texte par plat, ≤ 300 caractères (limite de
+`validerMenu`), rédigé **uniquement** à partir du nom du plat et de la composition standard qu'il désigne —
+aucun ingrédient ajouté au-delà du nom, aucune affirmation d'allergène, aucun nom ni prix touché (contrôle
+automatisé avant envoi : 81/81 présents, 0 texte > 300 car.). Le modèle de données n'a **pas** de champ de
+description EN (grep `descriptionEn` : 0 occurrence dans src/ et server/) → français seulement. Les textes déjà
+riches de la carte (Dynamite, Poke Bowl, Love Bao, spécialités…) sont repris tels quels ; les talons (« 4
+pièces. », « Fait maison. », « Cru ou épicé. ») sont remplacés par des descriptions complètes.
+
+**Incident, rapporté tel quel** : les deux premiers PUT ont dépassé les délais clients (300 s en fetch, 600 s en
+curl) sans aboutir — vérifié par GET après chaque échec (toujours 32 descriptions, aucune écriture partielle).
+Bissection : le même payload complet est accepté en 1,3 s par un commerce jetable créé pour le diagnostic
+(« Probe Cycle3 », `c-mwfe1fnk-uf6q`, toujours présent sur le staging, commande inactive) ; PATCH Asian Home :
+200 en 2,0 s ; PUT du menu alors enregistré (contenu inchangé) : 200 en 0,9 s. Le PUT réel a ensuite réussi en
+moins de 3 s. Cause exacte non établie — l'hypothèse la plus cohérente est un état transitoire de l'instance
+fraîchement redéployée, la première requête étant restée bloquée côté serveur (la création du commerce probe,
+concurrente, a elle-même pris 55,6 s avant de redevenir instantanée). **Vérification finale : GET public —
+81 plats, 81/81 descriptions non vides, 0 dérive nom/prix par rapport à la carte officielle.**
+
+## Lot 3 — Activation de la commande (staging) et parcours complet réel
+
+PATCH commerçant : `commande.active = true`, tables « Table 1 » à « Table 8 » créées, jetons générés par le
+serveur (conservés dans `node_modules/.cache/cycle3/tables-staging.json`). Fiche publique : `commandeActive =
+true` ; résolution publique du jeton de la Table 3 : 200 `{ table: "Table 3" }`.
+
+Parcours de bout en bout **sur le staging déployé** (API, mêmes appels que l'écran cuisine et la page de
+commande) : POST commande sur la Table 3 (1× Pad Thaï avec instruction « Peu épicé, sans arachide. » + 2× Bubble
+Tea, instruction générale « Commande de démonstration (cycle 3). ») → **201**, commande
+`6fe3713f-1681-44f8-8cf9-77f1ed4137bd`, total **2 390 centimes** (13,90 € + 2 × 5,00 €, recalculé par le
+serveur depuis le menu enregistré). Renvoi de la même clé d'idempotence → `doublon: true`, même identifiant
+(aucune commande en double). Liste cuisine (PIN commerçant) : la commande est visible, statut `recue`,
+instructions présentes. Transitions commerçant `acceptee` → `en_preparation` → `servie` : 200 à chaque fois, et
+le suivi client (secret de commande) reflète chaque statut dans la foulée. Aucune commande créée ailleurs que
+sur le staging ; le staging reste en état de démo prête (une commande de démonstration servie, visible en
+cuisine du jour).
+
+---
