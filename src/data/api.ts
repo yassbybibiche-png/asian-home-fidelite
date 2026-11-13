@@ -1,11 +1,12 @@
 // Client HTTP de l'API /api/v1 (server/). Aucune règle métier ici : le serveur décide de tout
 // (tampons, récompense, tirage). `fetch` est injectable pour les tests (aucun vrai serveur dans `npm test`).
-import type { Avis, Client, Commerce, CommerceCaisse, CommercePublic, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce, TypeLot } from '../types'
+import type { Avis, Client, Commande, Commerce, CommerceCaisse, CommercePublic, CompteurEvenement, EntreeJournal, EnvoiRelance, MembreEquipe, Menu, MessageClient, ModeleRelance, Tirage, TypeCommerce, TypeLot } from '../types'
 import type { StatutGain, StatutJeu } from '../lib/roulette'
 import type { Cible } from '../lib/messages'
 import type { ClientAPurger } from '../lib/rgpd'
 import type { GainEnCours, LotHistorique } from '../lib/carte'
 import type { DonneesReglement } from '../lib/reglement'
+import type { DemandeLigne } from '../lib/commande'
 
 export const MESSAGE_HORS_LIGNE = 'Serveur injoignable — vérifiez la connexion.'
 /** Le délai de la requête (`delaiMs`) a expiré : le serveur répond, mais trop lentement (pas une panne réseau). */
@@ -222,7 +223,23 @@ export type ChampsReglages = Partial<
     | 'plagesOuverture'
     | 'creneauxCreux'
   >
-> & { testsAB?: { accroche?: { actif: boolean } } }
+> & {
+  testsAB?: { accroche?: { actif: boolean } }
+  /** Commande à table : le jeton d'une table existante est renvoyé tel quel, une table sans jeton en reçoit un du serveur. */
+  commande?: { active: boolean; tables: { nom: string; jeton?: string }[] }
+}
+
+/** Commande à table vue par le client (Expérience 10/10) : jamais de secret dans une réponse du serveur. */
+export type CommandeClient = Omit<Commande, 'secret'>
+
+/** Panier envoyé (lot 1b) : `cleIdempotence` et `secret` tirés par le navigateur AVANT le premier envoi. */
+export interface DemandeCommande {
+  jetonTable: string
+  lignes: DemandeLigne[]
+  instructions?: string
+  cleIdempotence: string
+  secret: string
+}
 
 /**
  * `VITE_API_URL` → base de l'API. Absente ou vide → null (mode local, localStorage).
@@ -289,11 +306,13 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
   async function requete(
     methode: string,
     chemin: string,
-    options: { acces?: AccesCaisse | null; corps?: unknown; fichier?: Blob; texte?: boolean; binaire?: boolean; delaiMs?: number; jetonClient?: string | null } = {},
+    options: { acces?: AccesCaisse | null; corps?: unknown; fichier?: Blob; texte?: boolean; binaire?: boolean; delaiMs?: number; jetonClient?: string | null; secret?: string } = {},
   ) {
     const entetes: Record<string, string> = { ...entetesAcces(options.acces) }
     // Jeton client de la carte (P0-S7) : prouve que ce téléphone est celui du titulaire.
     if (options.jetonClient) entetes.Authorization = `Bearer ${options.jetonClient}`
+    // Secret de suivi d'une commande à table : en en-tête, jamais dans l'URL (journaux d'hébergeur).
+    if (options.secret) entetes['X-Secret-Commande'] = options.secret
     if (options.corps !== undefined) entetes['Content-Type'] = 'application/json'
     // Fichier brut (logo) : envoyé tel quel ; le serveur lit le format dans les octets, pas dans cet en-tête.
     if (options.fichier) entetes['Content-Type'] = options.fichier.type || 'application/octet-stream'
@@ -531,6 +550,13 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     menu: (commerceId: string) => requete('GET', `/commerces/${enc(commerceId)}/menu`) as Promise<{ menu: Menu; commerce: CommercePublic }>,
     majMenu: async (commerceId: string, acces: Acces, menu: Pick<Menu, 'categories'>) =>
       ((await requete('PUT', `/commerces/${enc(commerceId)}/menu`, { acces, corps: menu })) as { menu: Menu }).menu,
+    // ---- Commande à table (Expérience 10/10), public depuis le QR de la table ----
+    /** Nom de la table d'un jeton de QR : 404 = QR périmé, 409 = module désactivé. */
+    tableCommande: (commerceId: string, jeton: string) => requete('GET', `/commerces/${enc(commerceId)}/tables/${enc(jeton)}`) as Promise<{ table: string }>,
+    /** 201 = créée ; 200 `doublon` = même clé déjà reçue (réponse perdue puis nouvel essai) : même commande. */
+    commander: (commerceId: string, demande: DemandeCommande) => requete('POST', `/commerces/${enc(commerceId)}/commandes`, { corps: demande }) as Promise<{ commande: CommandeClient; doublon?: true }>,
+    suiviCommande: async (commerceId: string, commandeId: string, secret: string) =>
+      ((await requete('GET', `/commerces/${enc(commerceId)}/commandes/${enc(commandeId)}`, { secret })) as { commande: CommandeClient }).commande,
     /** Public : le client marque ses messages comme lus (P0-S7 : avec son jeton). */
     marquerLus: (clientId: string, jeton?: string | null) => requete('POST', `/cartes/${enc(clientId)}/lus`, { jetonClient: jeton }),
 

@@ -852,3 +852,139 @@ h3 {
 .page-client [data-resultat='gain'] {
   background-image: linear-gradient(to bottom, color-mix(in srgb, var(--color-magenta-500) 14%, transparent), var(--color-nuit-900));
 }
+
+/* =====================================================================================
+ * Expérience 10/10 (lot 2) : accueil #/bienvenue, menu v2 (mode Découverte), commande à table.
+ * Animations en opacité / transformation seulement (aucune dimension animée, sauf le dépliage d'une fiche
+ * de plat, ouvert par le client lui-même) ; toutes coupées si l'appareil demande un mouvement réduit.
+ * ===================================================================================== */
+
+/* Titre façon logo, en blanc : sur une photo voilée de nuit (en-têtes « moment », accueil). */
+.titre-logo {
+  font-family: var(--font-titre);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+
+/* Révélation au défilement (src/lib/revelation.ts) : seuls les éléments encore sous l'écran sont masqués. */
+.revelation-attente {
+  opacity: 0;
+  transform: translateY(18px);
+}
+.revelation-faite {
+  transition:
+    opacity 0.6s ease-out,
+    transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* Accueil : apparitions en cascade (fondu + légère montée), décalées. */
+@keyframes cascade {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.cascade {
+  animation: cascade 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.cascade-2 {
+  animation-delay: 0.15s;
+}
+.cascade-3 {
+  animation-delay: 0.3s;
+}
+.cascade-4 {
+  animation-delay: 0.45s;
+}
+.cascade-5 {
+  animation-delay: 0.7s;
+}
+
+/* Indicateur de défilement discret (chevron qui descend doucement). */
+@keyframes indicateur-defilement {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translateY(6px);
+    opacity: 1;
+  }
+}
+.indicateur-defilement {
+  animation: indicateur-defilement 2s ease-in-out infinite;
+}
+
+/* Fond ivoire des « moments » alternés de l'accueil (texte nuit, contraste ≈ 17:1). */
+.moment-ivoire {
+  background-color: var(--color-fond);
+  color: var(--color-nuit-950);
+}
+
+/* Menu : chevron de la fiche d'un plat, rotation douce à l'ouverture. */
+.chevron-detail {
+  display: inline-block;
+  transition: transform 0.25s ease;
+}
+[aria-expanded='true'] > .chevron-detail {
+  transform: rotate(180deg);
+}
+
+/* Menu : fiche dépliée qui s'ouvre en hauteur + fondu (rangées de grille 0fr → 1fr), sans saut brutal. */
+@keyframes depliage {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+}
+.depliage {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: depliage 0.3s ease-out both;
+}
+.depliage > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Commande : vue « Imprimer les QR » des tables (Réglages) — seule la planche s'imprime. */
+@media print {
+  body:has([data-impression-qr]) * {
+    visibility: hidden;
+  }
+  [data-impression-qr],
+  [data-impression-qr] * {
+    visibility: visible;
+  }
+  [data-impression-qr] {
+    position: absolute;
+    inset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .revelation-attente {
+    opacity: 1;
+    transform: none;
+  }
+  .cascade,
+  .indicateur-defilement,
+  .depliage {
+    animation: none;
+  }
+  .revelation-faite,
+  .chevron-detail {
+    transition: none;
+  }
+}

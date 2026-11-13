@@ -370,6 +370,13 @@ function EditeurProduit({ produit, onChange }: { produit: ProduitEdite; onChange
           </div>
         </div>
       )}
+      {/* Commande à table (Expérience 10/10) : un plat en rupture reste au menu, sans bouton d'ajout ; le serveur le refuse. */}
+      <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-medium">
+        <span className="zone-case my-0">
+          <input type="checkbox" className="case-a-cocher" checked={!!produit.indisponible} onChange={(e) => maj('indisponible', e.target.checked || undefined)} />
+        </span>
+        Indisponible (rupture) — ne se commande plus en ligne
+      </label>
       <details>
         <summary className="min-h-11 cursor-pointer py-2 font-medium">Allergènes ({produit.allergenes.length})</summary>
         <div className="grid grid-cols-2 gap-1">
