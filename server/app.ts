@@ -4113,6 +4113,18 @@ export async function creerServeur(o: OptionsServeur) {
 
     // ---------- Commande à table (Expérience 10/10, server/commandes.ts) ----------
 
+    if (sous === 'tables' && sousId && !action && m === 'GET') {
+      // PUBLIC (page #/commande, lot 2) : le nom de la table d'un jeton de QR, rien d'autre — ni les autres tables, ni
+      // leurs jetons. Module désactivé : 409 (même message que la commande) ; jeton inconnu (QR d'une table supprimée,
+      // régénéré, ou inventé) : 404.
+      limiterIp(req, 'lecture', limites.lectureParIp)
+      exigerActif(commerce)
+      if (!commerce.commande?.active) throw err(409, 'La commande en ligne n’est pas activée pour ce commerce.')
+      const table = commerce.commande.tables.find((t) => t.jeton === sousId)
+      if (!table) throw err(404, 'Table introuvable : scannez à nouveau le QR code de votre table.')
+      return { json: { table: table.nom } }
+    }
+
     if (sous === 'commandes' && !sousId && m === 'POST') {
       // PUBLIC (QR de la table) : le navigateur n'envoie que le jeton de la table, des ids de produits, des quantités et
       // des noms d'options ; tout le reste (noms, prix, total, statut, dates) est décidé ici depuis le menu en base.
