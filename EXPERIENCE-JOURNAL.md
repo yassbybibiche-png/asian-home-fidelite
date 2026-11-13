@@ -400,3 +400,31 @@ production `69e2143`) ; sauvegarde ciblée avant écriture ; la commande TEST es
 complet est prouvé en production**, 0 commande en attente. Détail : `FIX-409-RAPPORT.md`.
 
 ---
+## 7. Recommandations 1, 3, 4 (13/11 au soir) — instants + heures creuses actifs, jeu par table, écran vitrine
+
+Extension validée par l'utilisateur à 21:09, dans la foulée du FIX-409, déploiement production autorisé.
+Détail complet : `RECOMMANDATIONS-RAPPORT.md`. En résumé :
+
+- **R1** : le règlement généré couvre désormais les instants gagnants et les heures creuses (paragraphes
+  FR/EN conditionnels en section 4, aucune fuite des réglages — 6 tests). Puis activation en production,
+  répétée d'abord sur le staging, avec sauvegarde et diff strict avant/après : lot « Mochi offert »
+  `instantsParJour: 2`, lot « Thé glacé maison offert » `heuresCreuses: true`, créneaux lundi–jeudi
+  15:00–18:00. Probabilités et plafonds (10) inchangés, vérifiés par le diff. Fiche publique un vendredi
+  soir : le lot heures creuses est absent de la roue et `bonusCreux` absent — comportement conçu.
+- **R3** : `#/jouer/<id>/<jetonTable>` — le serveur résout la table depuis le jeton (jamais un nom du
+  client), le tirage porte `table`, pastille « 🍽 table » sur la page de jeu, lien « Jouer et gagner »
+  depuis la page de commande, bouton « Copier le lien du jeu » dans les Réglages, carte « Parties par
+  table (aujourd'hui) » au tableau de bord. 12 tests ; vérifié en réel sur le staging (tirage stocké
+  `table: 'Table 3'`, jeton inconnu ignoré). Bundle initial : 484 379 o, marge tombée à 43 o.
+- **R4** : `#/vitrine/<commerceId>` — TV en salle : vues Roue / Gains / Plats en rotation 12 s, données
+  rechargées toutes les 60 s, QR « Scannez pour jouer » permanent, nouvel endpoint public
+  `GET /commerces/:id/derniers-gains` (8 derniers lots physiques sur 30 jours, `{ prenom, lot }`
+  seulement). 8 tests ; les deux seules adaptations de registres autorisées (pages sombres, pages
+  différées). Bundle ramené à 484 259 o (marge 163 o) par déplacement de classes d'App.tsx vers le CSS.
+  Captures 1920×1080 relues (un QR assombri par le thème sombre a été corrigé). En production,
+  l'endpoint rend déjà les vrais gains (« Thé glacé maison offert », prénoms seuls).
+
+Suite finale : **1710/1710** (114 fichiers). Aucune probabilité, aucune règle, aucun prix touchés ;
+aucun envoi réel ; aucune dépense.
+
+---
