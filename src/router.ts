@@ -26,6 +26,7 @@ export type Page =
   | 'bienvenue'
   | 'commande'
   | 'cuisine'
+  | 'vitrine'
 
 const PAGES: Page[] = [
   'accueil',
@@ -51,14 +52,15 @@ const PAGES: Page[] = [
   'bienvenue',
   'commande',
   'cuisine',
+  'vitrine',
 ]
 
 /**
  * Pages sans en-tête ni navigation commerçant : pages du client final (jeu, carte, menu, désinscription des relances,
- * politique de confidentialité, règlement du jeu, accueil #/bienvenue et commande à table #/commande/<id>/<jetonTable>)
+ * politique de confidentialité, règlement du jeu, accueil #/bienvenue, commande à table #/commande/<id>/<jetonTable>, écran vitrine #/vitrine/<id>)
  * et la caisse (tablette du comptoir, déverrouillée par le code équipe et non par le PIN du gérant).
  */
-export const PAGES_PUBLIQUES: Page[] = ['jouer', 'carte', 'menu', 'caisse', 'desinscription', 'confidentialite', 'reglement', 'bienvenue', 'commande']
+export const PAGES_PUBLIQUES: Page[] = ['jouer', 'carte', 'menu', 'caisse', 'desinscription', 'confidentialite', 'reglement', 'bienvenue', 'commande', 'vitrine']
 
 export interface Route {
   page: Page

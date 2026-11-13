@@ -376,6 +376,8 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     commerce: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}`)) as { commerce: CommercePublic }).commerce,
     /** Règlement du jeu (R4, public) : de quoi générer la page #/reglement/<id> (src/lib/reglement.ts). */
     reglement: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}/reglement`)) as { reglement: DonneesReglement }).reglement,
+    /** Écran vitrine (R4, public) : 8 derniers lots gagnés, prénom et lot seulement. */
+    derniersGains: async (id: string) => ((await requete('GET', `/commerces/${enc(id)}/derniers-gains`)) as { gains: { prenom: string; lot: string }[] }).gains,
     /** Vue complète avec le jeton client de cette carte, vue limitée sans (P0-S7). */
     carte: (clientId: string, jeton?: string | null) => requete('GET', `/cartes/${enc(clientId)}`, { jetonClient: jeton }) as Promise<ReponseCarte>,
     /**

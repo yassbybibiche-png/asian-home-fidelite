@@ -3279,7 +3279,7 @@ export async function creerServeur(o: OptionsServeur) {
     if (ressource !== 'commerces') throw err(404, 'Route inconnue.')
 
     // Lectures publiques d'un commerce (liste, fiche, menu) : par IP, avant toute lecture en base.
-    if (m === 'GET' && (!sous || ((sous === 'menu' || sous === 'reglement') && !sousId))) limiterIp(req, 'lecture', limites.lectureParIp)
+    if (m === 'GET' && (!sous || ((sous === 'menu' || sous === 'reglement' || sous === 'derniers-gains') && !sousId))) limiterIp(req, 'lecture', limites.lectureParIp)
 
     if (!id) {
       if (m === 'GET') return { json: { commerces: await Promise.all((await st.commerces()).map((c) => fichePublique(c))) } }
@@ -3336,6 +3336,30 @@ export async function creerServeur(o: OptionsServeur) {
     if (sous === 'reglement' && !sousId) {
       if (m !== 'GET') throw err(405, 'Méthode non autorisée.')
       return { json: { reglement: donneesReglement(commerce) } }
+    }
+
+    // ---------- Derniers gains (écran vitrine R4) ----------
+    // PUBLIC (page #/vitrine/<id>, écran en salle) : les 8 derniers lots physiques gagnés sur 30 jours, du plus récent
+    // au plus ancien — prénom et libellé du lot SEULEMENT (ni contact, ni code, ni date, ni id). Sans prénom : omis.
+    // Limité par IP comme la fiche (ci-dessus, avant la lecture).
+    if (sous === 'derniers-gains' && !sousId) {
+      if (m !== 'GET') throw err(405, 'Méthode non autorisée.')
+      exigerActif(commerce)
+      const depuis = new Date(maintenant().getTime() - 30 * 86_400_000).toISOString()
+      const prenoms = new Map<string, string>()
+      const gains: { prenom: string; lot: string }[] = []
+      for (const x of await st.tiragesDepuis(id, depuis)) {
+        if (gains.length >= 8) break
+        if (!estGainPhysique(typeTirage(x))) continue
+        // Un client lu une seule fois ; au plus 40 lectures (clients sans prénom) pour borner la requête.
+        if (!prenoms.has(x.clientId)) {
+          if (prenoms.size >= 40) break
+          prenoms.set(x.clientId, (await st.client(id, x.clientId))?.prenom?.trim() ?? '')
+        }
+        const prenom = prenoms.get(x.clientId)
+        if (prenom) gains.push({ prenom, lot: x.lot })
+      }
+      return { json: { gains } }
     }
 
     // ---------- Logo téléversé (P1-B5) ----------
