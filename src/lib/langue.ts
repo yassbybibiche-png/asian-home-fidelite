@@ -375,6 +375,10 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   '★ Plat signature — l’un des best-sellers du restaurant.': '★ Signature dish — one of the restaurant’s best-sellers.',
   'Allergènes : demandez conseil à l’équipe en cas de doute.': 'Allergens: ask the team for advice if in doubt.',
   'Photo du plat : {nom}': 'Photo of the dish: {nom}',
+  // Menu visuel (13/11/2026) : rail « En photos », grandes cartes photo, pastille de la catégorie midi.
+  'En photos': 'In pictures',
+  'Voir le plat : {nom}': 'See the dish: {nom}',
+  '🍱 Menu Midi': '🍱 Lunch menu',
   // Badges déduits (🌶 / 🌱) : libellés fixes traduits, comme les cadres — les noms de plats, eux, ne le sont pas.
   // Les 4 libellés sont enregistrés par src/pages/MenuPublic.tsx (P2-Q1, bundle P2-Q2).
   'à confirmer': 'to confirm',
