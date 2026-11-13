@@ -33,6 +33,8 @@ const IMPORTS = {
   desinscription: () => import('./pages/Desinscription'),
   confidentialite: () => import('./pages/Confidentialite'),
   reglement: () => import('./pages/Reglement'),
+  bienvenue: () => import('./pages/Bienvenue'),
+  commande: () => import('./pages/Commande'),
 } satisfies Partial<Record<Page, () => Promise<{ default: ComponentType }>>>
 
 const TableauDeBord = lazy(IMPORTS.accueil)
@@ -52,8 +54,10 @@ const MenuCarte = lazy(IMPORTS.menuCarte)
 const Desinscription = lazy(IMPORTS.desinscription)
 const Confidentialite = lazy(IMPORTS.confidentialite)
 const Reglement = lazy(IMPORTS.reglement)
+const Bienvenue = lazy(IMPORTS.bienvenue)
+const Commande = lazy(IMPORTS.commande)
 
-const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidentialite', 'reglement']
+const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidentialite', 'reglement', 'bienvenue', 'commande']
 
 /**
  * Pages client à corps sombres (P1-D2, AUDIT.md §6.2/§6.3) : fond noir, surfaces sombres
@@ -61,8 +65,9 @@ const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidenti
  * #/roulette n'en fait PAS partie : c'est une page commerçant (configuration de la roue), elle
  * reste claire — comme la caisse (#/caisse, pourtant publique, car utilisée au comptoir) et les
  * pages de texte (#/desinscription, #/confidentialite, #/reglement, lecture longue sur fond clair).
+ * Expérience 10/10 (lot 2) : l'accueil #/bienvenue et la commande à table #/commande, dans la même DA nocturne.
  */
-const PAGES_CLIENT_SOMBRES: Page[] = ['jouer', 'carte', 'menu']
+const PAGES_CLIENT_SOMBRES: Page[] = ['jouer', 'carte', 'menu', 'bienvenue', 'commande']
 
 /**
  * Une fois l'espace commerçant ouvert, les autres pages du back-office sont téléchargées en arrière-plan (navigateur
@@ -168,6 +173,8 @@ const COMPOSANTS: Record<Page, ComponentType> = {
   desinscription: Desinscription,
   confidentialite: Confidentialite,
   reglement: Reglement,
+  bienvenue: Bienvenue,
+  commande: Commande,
 }
 
 /** Onglet surligné pour les sous-pages (fiche client → Clients, QR vitrine → Roulette). */

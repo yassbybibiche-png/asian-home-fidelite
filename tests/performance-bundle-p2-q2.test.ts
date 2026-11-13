@@ -30,7 +30,7 @@ const INITIAL_AVANT_OCTETS = 601_720
 const PLAFOND_BUNDLE_INITIAL = 484_422
 
 /** Pages du back-office et pages publiques secondaires : chacune dans son propre fichier, hors bundle initial. */
-const PAGES_DIFFEREES = ['TableauDeBord', 'Clients', 'Roulette', 'Avis', 'Reglages', 'Offre', 'Admin', 'Plus', 'FicheClient', 'QrVitrine', 'MenuPublic', 'Equipe', 'Messages', 'MenuCarte', 'Desinscription', 'Confidentialite', 'Reglement']
+const PAGES_DIFFEREES = ['TableauDeBord', 'Clients', 'Roulette', 'Avis', 'Reglages', 'Offre', 'Admin', 'Plus', 'FicheClient', 'QrVitrine', 'MenuPublic', 'Equipe', 'Messages', 'MenuCarte', 'Desinscription', 'Confidentialite', 'Reglement', 'Bienvenue', 'Commande']
 
 // ---------- Source : App.tsx ----------
 

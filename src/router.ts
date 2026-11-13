@@ -23,6 +23,8 @@ export type Page =
   | 'desinscription'
   | 'confidentialite'
   | 'reglement'
+  | 'bienvenue'
+  | 'commande'
 
 const PAGES: Page[] = [
   'accueil',
@@ -45,20 +47,22 @@ const PAGES: Page[] = [
   'desinscription',
   'confidentialite',
   'reglement',
+  'bienvenue',
+  'commande',
 ]
 
 /**
  * Pages sans en-tête ni navigation commerçant : pages du client final (jeu, carte, menu, désinscription des relances,
- * politique de confidentialité, règlement du jeu)
+ * politique de confidentialité, règlement du jeu, accueil #/bienvenue et commande à table #/commande/<id>/<jetonTable>)
  * et la caisse (tablette du comptoir, déverrouillée par le code équipe et non par le PIN du gérant).
  */
-export const PAGES_PUBLIQUES: Page[] = ['jouer', 'carte', 'menu', 'caisse', 'desinscription', 'confidentialite', 'reglement']
+export const PAGES_PUBLIQUES: Page[] = ['jouer', 'carte', 'menu', 'caisse', 'desinscription', 'confidentialite', 'reglement', 'bienvenue', 'commande']
 
 export interface Route {
   page: Page
   /** Identifiant passé dans l'URL (client ou commerce). */
   param?: string
-  /** Second segment (#/desinscription/<clientId>/<jeton>). */
+  /** Second segment (#/desinscription/<clientId>/<jeton>, #/commande/<commerceId>/<jetonTable>). */
   param2?: string
 }
 
