@@ -15,6 +15,9 @@ import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
 import { dependancesNavigateur, preparerRevelations } from '../lib/revelation'
 import { defilerRail } from '../lib/defilementRail'
+import { activerParallaxe } from '../lib/parallaxe'
+import { motsUniques } from '../lib/bandeau'
+import { BandeauDefilant } from '../components/BandeauDefilant'
 
 /** Traductions des badges de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
 enregistrerTraductions({
@@ -141,6 +144,8 @@ export function MenuAffiche({
   useEffect(() => (avecRail && rail.current ? defilerRail(rail.current, prefereMouvementReduit()) : undefined), [avecRail])
   const liste = useRef<HTMLDivElement>(null)
   useEffect(() => (liste.current ? preparerRevelations(liste.current, dependancesNavigateur()) : undefined), [active, recherche, visibles.length])
+  // Parallaxe des photos d'en-tête de catégorie (cycle 3) : les cibles sont relues à chaque image, la liste peut changer.
+  useEffect(() => (liste.current ? activerParallaxe(liste.current, prefereMouvementReduit()) : undefined), [total === 0])
   // L'onglet indiqué reste visible dans la barre (défilement horizontal).
   useEffect(() => {
     nav.current?.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
@@ -220,6 +225,9 @@ export function MenuAffiche({
 
       {bandeauPrix && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">{bandeauPrix}</p>}
 
+      {/* Bandeau défilant décoratif (le rail juste dessous nomme les mêmes plats) : noms des plats photographiés, jamais traduits. */}
+      {avecRail && <BandeauDefilant mots={motsUniques(platsPhoto.map(({ p }) => p.nom))} className="-mx-4" />}
+
       {avecRail && (
         <section aria-label={t('En photos')} className="space-y-2">
           <p className="font-titre text-lg font-bold">{t('En photos')}</p>
@@ -294,11 +302,14 @@ export function MenuAffiche({
                       )}
                     </div>
                     {photo && (
-                      <div className="relative overflow-hidden rounded-3xl shadow-relief" data-revelation>
-                        <picture className="block">
-                          <source srcSet={photo.srcPetit} type="image/webp" />
-                          <img src={photo.src} alt={photo.alt} loading="lazy" className="h-56 w-full object-cover" />
-                        </picture>
+                      <div className="relative h-56 overflow-hidden rounded-3xl shadow-relief" data-revelation>
+                        {/* Parallaxe (±28 px) : la photo déborde de 32 px en haut et en bas du cadre ; zoom lent (ken burns). */}
+                        <div className="cadre-parallaxe ken-burns absolute inset-x-0 -inset-y-8" data-parallaxe>
+                          <picture className="block">
+                            <source srcSet={photo.srcPetit} type="image/webp" />
+                            <img src={photo.src} alt={photo.alt} loading="lazy" className="h-56 w-full object-cover" />
+                          </picture>
+                        </div>
                         <span aria-hidden="true" className="absolute inset-0 bg-linear-to-t from-nuit-950/90 via-nuit-950/25 to-transparent" />
                         <span aria-hidden="true" className="absolute inset-x-5 bottom-4 flex flex-wrap items-end gap-2">
                           <span className="titre-logo text-2xl text-white">{c.nom}</span>
@@ -308,7 +319,7 @@ export function MenuAffiche({
                         </span>
                       </div>
                     )}
-                    <ul className="space-y-2">
+                    <ul className="cartes-echelonnees space-y-2">
                       {c.produits.map((p) => {
                         const detail = ouvert === p.id
                         const signature = estSignature(p.nom)
@@ -331,7 +342,7 @@ export function MenuAffiche({
                             )}
                             <button
                               type="button"
-                              className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left active:bg-gray-50"
+                              className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-transform active:scale-[0.99] active:bg-gray-50"
                               aria-expanded={detail}
                               onClick={() => setOuvert(detail ? null : p.id)}
                             >
@@ -429,7 +440,7 @@ function OngletCategorie({ libelle, choisi, indique, onClick }: { libelle: strin
   return (
     <button
       type="button"
-      className={`puce relative whitespace-nowrap ${indique ? 'after:absolute after:inset-x-4 after:-bottom-0.5 after:h-1 after:rounded-full after:bg-magenta-400' : ''}`}
+      className={`puce relative whitespace-nowrap active:scale-95 ${indique ? 'after:absolute after:inset-x-4 after:-bottom-0.5 after:h-1 after:rounded-full after:bg-magenta-400' : ''}`}
       aria-pressed={choisi}
       aria-current={indique ? 'true' : undefined}
       onClick={onClick}

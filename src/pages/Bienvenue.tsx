@@ -11,6 +11,9 @@ import { dependancesNavigateur, preparerRevelations } from '../lib/revelation'
 import { prefereMouvementReduit } from '../lib/menuClient'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 import { useLangue } from '../components/Langue'
+import { BandeauDefilant } from '../components/BandeauDefilant'
+import { motsBandeauxAccueil } from '../lib/bandeau'
+import { activerParallaxe } from '../lib/parallaxe'
 
 /** Traductions de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
 enregistrerTraductions({
@@ -31,6 +34,8 @@ enregistrerTraductions({
   'Cocktails': 'Cocktails',
   'Cocktails signature : Kohsamui, Tokyo et Piña Colada.': 'Signature cocktails: Kohsamui, Tokyo and Piña Colada.',
   'À bientôt à table.': 'See you soon at the table.',
+  'Plats signatures': 'Signature dishes',
+  'Au menu': 'On the menu',
 })
 
 /**
@@ -98,6 +103,8 @@ function Accueil({ commerce }: { commerce: CommercePublic }) {
     : []
   const page = useRef<HTMLDivElement>(null)
   useEffect(() => (page.current ? preparerRevelations(page.current, dependancesNavigateur()) : undefined), [])
+  useEffect(() => (page.current ? activerParallaxe(page.current, prefereMouvementReduit()) : undefined), [])
+  const bandeaux = motsBandeauxAccueil(asianHome)
 
   return (
     <div ref={page}>
@@ -114,7 +121,7 @@ function Accueil({ commerce }: { commerce: CommercePublic }) {
           {/* Phrase factuelle : le type de cuisine quand la donnée existe (celle du menu d'Asian Home), sinon rien. */}
           {asianHome && <p className="cascade cascade-3 mt-3 text-base text-white/85">{t('Cuisine asiatique halal · Thaï, Japon, Vietnam, Chine')}</p>}
           <div className="cascade cascade-4 mt-8">
-            <Actions commerce={commerce} />
+            <Actions commerce={commerce} presse />
           </div>
           {moments.length > 0 && (
             <button
@@ -129,7 +136,16 @@ function Accueil({ commerce }: { commerce: CommercePublic }) {
             </button>
           )}
         </div>
+        {/* Pastilles décoratives qui lévitent aux coins hauts (photos du menu, Asian Home seulement). */}
+        {asianHome && (
+          <>
+            <img src={VISUELS.menuLocLacVignette} alt="" aria-hidden="true" className="flottant pointer-events-none absolute top-6 left-4 h-20 w-20 -rotate-6 rounded-2xl object-cover shadow-relief ring-2 ring-white/25" />
+            <img src={VISUELS.menuMangoStickyRiceVignette} alt="" aria-hidden="true" className="flottant flottant-lent pointer-events-none absolute top-14 right-4 h-16 w-16 rotate-6 rounded-2xl object-cover shadow-relief ring-2 ring-white/25" />
+          </>
+        )}
       </section>
+
+      <BandeauDefilant mots={bandeaux.signatures} libelle={t('Plats signatures')} />
 
       {moments.length > 0 && (
         <div id="moments">
@@ -140,7 +156,7 @@ function Accueil({ commerce }: { commerce: CommercePublic }) {
                 <h2 id={`moment-${m.id}`} className="titre-logo text-5xl">
                   {m.titre}
                 </h2>
-                <picture className="mt-6 block overflow-hidden rounded-3xl shadow-relief">
+                <picture className="ken-burns mt-6 block overflow-hidden rounded-3xl shadow-relief">
                   {m.petit && <source srcSet={m.petit} type="image/webp" />}
                   <img src={m.src} alt={m.alt} loading="lazy" className="h-80 w-full object-cover" />
                 </picture>
@@ -148,13 +164,14 @@ function Accueil({ commerce }: { commerce: CommercePublic }) {
               </div>
             </section>
           ))}
+          <BandeauDefilant mots={bandeaux.categories} libelle={t('Au menu')} className="bandeau-inverse" />
           <section className="hero-sombre px-6 py-14 text-center" aria-labelledby="bienvenue-fin">
             <div className="mx-auto max-w-md" data-revelation>
               <h2 id="bienvenue-fin" className="titre-magenta text-2xl">
                 {t('À bientôt à table.')}
               </h2>
               <div className="mt-6">
-                <Actions commerce={commerce} />
+                <Actions commerce={commerce} presse />
               </div>
             </div>
           </section>
@@ -169,11 +186,14 @@ function Accueil({ commerce }: { commerce: CommercePublic }) {
   )
 }
 
-/** Photo plein cadre (décorative : le titre dit où l'on est) sous un voile nuit dégradé, plus dense en bas. */
+/**
+ * Photo plein cadre (décorative : le titre dit où l'on est) sous un voile nuit dégradé, plus dense en bas. Parallaxe :
+ * l'image fait 115 % de la hauteur du héros, centrée, pour ne jamais montrer de bord en se décalant (±28 px au plus).
+ */
 function FondHeros({ photo }: { photo: string }) {
   return (
     <>
-      {photo && <img src={photo} alt="" fetchPriority="high" className="absolute inset-0 h-full w-full object-cover" />}
+      {photo && <img src={photo} alt="" fetchPriority="high" className="absolute inset-x-0 -top-[7.5%] h-[115%] w-full object-cover" data-parallaxe />}
       <span aria-hidden="true" className="absolute inset-0 bg-linear-to-b from-nuit-950/35 via-nuit-950/60 to-nuit-950" />
     </>
   )
@@ -182,19 +202,22 @@ function FondHeros({ photo }: { photo: string }) {
 /**
  * « Découvrir la carte » toujours ; « Commander à table » seulement si le module est activé (fiche publique) — sans
  * QR de table, il n'ouvre qu'une note (aucune commande sans table) ; « Jouer et gagner » : la roue existante.
+ * `presse` : retour tactile au toucher (classe locale, accueil seulement).
  */
-export function Actions({ commerce }: { commerce: Pick<CommercePublic, 'id' | 'commandeActive'> }) {
+export function Actions({ commerce, presse = false }: { commerce: Pick<CommercePublic, 'id' | 'commandeActive'>; presse?: boolean }) {
   const { t } = useLangue()
+  // Retour tactile (léger enfoncement) propre à l'accueil : les classes globales .bouton restent inchangées.
+  const p = presse ? ' presse' : ''
   const [note, setNote] = useState(false)
   const id = encodeURIComponent(commerce.id)
   return (
     <div className="grid gap-3">
-      <a href={`#/menu/${id}`} className="bouton w-full text-lg">
+      <a href={`#/menu/${id}`} className={`bouton w-full text-lg${p}`}>
         {t('Découvrir la carte')}
       </a>
       {commerce.commandeActive && (
         <>
-          <button type="button" className="bouton-secondaire w-full" aria-expanded={note} onClick={() => setNote(!note)}>
+          <button type="button" className={`bouton-secondaire w-full${p}`} aria-expanded={note} onClick={() => setNote(!note)}>
             {t('Commander à table')}
           </button>
           {note && (
@@ -204,7 +227,7 @@ export function Actions({ commerce }: { commerce: Pick<CommercePublic, 'id' | 'c
           )}
         </>
       )}
-      <a href={`#/jouer/${id}`} className="bouton-secondaire w-full">
+      <a href={`#/jouer/${id}`} className={`bouton-secondaire w-full${p}`}>
         {t('Jouer et gagner')}
       </a>
     </div>

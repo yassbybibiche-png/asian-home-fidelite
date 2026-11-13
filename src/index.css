@@ -958,6 +958,116 @@ h3 {
   overflow: hidden;
 }
 
+/* =====================================================================================
+ * Expérience cycle 3 (lot 1) : mouvement « niveau Ciao » sur les surfaces Découverte (#/bienvenue, #/menu) seulement.
+ * Transform / opacité uniquement (CLS nul) ; tout est coupé en mouvement réduit (bloc en fin de fichier).
+ * ===================================================================================== */
+
+/* Bandeau défilant (src/components/BandeauDefilant.tsx) : deux copies identiques, la piste glisse de -50 %. */
+@keyframes bandeau-defilement {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.bandeau-piste {
+  display: flex;
+  width: max-content;
+  animation: bandeau-defilement 36s linear infinite;
+}
+.bandeau-inverse .bandeau-piste {
+  animation-direction: reverse;
+}
+.bandeau-defilant:hover .bandeau-piste,
+.bandeau-defilant:focus-within .bandeau-piste {
+  animation-play-state: paused;
+}
+.bandeau-moitie {
+  display: flex;
+  flex-shrink: 0;
+}
+/* Marge à droite de chaque mot (pas de gap) : les deux moitiés ont exactement la même largeur → boucle sans couture. */
+.bandeau-moitie li {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding-right: 1.5rem;
+  white-space: nowrap;
+}
+/* Alternance douce magenta / blanc (magenta clair sur nuit : 5,88:1). */
+.bandeau-moitie li:nth-child(even) {
+  color: var(--color-magenta-300);
+}
+.bandeau-etoile {
+  color: var(--color-magenta-400);
+  font-size: 0.75em;
+}
+
+/* Pastilles photo du héros de l'accueil : lévitation lente (la rotation, propriété `rotate`, reste fixe). */
+@keyframes flottement {
+  from {
+    transform: translateY(-8px);
+  }
+  to {
+    transform: translateY(8px);
+  }
+}
+.flottant {
+  animation: flottement 6s ease-in-out infinite alternate;
+}
+.flottant-lent {
+  animation-duration: 7.5s;
+}
+
+/* Ken burns : zoom très lent dans le cadre (overflow-hidden) des photos « moment ». */
+@keyframes ken-burns {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.07);
+  }
+}
+.ken-burns img {
+  animation: ken-burns 16s ease-in-out infinite alternate;
+}
+/* Cadre de parallaxe du menu : la photo remplit le calque qui déborde de 32 px en haut et en bas. */
+.cadre-parallaxe picture,
+.cadre-parallaxe img {
+  height: 100%;
+}
+
+/* Les titres « moment » entrent en scène avec leur bloc révélé (glissé depuis la gauche, juste après le bloc). */
+.revelation-attente .titre-logo {
+  opacity: 0;
+  transform: translateX(-28px);
+}
+.revelation-faite .titre-logo {
+  transition:
+    opacity 0.7s ease-out 0.15s,
+    transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) 0.15s;
+}
+/* Cartes plats révélées en cascade selon leur rang dans la catégorie (60 ms par carte, plafond 240 ms). */
+.cartes-echelonnees > li.revelation-faite:nth-child(2) {
+  transition-delay: 60ms;
+}
+.cartes-echelonnees > li.revelation-faite:nth-child(3) {
+  transition-delay: 120ms;
+}
+.cartes-echelonnees > li.revelation-faite:nth-child(4) {
+  transition-delay: 180ms;
+}
+.cartes-echelonnees > li.revelation-faite:nth-child(n + 5) {
+  transition-delay: 240ms;
+}
+
+/* Boutons de l'accueil : enfoncement plus marqué que celui des .bouton globaux (leur transition couvre `scale`). */
+.presse:active {
+  scale: 0.96;
+}
+
 /* Commande : vue « Imprimer les QR » des tables (Réglages) — seule la planche s'imprime. */
 @media print {
   body:has([data-impression-qr]) * {
@@ -974,17 +1084,23 @@ h3 {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .revelation-attente {
+  .revelation-attente,
+  .revelation-attente .titre-logo {
     opacity: 1;
     transform: none;
   }
   .cascade,
   .indicateur-defilement,
-  .depliage {
+  .depliage,
+  .bandeau-piste,
+  .flottant,
+  .ken-burns img {
     animation: none;
   }
   .revelation-faite,
-  .chevron-detail {
+  .revelation-faite .titre-logo,
+  .chevron-detail,
+  .presse {
     transition: none;
   }
 }
