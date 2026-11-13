@@ -1,4 +1,6 @@
-import type { Avis, Client } from '../types'
+import type { Avis, Client, Tirage } from '../types'
+// Bundle initial au plafond (P2-Q2) : `memeJourParis` est déjà dans le bundle initial (comparateur jour de Paris).
+import { memeJourParis } from './points.ts'
 
 const JOUR = 24 * 60 * 60 * 1000
 export const JOURS_INACTIVITE = 30
@@ -65,6 +67,18 @@ export function calculerChiffresCartes(clients: Client[], maintenant = new Date(
       .slice(0, 5)
       .map((c) => ({ id: c.id, prenom: c.prenom, passages: c.visites.length, points: c.points ?? 0 })),
   }
+}
+
+/**
+ * Parties par table (R3) : tirages du jour de Paris `jour` (AAAA-MM-JJ) venus d'un QR de table (`table` posé par le
+ * serveur), comptés par table, triés par nombre décroissant puis par nom. Les tirages sans table sont ignorés.
+ */
+export function compterPartiesParTable(tirages: Tirage[], jour: string): [string, number][] {
+  // Midi UTC du jour donné : toujours le même jour à Paris (UTC+1 / UTC+2).
+  const midi = new Date(`${jour}T12:00:00Z`)
+  const n = new Map<string, number>()
+  for (const t of tirages) if (t.table && memeJourParis(new Date(t.date), midi)) n.set(t.table, (n.get(t.table) ?? 0) + 1)
+  return [...n].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr'))
 }
 
 export function noteMoyenne(avis: Avis[]): number | null {

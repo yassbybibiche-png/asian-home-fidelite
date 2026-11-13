@@ -44,6 +44,7 @@ enregistrerTraductions({
   'La commande à table n’est pas disponible pour le moment : adressez-vous au personnel.': 'Ordering at the table is not available right now: please ask the staff.',
   // En-tête, menu, panier.
   'Votre table': 'Your table',
+  'Jouer et gagner': 'Play and win',
   'Ajouter': 'Add',
   'Ajouter : {nom}': 'Add: {nom}',
   'Choisir': 'Choose',
@@ -204,6 +205,10 @@ function CommandeApi({ api, commerceId, jetonTable }: { api: ClientApi; commerce
           <p className="titre-magenta truncate text-lg">{donnees.commerce.nom}</p>
           <p className="surtitre-sombre">{t('Votre table')}</p>
           <h1 className="truncate text-2xl font-bold text-white">{donnees.table}</h1>
+          {/* R3 : la roue depuis la même table — le tirage retiendra la table d'origine (jeton du QR). Un lien simple. */}
+          <a href={`#/jouer/${encodeURIComponent(commerceId)}/${encodeURIComponent(jetonTable)}`} className="mt-1 inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-magenta-300 underline" data-lien-jeu-table>
+            <span aria-hidden>🎡</span> {t('Jouer et gagner')}
+          </a>
         </div>
       </header>
       {vue === 'suivi' && suivi ? (

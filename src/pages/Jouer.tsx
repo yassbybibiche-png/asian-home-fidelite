@@ -142,7 +142,7 @@ function decorRoue(commerce: CommerceJeu, jeu: JeuRoue, fete?: TypeLot) {
 }
 
 /** En-tête + roue, communs aux deux modes. `infos` (R4) : avant le tirage, lots du jour + règles + lien règlement. */
-function Cadre({ commerce, rotation, children, pied, infos, jeu, fete }: { commerce: CommerceJeu; rotation: number; children: ReactNode; pied: ReactNode; infos: boolean; jeu: JeuRoue; fete?: TypeLot }) {
+function Cadre({ commerce, rotation, children, pied, infos, jeu, fete, table }: { commerce: CommerceJeu; rotation: number; children: ReactNode; pied: ReactNode; infos: boolean; jeu: JeuRoue; fete?: TypeLot; table?: string }) {
   const { t } = useLangue()
   // Test A/B « accroche » (P2-Q3, docs/TESTS-AB.md) : variante du jour, la même pour tous les clients de la journée.
   const accroche = accrocheJeu(commerce, jourParis(new Date()))
@@ -157,6 +157,7 @@ function Cadre({ commerce, rotation, children, pied, infos, jeu, fete }: { comme
           <h1 className="titre-magenta mt-3 text-2xl">{commerce.nom}</h1>
           <p className="mt-1 font-semibold text-magenta-300">{t(accroche.modele, accroche.valeurs)}</p>
           {commerce.coordonnees && <p className="mt-1 text-sm text-white/70">{commerce.coordonnees}</p>}
+          {table && <p className="pastille-table">🍽 {table}</p>}
         </header>
 
         <div className="hero-sombre -mx-1 rounded-3xl px-2 py-4 ring-1 ring-magenta-400/30">
@@ -191,7 +192,7 @@ export function InfosJeu({ commerce }: { commerce: CommerceJeu }) {
         {t('À gagner aujourd’hui')}
       </h2>
       {'bonusCreux' in commerce && commerce.bonusCreux && (
-        <p className="inline-block rounded-full bg-green-50 px-3 py-1 text-sm font-semibold text-green-900 ring-1 ring-green-200" data-bonus-creux>
+        <p className="badge-creux" data-bonus-creux>
           <span aria-hidden>⏰</span> {t('Bonus heures creuses actif')}
         </p>
       )}
@@ -582,7 +583,12 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
   // message privé) le porte, via cette API.
   const jetons = useMemo(() => memoireJetons(stockageLocal()), [])
   const joueurActif = useRef<string | null>(null)
-  const api = useMemo(() => avecJetonClient(apiServeur, jetons, () => joueurActif.current), [apiServeur, jetons])
+  // R3 — QR de table (#/jouer/<id>/<jetonTable>) : le tirage porte le jeton, le serveur en déduit la table (ou l'ignore).
+  const { param2: jetonTable } = useRoute()
+  const api = useMemo(() => avecJetonClient(apiServeur, jetons, () => joueurActif.current, jetonTable), [apiServeur, jetons, jetonTable])
+  // Nom de la table, affiché discrètement ; résolution en échec (QR inconnu, commande éteinte) : rien, on joue normalement.
+  const [table, setTable] = useState<string>()
+  useEffect(() => void (jetonTable && apiServeur.tableCommande(commerce.id, jetonTable).then((x) => setTable(x.table), () => {})), [apiServeur, commerce.id, jetonTable])
   const essaisJeton = useRef(new Set<string>())
   // Code de parrainage dans le lien partagé (#/jouer/<id>?parrain=AH-XXXXXX) : attaché à l'inscription.
   const parrain = useMemo(() => /[?&]parrain=([A-Za-z0-9-]+)/.exec(window.location.hash)?.[1], [])
@@ -745,6 +751,7 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
       jeu={jeuRoue}
       fete={etape === 'resultat' && gain ? typeTirage({ lot: gain.lot, typeLot: gain.type }) : undefined}
       infos={etape === 'pret' && jeu?.statut !== 'dejaJoue' && !accesPerdu}
+      table={table}
       pied={
         <>
           {commerce.demo && <BadgeDemo>{t('Démo')}</BadgeDemo>}{' '}

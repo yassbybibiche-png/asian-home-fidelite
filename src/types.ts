@@ -673,6 +673,11 @@ export interface Tirage {
    * n'est parti (refus confirmé, gain expiré entre-temps) ; gardé si l'issue est incertaine (revue Codex 2 R7).
    */
   relanceGainLe?: string
+  /**
+   * Nom de la table d'origine quand le tirage vient du QR de table (R3, #/jouer/<commerce>/<jetonTable>) : posé par le
+   * serveur depuis le jeton de la table, jamais depuis un nom envoyé par le client ; absent sinon.
+   */
+  table?: string
 }
 
 export interface Avis {
