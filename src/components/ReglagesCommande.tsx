@@ -74,6 +74,11 @@ export function ReglagesCommande() {
       <h2 id="commande-table-titre" className="titre-carte">
         Commande à table
       </h2>
+      {/* Lot 5 : la barre « Enregistrer » des Réglages passe par-dessus cette section sans l'enregistrer. */}
+      <p className="text-sm font-semibold text-gray-700" data-aide-enregistrement>
+        Cette section s’enregistre avec le bouton « Enregistrer la commande à table » ci-dessous — la barre d’enregistrement générale ne sauvegarde ni
+        l’activation ni les tables.
+      </p>
       <p className="text-sm text-gray-600">
         Chaque table a son QR code : le client le scanne, choisit ses plats et envoie sa commande en cuisine. Le prix est toujours recalculé par le serveur
         depuis votre menu ; un plat sans prix ou marqué « Indisponible » (Menu) ne se commande pas en ligne. Le paiement reste sur place.
@@ -128,6 +133,7 @@ export function ReglagesCommande() {
         <p className="text-sm text-gray-600">Supprimer une table invalide son QR code. Renommer une table garde le même QR.</p>
       </div>
 
+      {modifie && <p className="text-sm font-semibold text-amber-800">Commande à table modifiée, pas encore enregistrée : utilisez le bouton ci-dessous.</p>}
       <MessageErreur>{probleme ?? (erreur && `Commande à table non enregistrée : ${erreur}`)}</MessageErreur>
       <button type="button" className="bouton w-full" disabled={!!probleme || enCours || (!modifie && !enregistre)} onClick={() => void enregistrer()}>
         {enCours ? 'Enregistrement…' : enregistre && !modifie ? '✓ Commande à table enregistrée' : 'Enregistrer la commande à table'}
