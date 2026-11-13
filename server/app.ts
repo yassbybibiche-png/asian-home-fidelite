@@ -6,7 +6,9 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-import type { Apparence, Avis, Client, Commerce, CommerceCaisse, CommercePublic, CreneauCreux, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, InstantsDuJour, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
+import type { Apparence, Avis, Client, Commande, Commerce, CommerceCaisse, CommercePublic, ConfigCommande, CreneauCreux, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, InstantsDuJour, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TableCommande, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
+import { calculerCommande, estStatutCommande, lireInstructions, STATUTS_COMMANDE } from '../src/lib/commande.ts'
+import { changerStatut, CommandeIntrouvable, commandeDejaCreee, ConflitCommande, creerCommande, lireCommande, listerCommandes, sansSecret, TransitionInvalide } from './commandes.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
@@ -120,6 +122,15 @@ export const LIMITES_PUBLIQUES = {
 }
 export type LimitesPubliques = typeof LIMITES_PUBLIQUES
 const FENETRE_PUBLIQUE_MS = 60_000
+/**
+ * POST /commerces/:id/commandes (commande à table, Expérience 10/10) — par IP et par minute. À part de
+ * LIMITES_PUBLIQUES (dont la liste des clés est épinglée par les tests) ; option `limiteCommandesParIp` en test.
+ */
+export const LIMITE_COMMANDES_PAR_IP = 10
+/** Tables d'un commerce pour la commande à table (`commande.tables`). */
+export const TABLES_COMMANDE_MAX = 50
+/** Clé d'idempotence d'une commande (tirée par le navigateur à chaque panier validé). */
+const FORMAT_CLE_IDEMPOTENCE = /^[\w-]{8,100}$/
 
 /**
  * PIN / codes faux (anti-bruteforce, persistant en base : table `tentatives_auth`). Deux compteurs par échec :
@@ -178,6 +189,8 @@ export interface OptionsServeur {
   graceAnciensIdJusquAu?: string
   /** Seuils des routes publiques, si différents de LIMITES_PUBLIQUES (tests). */
   limitesPubliques?: Partial<LimitesPubliques>
+  /** Seuil de POST /commerces/:id/commandes par IP et par minute, si différent de LIMITE_COMMANDES_PAR_IP (tests). */
+  limiteCommandesParIp?: number
   /** Journal des lectures sensibles (P2-S15) : part des lectures `GET /cartes/:id` et `GET /commerces`
    * journalisées (0–1, défaut 0,1) ; 0 = rien, 1 = tout (tests). Échantillonnage obligatoire (volume).
    * `plafond` = lignes max par minute (défaut 600) : au-delà, les lignes sont comptées puis résumées en une
@@ -207,6 +220,14 @@ class ErreurHttp extends Error {
 }
 
 const err = (statut: number, message: string) => new ErreurHttp(statut, message)
+
+/** Erreurs typées de `server/commandes.ts` → réponse HTTP (conflit 409, transition 400, introuvable 404). */
+function erreurCommande(e: unknown): unknown {
+  if (e instanceof ConflitCommande) return err(409, e.message)
+  if (e instanceof TransitionInvalide) return err(400, e.message)
+  if (e instanceof CommandeIntrouvable) return err(404, e.message)
+  return e
+}
 
 // ---------- PIN ----------
 
@@ -741,7 +762,37 @@ function apparence(v: unknown): Apparence {
   return a
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB', 'modeAccesRoue', 'limiteGainsMois', 'plagesOuverture', 'creneauxCreux']
+/**
+ * Commande à table (Expérience 10/10) : `{ active, tables: { nom, jeton? }[] }`. Noms : espaces retirés, non vides,
+ * 40 caractères au plus, uniques (majuscules ignorées), 50 tables au plus. Jeton : celui d'une table existante est
+ * gardé tel quel (jamais régénéré) ; absent — ou inconnu de ce commerce : un jeton n'est jamais choisi par le
+ * navigateur — un nouveau est tiré ici (aléatoire, 24 caractères URL-safe). Retirer le jeton d'une table la régénère.
+ */
+function configCommande(v: unknown, existant: ConfigCommande | undefined): ConfigCommande {
+  const o = (v ?? {}) as Corps
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) throw err(400, '« commande » doit valoir { active, tables }.')
+  const inconnus = Object.keys(o).filter((k) => k !== 'active' && k !== 'tables')
+  if (inconnus.length) throw err(400, `« commande » : champ inconnu (${inconnus.join(', ')}).`)
+  const active = booleen(o.active, 'commande.active')
+  if (!Array.isArray(o.tables) || o.tables.length > TABLES_COMMANDE_MAX) throw err(400, `« commande.tables » doit être une liste de ${TABLES_COMMANDE_MAX} tables maximum.`)
+  const connus = new Set((existant?.tables ?? []).map((t) => t.jeton))
+  const noms = new Set<string>()
+  const jetons = new Set<string>()
+  const tables = o.tables.map((x: unknown, i): TableCommande => {
+    const t = (x ?? {}) as Corps
+    const nom = texte(t.nom, `table n° ${i + 1}`, 40, { requis: true })
+    const cle = nom.toLocaleLowerCase('fr')
+    if (noms.has(cle)) throw err(400, `Table « ${nom} » en double : chaque table doit avoir un nom différent (les majuscules ne comptent pas).`)
+    noms.add(cle)
+    let jeton = typeof t.jeton === 'string' && connus.has(t.jeton) && !jetons.has(t.jeton) ? t.jeton : ''
+    while (!jeton || jetons.has(jeton)) jeton = randomBytes(18).toString('base64url')
+    jetons.add(jeton)
+    return { nom, jeton }
+  })
+  return { active, tables }
+}
+
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB', 'modeAccesRoue', 'limiteGainsMois', 'plagesOuverture', 'creneauxCreux', 'commande']
 
 /**
  * Tests A/B (P2-Q3) : le navigateur n'envoie que `{ accroche: { actif } }` ; les dates de début et de fin sont posées
@@ -849,6 +900,7 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
     if (p) throw err(400, `« creneauxCreux » : ${p}.`)
     r.creneauxCreux = nettoyerCreneaux(corps.creneauxCreux as CreneauCreux[])
   }
+  if ('commande' in corps) r.commande = configCommande(corps.commande, c.commande)
   if ('conservationMois' in corps) {
     const n = corps.conservationMois
     if (typeof n !== 'number' || !Number.isInteger(n) || n < CONSERVATION_MIN_MOIS || n > CONSERVATION_MAX_MOIS) {
@@ -1102,7 +1154,7 @@ export function lireOrigineCors(valeur: string): string {
 function entetesCors(autorisee: string, origine: string | undefined): Record<string, string> {
   const autorisation = {
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session, X-Commerce-PIN, X-Admin-PIN, X-Equipe-Code',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session, X-Commerce-PIN, X-Admin-PIN, X-Equipe-Code, X-Secret-Commande',
     'Access-Control-Max-Age': '600',
   }
   if (autorisee === '*') return { 'Access-Control-Allow-Origin': '*', ...autorisation }
@@ -4052,6 +4104,83 @@ export async function creerServeur(o: OptionsServeur) {
       }
       await journaliser(id, { type: 'gerant', nom: 'Gérant' }, 'message', `Message déposé dans l’espace client de ${n} client${n > 1 ? 's' : ''} (cible : ${corps.cible})`)
       return { json: { destinataires: n } }
+    }
+
+    // ---------- Commande à table (Expérience 10/10, server/commandes.ts) ----------
+
+    if (sous === 'commandes' && !sousId && m === 'POST') {
+      // PUBLIC (QR de la table) : le navigateur n'envoie que le jeton de la table, des ids de produits, des quantités et
+      // des noms d'options ; tout le reste (noms, prix, total, statut, dates) est décidé ici depuis le menu en base.
+      limiterIp(req, 'commande', o.limiteCommandesParIp ?? LIMITE_COMMANDES_PAR_IP)
+      exigerActif(commerce)
+      const config = commerce.commande
+      if (!config?.active) throw err(409, 'La commande en ligne n’est pas activée pour ce commerce.')
+      const corps = await lireCorps(req)
+      const table = typeof corps.jetonTable === 'string' ? config.tables.find((t) => t.jeton === corps.jetonTable) : undefined
+      if (!table) throw err(404, 'Table introuvable : scannez à nouveau le QR code de votre table.')
+      const cle = corps.cleIdempotence
+      if (typeof cle !== 'string' || !FORMAT_CLE_IDEMPOTENCE.test(cle)) throw err(400, '« cleIdempotence » manquante ou invalide (8 à 100 caractères : lettres, chiffres, - et _).')
+      // Panier déjà reçu (réseau coupé avant la réponse, double appui) : la commande existante, même si le menu a
+      // changé depuis — sans son secret, que le navigateur d'origine a déjà. Le cas simultané est tranché par creerCommande.
+      const nouvelle = async () => {
+        const calcul = calculerCommande(await st.menu(id), corps.lignes)
+        if (!calcul.ok) throw err(400, calcul.message)
+        const instructions = lireInstructions(corps.instructions)
+        if (typeof instructions === 'object') throw err(400, instructions.message)
+        const t = maintenant().toISOString()
+        const neuve: Commande = {
+          id: randomUUID(),
+          commerceId: id,
+          table: table.nom,
+          lignes: calcul.lignes,
+          ...(instructions ? { instructions } : {}),
+          total: calcul.total,
+          statut: 'recue',
+          creeLe: t,
+          majLe: t,
+          secret: randomBytes(24).toString('base64url'),
+        }
+        try {
+          return await creerCommande(st, neuve, cle)
+        } catch (e) {
+          throw erreurCommande(e)
+        }
+      }
+      const deja = await commandeDejaCreee(st, id, cle)
+      const r = deja ? { commande: deja, doublon: true } : await nouvelle()
+      if (r.doublon) return { json: { commande: sansSecret(r.commande), doublon: true } }
+      return { statut: 201, json: { commande: sansSecret(r.commande), secret: r.commande.secret } }
+    }
+
+    if (sous === 'commandes' && sousId && !action && m === 'GET') {
+      // PUBLIC (suivi par le client) : secret de la commande exigé (en-tête X-Secret-Commande ou ?secret=). Commande
+      // absente, d'un autre commerce, secret absent ou faux : le même 404 (aucun oracle d'existence).
+      limiterIp(req, 'lecture', limites.lectureParIp)
+      const secret = enTete(req, 'x-secret-commande') ?? new URL(req.url ?? '/', 'http://localhost').searchParams.get('secret') ?? ''
+      const c = await lireCommande(st, id, sousId)
+      if (!c || !egaux(Buffer.from(secret), Buffer.from(c.secret))) throw err(404, 'Commande introuvable.')
+      return { json: { commande: sansSecret(c) } }
+    }
+
+    if (sous === 'commandes' && !sousId && m === 'GET') {
+      // Commerçant (écran cuisine) : commandes d'un jour à Paris (?jour=AAAA-MM-JJ, défaut aujourd'hui), sans les secrets.
+      await exigerCommercant(req, id)
+      const demande = new URL(req.url ?? '/', 'http://localhost').searchParams.get('jour')
+      if (demande !== null && !/^\d{4}-\d{2}-\d{2}$/.test(demande)) throw err(400, '« jour » doit être une date AAAA-MM-JJ.')
+      const jour = demande ?? jourParis(maintenant())
+      return { json: { jour, commandes: (await listerCommandes(st, id, jour)).map((c) => sansSecret(c)) } }
+    }
+
+    if (sous === 'commandes' && sousId && action === 'statut' && !extra && m === 'POST') {
+      // Commerçant : transition de statut, écrite par comparaison-et-échange (409 si une autre vient de passer).
+      await exigerCommercant(req, id)
+      const corps = await lireCorps(req, 200)
+      if (!estStatutCommande(corps.vers)) throw err(400, `« vers » doit valoir : ${STATUTS_COMMANDE.join(', ')}.`)
+      try {
+        return { json: { commande: sansSecret(await changerStatut(st, id, sousId, corps.vers, maintenant())) } }
+      } catch (e) {
+        throw erreurCommande(e)
+      }
     }
 
     // ---------- Menu digital ----------
