@@ -8,7 +8,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path'
 
 import type { Apparence, Avis, Client, Commande, Commerce, CommerceCaisse, CommercePublic, ConfigCommande, CreneauCreux, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, InstantsDuJour, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TableCommande, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
 import { calculerCommande, estStatutCommande, lireInstructions, STATUTS_COMMANDE } from '../src/lib/commande.ts'
-import { changerStatut, CommandeIntrouvable, commandeDejaCreee, ConflitCommande, creerCommande, lireCommande, listerCommandes, sansSecret, TransitionInvalide } from './commandes.ts'
+import { changerStatut, CommandeIntrouvable, commandeDejaCreee, ConflitCommande, creerCommande, lireCommande, listerCommandes, purgerSiDue, sansSecret, TransitionInvalide } from './commandes.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
@@ -4169,6 +4169,13 @@ export async function creerServeur(o: OptionsServeur) {
       const deja = await commandeDejaCreee(st, id, cle)
       const r = deja ? { commande: deja, doublon: true } : await nouvelle()
       if (r.doublon) return { json: { commande: sansSecret(r.commande), doublon: true } }
+      // Purge des jours anciens (lot 4), au plus une fois par 24 h et par commerce : la commande est déjà écrite, un
+      // échec ici ne la refuse jamais.
+      try {
+        await purgerSiDue(st, id, maintenant())
+      } catch (e) {
+        console.warn(`[commandes] purge des commandes anciennes reportée : ${e instanceof Error ? e.message : e}`)
+      }
       return { statut: 201, json: { commande: sansSecret(r.commande) } }
     }
 

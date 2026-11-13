@@ -1,21 +1,34 @@
 // Commandes à table (Expérience 10/10), rangées dans la table `meta` (aucune migration) :
 // - `commande:<commerceId>:<id>`          → la commande (JSON) ;
 // - `commandes:<commerceId>:<jourParis>`  → index du jour : liste JSON des ids, dans l'ordre d'arrivée ;
-// - `commande-idem:<commerceId>:<clé>`    → id de la commande créée avec cette clé d'idempotence.
+// - `commande-idem:<commerceId>:<clé>`    → id de la commande créée avec cette clé d'idempotence ;
+// - `commandes-purge:<commerceId>:<jour>` → entrée de purge du jour (lot 4) : `{ commandes, idempotences }`, ids et clés
+//   d'idempotence (sans préfixe) à supprimer avec le jour ;
+// - `commandes-purge-faite:<commerceId>`  → date ISO de la dernière purge (une par 24 h, déclenchée à la création).
 // Toute écriture d'une clé existante est conditionnelle (`majMetaSi` : comparaison-et-échange sur la valeur lue) ;
 // une clé neuve est posée par `majMetaSi(cle, undefined, …)` (insertion seulement si absente). Les deux stockages le
 // font en une requête atomique : SQLite `INSERT … ON CONFLICT DO NOTHING` / `UPDATE … WHERE valeur = ?`, Supabase
 // INSERT (clé primaire : le second échoue) / `UPDATE … eq('valeur', attendue)`.
 import type { Commande, StatutCommande } from '../src/types.ts'
 import { jourParis, transitionValide } from '../src/lib/commande.ts'
+import { ajouterJours } from '../src/lib/mesure.ts'
 import type { Stockage } from './stockage.ts'
 
 /** Réessais de l'ajout à l'index du jour quand une autre commande l'a modifié entre la lecture et l'écriture. */
 export const ESSAIS_INDEX = 8
 
+/** Jours de Paris gardés : un jour strictement plus vieux (J-31 et avant) est purgé — commandes, secrets, index. */
+export const CONSERVATION_COMMANDES_JOURS = 30
+/** Intervalle minimal entre deux purges d'un même commerce (déclenchées par la création d'une commande). */
+export const INTERVALLE_PURGE_MS = 24 * 60 * 60 * 1000
+/** Aucune commande avant ce jour (module livré en novembre 2026) : borne de la toute première purge d'un commerce. */
+export const PREMIER_JOUR_COMMANDES = '2026-11-01'
+
 export const cleCommande = (commerceId: string, id: string) => `commande:${commerceId}:${id}`
 export const cleIndexCommandes = (commerceId: string, jour: string) => `commandes:${commerceId}:${jour}`
 export const cleIdempotence = (commerceId: string, cle: string) => `commande-idem:${commerceId}:${cle}`
+export const cleEntreePurge = (commerceId: string, jour: string) => `commandes-purge:${commerceId}:${jour}`
+export const clePurgeFaite = (commerceId: string) => `commandes-purge-faite:${commerceId}`
 
 /** Écriture perdue face à une écriture simultanée (le routeur répond 409 « réessayez »). */
 export class ConflitCommande extends Error {}
@@ -66,42 +79,143 @@ async function ajouterAIndex(st: Stockage, commerceId: string, jour: string, id:
   throw new ConflitCommande('Trop de commandes simultanées : réessayez.')
 }
 
+interface EntreePurge {
+  commandes: string[]
+  idempotences: string[]
+}
+
+function lireEntreePurge(brut: string | undefined): EntreePurge {
+  const v = lireJson<Partial<EntreePurge>>(brut)
+  const chaines = (x: unknown) => (Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string') : [])
+  return { commandes: chaines(v?.commandes), idempotences: chaines(v?.idempotences) }
+}
+
+/** Ajoute l'id et la clé d'idempotence à l'entrée de purge du jour (même patron que l'index : CAS + réessai). */
+async function ajouterAPurge(st: Stockage, commerceId: string, jour: string, id: string, cle: string) {
+  const k = cleEntreePurge(commerceId, jour)
+  for (let i = 0; i < ESSAIS_INDEX; i++) {
+    const lu = await st.meta(k)
+    const e = lireEntreePurge(lu)
+    if (e.commandes.includes(id) && e.idempotences.includes(cle)) return
+    const maj: EntreePurge = {
+      commandes: e.commandes.includes(id) ? e.commandes : [...e.commandes, id],
+      idempotences: e.idempotences.includes(cle) ? e.idempotences : [...e.idempotences, cle],
+    }
+    if (await st.majMetaSi(k, lu, JSON.stringify(maj))) return
+  }
+  throw new ConflitCommande('Trop de commandes simultanées : réessayez.')
+}
+
 /**
- * Crée la commande (`commande.secret` fourni par le navigateur). Clé d'idempotence déjà posée → aucune écriture : la
- * commande existante est rendue avec `doublon: true` (ConflitCommande si elle est encore en cours d'écriture par la
- * première requête). Échec après la pose de la clé → clé et commande retirées (au mieux) : un nouvel essai recrée.
+ * Commande déjà créée avec cette clé d'idempotence (lecture seule). undefined = clé libre, OU clé orpheline : elle
+ * pointe une commande absente (purgée, ou création défaite dont la clé n'a pas pu être retirée) — `creerCommande` la
+ * reprend. Il n'y a pas d'état « clé posée, commande pas encore écrite » : la commande est écrite AVANT la clé.
  */
-/** Commande déjà créée avec cette clé d'idempotence (lecture seule ; undefined = clé libre ou écriture en cours). */
 export async function commandeDejaCreee(st: Stockage, commerceId: string, cle: string): Promise<Commande | undefined> {
   const id = await st.meta(cleIdempotence(commerceId, cle))
   return id ? lireCommande(st, commerceId, id) : undefined
 }
 
+async function supprimerAuMieux(st: Stockage, cles: string[]) {
+  for (const k of cles) {
+    try {
+      await st.supprimerMeta(k)
+    } catch {
+      // Au mieux : l'erreur d'origine est celle qui compte (une commande hors index reste couverte par l'entrée de purge).
+    }
+  }
+}
+
+/**
+ * Crée la commande (`commande.secret` fourni par le navigateur), dans cet ordre : (1) entrée de purge du jour (ids et clé
+ * listés d'avance : tout ce qui sera écrit ensuite est purgeable, même après un échec), (2) la commande, (3) la clé
+ * d'idempotence, (4) l'index du jour. Clé déjà posée vers une commande existante → la commande neuve est retirée et
+ * l'existante rendue avec `doublon: true` ; clé orpheline (commande absente) → reprise par comparaison-et-échange.
+ * Échec après la pose de la clé → clé PUIS commande retirées (au mieux) : un nouvel essai recrée.
+ */
 export async function creerCommande(st: Stockage, commande: Commande, cle: string): Promise<{ commande: Commande; doublon: boolean }> {
   const { commerceId, id } = commande
   const cleIdem = cleIdempotence(commerceId, cle)
-  if (!(await st.majMetaSi(cleIdem, undefined, id))) {
-    const deja = await commandeDejaCreee(st, commerceId, cle)
-    if (!deja) throw new ConflitCommande('Commande en cours d’enregistrement : réessayez dans un instant.')
-    return { commande: deja, doublon: true }
-  }
-  let ecrite = false
+  const cleCmd = cleCommande(commerceId, id)
+  const jour = jourParis(new Date(commande.creeLe))
+  await ajouterAPurge(st, commerceId, jour, id, cle)
+  if (!(await st.majMetaSi(cleCmd, undefined, JSON.stringify(commande)))) throw new ConflitCommande('Identifiant de commande déjà pris : réessayez.')
+  let posee = false
   try {
-    if (!(await st.majMetaSi(cleCommande(commerceId, id), undefined, JSON.stringify(commande)))) throw new ConflitCommande('Identifiant de commande déjà pris : réessayez.')
-    ecrite = true
-    await ajouterAIndex(st, commerceId, jourParis(new Date(commande.creeLe)), id)
-  } catch (e) {
-    // La commande n'est pas dans l'index (invisible en cuisine) : on défait, pour qu'un nouvel essai la recrée.
-    for (const k of ecrite ? [cleCommande(commerceId, id), cleIdem] : [cleIdem]) {
-      try {
-        await st.supprimerMeta(k)
-      } catch {
-        // Au mieux : l'erreur d'origine est celle qui compte.
+    for (let i = 0; i < ESSAIS_INDEX && !posee; i++) {
+      // Insertion d'abord (cas courant : clé neuve) ; sinon on lit à qui elle est.
+      if (await st.majMetaSi(cleIdem, undefined, id)) {
+        posee = true
+        break
       }
+      const lu = await st.meta(cleIdem)
+      if (lu === undefined) continue // retirée entre-temps (création défaite) : on retente l'insertion
+      const deja = await lireCommande(st, commerceId, lu)
+      if (deja) {
+        await supprimerAuMieux(st, [cleCmd])
+        return { commande: deja, doublon: true }
+      }
+      posee = await st.majMetaSi(cleIdem, lu, id) // orpheline : reprise, sauf si une autre requête l'a reprise avant
     }
+    if (!posee) throw new ConflitCommande('Commande en cours d’enregistrement : réessayez dans un instant.')
+    await ajouterAIndex(st, commerceId, jour, id)
+  } catch (e) {
+    // La commande n'est pas dans l'index (invisible en cuisine) : on défait, pour qu'un nouvel essai la recrée. La clé
+    // d'abord : retirée avant la commande, elle ne pointe jamais, même un instant, une commande en train de disparaître.
+    await supprimerAuMieux(st, posee ? [cleIdem, cleCmd] : [cleCmd])
     throw e
   }
   return { commande, doublon: false }
+}
+
+/**
+ * Purge les jours de Paris strictement plus vieux que CONSERVATION_COMMANDES_JOURS (J-31 et avant), de `depuis`
+ * (inclus) à J-31 : clés d'idempotence listées (seulement si elles pointent encore une commande du jour), commandes de
+ * l'index ET de l'entrée de purge, puis l'index et l'entrée eux-mêmes en dernier (purge interrompue = reprise au
+ * prochain passage). Rejouer la purge ne fait rien. Rend le nombre de commandes supprimées.
+ */
+export async function purgerCommandesAnciennes(st: Stockage, commerceId: string, maintenant: Date, depuis = PREMIER_JOUR_COMMANDES): Promise<number> {
+  const dernier = ajouterJours(jourParis(maintenant), -(CONSERVATION_COMMANDES_JOURS + 1))
+  let supprimees = 0
+  for (let jour = depuis; jour <= dernier; jour = ajouterJours(jour, 1)) {
+    const cleIndex = cleIndexCommandes(commerceId, jour)
+    const clePurge = cleEntreePurge(commerceId, jour)
+    const brutIndex = await st.meta(cleIndex)
+    const brutPurge = await st.meta(clePurge)
+    if (brutIndex === undefined && brutPurge === undefined) continue
+    const entree = lireEntreePurge(brutPurge)
+    const ids = [...new Set([...idsIndex(brutIndex), ...entree.commandes])]
+    for (const cle of entree.idempotences) {
+      const k = cleIdempotence(commerceId, cle)
+      const pointe = await st.meta(k)
+      if (pointe !== undefined && ids.includes(pointe)) await st.supprimerMeta(k)
+    }
+    for (const id of ids) {
+      const k = cleCommande(commerceId, id)
+      if ((await st.meta(k)) === undefined) continue
+      await st.supprimerMeta(k)
+      supprimees++
+    }
+    await st.supprimerMeta(cleIndex)
+    await st.supprimerMeta(clePurge)
+  }
+  return supprimees
+}
+
+/**
+ * Purge opportuniste (création d'une commande) : rien si la dernière date de moins de INTERVALLE_PURGE_MS ; sinon
+ * purge depuis le dernier jour couvert (J-31 de la dernière purge, avec une semaine de recouvrement) puis marque.
+ * Rend true si une purge a eu lieu. Les erreurs remontent : l'appelant les avale (une vente n'attend jamais la purge).
+ */
+export async function purgerSiDue(st: Stockage, commerceId: string, maintenant: Date): Promise<boolean> {
+  const cle = clePurgeFaite(commerceId)
+  const derniere = await st.meta(cle)
+  const t = derniere ? Date.parse(derniere) : NaN
+  if (Number.isFinite(t) && maintenant.getTime() - t < INTERVALLE_PURGE_MS) return false
+  const depuis = Number.isFinite(t) ? ajouterJours(jourParis(new Date(t)), -(CONSERVATION_COMMANDES_JOURS + 8)) : PREMIER_JOUR_COMMANDES
+  await purgerCommandesAnciennes(st, commerceId, maintenant, depuis < PREMIER_JOUR_COMMANDES ? PREMIER_JOUR_COMMANDES : depuis)
+  await st.majMeta(cle, maintenant.toISOString())
+  return true
 }
 
 /**
