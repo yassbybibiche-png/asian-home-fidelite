@@ -120,6 +120,7 @@ const CHEMINS: Record<string, string> = {
   equipe: 'M9 11a4 4 0 100-8 4 4 0 000 8zM2 21v-1a6 6 0 0112 0v1M17 11a3 3 0 100-6M22 21v-1a5 5 0 00-4-4.9',
   messages: 'M4 5h16v11H8l-4 4zM8 9h8M8 12h5',
   menuCarte: 'M6 3h12v18H6zM9 7h6M9 11h6M9 15h4',
+  cuisine: 'M3 11h18M5 11v3a5 5 0 005 5h4a5 5 0 005-5v-3M9 4v4M12 3v5M15 4v4',
 }
 
 export function Icone({ nom, className = 'h-6 w-6' }: { nom: string; className?: string }) {

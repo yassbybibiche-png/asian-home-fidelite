@@ -25,6 +25,7 @@ export type Page =
   | 'reglement'
   | 'bienvenue'
   | 'commande'
+  | 'cuisine'
 
 const PAGES: Page[] = [
   'accueil',
@@ -49,6 +50,7 @@ const PAGES: Page[] = [
   'reglement',
   'bienvenue',
   'commande',
+  'cuisine',
 ]
 
 /**

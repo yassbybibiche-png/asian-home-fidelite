@@ -7,6 +7,7 @@ const LIENS: { page: Page; titre: string; aide: string }[] = [
   { page: 'equipe', titre: 'Équipe et caisse', aide: 'Membres, codes à 4 chiffres, lien de la caisse du comptoir' },
   { page: 'messages', titre: 'Messages', aide: 'Messages automatiques et ciblés, texte prêt à copier' },
   { page: 'menuCarte', titre: 'Menu', aide: 'Catégories, produits, prix, photos, allergènes, QR du menu' },
+  { page: 'cuisine', titre: 'Cuisine', aide: 'Commandes à table du jour : accepter, préparer, servir' },
   { page: 'reglages', titre: 'Réglages', aide: 'Récompenses, points, messages auto, apparence de la carte, lots, avis' },
   { page: 'offre', titre: `L’offre ${NOM_APP}`, aide: 'Gratuit · kit de lancement (flyers, étiquettes QR, vitrine)' },
   { page: 'admin', titre: 'Admin', aide: 'Tous les commerces, ajout, activation, réinitialisation de la démo' },

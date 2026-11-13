@@ -35,6 +35,7 @@ const IMPORTS = {
   reglement: () => import('./pages/Reglement'),
   bienvenue: () => import('./pages/Bienvenue'),
   commande: () => import('./pages/Commande'),
+  cuisine: () => import('./pages/Cuisine'),
 } satisfies Partial<Record<Page, () => Promise<{ default: ComponentType }>>>
 
 const TableauDeBord = lazy(IMPORTS.accueil)
@@ -56,6 +57,7 @@ const Confidentialite = lazy(IMPORTS.confidentialite)
 const Reglement = lazy(IMPORTS.reglement)
 const Bienvenue = lazy(IMPORTS.bienvenue)
 const Commande = lazy(IMPORTS.commande)
+const Cuisine = lazy(IMPORTS.cuisine)
 
 const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidentialite', 'reglement', 'bienvenue', 'commande']
 
@@ -136,6 +138,7 @@ const ONGLETS: { page: Page; libelle: string }[] = [
   { page: 'avis', libelle: 'Avis' },
   { page: 'messages', libelle: 'Messages' },
   { page: 'menuCarte', libelle: 'Menu' },
+  { page: 'cuisine', libelle: 'Cuisine' },
   { page: 'equipe', libelle: 'Équipe' },
   { page: 'reglages', libelle: 'Réglages' },
   { page: 'offre', libelle: 'Offre' },
@@ -150,7 +153,7 @@ const ONGLETS_MOBILE: { page: Page; libelle: string }[] = [
   { page: 'avis', libelle: 'Avis' },
   { page: 'plus', libelle: 'Plus' },
 ]
-const PAGES_SOUS_PLUS: Page[] = ['plus', 'reglages', 'offre', 'admin', 'equipe', 'messages', 'menuCarte']
+const PAGES_SOUS_PLUS: Page[] = ['plus', 'reglages', 'offre', 'admin', 'equipe', 'messages', 'menuCarte', 'cuisine']
 
 const COMPOSANTS: Record<Page, ComponentType> = {
   accueil: TableauDeBord,
@@ -175,6 +178,7 @@ const COMPOSANTS: Record<Page, ComponentType> = {
   reglement: Reglement,
   bienvenue: Bienvenue,
   commande: Commande,
+  cuisine: Cuisine,
 }
 
 /** Onglet surligné pour les sous-pages (fiche client → Clients, QR vitrine → Roulette). */

@@ -160,11 +160,10 @@ export function ReglagesCommande() {
       )}
 
       <p className="text-sm text-gray-600">
-        Écran cuisine (commandes reçues, à accepter puis servir) :{' '}
+        Écran cuisine : les commandes du jour, à accepter, préparer puis servir.{' '}
         <a href="#/cuisine" className="font-semibold text-magenta-700 underline">
-          #/cuisine
-        </a>{' '}
-        — il arrive avec la prochaine étape du chantier.
+          Ouvrir l’écran cuisine
+        </a>
       </p>
 
       {impression && <PlancheQr tables={qrs} commerceId={commerce.id} nomCommerce={commerce.nom} onFermer={() => setImpression(false)} />}
