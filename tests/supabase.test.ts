@@ -83,7 +83,8 @@ interface Requete {
 }
 
 /** `sans0003` : base de production AVANT la migration 0003 (tables equipe / journal / menus absentes). `sans0004` à `sans0008` : idem pour 0004 à 0008. `sans0010` : idem pour 0010 (compteurs publics). */
-function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, sans0006 = false, sans0007 = false, sans0008 = false, sans0010 = false } = {}) {
+/** `metaValeurJsonb` : projet ancien où `meta.valeur` est jsonb (et non `text` comme la 0001 actuelle) — PostgREST y convertit le littéral d'un filtre `eq` en jsonb : un texte JSON devient un objet/nombre, jamais égal à la chaîne stockée ; un texte non-JSON est rejeté (22P02) ; seule la forme JSON-encodée de la chaîne égale la valeur stockée (FIX-409). */
+function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, sans0006 = false, sans0007 = false, sans0008 = false, sans0010 = false, metaValeurJsonb = false } = {}) {
   const absentes = new Set([
     ...(sans0003 ? ['equipe', 'journal', 'menus'] : []),
     ...(sans0004 ? ['parrainages', 'demandes_rattrapage'] : []),
@@ -106,6 +107,8 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
   const json = (statut: number, corps?: unknown) =>
     new Response(corps === undefined ? null : JSON.stringify(corps), { status: statut, headers: { 'content-type': 'application/json' } })
   const erreur = (statut: number, code: string, message: string) => json(statut, { code, message, details: null, hint: null })
+  /** Conversion d'un littéral de filtre en jsonb impossible (Postgres : 22P02) — voir `metaValeurJsonb`. */
+  class ErreurCastJsonb extends Error {}
 
   /** Colonne, ou chemin JSONB d'un niveau (`donnees->>code` : texte ; `donnees->remis` : json) ; clé absente = NULL. */
   function valeur(l: Ligne, col: string): unknown {
@@ -139,6 +142,17 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
         continue
       }
       if (!v.startsWith('eq.')) throw new Error(`Opérateur non géré par le faux PostgREST : ${col}=${v}`)
+      if (metaValeurJsonb && table === 'meta' && col === 'valeur') {
+        // Colonne jsonb : le littéral est converti en jsonb avant comparaison (égalité jsonb, pas textuelle).
+        let f: unknown
+        try {
+          f = JSON.parse(v.slice(3))
+        } catch {
+          throw new ErreurCastJsonb()
+        }
+        lignes = lignes.filter((l) => typeof f === 'string' && l.valeur === f)
+        continue
+      }
       lignes = lignes.filter((l) => valeur(l, col) != null && String(valeur(l, col)) === v.slice(3))
     }
     const ordre = params.get('order')
@@ -279,7 +293,13 @@ function fauxPostgrest({ sans0003 = false, sans0004 = false, sans0005 = false, s
       rejets.push(`${table}:echec-${methode}`)
       return erreur(500, 'XX000', 'panne ponctuelle')
     }
-    const reponse = await traiter(methode, table, url.searchParams, entetes, corps)
+    let reponse: Response
+    try {
+      reponse = await traiter(methode, table, url.searchParams, entetes, corps)
+    } catch (e) {
+      if (e instanceof ErreurCastJsonb) reponse = erreur(400, '22P02', 'invalid input syntax for type json')
+      else throw e
+    }
     // Lecture lente : l'instantané est pris tout de suite, la réponse n'arrive que `ms` plus tard (latence réseau).
     if (lenteur?.vise(methode, table, url.searchParams)) await new Promise((ok) => setTimeout(ok, lenteur!.ms))
     return reponse
@@ -2362,5 +2382,86 @@ describe('Supabase : variables d’environnement et secrets', () => {
     assert.match(code, /import \{ cleContact \} from '\.\.\/src\/lib\/fidelite\.ts'/)
     assert.doesNotMatch(code, /tampons|seuilTampons|visites|statutJeu|tirerLot|0033|\\D/)
     assert.doesNotMatch(code, /from 'pg'|postgres:\/\//, 'pas de connexion Postgres directe')
+  })
+})
+
+// ---------- FIX-409 : CAS meta sur un projet où `meta.valeur` est jsonb ----------
+// Production, 13/11/2026 : la commande TEST se crée (INSERT) et se lit, mais chaque transition renvoie 409 —
+// l'UPDATE conditionnel de `majMetaSi` (`eq('valeur', <valeur lue>)`) n'y matche aucune ligne, alors que la
+// jumelle transite sur le projet test (colonne `text`, 0001). Sur une colonne jsonb, PostgREST convertit le
+// littéral du filtre en jsonb : le texte JSON relu devient un objet, jamais égal à la chaîne stockée. Le
+// correctif (relecture de contrôle puis réessai avec la forme JSON-encodée de la chaîne) doit donc faire
+// passer les mêmes scénarios sur les DEUX types de colonne, sans jamais affaiblir le conflit réel.
+
+describe('Supabase : meta.valeur en jsonb (ancien projet) — le CAS meta reste fiable', () => {
+  const JSON_CMD = '{"id":"c1","statut":"recue"}'
+
+  for (const jsonb of [false, true]) {
+    test(`majMetaSi : insertion puis CAS (valeur JSON, nombre, UUID) — colonne ${jsonb ? 'jsonb' : 'text'}`, async () => {
+      const st = ouvrir(fauxPostgrest({ metaValeurJsonb: jsonb }))
+      // Valeur JSON (une commande) : le cas production du 13/11.
+      assert.equal(await st.majMetaSi('k', undefined, JSON_CMD), true)
+      assert.equal(await st.majMetaSi('k', JSON_CMD, '{"id":"c1","statut":"acceptee"}'), true)
+      assert.equal(await st.meta('k'), '{"id":"c1","statut":"acceptee"}')
+      // Conflit réel : attendue périmée → false, valeur intacte (jamais d'écriture aveugle).
+      assert.equal(await st.majMetaSi('k', JSON_CMD, '{"id":"c1","statut":"servie"}'), false)
+      assert.equal(await st.meta('k'), '{"id":"c1","statut":"acceptee"}')
+      // Valeur « nombre » (version de PIN) : '1' → '2'.
+      assert.equal(await st.majMetaSi('v', undefined, '1'), true)
+      assert.equal(await st.majMetaSi('v', '1', '2'), true)
+      assert.equal(await st.meta('v'), '2')
+      // Valeur non-JSON (UUID d'idempotence) : reprise par CAS.
+      assert.equal(await st.majMetaSi('i', undefined, 'uuid-1'), true)
+      assert.equal(await st.majMetaSi('i', 'uuid-1', 'uuid-2'), true)
+      assert.equal(await st.meta('i'), 'uuid-2')
+      // Clé absente avec attendue définie → false.
+      assert.equal(await st.majMetaSi('absente', 'x', 'y'), false)
+    })
+  }
+
+  test('commande complète sur HTTP : création puis recue → acceptee → en_preparation → servie (colonne jsonb)', async () => {
+    const f = fauxPostgrest({ metaValeurJsonb: true })
+    const app = await creerServeur({
+      fichierDb: join(tmpdir(), 'fix409-ne-doit-pas-exister.db'),
+      supabase: { url: URL_SB, cleServiceRole: CLE, fetch: f.fetch },
+      adminPin: ADMIN,
+      pinInitial: '1234',
+      version: 'test',
+      maintenant: () => new Date('2026-11-13T11:00:00Z'),
+      limiteCommandesParIp: 30,
+    })
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const base = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    async function api(methode: string, chemin: string, corps?: unknown, entetes: Record<string, string> = {}) {
+      const r = await fetch(base + chemin, {
+        method: methode,
+        headers: { 'Content-Type': 'application/json', ...entetes },
+        body: corps === undefined ? undefined : JSON.stringify(corps),
+      })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    try {
+      const menu = { categories: [{ id: 'cat-plats', nom: 'Plats', produits: [{ id: 'p-pad', nom: 'Pad Thaï', prix: 1390, allergenes: [] }] }] }
+      assert.equal((await api('PUT', `/commerces/${AH}/menu`, menu, PIN)).statut, 200)
+      assert.equal((await api('PATCH', `/commerces/${AH}`, { commande: { active: true, tables: [{ nom: 'Table 1' }] } }, PIN)).statut, 200)
+      const etat = (await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.commerce as { commande: { tables: { jeton: string }[] } }
+      const jeton = etat.commande.tables[0].jeton
+      const c1 = await api('POST', `/commerces/${AH}/commandes`, { jetonTable: jeton, lignes: [{ produitId: 'p-pad', quantite: 1 }], cleIdempotence: 'cle-fix409-1', secret: 'secret-fix409-numero-1' })
+      assert.equal(c1.statut, 201, JSON.stringify(c1.contenu))
+      const id = (c1.contenu as { commande: { id: string } }).commande.id
+      for (const vers of ['acceptee', 'en_preparation', 'servie']) {
+        const t = await api('POST', `/commerces/${AH}/commandes/${id}/statut`, { vers }, PIN)
+        assert.equal(t.statut, 200, `${vers} : ${JSON.stringify(t.contenu)}`)
+        assert.equal((t.contenu as { commande: { statut: string } }).commande.statut, vers)
+      }
+      // Deuxième commande le même jour : l'index du jour et l'entrée de purge sont mis à jour par CAS.
+      const c2 = await api('POST', `/commerces/${AH}/commandes`, { jetonTable: jeton, lignes: [{ produitId: 'p-pad', quantite: 1 }], cleIdempotence: 'cle-fix409-2', secret: 'secret-fix409-numero-2' })
+      assert.equal(c2.statut, 201, JSON.stringify(c2.contenu))
+      const liste = (await api('GET', `/commerces/${AH}/commandes`, undefined, PIN)).contenu as { commandes: { id: string; statut: string }[] }
+      assert.equal(liste.commandes.length, 2)
+      assert.equal(liste.commandes.find((c) => c.id === id)?.statut, 'servie')
+    } finally {
+      await app.fermer()
+    }
   })
 })
