@@ -193,3 +193,58 @@ site comme « très animé » ; c'est sa référence d'ambition, pas une mesure.
     Cuisine si le budget bundle le permet (sinon abandon documenté).
 
 ---
+
+## Cycle 2 — construit (lot 4 + micro-lot 5)
+
+- **Purge des commandes** (lot 4) : conservation 30 jours, purge opportuniste à la
+  création (au plus une fois/24 h par commerce, jamais bloquante), entrée d'index de
+  purge écrite à la création ; les clés d'idempotence orphelines (commande disparue)
+  sont désormais traitées comme libres au lieu d'un 409 éternel ; ordre d'écriture
+  durci (commande avant sa clé). 9 tests, 12 mutations détectées.
+- **Onglet « Cuisine » masqué** quand le module est désactivé (barre bureau + écran
+  Plus) ; `#/cuisine` reste atteignable par URL avec son écran explicatif. Bundle :
+  483 925 → 484 018 o.
+- **Animations vues en mouvement** (lot 4, captures Playwright SANS mouvement réduit) :
+  cascade de l'accueil complète et propre dans tous les cas de défilement ; marquee du
+  rail « En photos » ≈ 56 px en 2 s ; fondu de catégorie au défilement complet ; page
+  commande **identique octet pour octet à 2 s d'intervalle** (aucune animation
+  décorative — prouvé, pas seulement affirmé). Réglages commande et cuisine capturés
+  connectés pour la première fois ; aucun défaut visuel concret vu.
+- **Micro-lot 5** : piège des deux « Enregistrer » levé — aide permanente en tête de la
+  section commande + avertissement persistant « modifiée, pas encore enregistrée » qui
+  contredit le faux retour de la barre générale. Bundle inchangé.
+- **Totaux finaux : 1666/1666 tests unitaires, E2E 12/12 (relancé au lot 4), bundle
+  initial 484 018 o (plafond 484 422 o, marge 404 o), CLS mesuré 0 (cycle 1).**
+
+## Cycle 2 — critique (10 questions, coordinateur)
+
+1. **Visuellement meilleur ?** À périmètre visuel constant (cycle d'hygiène et de
+   preuve) ; le doute du cycle 1 est levé : les animations existent en mouvement et
+   sont propres — en laboratoire, sur Pixel 7 simulé.
+2. **Parcours client plus simple ?** Inchangé côté client ; côté commerçant, oui :
+   onglet cuisine pertinent seulement quand le module vit, et fin du faux retour
+   d'enregistrement des tables.
+3. **Animations fluides ?** Mouvement constaté et régulier sur captures espacées ;
+   **images/seconde non mesurées** (environnement sans écran) — la fluidité sur
+   appareil réel reste « à vérifier » lors de la validation sur staging.
+4. **Menu plus agréable ?** Inchangé ce cycle (traité au cycle 1, mesures stables).
+5. **Commande plus rapide ?** Inchangé ; la purge et les finitions ne touchent pas le
+   chemin d'action.
+6. **Performances préservées ?** Oui : bundle 484 018 o sous le plafond ; aucun
+   changement sur les pages publiques clientes hors chunks différés.
+7. **Identité respectée ?** Oui : aucun apport visuel extérieur ce cycle.
+8. **Régression ?** Aucune : suite complète verte à chaque lot (1663 puis 1666),
+   E2E 12/12 au lot 4, mutations toutes détectées (12/12 au lot 4).
+9. **Qu'est-ce qui empêche encore l'excellence ?** Des points hors code ou bloqués,
+   pas des défauts du code livré : commutateur FR/EN sur les nouvelles pages (test
+   existant — autorisation requise) ; 70 plats sans photo (restaurant) ; menu d'Asian
+   Home à enregistrer par le commerçant avant activation ; validation humaine sur
+   appareil réel ; quelques lignes `meta` d'idempotence pré-cycle 2 devenues
+   orphelines (leur commande n'existe plus, elles sont traitées comme libres —
+   volume négligeable, non supprimées faute de balayage possible des clés).
+10. **Plus de valeur ensuite ?** La validation de l'utilisateur sur le staging, puis
+    l'activation réelle chez Asian Home (menu enregistré, tables créées, QR imprimés,
+    essai en salle). Côté code, les gains pertinents et vérifiables **plafonnent** :
+    **arrêt de la boucle après le cycle 2**, conformément au master prompt.
+
+---
