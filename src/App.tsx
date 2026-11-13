@@ -33,6 +33,9 @@ const IMPORTS = {
   desinscription: () => import('./pages/Desinscription'),
   confidentialite: () => import('./pages/Confidentialite'),
   reglement: () => import('./pages/Reglement'),
+  bienvenue: () => import('./pages/Bienvenue'),
+  commande: () => import('./pages/Commande'),
+  cuisine: () => import('./pages/Cuisine'),
 } satisfies Partial<Record<Page, () => Promise<{ default: ComponentType }>>>
 
 const TableauDeBord = lazy(IMPORTS.accueil)
@@ -52,8 +55,11 @@ const MenuCarte = lazy(IMPORTS.menuCarte)
 const Desinscription = lazy(IMPORTS.desinscription)
 const Confidentialite = lazy(IMPORTS.confidentialite)
 const Reglement = lazy(IMPORTS.reglement)
+const Bienvenue = lazy(IMPORTS.bienvenue)
+const Commande = lazy(IMPORTS.commande)
+const Cuisine = lazy(IMPORTS.cuisine)
 
-const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidentialite', 'reglement']
+const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidentialite', 'reglement', 'bienvenue', 'commande']
 
 /**
  * Pages client à corps sombres (P1-D2, AUDIT.md §6.2/§6.3) : fond noir, surfaces sombres
@@ -61,8 +67,9 @@ const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidenti
  * #/roulette n'en fait PAS partie : c'est une page commerçant (configuration de la roue), elle
  * reste claire — comme la caisse (#/caisse, pourtant publique, car utilisée au comptoir) et les
  * pages de texte (#/desinscription, #/confidentialite, #/reglement, lecture longue sur fond clair).
+ * Expérience 10/10 (lot 2) : l'accueil #/bienvenue et la commande à table #/commande, dans la même DA nocturne.
  */
-const PAGES_CLIENT_SOMBRES: Page[] = ['jouer', 'carte', 'menu']
+const PAGES_CLIENT_SOMBRES: Page[] = ['jouer', 'carte', 'menu', 'bienvenue', 'commande']
 
 /**
  * Une fois l'espace commerçant ouvert, les autres pages du back-office sont téléchargées en arrière-plan (navigateur
@@ -131,6 +138,7 @@ const ONGLETS: { page: Page; libelle: string }[] = [
   { page: 'avis', libelle: 'Avis' },
   { page: 'messages', libelle: 'Messages' },
   { page: 'menuCarte', libelle: 'Menu' },
+  { page: 'cuisine', libelle: 'Cuisine' },
   { page: 'equipe', libelle: 'Équipe' },
   { page: 'reglages', libelle: 'Réglages' },
   { page: 'offre', libelle: 'Offre' },
@@ -145,7 +153,7 @@ const ONGLETS_MOBILE: { page: Page; libelle: string }[] = [
   { page: 'avis', libelle: 'Avis' },
   { page: 'plus', libelle: 'Plus' },
 ]
-const PAGES_SOUS_PLUS: Page[] = ['plus', 'reglages', 'offre', 'admin', 'equipe', 'messages', 'menuCarte']
+const PAGES_SOUS_PLUS: Page[] = ['plus', 'reglages', 'offre', 'admin', 'equipe', 'messages', 'menuCarte', 'cuisine']
 
 const COMPOSANTS: Record<Page, ComponentType> = {
   accueil: TableauDeBord,
@@ -168,6 +176,9 @@ const COMPOSANTS: Record<Page, ComponentType> = {
   desinscription: Desinscription,
   confidentialite: Confidentialite,
   reglement: Reglement,
+  bienvenue: Bienvenue,
+  commande: Commande,
+  cuisine: Cuisine,
 }
 
 /** Onglet surligné pour les sous-pages (fiche client → Clients, QR vitrine → Roulette). */
@@ -282,6 +293,8 @@ export default function App() {
   }
   if (mode === 'api' && !accesPret) return <SqueletteCommercant libelle="Chargement…" />
   if (mode === 'api' && (!acces || !commerce)) return <Verrou />
+  // Onglet Cuisine masqué tant que la commande à table est désactivée (#/cuisine reste ouvrable par son URL).
+  const onglets = ONGLETS.filter((o) => o.page != 'cuisine' || commerce.commande?.active)
 
   return (
     <div className="min-h-dvh pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8">
@@ -300,7 +313,7 @@ export default function App() {
           )}
         </div>
         <nav className="mx-auto hidden max-w-5xl gap-1 overflow-x-auto px-3 md:flex" aria-label="Navigation principale">
-          {ONGLETS.map((o) => (
+          {onglets.map((o) => (
             <a
               key={o.page}
               href={`#/${o.page}`}

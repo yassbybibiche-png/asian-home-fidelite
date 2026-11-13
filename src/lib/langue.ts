@@ -11,8 +11,9 @@ export type Langue = 'fr' | 'en'
 export const CLE_LANGUE = 'fideliz:langue'
 
 /** Pages où la langue mémorisée s'applique (pages publiques du client final ; le commutateur FR / EN
- *  n'est affiché que sur #/jouer, #/carte et #/menu). */
-export const PAGES_TRADUITES = ['jouer', 'carte', 'menu', 'desinscription', 'confidentialite', 'reglement'] as const
+ *  n'est affiché que sur #/jouer, #/carte et #/menu — #/bienvenue et #/commande, Expérience 10/10, appliquent
+ *  la langue choisie sur ces pages, comme #/desinscription). */
+export const PAGES_TRADUITES = ['jouer', 'carte', 'menu', 'desinscription', 'confidentialite', 'reglement', 'bienvenue', 'commande'] as const
 
 export function estPageTraduite(page: string): boolean {
   return (PAGES_TRADUITES as readonly string[]).includes(page)
@@ -375,6 +376,13 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   '★ Plat signature — l’un des best-sellers du restaurant.': '★ Signature dish — one of the restaurant’s best-sellers.',
   'Allergènes : demandez conseil à l’équipe en cas de doute.': 'Allergens: ask the team for advice if in doubt.',
   'Photo du plat : {nom}': 'Photo of the dish: {nom}',
+  // Menu visuel (13/11/2026) : rail « En photos », grandes cartes photo, pastille de la catégorie midi.
+  'En photos': 'In pictures',
+  'Voir le plat : {nom}': 'See the dish: {nom}',
+  '🍱 Menu Midi': '🍱 Lunch menu',
+  // Expérience 10/10 (lot 2) : barre « commande à table » du menu et lien vers l'accueil #/bienvenue.
+  'Vous êtes à table ? Scannez le QR de votre table pour commander.': 'At your table? Scan your table’s QR code to order.',
+  'Découvrir le restaurant': 'Discover the restaurant',
   // Badges déduits (🌶 / 🌱) : libellés fixes traduits, comme les cadres — les noms de plats, eux, ne le sont pas.
   // Les 4 libellés sont enregistrés par src/pages/MenuPublic.tsx (P2-Q1, bundle P2-Q2).
   'à confirmer': 'to confirm',

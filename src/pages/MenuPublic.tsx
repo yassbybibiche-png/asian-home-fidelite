@@ -5,7 +5,7 @@ import type { CommercePublic, Menu } from '../types'
 import { ErreurApi } from '../data/api'
 import { formaterPrix } from '../lib/points'
 import { bandeauPrixManquants, filtrerMenu, LIBELLE_ALLERGENES_ABSENTS } from '../lib/menu'
-import { badgesPlat, boutonsMenu, categorieEffective, categorieMidi, estHeureMenuMidi, LIBELLES_BADGES, MENTION_BADGE_DEDUIT } from '../lib/menuClient'
+import { badgesPlat, boutonsMenu, categorieEffective, categorieMidi, estHeureMenuMidi, LIBELLES_BADGES, MENTION_BADGE_DEDUIT, photoCartePlat, prefereMouvementReduit } from '../lib/menuClient'
 import { LogoCommerce, PiedPublic } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
 import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
@@ -13,6 +13,11 @@ import { estSignature, masquerPrixNonConfirmes, menuReelAsianHome, retirerPhotos
 import { enregistrerTraductions } from '../lib/langue'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
+import { dependancesNavigateur, preparerRevelations } from '../lib/revelation'
+import { defilerRail } from '../lib/defilementRail'
+import { activerParallaxe } from '../lib/parallaxe'
+import { motsUniques } from '../lib/bandeau'
+import { BandeauDefilant } from '../components/BandeauDefilant'
 
 /** Traductions des badges de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
 enregistrerTraductions({
@@ -106,6 +111,11 @@ export function MenuAffiche({
   const midi = useMemo(() => categorieMidi(menuAffiche.categories.filter((c) => c.produits.length)), [menuAffiche])
   const bandeauMidi = !!midi && estHeureMenuMidi(maintenant)
   const avecBadges = visibles.some((c) => c.produits.some((p) => badgesPlat(p).length))
+  // Rail « En photos » : les plats photographiés de toute la carte (liste complète, hors recherche et onglet).
+  const platsPhoto = useMemo(
+    () => menuAffiche.categories.flatMap((c) => c.produits.filter((p) => p.photo).map((p) => ({ categorieId: c.id, p }))),
+    [menuAffiche],
+  )
   // Interface traduite (P2-Q1) ; les noms de plats et de catégories restent ceux du restaurant.
   const { langue, t } = useLangue()
 
@@ -127,6 +137,15 @@ export function MenuAffiche({
     return () => obs.disconnect()
   }, [active, visibles.length, recherche])
   const ongletIndique = active === 'toutes' ? enVue : active
+  // Menu v2 (Expérience 10/10) : rail « En photos » qui défile seul, lentement (pause au toucher / survol / focus,
+  // jamais en mouvement réduit), et cartes qui se révèlent au défilement (contenu visible par défaut).
+  const rail = useRef<HTMLDivElement>(null)
+  const avecRail = recherche === '' && platsPhoto.length >= 2
+  useEffect(() => (avecRail && rail.current ? defilerRail(rail.current, prefereMouvementReduit()) : undefined), [avecRail])
+  const liste = useRef<HTMLDivElement>(null)
+  useEffect(() => (liste.current ? preparerRevelations(liste.current, dependancesNavigateur()) : undefined), [active, recherche, visibles.length])
+  // Parallaxe des photos d'en-tête de catégorie (cycle 3) : les cibles sont relues à chaque image, la liste peut changer.
+  useEffect(() => (liste.current ? activerParallaxe(liste.current, prefereMouvementReduit()) : undefined), [total === 0])
   // L'onglet indiqué reste visible dans la barre (défilement horizontal).
   useEffect(() => {
     nav.current?.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
@@ -140,6 +159,14 @@ export function MenuAffiche({
     if (liste && (defiler || liste.getBoundingClientRect().top < 0)) liste.scrollIntoView({ block: 'start' })
   }
 
+  /** Depuis le rail : onglet « Toutes » (la carte du plat est visible quelle que soit sa catégorie),
+      fiche du plat ouverte, puis défilement jusqu'à sa carte. */
+  function allerAuPlat(_categorieId: string, platId: string) {
+    setCategorie('toutes')
+    setOuvert(platId)
+    setTimeout(() => document.getElementById(`plat-${platId}`)?.scrollIntoView({ behavior: prefereMouvementReduit() ? 'auto' : 'smooth', block: 'center' }), 80)
+  }
+
   return (
     <div className="mx-auto max-w-md space-y-5 px-4 pt-6 pb-10">
       <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-2 pb-6 text-center shadow-relief">
@@ -151,6 +178,13 @@ export function MenuAffiche({
         <h1 className="titre-magenta mt-1 text-2xl">{commerce.nom}</h1>
         <p className="mt-1 text-sm text-white/80">{t('Cuisine asiatique halal · Thaï, Japon, Vietnam, Chine')}</p>
       </header>
+
+      {/* Commande à table activée : simple information (le panier n'existe qu'en mode Commande, via le QR de la table). */}
+      {commerce.commandeActive && (
+        <p className="rounded-2xl bg-nuit-900 px-4 py-3 text-center text-sm text-white ring-1 ring-magenta-400/40" role="note">
+          {t('Vous êtes à table ? Scannez le QR de votre table pour commander.')}
+        </p>
+      )}
 
       {boutons.length > 0 && (
         <nav className="flex flex-wrap justify-center gap-2" aria-label={t('Contacter le restaurant')}>
@@ -191,6 +225,32 @@ export function MenuAffiche({
 
       {bandeauPrix && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">{bandeauPrix}</p>}
 
+      {/* Bandeau défilant décoratif (le rail juste dessous nomme les mêmes plats) : noms des plats photographiés, jamais traduits. */}
+      {avecRail && <BandeauDefilant mots={motsUniques(platsPhoto.map(({ p }) => p.nom))} className="-mx-4" />}
+
+      {avecRail && (
+        <section aria-label={t('En photos')} className="space-y-2">
+          <p className="font-titre text-lg font-bold">{t('En photos')}</p>
+          <div ref={rail} className="flex gap-3 overflow-x-auto pb-1" data-rail-photos>
+            {platsPhoto.map(({ categorieId, p }) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => allerAuPlat(categorieId, p.id)}
+                aria-label={t('Voir le plat : {nom}', { nom: p.nom })}
+                className="w-36 shrink-0 overflow-hidden rounded-2xl bg-white text-left shadow-douce ring-1 ring-gray-900/5 transition-transform active:scale-[0.97]"
+              >
+                <img src={photoCartePlat(p)} alt="" loading="lazy" className="h-24 w-full object-cover" />
+                <span className="block px-3 py-2">
+                  <span className="block truncate text-sm font-semibold">{p.nom}</span>
+                  <span className="block text-sm font-semibold text-magenta-700 tabular-nums">{p.prix == null ? t('Prix sur place') : formaterPrix(p.prix)}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       {categories.length === 0 && !recherche ? (
         <MessagePublic titre="Menu à venir">Le commerce n’a pas encore publié son menu.</MessagePublic>
       ) : (
@@ -224,7 +284,7 @@ export function MenuAffiche({
               {t('Aucun plat ne correspond à « {recherche} ».', { recherche })}
             </p>
           ) : (
-            <>
+            <div ref={liste} className="space-y-5">
               <p id="liste-menu" className="scroll-mt-36 text-sm text-gray-600" role="status">
                 {t(total > 1 ? '{n} plats' : '{n} plat', { n: total })}
                 {recherche ? t(' pour « {recherche} »', { recherche }) : ''}
@@ -232,24 +292,57 @@ export function MenuAffiche({
               {visibles.map((c) => {
                 const photo = photoCategorie(c.nom)
                 return (
-                  <section key={c.id} id={`m-${c.id}`} data-categorie={c.id} className="scroll-mt-36 space-y-2">
-                    <h2 className="font-titre text-xl font-bold">{c.nom}</h2>
+                  <section key={c.id} id={`m-${c.id}`} data-categorie={c.id} className="apparition scroll-mt-36 space-y-2">
+                    {/* Avec une photo, la catégorie devient un « moment » : le nom en typographie logo sur la photo
+                        (le titre h2 reste dans le document pour les lecteurs d'écran et le plan de la page). */}
+                    <div className={photo ? 'sr-only' : 'flex flex-wrap items-center gap-2'}>
+                      <h2 className="font-titre text-xl font-bold">{c.nom}</h2>
+                      {bandeauMidi && midi && c.id === midi.id && (
+                        <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('🍱 Menu Midi')}</span>
+                      )}
+                    </div>
                     {photo && (
-                      <picture className="block">
-                        <source srcSet={photo.srcPetit} type="image/webp" />
-                        <img src={photo.src} alt={photo.alt} loading="lazy" className="h-32 w-full rounded-2xl object-cover" />
-                      </picture>
+                      <div className="relative h-56 overflow-hidden rounded-3xl shadow-relief" data-revelation>
+                        {/* Parallaxe (±28 px) : la photo déborde de 32 px en haut et en bas du cadre ; zoom lent (ken burns). */}
+                        <div className="cadre-parallaxe ken-burns absolute inset-x-0 -inset-y-8" data-parallaxe>
+                          <picture className="block">
+                            <source srcSet={photo.srcPetit} type="image/webp" />
+                            <img src={photo.src} alt={photo.alt} loading="lazy" className="h-56 w-full object-cover" />
+                          </picture>
+                        </div>
+                        <span aria-hidden="true" className="absolute inset-0 bg-linear-to-t from-nuit-950/90 via-nuit-950/25 to-transparent" />
+                        <span aria-hidden="true" className="absolute inset-x-5 bottom-4 flex flex-wrap items-end gap-2">
+                          <span className="titre-logo text-2xl text-white">{c.nom}</span>
+                          {bandeauMidi && midi && c.id === midi.id && (
+                            <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('🍱 Menu Midi')}</span>
+                          )}
+                        </span>
+                      </div>
                     )}
-                    <ul className="space-y-2">
+                    <ul className="cartes-echelonnees space-y-2">
                       {c.produits.map((p) => {
                         const detail = ouvert === p.id
                         const signature = estSignature(p.nom)
                         const badges = badgesPlat(p)
                         return (
-                          <li key={p.id} className="overflow-hidden rounded-2xl bg-white shadow-douce ring-1 ring-gray-900/5">
+                          <li key={p.id} id={`plat-${p.id}`} className="overflow-hidden rounded-3xl bg-white shadow-douce ring-1 ring-gray-900/5" data-revelation>
+                            {p.photo && (
+                              <button
+                                type="button"
+                                className="relative block w-full transition-transform active:scale-[0.99]"
+                                aria-expanded={detail}
+                                aria-label={t('Voir le plat : {nom}', { nom: p.nom })}
+                                onClick={() => setOuvert(detail ? null : p.id)}
+                              >
+                                <img src={photoCartePlat(p)} alt="" loading="lazy" className="h-44 w-full object-cover" />
+                                <span className="absolute right-3 bottom-3 rounded-full bg-nuit-950/85 px-3 py-1 font-semibold text-white tabular-nums backdrop-blur">
+                                  {p.prix == null ? <span className="text-sm italic">{t('Prix sur place')}</span> : formaterPrix(p.prix)}
+                                </span>
+                              </button>
+                            )}
                             <button
                               type="button"
-                              className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left active:bg-gray-50"
+                              className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-transform active:scale-[0.99] active:bg-gray-50"
                               aria-expanded={detail}
                               onClick={() => setOuvert(detail ? null : p.id)}
                             >
@@ -276,10 +369,15 @@ export function MenuAffiche({
                               ) : (
                                 <span className="shrink-0 font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix)}</span>
                               )}
+                              <span aria-hidden="true" className="chevron-detail shrink-0 text-gray-400">
+                                ▾
+                              </span>
                             </button>
                             {detail && (
-                              <div className="apparition space-y-3 border-t border-gray-100 px-4 py-3">
-                                {p.photo && <img src={p.photo} alt={t('Photo du plat : {nom}', { nom: p.nom })} loading="lazy" className="h-44 w-full rounded-2xl object-cover" />}
+                              <div className="depliage border-t border-gray-100">
+                              <div>
+                              <div className="space-y-3 px-4 py-3">
+                                {p.photo && <img src={p.photo} alt={t('Photo du plat : {nom}', { nom: p.nom })} loading="lazy" className="h-56 w-full rounded-2xl object-cover" />}
                                 {p.description ? (
                                   <p className="text-sm text-gray-700">{p.description}</p>
                                 ) : (
@@ -310,6 +408,8 @@ export function MenuAffiche({
                                 )}
                                 {signature && <p className="text-sm font-semibold text-magenta-700">{t('★ Plat signature — l’un des best-sellers du restaurant.')}</p>}
                               </div>
+                              </div>
+                              </div>
                             )}
                           </li>
                         )
@@ -318,13 +418,18 @@ export function MenuAffiche({
                   </section>
                 )
               })}
-            </>
+            </div>
           )}
         </>
       )}
       {avecBadges && <p className="text-center text-sm text-gray-600">{t('* 🌶 / 🌱 : déduit du nom ou de la description du plat, {mention} auprès de l’équipe.', { mention: t(MENTION_BADGE_DEDUIT) })}</p>}
       {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}
       <p className="text-center text-sm text-gray-600">{t('Allergènes : demandez conseil à l’équipe en cas de doute.')}</p>
+      <p className="text-center">
+        <a href={`#/bienvenue/${encodeURIComponent(commerce.id)}`} className="lien">
+          {t('Découvrir le restaurant')}
+        </a>
+      </p>
       <PiedPublic commerceId={commerce.id} />
     </div>
   )
@@ -335,7 +440,7 @@ function OngletCategorie({ libelle, choisi, indique, onClick }: { libelle: strin
   return (
     <button
       type="button"
-      className={`puce relative whitespace-nowrap ${indique ? 'after:absolute after:inset-x-4 after:-bottom-0.5 after:h-1 after:rounded-full after:bg-magenta-400' : ''}`}
+      className={`puce relative whitespace-nowrap active:scale-95 ${indique ? 'after:absolute after:inset-x-4 after:-bottom-0.5 after:h-1 after:rounded-full after:bg-magenta-400' : ''}`}
       aria-pressed={choisi}
       aria-current={indique ? 'true' : undefined}
       onClick={onClick}

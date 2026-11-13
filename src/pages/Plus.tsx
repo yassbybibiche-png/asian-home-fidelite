@@ -7,6 +7,7 @@ const LIENS: { page: Page; titre: string; aide: string }[] = [
   { page: 'equipe', titre: 'Équipe et caisse', aide: 'Membres, codes à 4 chiffres, lien de la caisse du comptoir' },
   { page: 'messages', titre: 'Messages', aide: 'Messages automatiques et ciblés, texte prêt à copier' },
   { page: 'menuCarte', titre: 'Menu', aide: 'Catégories, produits, prix, photos, allergènes, QR du menu' },
+  { page: 'cuisine', titre: 'Cuisine', aide: 'Commandes à table du jour : accepter, préparer, servir' },
   { page: 'reglages', titre: 'Réglages', aide: 'Récompenses, points, messages auto, apparence de la carte, lots, avis' },
   { page: 'offre', titre: `L’offre ${NOM_APP}`, aide: 'Gratuit · kit de lancement (flyers, étiquettes QR, vitrine)' },
   { page: 'admin', titre: 'Admin', aide: 'Tous les commerces, ajout, activation, réinitialisation de la démo' },
@@ -55,7 +56,7 @@ export default function Plus() {
       </section>
 
       <nav className="carte divide-y divide-gray-100 py-1" aria-label="Autres pages">
-        {LIENS.map((l) => (
+        {LIENS.filter((l) => l.page !== 'cuisine' || commerce.commande?.active).map((l) => (
           <a key={l.page} href={`#/${l.page}`} className="-mx-2 flex min-h-16 items-center gap-4 rounded-xl px-2 py-3 transition-colors hover:bg-gray-50 active:bg-gray-100">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-magenta-500/10 text-magenta-600">
               <Icone nom={l.page} />
