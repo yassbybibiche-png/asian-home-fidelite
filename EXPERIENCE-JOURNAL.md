@@ -428,3 +428,22 @@ Suite finale : **1710/1710** (114 fichiers). Aucune probabilité, aucune règle,
 aucun envoi réel ; aucune dépense.
 
 ---
+## 8. Boucle animations (13/11 au soir) — Découverte (#/bienvenue, #/menu)
+
+Ordre de l'utilisateur (21:11) : Claude Code à fond sur les animations, en boucle ; consigne
+additionnelle (21:36) : s'inspirer des meilleurs concurrents. Rapport de boucle tenu dans
+`ANIMATIONS-BOUCLE-RAPPORT.md` ; vidéos dans `captures-animations/`.
+
+### Inspiration concurrents (passe préalable au cycle 1)
+
+Catalogue complet dans `ANIMATIONS-BOUCLE-RAPPORT.md` (méthode : pages publiques par extraction de
+texte + documentation des éditeurs ; le mouvement n'est pas observable par extraction — limite
+assumée, comme pour Ciao). En résumé : Ciao (univers par saveur), Drimify (roue 3D cinématique,
+geste et révélation), menus « vivants » Menu.AI/CartaNova (une animation par plat), Socialshaker
+(habillage par thème), Hey Pongo (actes numérotés), Fideliz (rail à défilement), SpinLocal/SpinDine
+(parcours en étapes, révélation), Qualifio (roue décorative d'accueil). Principes uniquement.
+
+Manques chez nous, par visibilité : (1) aucune transition d'univers par catégorie dans le menu ;
+(2) titres de catégorie statiques ; (3) rail photos sans inertie ; (4) pas de plat-star plein cadre
+au défilement ; (5) aucune transition de page. Vidéo de l'état actuel : `captures-animations/avant.webm`.
+
