@@ -227,6 +227,44 @@ describe('Réglages : PATCH lienDeliveroo / lienUberEats (liste blanche)', () =>
 
 // ---------- Vérifications d'affichage (source) ----------
 
+describe('Déblocage C-bis : la fiche publique GET /commerces/:id publie menuDisponible', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'fidelite-cbis-'))
+  after(() => rmSync(dossier, { recursive: true, force: true }))
+
+  test('menu avec ≥ 1 produit → menuDisponible: true ; sans menu ou menu sans produit → clé absente ; rien d’autre ne change', async (t) => {
+    const app = await creerServeur({ fichierDb: join(dossier, 'cbis.db'), adminPin: '987654', pinInitial: '1234', version: 'test' })
+    t.after(() => app.fermer())
+    await new Promise<void>((ok) => app.serveur.listen(0, '127.0.0.1', ok))
+    const racine = `http://127.0.0.1:${(app.serveur.address() as AddressInfo).port}/api/v1`
+    const api = async (m: string, chemin: string, corps?: unknown, entetes: Record<string, string> = {}) => {
+      const r = await fetch(`${racine}${chemin}`, { method: m, headers: { 'Content-Type': 'application/json', ...entetes }, body: corps === undefined ? undefined : JSON.stringify(corps) })
+      return { statut: r.status, contenu: await r.json() }
+    }
+    // Commerce autre qu'Asian Home (estAsianHome ne couvre pas ce cas côté front).
+    const cree = await api('POST', '/commerces', { nom: 'Chez Lin', type: 'restaurant', lienGoogle: 'https://g.page/r/x/review', pin: '4321' }, { 'X-Admin-PIN': '987654' })
+    assert.equal(cree.statut, 201)
+    const id: string = cree.contenu.commerce.id
+    const fiche = async () => (await api('GET', `/commerces/${id}`)).contenu.commerce
+
+    const sansMenu = await fiche()
+    assert.ok(!('menuDisponible' in sansMenu), 'aucun menu : clé absente (jamais false)')
+    assert.equal((await api('PUT', `/commerces/${id}/menu`, { categories: [{ nom: 'Desserts', produits: [] }] }, { 'X-Commerce-PIN': '4321' })).statut, 200)
+    assert.ok(!('menuDisponible' in (await fiche())), 'menu sans produit : clé absente')
+
+    const menu = { categories: [{ nom: 'Dim sum', produits: [{ nom: 'Har gow', prix: 790, allergenes: [], description: '4 pièces' }] }] }
+    assert.equal((await api('PUT', `/commerces/${id}/menu`, menu, { 'X-Commerce-PIN': '4321' })).statut, 200)
+    const avecMenu = await fiche()
+    assert.equal(avecMenu.menuDisponible, true)
+    // Seul le drapeau s'ajoute : même fiche expurgée qu'avant (lots sans probabilité, pas de créneaux bruts).
+    const { menuDisponible: _, ...reste } = avecMenu
+    assert.deepEqual(reste, sansMenu)
+    assert.doesNotMatch(JSON.stringify(avecMenu), /probabilite|creneauxCreux|heuresCreuses/)
+    // Les autres appelants de la fiche (liste GET /commerces, qui ne lit pas les menus) gardent la clé absente.
+    const liste: Record<string, unknown>[] = (await api('GET', '/commerces')).contenu.commerces
+    assert.ok(liste.length >= 2 && liste.every((c) => !('menuDisponible' in c)))
+  })
+})
+
 describe('Affichage : images paresseuses, descriptions sur 2 lignes, prix, allergènes', () => {
   const tsx = source('src/pages/MenuPublic.tsx')
   test('toutes les images de plats / catégories en loading="lazy" (seule la photo d’en-tête est immédiate)', () => {

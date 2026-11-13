@@ -273,7 +273,7 @@ function CarteApi({ api: apiServeur }: { api: ClientApi }) {
     gains: GainEnCours[]
     acces?: AccesCarte
   } | null>(null)
-  const [limitee, setLimitee] = useState<{ tampons: number; commerce: CommercePublic; gainDuJour: GainDuJour | null; acces: AccesCarte } | null>(null)
+  const [limitee, setLimitee] = useState<{ tampons: number; commerce: CommercePublic; gainDuJour: GainDuJour | null; acces: AccesCarte; menu: boolean } | null>(null)
   const [erreur, setErreur] = useState<'introuvable' | 'inactif' | 'horsLigne' | null>(null)
   const { t } = useLangue()
 
@@ -301,20 +301,21 @@ function CarteApi({ api: apiServeur }: { api: ClientApi }) {
       // Gain de la roue du jour pas encore retiré (P1-C3) : rappelé sur la carte avec son code, valable aujourd'hui.
       const gainDuJour = r.jeu.codeDuJour && r.jeu.lotDuJour && !r.jeu.remisDuJour ? { lot: r.jeu.lotDuJour, code: r.jeu.codeDuJour } : null
       setErreur(null)
+      // Asian Home : le menu public affiche la vraie carte en repli tant que le
+      // commerçant n'a pas enregistré son propre menu — le lien est donc visible (vue complète comme limitée).
+      const menu = !!r.menuDisponible || estAsianHome(r.commerce)
       if (estVueLimitee(r)) {
         setDonnees(null)
-        setLimitee({ tampons: r.client.tampons, commerce: r.commerce, gainDuJour, acces: r.acces })
+        setLimitee({ tampons: r.client.tampons, commerce: r.commerce, gainDuJour, acces: r.acces, menu })
         return
       }
       setLimitee(null)
       // Carte ouverte avec le jeton de ce téléphone (P0-S7, ex. récupérée au comptoir) : la page de jeu la reprend.
       if (r.acces?.jeton) memoriserJoueurCarte(memoireJoueur(stockageLocal(), r.commerce.id), jetons, r.client)
-      // Asian Home : le menu public affiche la vraie carte en repli tant que le
-      // commerçant n'a pas enregistré son propre menu — le lien est donc visible.
       setDonnees({
         client: r.client,
         commerce: r.commerce,
-        menu: !!r.menuDisponible || estAsianHome(r.commerce),
+        menu,
         gainDuJour,
         lots: r.historiqueLots ?? [],
         gains: r.gainsEnCours ?? [],
@@ -716,6 +717,7 @@ function VueLimitee({
   gainDuJour,
   acces,
   lienRefuse,
+  menu,
 }: {
   api: ClientApi
   tampons: number
@@ -723,6 +725,7 @@ function VueLimitee({
   gainDuJour: GainDuJour | null
   acces: AccesCarte
   lienRefuse: boolean
+  menu: boolean
 }) {
   const { langue, t } = useLangue()
   if (!commerce.actif) return <MessagePublic titre={commerce.nom}>La carte de fidélité de ce commerce n’est plus disponible.</MessagePublic>
@@ -759,6 +762,11 @@ function VueLimitee({
           </p>
           {acces.ancienLien && date && <p className="text-sm text-gray-700">{t('Ce lien ne suffira plus à ouvrir la carte après le {date}.', { date })}</p>}
         </section>
+        {menu && (
+          <a href={`#/menu/${commerce.id}`} className="bouton-secondaire w-full">
+            {t('📖 Voir le menu')}
+          </a>
+        )}
         <PiedPublic commerceId={commerce.id} />
       </div>
       <RetrouverCarte api={api} />

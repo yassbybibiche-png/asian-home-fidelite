@@ -51,9 +51,9 @@ describe('Consentement : case non pré-cochée, envoyée seulement si cochée', 
       assert.match(s, /SMS ou e-mail \(désinscription à tout moment\)/, `${f} : une ligne claire`)
     }
     const jouer = source('src/pages/Jouer.tsx')
-    // P1-C1 : le prénom n'est plus demandé avant le tirage → inscription avec un prénom vide.
-    assert.match(jouer, /inscrireClient\(commerce\.id, '', contactSaisi, consentementRelance\)/)
-    assert.match(jouer, /api\.inscrirePublic\(commerce\.id, '', contactSaisi, parrain, consentementRelance\)/)
+    // Déblocage 12/11 (décision utilisateur) : le prénom optionnel saisi avant le tirage est transmis à l'inscription.
+    assert.match(jouer, /inscrireClient\(commerce\.id, prenomSaisi, contactSaisi, consentementRelance\)/)
+    assert.match(jouer, /api\.inscrirePublic\(commerce\.id, prenomSaisi, contactSaisi, parrain, consentementRelance\)/)
     assert.match(source('src/pages/Clients.tsx'), /inscrireClient\(commerce\.id, prenom, contactSaisi, consentement\)/)
   })
 

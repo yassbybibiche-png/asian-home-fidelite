@@ -22,6 +22,13 @@ after(() => rmSync(dossier, { recursive: true, force: true }))
 /** Taille du bundle initial avant P2-Q2 (mesurée sur master 1e40b68 : un seul fichier JS hors jsQR). */
 const INITIAL_AVANT_OCTETS = 601_720
 
+/**
+ * Plafond du bundle initial, relevé le 12/11/2026 sur décision explicite de l'utilisateur (« tout débloquer ») :
+ * strict nécessaire pour les trois chantiers du déblocage (mesure 482 374 o) + ~2 Ko de marge.
+ * Ancien plafond effectif : INITIAL_AVANT_OCTETS * 0.8 = 481 376 o. Voir DEBLOCAGE-RAPPORT.md.
+ */
+const PLAFOND_BUNDLE_INITIAL = 484_422
+
 /** Pages du back-office et pages publiques secondaires : chacune dans son propre fichier, hors bundle initial. */
 const PAGES_DIFFEREES = ['TableauDeBord', 'Clients', 'Roulette', 'Avis', 'Reglages', 'Offre', 'Admin', 'Plus', 'FicheClient', 'QrVitrine', 'MenuPublic', 'Equipe', 'Messages', 'MenuCarte', 'Desinscription', 'Confidentialite', 'Reglement']
 
@@ -107,7 +114,7 @@ describe('P2-Q2 : build Vite découpé', () => {
     const js = initiaux.map(contenu).join('\n')
     for (const marque of ['la roue arrive', 'votre carte arrive', 'Hors ligne et aucune donn', 'les actions seront gard']) assert.ok(js.includes(marque), marque)
     const octets = initiaux.reduce((n, f) => n + Buffer.byteLength(contenu(f)), 0)
-    assert.ok(octets < INITIAL_AVANT_OCTETS * 0.8, `bundle initial ${octets} o (avant : ${INITIAL_AVANT_OCTETS} o)`)
+    assert.ok(octets < PLAFOND_BUNDLE_INITIAL, `bundle initial ${octets} o, plafond ${PLAFOND_BUNDLE_INITIAL} o (avant : ${INITIAL_AVANT_OCTETS} o)`)
     // jsQR reste différé (chargé à la première ouverture du scanner).
     assert.ok(!initiaux.some((f) => f.startsWith('jsQR-')))
     // Plus d'avertissement Vite « chunk > 500 kB ».

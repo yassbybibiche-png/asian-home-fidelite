@@ -167,6 +167,7 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'Pas de lot cette fois{prenom}… mais votre visite compte !': 'No prize this time{prenom}… but your visit counts!',
   // Roue v2, R4 : avant le tirage (lots du jour, règles, règlement), résultat (dates du gain, solde de points).
   'À gagner aujourd’hui': 'To win today',
+  'Bonus heures creuses actif': 'Off-peak bonus active',
   'consolation': 'consolation prize',
   '1 tirage par jour · gain utilisable dès demain, pendant 30 jours': '1 spin per day · prize usable from tomorrow, for 30 days',
   'Le résultat est tiré au hasard.': 'The result is drawn at random.',
