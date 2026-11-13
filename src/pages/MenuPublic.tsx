@@ -13,6 +13,8 @@ import { estSignature, masquerPrixNonConfirmes, menuReelAsianHome, retirerPhotos
 import { enregistrerTraductions } from '../lib/langue'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
+import { dependancesNavigateur, preparerRevelations } from '../lib/revelation'
+import { defilerRail } from '../lib/defilementRail'
 
 /** Traductions des badges de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
 enregistrerTraductions({
@@ -132,6 +134,13 @@ export function MenuAffiche({
     return () => obs.disconnect()
   }, [active, visibles.length, recherche])
   const ongletIndique = active === 'toutes' ? enVue : active
+  // Menu v2 (Expérience 10/10) : rail « En photos » qui défile seul, lentement (pause au toucher / survol / focus,
+  // jamais en mouvement réduit), et cartes qui se révèlent au défilement (contenu visible par défaut).
+  const rail = useRef<HTMLDivElement>(null)
+  const avecRail = recherche === '' && platsPhoto.length >= 2
+  useEffect(() => (avecRail && rail.current ? defilerRail(rail.current, prefereMouvementReduit()) : undefined), [avecRail])
+  const liste = useRef<HTMLDivElement>(null)
+  useEffect(() => (liste.current ? preparerRevelations(liste.current, dependancesNavigateur()) : undefined), [active, recherche, visibles.length])
   // L'onglet indiqué reste visible dans la barre (défilement horizontal).
   useEffect(() => {
     nav.current?.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
@@ -164,6 +173,13 @@ export function MenuAffiche({
         <h1 className="titre-magenta mt-1 text-2xl">{commerce.nom}</h1>
         <p className="mt-1 text-sm text-white/80">{t('Cuisine asiatique halal · Thaï, Japon, Vietnam, Chine')}</p>
       </header>
+
+      {/* Commande à table activée : simple information (le panier n'existe qu'en mode Commande, via le QR de la table). */}
+      {commerce.commandeActive && (
+        <p className="rounded-2xl bg-nuit-900 px-4 py-3 text-center text-sm text-white ring-1 ring-magenta-400/40" role="note">
+          {t('Vous êtes à table ? Scannez le QR de votre table pour commander.')}
+        </p>
+      )}
 
       {boutons.length > 0 && (
         <nav className="flex flex-wrap justify-center gap-2" aria-label={t('Contacter le restaurant')}>
@@ -204,17 +220,17 @@ export function MenuAffiche({
 
       {bandeauPrix && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">{bandeauPrix}</p>}
 
-      {recherche === '' && platsPhoto.length >= 2 && (
+      {avecRail && (
         <section aria-label={t('En photos')} className="space-y-2">
           <p className="font-titre text-lg font-bold">{t('En photos')}</p>
-          <div className="flex gap-3 overflow-x-auto pb-1">
+          <div ref={rail} className="flex gap-3 overflow-x-auto pb-1" data-rail-photos>
             {platsPhoto.map(({ categorieId, p }) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => allerAuPlat(categorieId, p.id)}
                 aria-label={t('Voir le plat : {nom}', { nom: p.nom })}
-                className="w-36 shrink-0 overflow-hidden rounded-2xl bg-white text-left shadow-douce ring-1 ring-gray-900/5"
+                className="w-36 shrink-0 overflow-hidden rounded-2xl bg-white text-left shadow-douce ring-1 ring-gray-900/5 transition-transform active:scale-[0.97]"
               >
                 <img src={photoCartePlat(p)} alt="" loading="lazy" className="h-24 w-full object-cover" />
                 <span className="block px-3 py-2">
@@ -260,7 +276,7 @@ export function MenuAffiche({
               {t('Aucun plat ne correspond à « {recherche} ».', { recherche })}
             </p>
           ) : (
-            <>
+            <div ref={liste} className="space-y-5">
               <p id="liste-menu" className="scroll-mt-36 text-sm text-gray-600" role="status">
                 {t(total > 1 ? '{n} plats' : '{n} plat', { n: total })}
                 {recherche ? t(' pour « {recherche} »', { recherche }) : ''}
@@ -269,17 +285,28 @@ export function MenuAffiche({
                 const photo = photoCategorie(c.nom)
                 return (
                   <section key={c.id} id={`m-${c.id}`} data-categorie={c.id} className="apparition scroll-mt-36 space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
+                    {/* Avec une photo, la catégorie devient un « moment » : le nom en typographie logo sur la photo
+                        (le titre h2 reste dans le document pour les lecteurs d'écran et le plan de la page). */}
+                    <div className={photo ? 'sr-only' : 'flex flex-wrap items-center gap-2'}>
                       <h2 className="font-titre text-xl font-bold">{c.nom}</h2>
                       {bandeauMidi && midi && c.id === midi.id && (
                         <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('🍱 Menu Midi')}</span>
                       )}
                     </div>
                     {photo && (
-                      <picture className="block">
-                        <source srcSet={photo.srcPetit} type="image/webp" />
-                        <img src={photo.src} alt={photo.alt} loading="lazy" className="h-44 w-full rounded-3xl object-cover shadow-relief" />
-                      </picture>
+                      <div className="relative overflow-hidden rounded-3xl shadow-relief" data-revelation>
+                        <picture className="block">
+                          <source srcSet={photo.srcPetit} type="image/webp" />
+                          <img src={photo.src} alt={photo.alt} loading="lazy" className="h-56 w-full object-cover" />
+                        </picture>
+                        <span aria-hidden="true" className="absolute inset-0 bg-linear-to-t from-nuit-950/90 via-nuit-950/25 to-transparent" />
+                        <span aria-hidden="true" className="absolute inset-x-5 bottom-4 flex flex-wrap items-end gap-2">
+                          <span className="titre-logo text-2xl text-white">{c.nom}</span>
+                          {bandeauMidi && midi && c.id === midi.id && (
+                            <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('🍱 Menu Midi')}</span>
+                          )}
+                        </span>
+                      </div>
                     )}
                     <ul className="space-y-2">
                       {c.produits.map((p) => {
@@ -287,11 +314,11 @@ export function MenuAffiche({
                         const signature = estSignature(p.nom)
                         const badges = badgesPlat(p)
                         return (
-                          <li key={p.id} id={`plat-${p.id}`} className="apparition overflow-hidden rounded-3xl bg-white shadow-douce ring-1 ring-gray-900/5">
+                          <li key={p.id} id={`plat-${p.id}`} className="overflow-hidden rounded-3xl bg-white shadow-douce ring-1 ring-gray-900/5" data-revelation>
                             {p.photo && (
                               <button
                                 type="button"
-                                className="relative block w-full"
+                                className="relative block w-full transition-transform active:scale-[0.99]"
                                 aria-expanded={detail}
                                 aria-label={t('Voir le plat : {nom}', { nom: p.nom })}
                                 onClick={() => setOuvert(detail ? null : p.id)}
@@ -331,12 +358,14 @@ export function MenuAffiche({
                               ) : (
                                 <span className="shrink-0 font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix)}</span>
                               )}
-                              <span aria-hidden="true" className="shrink-0 text-gray-400">
-                                {detail ? '▴' : '▾'}
+                              <span aria-hidden="true" className="chevron-detail shrink-0 text-gray-400">
+                                ▾
                               </span>
                             </button>
                             {detail && (
-                              <div className="apparition space-y-3 border-t border-gray-100 px-4 py-3">
+                              <div className="depliage border-t border-gray-100">
+                              <div>
+                              <div className="space-y-3 px-4 py-3">
                                 {p.photo && <img src={p.photo} alt={t('Photo du plat : {nom}', { nom: p.nom })} loading="lazy" className="h-56 w-full rounded-2xl object-cover" />}
                                 {p.description ? (
                                   <p className="text-sm text-gray-700">{p.description}</p>
@@ -368,6 +397,8 @@ export function MenuAffiche({
                                 )}
                                 {signature && <p className="text-sm font-semibold text-magenta-700">{t('★ Plat signature — l’un des best-sellers du restaurant.')}</p>}
                               </div>
+                              </div>
+                              </div>
                             )}
                           </li>
                         )
@@ -376,13 +407,18 @@ export function MenuAffiche({
                   </section>
                 )
               })}
-            </>
+            </div>
           )}
         </>
       )}
       {avecBadges && <p className="text-center text-sm text-gray-600">{t('* 🌶 / 🌱 : déduit du nom ou de la description du plat, {mention} auprès de l’équipe.', { mention: t(MENTION_BADGE_DEDUIT) })}</p>}
       {commerce.coordonnees && <p className="text-center text-sm text-gray-600">{commerce.coordonnees}</p>}
       <p className="text-center text-sm text-gray-600">{t('Allergènes : demandez conseil à l’équipe en cas de doute.')}</p>
+      <p className="text-center">
+        <a href={`#/bienvenue/${encodeURIComponent(commerce.id)}`} className="lien">
+          {t('Découvrir le restaurant')}
+        </a>
+      </p>
       <PiedPublic commerceId={commerce.id} />
     </div>
   )
