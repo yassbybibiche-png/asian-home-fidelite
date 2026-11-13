@@ -424,9 +424,10 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
       requete('POST', `/commerces/${enc(commerceId)}/evenements`, { corps: { type }, delaiMs: 5_000 }) as Promise<{ ok: boolean; compte: boolean }>,
     /** Le navigateur n'envoie qu'un contact : la visite du jour, le tirage du jour et le lot sont décidés par le serveur. */
     /** P0-S7 : `jeton` = jeton client du joueur (exigé par un serveur en mode strict ; le joueur est alors sa carte). */
-    tirer: (commerceId: string, contact: string, prenom?: string, parrain?: string, jeton?: string | null) =>
+    /** R3 : `jetonTable` = jeton du QR de table (#/jouer/<id>/<jeton>) ; le serveur en déduit la table, ou l'ignore. */
+    tirer: (commerceId: string, contact: string, prenom?: string, parrain?: string, jeton?: string | null, jetonTable?: string) =>
       requete('POST', `/commerces/${enc(commerceId)}/tirages`, {
-        corps: { contact, ...(prenom ? { prenom } : {}), ...(parrain ? { parrain } : {}) },
+        corps: { contact, ...(prenom ? { prenom } : {}), ...(parrain ? { parrain } : {}), jetonTable },
         jetonClient: jeton,
       }) as Promise<ResultatTirage>,
     /** R3 — « Utiliser mon gain » : active le code du tirage pour 10 minutes et le renvoie (jeton client exigé). */
