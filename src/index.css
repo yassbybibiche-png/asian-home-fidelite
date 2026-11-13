@@ -200,6 +200,19 @@ h3 {
     opacity: 0.6;
     --icone-son: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 9h4l5-4v14l-5-4H3z'/%3E%3Cpath d='M16 9.5l5 5m0-5l-5 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
   }
+  /* Cadre de l'espace commerçant (App.tsx) — classes déplacées du TSX (bundle initial au plafond, R4 vitrine). */
+  .espace-commercant {
+    @apply min-h-dvh pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8;
+  }
+  .en-tete-commercant {
+    @apply sticky top-0 z-20 border-b border-white/10 shadow-[0_1px_8px_-4px_rgb(0_0_0/0.5)] print:hidden;
+  }
+  .bandeau-hors-ligne {
+    @apply flex items-center justify-between gap-3 rounded-xl bg-nuit-900 px-3 py-2 text-sm text-white ring-1 ring-white/10;
+  }
+  .barre-mobile {
+    @apply fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-white/10 bg-nuit-950/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_-8px_rgb(0_0_0/0.5)] backdrop-blur-md md:hidden print:hidden;
+  }
   .attente-pulse {
     @apply relative inline-flex h-3 w-3 shrink-0 rounded-full bg-magenta-400;
     animation: attente-point 1.6s ease-in-out infinite;
@@ -1091,6 +1104,28 @@ h3 {
   }
 }
 
+/* Écran vitrine #/vitrine (R4) : roue décorative qui tourne lentement (un tour en 60 s, transform seul). */
+@keyframes vitrine-rotation {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+.vitrine-roue {
+  animation: vitrine-rotation 60s linear infinite;
+}
+/* Mouvement réduit : roue immobile, vues et plats changent sans fondu (Vitrine.tsx retire aussi ces classes). */
+@media (prefers-reduced-motion: reduce) {
+  .vitrine-roue {
+    animation: none;
+  }
+  .vitrine * {
+    transition: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .revelation-attente,
   .revelation-attente .titre-logo {
@@ -1112,3 +1147,4 @@ h3 {
     transition: none;
   }
 }
+

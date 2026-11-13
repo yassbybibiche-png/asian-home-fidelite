@@ -36,6 +36,7 @@ const IMPORTS = {
   bienvenue: () => import('./pages/Bienvenue'),
   commande: () => import('./pages/Commande'),
   cuisine: () => import('./pages/Cuisine'),
+  vitrine: () => import('./pages/Vitrine'),
 } satisfies Partial<Record<Page, () => Promise<{ default: ComponentType }>>>
 
 const TableauDeBord = lazy(IMPORTS.accueil)
@@ -58,8 +59,9 @@ const Reglement = lazy(IMPORTS.reglement)
 const Bienvenue = lazy(IMPORTS.bienvenue)
 const Commande = lazy(IMPORTS.commande)
 const Cuisine = lazy(IMPORTS.cuisine)
+const Vitrine = lazy(IMPORTS.vitrine)
 
-const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidentialite', 'reglement', 'bienvenue', 'commande']
+const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidentialite', 'reglement', 'bienvenue', 'commande', 'vitrine']
 
 /**
  * Pages client à corps sombres (P1-D2, AUDIT.md §6.2/§6.3) : fond noir, surfaces sombres
@@ -68,8 +70,9 @@ const PAGES_PUBLIQUES_DIFFEREES: Page[] = ['menu', 'desinscription', 'confidenti
  * reste claire — comme la caisse (#/caisse, pourtant publique, car utilisée au comptoir) et les
  * pages de texte (#/desinscription, #/confidentialite, #/reglement, lecture longue sur fond clair).
  * Expérience 10/10 (lot 2) : l'accueil #/bienvenue et la commande à table #/commande, dans la même DA nocturne.
+ * R4 : l'écran vitrine #/vitrine (TV en salle).
  */
-const PAGES_CLIENT_SOMBRES: Page[] = ['jouer', 'carte', 'menu', 'bienvenue', 'commande']
+const PAGES_CLIENT_SOMBRES: Page[] = ['jouer', 'carte', 'menu', 'bienvenue', 'commande', 'vitrine']
 
 /**
  * Une fois l'espace commerçant ouvert, les autres pages du back-office sont téléchargées en arrière-plan (navigateur
@@ -179,6 +182,7 @@ const COMPOSANTS: Record<Page, ComponentType> = {
   bienvenue: Bienvenue,
   commande: Commande,
   cuisine: Cuisine,
+  vitrine: Vitrine,
 }
 
 /** Onglet surligné pour les sous-pages (fiche client → Clients, QR vitrine → Roulette). */
@@ -235,7 +239,7 @@ function BandeauDonnees() {
   }
   if (connexion !== 'horsLigne') return null
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl bg-nuit-900 px-3 py-2 text-sm text-white ring-1 ring-white/10" role="status">
+    <div className="bandeau-hors-ligne" role="status">
       <span>
         <strong>Hors ligne</strong> — dernières données connues{derniereSynchro ? ` (${heure.format(new Date(derniereSynchro))})` : ''}. Serveur injoignable —
         vérifiez la connexion.
@@ -297,8 +301,8 @@ export default function App() {
   const onglets = ONGLETS.filter((o) => o.page != 'cuisine' || commerce.commande?.active)
 
   return (
-    <div className="min-h-dvh pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8">
-      <header className="hero-sombre sticky top-0 z-20 border-b border-white/10 shadow-[0_1px_8px_-4px_rgb(0_0_0/0.5)] print:hidden">
+    <div className="espace-commercant">
+      <header className="hero-sombre en-tete-commercant">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2">
           <SelecteurCommerce />
           <span className="titre-magenta hidden shrink-0 text-lg sm:block">{NOM_APP}</span>
@@ -352,7 +356,7 @@ export default function App() {
       </main>
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-white/10 bg-nuit-950/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_-8px_rgb(0_0_0/0.5)] backdrop-blur-md md:hidden print:hidden"
+        className="barre-mobile"
         aria-label="Navigation principale"
       >
         {ONGLETS_MOBILE.map((o) => {
