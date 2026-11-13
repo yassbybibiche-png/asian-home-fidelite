@@ -5,7 +5,7 @@ import type { CommercePublic, Menu } from '../types'
 import { ErreurApi } from '../data/api'
 import { formaterPrix } from '../lib/points'
 import { bandeauPrixManquants, filtrerMenu, LIBELLE_ALLERGENES_ABSENTS } from '../lib/menu'
-import { badgesPlat, boutonsMenu, categorieEffective, categorieMidi, estHeureMenuMidi, LIBELLES_BADGES, MENTION_BADGE_DEDUIT } from '../lib/menuClient'
+import { badgesPlat, boutonsMenu, categorieEffective, categorieMidi, estHeureMenuMidi, LIBELLES_BADGES, MENTION_BADGE_DEDUIT, photoCartePlat, prefereMouvementReduit } from '../lib/menuClient'
 import { LogoCommerce, PiedPublic } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
 import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
@@ -106,6 +106,11 @@ export function MenuAffiche({
   const midi = useMemo(() => categorieMidi(menuAffiche.categories.filter((c) => c.produits.length)), [menuAffiche])
   const bandeauMidi = !!midi && estHeureMenuMidi(maintenant)
   const avecBadges = visibles.some((c) => c.produits.some((p) => badgesPlat(p).length))
+  // Rail « En photos » : les plats photographiés de toute la carte (liste complète, hors recherche et onglet).
+  const platsPhoto = useMemo(
+    () => menuAffiche.categories.flatMap((c) => c.produits.filter((p) => p.photo).map((p) => ({ categorieId: c.id, p }))),
+    [menuAffiche],
+  )
   // Interface traduite (P2-Q1) ; les noms de plats et de catégories restent ceux du restaurant.
   const { langue, t } = useLangue()
 
@@ -138,6 +143,14 @@ export function MenuAffiche({
     setOuvert(null)
     const liste = document.getElementById('liste-menu')
     if (liste && (defiler || liste.getBoundingClientRect().top < 0)) liste.scrollIntoView({ block: 'start' })
+  }
+
+  /** Depuis le rail : onglet « Toutes » (la carte du plat est visible quelle que soit sa catégorie),
+      fiche du plat ouverte, puis défilement jusqu'à sa carte. */
+  function allerAuPlat(_categorieId: string, platId: string) {
+    setCategorie('toutes')
+    setOuvert(platId)
+    setTimeout(() => document.getElementById(`plat-${platId}`)?.scrollIntoView({ behavior: prefereMouvementReduit() ? 'auto' : 'smooth', block: 'center' }), 80)
   }
 
   return (
@@ -191,6 +204,29 @@ export function MenuAffiche({
 
       {bandeauPrix && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">{bandeauPrix}</p>}
 
+      {recherche === '' && platsPhoto.length >= 2 && (
+        <section aria-label={t('En photos')} className="space-y-2">
+          <p className="font-titre text-lg font-bold">{t('En photos')}</p>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {platsPhoto.map(({ categorieId, p }) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => allerAuPlat(categorieId, p.id)}
+                aria-label={t('Voir le plat : {nom}', { nom: p.nom })}
+                className="w-36 shrink-0 overflow-hidden rounded-2xl bg-white text-left shadow-douce ring-1 ring-gray-900/5"
+              >
+                <img src={photoCartePlat(p)} alt="" loading="lazy" className="h-24 w-full object-cover" />
+                <span className="block px-3 py-2">
+                  <span className="block truncate text-sm font-semibold">{p.nom}</span>
+                  <span className="block text-sm font-semibold text-magenta-700 tabular-nums">{p.prix == null ? t('Prix sur place') : formaterPrix(p.prix)}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       {categories.length === 0 && !recherche ? (
         <MessagePublic titre="Menu à venir">Le commerce n’a pas encore publié son menu.</MessagePublic>
       ) : (
@@ -232,12 +268,17 @@ export function MenuAffiche({
               {visibles.map((c) => {
                 const photo = photoCategorie(c.nom)
                 return (
-                  <section key={c.id} id={`m-${c.id}`} data-categorie={c.id} className="scroll-mt-36 space-y-2">
-                    <h2 className="font-titre text-xl font-bold">{c.nom}</h2>
+                  <section key={c.id} id={`m-${c.id}`} data-categorie={c.id} className="apparition scroll-mt-36 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="font-titre text-xl font-bold">{c.nom}</h2>
+                      {bandeauMidi && midi && c.id === midi.id && (
+                        <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('🍱 Menu Midi')}</span>
+                      )}
+                    </div>
                     {photo && (
                       <picture className="block">
                         <source srcSet={photo.srcPetit} type="image/webp" />
-                        <img src={photo.src} alt={photo.alt} loading="lazy" className="h-32 w-full rounded-2xl object-cover" />
+                        <img src={photo.src} alt={photo.alt} loading="lazy" className="h-44 w-full rounded-3xl object-cover shadow-relief" />
                       </picture>
                     )}
                     <ul className="space-y-2">
@@ -246,7 +287,21 @@ export function MenuAffiche({
                         const signature = estSignature(p.nom)
                         const badges = badgesPlat(p)
                         return (
-                          <li key={p.id} className="overflow-hidden rounded-2xl bg-white shadow-douce ring-1 ring-gray-900/5">
+                          <li key={p.id} id={`plat-${p.id}`} className="apparition overflow-hidden rounded-3xl bg-white shadow-douce ring-1 ring-gray-900/5">
+                            {p.photo && (
+                              <button
+                                type="button"
+                                className="relative block w-full"
+                                aria-expanded={detail}
+                                aria-label={t('Voir le plat : {nom}', { nom: p.nom })}
+                                onClick={() => setOuvert(detail ? null : p.id)}
+                              >
+                                <img src={photoCartePlat(p)} alt="" loading="lazy" className="h-44 w-full object-cover" />
+                                <span className="absolute right-3 bottom-3 rounded-full bg-nuit-950/85 px-3 py-1 font-semibold text-white tabular-nums backdrop-blur">
+                                  {p.prix == null ? <span className="text-sm italic">{t('Prix sur place')}</span> : formaterPrix(p.prix)}
+                                </span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left active:bg-gray-50"
@@ -276,10 +331,13 @@ export function MenuAffiche({
                               ) : (
                                 <span className="shrink-0 font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix)}</span>
                               )}
+                              <span aria-hidden="true" className="shrink-0 text-gray-400">
+                                {detail ? '▴' : '▾'}
+                              </span>
                             </button>
                             {detail && (
                               <div className="apparition space-y-3 border-t border-gray-100 px-4 py-3">
-                                {p.photo && <img src={p.photo} alt={t('Photo du plat : {nom}', { nom: p.nom })} loading="lazy" className="h-44 w-full rounded-2xl object-cover" />}
+                                {p.photo && <img src={p.photo} alt={t('Photo du plat : {nom}', { nom: p.nom })} loading="lazy" className="h-56 w-full rounded-2xl object-cover" />}
                                 {p.description ? (
                                   <p className="text-sm text-gray-700">{p.description}</p>
                                 ) : (

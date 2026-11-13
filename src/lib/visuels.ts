@@ -58,6 +58,10 @@ export const VISUELS = {
   /** Même plat, recadrage carré centré pour la liste du menu (192×192, WebP q75, ~6 Ko) —
       le JPEG 1109×720 (156 Ko) reste la photo de la fiche (item C). */
   menuLocLacVignette: '/visuels/menu-loc-lac-vignette.webp',
+  /** Même plat, variante WebP pour les grandes cartes du menu visuel (720×467, WebP q80, ~41 Ko,
+      dérivée du JPEG par redimensionnement Pillow, mission « menu visuel » 13/11/2026) —
+      le JPEG 1109×720 (156 Ko) reste la photo de la fiche détaillée. */
+  menuLocLacPetit: '/visuels/menu-loc-lac-petit.webp',
   /**
    * Nouilles sautées aux crevettes — rattachée à AUCUN plat depuis le lot P1-B2 : « Mi Prat » a désormais
    * la photo légendée « MI PRAT » par le restaurant dans son PDF. Gardée au cas où le commerçant confirme le plat montré.

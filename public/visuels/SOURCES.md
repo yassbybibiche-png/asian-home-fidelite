@@ -147,3 +147,18 @@ fichier reste ici, rattaché à aucun plat.
 Rappel : **aucune photo prise par des clients sur Google** n'est utilisée. Les
 photos futures du commerçant se déposent dans `assets/source/photos/`
 (voir son README) et se rattachent à la main après vérification visuelle.
+
+---
+
+## Ajout du 13/11/2026 — mission « menu visuel »
+
+| Fichier | Contenu | Source |
+|---|---|---|
+| `menu-loc-lac-petit.webp` (720×467, 40 670 o) | Loc Lac : bœuf caramélisé, riz rouge, œuf au plat, salade, rosace de tomate — variante d'affichage pour les grandes cartes du menu public, dérivée de `menu-loc-lac.jpg` par redimensionnement (Pillow, WebP q80) ; le JPEG reste la photo de la fiche détaillée | Dérivé de `menu-loc-lac.jpg` ci-dessus, pas une nouvelle source |
+
+Inventaire PDF rejoué le 13/11/2026 (les 6 pages extraites et examinées) : la page 5
+« MENU MIDI » ne contient aucune photo (texte seul) ; les pages 2, 3, 4 et 6 confirment
+l'inventaire du 10/11/2026 — aucune photo de plat supplémentaire n'est rattachable
+(les deux photos « Spécialités » de la page 6 ne sont pas légendées individuellement,
+les deux bocaux « Desserts » restent indiscernables, les boissons ne sont pas
+identifiables plat par plat). Compte inchangé : 11 plats avec photo vérifiée, 70 sans.

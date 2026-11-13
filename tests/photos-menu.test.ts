@@ -216,8 +216,8 @@ describe('Affichage (source) : vignette dans la liste, photo dans la fiche', () 
   const publicTsx = readFileSync(new URL('../src/pages/MenuPublic.tsx', import.meta.url), 'utf8')
   const carteTsx = readFileSync(new URL('../src/pages/MenuCarte.tsx', import.meta.url), 'utf8')
 
-  test('#/menu : liste → photoVignette ?? photo ; fiche dépliée → photo', () => {
-    assert.match(publicTsx, /<img src=\{p\.photoVignette \?\? p\.photo\} alt="" loading="lazy" className="h-16 w-16/)
+  test('#/menu : grande carte → photoCartePlat ; fiche dépliée → photo', () => {
+    assert.match(publicTsx, /<img src=\{photoCartePlat\(p\)\} alt="" loading="lazy" className="h-44 w-full/)
     assert.match(publicTsx, /<img src=\{p\.photo\} alt=\{t\('Photo du plat : \{nom\}', \{ nom: p\.nom \}\)\}/)
   })
   test('#/menuCarte : champ vignette optionnel ; changer ou retirer la photo efface la vignette', () => {

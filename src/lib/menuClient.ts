@@ -2,6 +2,21 @@
 // Logique pure, testée (tests/menu-client-p1-c5.test.ts) ; la page est src/pages/MenuPublic.tsx.
 import type { CategorieMenu, Commerce, Produit } from '../types'
 import { sansAccents } from './recherche.ts'
+import { VISUELS } from './visuels.ts'
+
+// ---------- Menu visuel : photo des grandes cartes, mouvement réduit ----------
+
+/** Photo affichée sur la grande carte d'un plat : la fiche du plat, sauf le Loc Lac dont le
+    JPEG (156 Ko) a une variante WebP légère (le détail déplié garde la fiche d'origine). */
+export function photoCartePlat(p: Pick<Produit, 'photo'>): string | undefined {
+  if (!p.photo) return undefined
+  return p.photo === VISUELS.menuLocLac ? VISUELS.menuLocLacPetit : p.photo
+}
+
+/** Mouvement réduit demandé par l'appareil (défilements doux désactivés). */
+export function prefereMouvementReduit(): boolean {
+  return typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
+}
 
 // ---------- Badges « épicé » / « végétarien » ----------
 // La carte officielle ne marque aucun plat épicé ni végétarien : ces badges sont DÉDUITS des mots du nom ou de la
