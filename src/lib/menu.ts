@@ -38,7 +38,7 @@ export const ALLERGENES = [
 
 // 120 produits : la carte officielle d'Asian Home compte 81 plats (78 tarifés + 3 hors carte),
 // l'ancienne limite de 60 la refusait ; marge pour les ajouts du commerçant.
-export const LIMITES_MENU = { categories: 20, produits: 120, photoOctets: 60_000 }
+export const LIMITES_MENU = { categories: 20, produits: 120, photoOctets: 60_000, options: 10 }
 
 const PHOTO = /^(https:\/\/\S{1,500}|data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+|\/visuels\/[\w\-]+\.(?:jpg|jpeg|png|webp))$/
 
@@ -94,6 +94,20 @@ export function validerMenu(brut: unknown, commerceId: string, maintenant: Date)
       if (description) produit.description = description
       if (photo) produit.photo = photo
       if (photoVignette) produit.photoVignette = photoVignette
+      // Commande à table (Expérience 10/10) : rupture et options tarifées, écrites seulement si renseignées.
+      if (pr.indisponible != null && typeof pr.indisponible !== 'boolean') throw new ErreurMenu(`« ${nom} » : « indisponible » doit valoir true ou false.`)
+      if (pr.indisponible) produit.indisponible = true
+      if (pr.options != null) {
+        if (!Array.isArray(pr.options) || pr.options.length > LIMITES_MENU.options) throw new ErreurMenu(`« ${nom} » : « options » = liste de ${LIMITES_MENU.options} options maximum.`)
+        const options = pr.options.map((x: unknown, k) => {
+          const op = (x ?? {}) as Record<string, unknown>
+          const nomOption = chaine(op.nom, `option n° ${k + 1} de « ${nom} »`, 40, true)
+          if (typeof op.prix !== 'number' || !Number.isInteger(op.prix) || op.prix < 0 || op.prix > 100_000) throw new ErreurMenu(`« ${nom} » : prix de l’option « ${nomOption} » invalide (centimes, 0 à 100 000).`)
+          return { nom: nomOption, prix: op.prix }
+        })
+        if (new Set(options.map((op) => op.nom.toLowerCase())).size !== options.length) throw new ErreurMenu(`« ${nom} » : option en double.`)
+        if (options.length) produit.options = options
+      }
       return produit
     })
     return { id: id(cat.id, 'cat', i), nom: nomCat, produits }

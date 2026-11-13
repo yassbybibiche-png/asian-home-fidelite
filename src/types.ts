@@ -189,6 +189,52 @@ export interface Commerce {
   conservationMois?: number
   /** Tests A/B (P2-Q3, docs/TESTS-AB.md). Absent = aucun test en cours. */
   testsAB?: TestsAB
+  /**
+   * Commande à table (Expérience 10/10). Absent = module désactivé (les nouveaux commerces n'en ont pas). `jeton` =
+   * ce qu'encode le QR de la table, généré par le serveur (jamais publié : la fiche publique n'a que `commandeActive`).
+   */
+  commande?: ConfigCommande
+}
+
+export interface ConfigCommande {
+  active: boolean
+  tables: TableCommande[]
+}
+
+export interface TableCommande {
+  nom: string
+  jeton: string
+}
+
+/** Cycle d'une commande à table : recue → acceptee | refusee ; acceptee → en_preparation → servie. */
+export type StatutCommande = 'recue' | 'acceptee' | 'refusee' | 'en_preparation' | 'servie'
+
+/** Ligne de commande : nom et prix FIGÉS à la création, relus du menu en base (jamais ceux du navigateur). */
+export interface LigneCommande {
+  produitId: string
+  nom: string
+  /** Centimes, prix du produit seul (sans les options). */
+  prixUnitaire: number
+  quantite: number
+  /** Options choisies, prix en centimes (supplément par unité). */
+  options: OptionProduit[]
+  instructions?: string
+}
+
+/** Commande à table (table `meta`, `server/commandes.ts`). Montants en centimes. */
+export interface Commande {
+  id: string
+  commerceId: string
+  /** Nom de la table au moment de la commande. */
+  table: string
+  lignes: LigneCommande[]
+  instructions?: string
+  total: number
+  statut: StatutCommande
+  creeLe: string
+  majLe: string
+  /** Secret de suivi du client : jamais renvoyé, sauf une fois à la création. */
+  secret: string
 }
 
 /**
@@ -319,6 +365,8 @@ export interface CommercePublic {
   bonusCreux?: true
   /** Menu public non vide (Déblocage C-bis) : présent (true) seulement sur GET /commerces/:id — bouton « Voir le menu » dès l'arrivée. */
   menuDisponible?: true
+  /** Commande à table activée avec au moins une table (Expérience 10/10) : présent (true) seulement dans ce cas. */
+  commandeActive?: true
   actif: boolean
   demo: boolean
   catalogue?: Pick<RecompensePoints, 'nom' | 'cout' | 'description'>[]
@@ -467,6 +515,16 @@ export interface Produit {
   /** Petite version pour la liste du menu (même format que `photo`) ; absente = `photo` est utilisée. */
   photoVignette?: string
   allergenes: string[]
+  /** Commande à table : true = ne peut pas être commandé (rupture). Absent = disponible. */
+  indisponible?: boolean
+  /** Options tarifées (supplément en centimes), choisies par NOM à la commande. Absent = aucune option. */
+  options?: OptionProduit[]
+}
+
+export interface OptionProduit {
+  nom: string
+  /** Centimes. */
+  prix: number
 }
 
 export interface CategorieMenu {
