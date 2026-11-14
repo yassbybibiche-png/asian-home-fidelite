@@ -1330,6 +1330,28 @@ h3 {
   }
 }
 
+/* Boucle animations, cycle 3 : plat-star plein cadre du menu Découverte (MenuPublic.tsx, `PlatStar`). Hauteur fixée ici,
+   jamais par l'image (object-cover) → CLS nul. La photo vit au défilement avec les patrons existants : calque
+   `.cadre-parallaxe` (débord de 32 px) et zoom lent `[data-univers-actif] .ken-burns img` ; le nom se révèle mot à mot.
+   À la révélation, le calque photo « plonge » vers sa taille (propriété `scale`, distincte du `transform` posé en ligne
+   par la parallaxe). */
+.plat-star {
+  height: clamp(20rem, 62vh, 34rem);
+}
+.plat-star.revelation-attente .cadre-parallaxe {
+  scale: 1.14;
+}
+.plat-star.revelation-faite .cadre-parallaxe {
+  transition: scale 1.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* Mouvement réduit : bloc statique (la parallaxe et le zoom sont déjà coupés ailleurs). */
+@media (prefers-reduced-motion: reduce) {
+  .plat-star .cadre-parallaxe {
+    scale: none;
+    transition: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .revelation-attente,
   .revelation-attente .titre-logo {
