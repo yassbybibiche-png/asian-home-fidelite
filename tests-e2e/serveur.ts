@@ -36,6 +36,10 @@ const app = await creerServeur({
   production: false,
   dossierStatique: statique,
   version: 'e2e',
+  // P3-2 : toute la passe partage une seule IP (127.0.0.1) et une fenêtre de 60 s — les limites de production
+  // (10 inscriptions/min) seraient atteintes par la passe elle-même, sans rapport avec le produit. Relevées ici
+  // seulement ; les limites de production restent épinglées par les tests unitaires (compteurs-publics-p0-s20).
+  limitesPubliques: { inscriptionParIp: 1000, inscriptionParContact: 1000, ficheClientParIp: 1000, lectureParIp: 1000, lectureParCarte: 1000, tirageParIp: 1000, tirageParContact: 1000 },
 })
 
 app.serveur.listen(PORT_E2E, '127.0.0.1', () => {
