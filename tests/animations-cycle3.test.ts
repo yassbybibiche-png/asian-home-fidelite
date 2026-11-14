@@ -7,7 +7,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { platStar } from '../src/lib/platStar.ts'
+import { AGRANDISSEMENT_MAX_STAR, CADRE_STAR, DIMENSIONS_PHOTOS_PLATS, RATIO_CADRE_STAR, agrandissementStar, photoEligibleStar, platStar } from '../src/lib/platStar.ts'
+import { lireEnTeteImage } from '../src/lib/logo.ts'
 import { masquerPrixNonConfirmes, menuReelAsianHome, retirerPhotosDetachees } from '../src/data/menu-reel.ts'
 import type { Produit } from '../src/types.ts'
 
@@ -54,18 +55,86 @@ describe('Cycle 3 : choix du plat-star (src/lib/platStar.ts)', () => {
   })
 
   test('renvoie le plat lui-même (vraie photo, vrai nom, vrai prix, vraie description), jamais une copie', () => {
-    const p = { ...plat('Poke Bowl', '/visuels/menu-poke-bowl.webp'), description: 'Riz, saumon' }
+    const p = { ...plat('Poke Bowl', 'https://exemple.fr/poke.jpg'), description: 'Riz, saumon' }
     assert.equal(platStar({ produits: [p] }), p)
   })
 
-  test('carte réelle : 4 catégories reçoivent un star, chacun avec la photo du plat', () => {
+  test('carte réelle : seules les photos qui supportent le plein cadre font un star (Plats thaï, Desserts)', () => {
     const m = retirerPhotosDetachees(masquerPrixNonConfirmes(menuReelAsianHome()))
     const stars = Object.fromEntries(m.categories.map((c) => [c.nom, platStar(c)?.nom ?? null]).filter(([, s]) => s))
-    assert.deepEqual(stars, { 'Poke Bowl': 'Poke Bowl', 'Entrées thaï': 'Dynamite', 'Plats thaï': 'Loc Lac', Desserts: 'Mango Stick' })
+    assert.deepEqual(stars, { 'Plats thaï': 'Loc Lac', Desserts: 'Mango Stick' })
     for (const c of m.categories) {
       const s = platStar(c)
       if (s) assert.ok(c.produits.includes(s) && s.photo, c.nom)
     }
+  })
+})
+
+describe('Cycle 3 : seuil de résolution du plat-star (src/lib/platStar.ts)', () => {
+  test('cadre de référence aligné sur .plat-star (clamp 20rem / 62vh / 34rem), ratio ≈ 0,73, seuil ×1,5', () => {
+    assert.deepEqual(CADRE_STAR, { largeur: 380, hauteur: 520 })
+    assert.ok(Math.abs(RATIO_CADRE_STAR - 380 / 520) < 1e-9)
+    assert.equal(AGRANDISSEMENT_MAX_STAR, 1.5)
+    assert.match(regle('.plat-star'), /height: clamp\(20rem, 62vh, 34rem\);/)
+  })
+
+  test('agrandissement : photo plus large que le cadre → hauteur limitante ; plus haute → largeur limitante', () => {
+    assert.ok(Math.abs(agrandissementStar(1040, 520) - 1) < 1e-9, 'paysage, hauteur exacte : ×1')
+    assert.ok(Math.abs(agrandissementStar(380, 2000) - 1) < 1e-9, 'portrait, largeur exacte : ×1')
+    assert.ok(Math.abs(agrandissementStar(190, 260) - 2) < 1e-9, 'même ratio, moitié : ×2')
+    assert.ok(Math.abs(agrandissementStar(341, 225) - 520 / 225) < 1e-9)
+  })
+
+  test('bornes : ×1,5 pile éligible, juste au-delà écarté', () => {
+    const borne = 520 / 1.5 // hauteur limitante (paysage) donnant exactement ×1,5
+    assert.equal(agrandissementStar(1000, borne), 1.5)
+    assert.ok(agrandissementStar(1000, borne - 1) > 1.5)
+    const t = DIMENSIONS_PHOTOS_PLATS as Record<string, readonly [number, number]>
+    t['/test-borne.webp'] = [1000, borne]
+    t['/test-au-dela.webp'] = [1000, borne - 1]
+    try {
+      assert.equal(photoEligibleStar('/test-borne.webp'), true)
+      assert.equal(photoEligibleStar('/test-au-dela.webp'), false)
+    } finally {
+      delete t['/test-borne.webp']
+      delete t['/test-au-dela.webp']
+    }
+  })
+
+  test('photos réelles : Loc Lac (×0,72) et Mango Stick (×1,26) éligibles ; Dynamite (×2,3) et Poke Bowl (×3,9) écartés', () => {
+    const f = (p: string) => agrandissementStar(...(DIMENSIONS_PHOTOS_PLATS[p] as [number, number]))
+    assert.ok(f('/visuels/menu-loc-lac.jpg') < 0.75)
+    assert.ok(f('/visuels/menu-mango-sticky-rice.jpg') < 1.3)
+    assert.ok(f('/visuels/menu-dynamite.webp') > 2.3)
+    assert.ok(f('/visuels/menu-poke-bowl.webp') > 3.9)
+    for (const p of ['/visuels/menu-loc-lac.jpg', '/visuels/menu-mango-sticky-rice.jpg']) assert.equal(photoEligibleStar(p), true, p)
+    for (const p of ['/visuels/menu-dynamite.webp', '/visuels/menu-poke-bowl.webp', '/visuels/menu-bo-bun.webp']) assert.equal(photoEligibleStar(p), false, p)
+  })
+
+  test('table : chaque photo de plat de la carte y figure, avec les dimensions RÉELLES du fichier', () => {
+    const photos = new Set(menuReelAsianHome().categories.flatMap((c) => c.produits.flatMap((p) => (p.photo ? [p.photo] : []))))
+    photos.add('/visuels/menu-makis.jpg') // détachée (P1-M3) mais encore présente dans des menus enregistrés
+    assert.deepEqual([...photos].sort(), Object.keys(DIMENSIONS_PHOTOS_PLATS).sort())
+    for (const [p, [l, h]] of Object.entries(DIMENSIONS_PHOTOS_PLATS)) {
+      const infos = lireEnTeteImage(readFileSync(join(RACINE, 'public', p)))
+      assert.deepEqual([infos?.largeur, infos?.hauteur], [l, h], p)
+    }
+  })
+
+  test('photo inconnue de la table (URL d’un commerçant) : éligible par défaut', () => {
+    assert.equal(photoEligibleStar('https://exemple.fr/photo-telephone.jpg'), true)
+    assert.equal(platStar({ produits: [plat('Nems', 'https://exemple.fr/n.jpg')] })?.nom, 'Nems')
+  })
+
+  test('sélection parmi les éligibles : signature trop petite écartée au profit du suivant éligible', () => {
+    const c = { produits: [plat('Dynamite', '/visuels/menu-dynamite.webp'), plat('Nems', '/visuels/menu-poke-bowl.webp'), plat('Gyoza', '/g.jpg'), plat('Bao', '/b.jpg')] }
+    assert.equal(platStar(c)?.nom, 'Gyoza')
+    const d = { produits: [plat('Mango Stick', '/visuels/menu-mango-sticky-rice.jpg'), plat('Loc Lac', '/visuels/menu-loc-lac.jpg')] }
+    assert.equal(platStar(d)?.nom, 'Loc Lac', 'la signature éligible passe devant')
+  })
+
+  test('aucune photo éligible : null (pas de bloc)', () => {
+    assert.equal(platStar({ produits: [plat('Dynamite', '/visuels/menu-dynamite.webp'), plat('Poke Bowl', '/visuels/menu-poke-bowl.webp')] }), null)
   })
 })
 
