@@ -460,6 +460,9 @@ export const ERREURS_EN: Record<string, string> = {
   COMMANDE_INTROUVABLE: 'Order not found.',
   COMMANDE_CONFLIT: 'Too many orders at once: please try again.',
   COMMANDE_INVALIDE: 'This change is not possible for this order.',
+  COMMANDE_TECHNIQUE: 'Technical problem: the update was not saved. Please try again; if it keeps happening, report it.',
+  REMISE_TECHNIQUE: 'Technical problem: the prize was not collected. Please try again; if it keeps happening, report it.',
+  ACTIVATION_TECHNIQUE: 'Technical problem: the code could not be activated. Please try again; if it keeps happening, ask at the counter.',
 }
 
 /** Une valeur de détail au format AAAA-MM-JJ → « Tue 17 Nov 2026 » en anglais, telle quelle sinon. */

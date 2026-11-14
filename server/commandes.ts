@@ -32,6 +32,13 @@ export const clePurgeFaite = (commerceId: string) => `commandes-purge-faite:${co
 
 /** Écriture perdue face à une écriture simultanée (le routeur répond 409 « réessayez »). */
 export class ConflitCommande extends Error {}
+/**
+ * Écriture perdue SANS qu'une autre écriture soit passée entre-temps (la valeur relue est inchangée : écart
+ * technique, comme l'incident 409 — la colonne `meta.valeur` en jsonb côté production). Le routeur répond 500, et
+ * le message ne doit jamais dire « modifiée par ailleurs » : rien n'a été modifié, c'est le stockage qui n'a pas
+ * appliqué l'écriture (P2-2).
+ */
+export class ErreurTechniqueCommande extends Error {}
 /** Transition de statut interdite (le routeur répond 400). */
 export class TransitionInvalide extends Error {}
 /** Commande absente de CE commerce (le routeur répond 404). */
@@ -220,7 +227,9 @@ export async function purgerSiDue(st: Stockage, commerceId: string, maintenant: 
 
 /**
  * Passe la commande au statut `vers` : relue, transition vérifiée, écrite seulement si la valeur en base est encore
- * celle relue (une autre transition passée entre-temps → ConflitCommande). Aucune écriture sans comparaison-et-échange.
+ * celle relue. Écriture perdue → on RELIT avant de conclure : valeur changée = conflit réel (une autre transition est
+ * passée entre-temps) ; valeur inchangée = échec technique du stockage, à dire comme tel (P2-2) — pendant
+ * l'incident 409, l'équipe lisait « modifiée par ailleurs » alors que rien n'avait changé.
  */
 export async function changerStatut(st: Stockage, commerceId: string, id: string, vers: StatutCommande, maintenant = new Date()): Promise<Commande> {
   const cle = cleCommande(commerceId, id)
@@ -229,8 +238,9 @@ export async function changerStatut(st: Stockage, commerceId: string, id: string
   if (!brut || !c || c.commerceId !== commerceId || c.id !== id) throw new CommandeIntrouvable('Commande introuvable.')
   if (!transitionValide(c.statut, vers)) throw new TransitionInvalide(`Transition impossible : « ${c.statut} » → « ${vers} ».`)
   const maj: Commande = { ...c, statut: vers, majLe: maintenant.toISOString() }
-  if (!(await st.majMetaSi(cle, brut, JSON.stringify(maj)))) throw new ConflitCommande('La commande vient d’être modifiée par ailleurs : rechargez puis réessayez.')
-  return maj
+  if (await st.majMetaSi(cle, brut, JSON.stringify(maj))) return maj
+  if ((await st.meta(cle)) !== brut) throw new ConflitCommande('La commande vient d’être modifiée par ailleurs : rechargez puis réessayez.')
+  throw new ErreurTechniqueCommande('Problème technique : la transition n’a pas été enregistrée. Réessayez ; si ça persiste, signalez-le.')
 }
 
 /** La commande telle qu'on la montre (client avec son secret, commerçant) : jamais le secret. */

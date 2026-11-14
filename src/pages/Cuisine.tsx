@@ -63,6 +63,9 @@ async function appeler(url: string, acces: Acces, vers?: StatutCommande): Promis
 function messageErreur(r: Reponse): string {
   if (r.statut === 0) return MESSAGE_HORS_LIGNE
   if (r.statut === 401 || r.statut === 403) return 'Session expirée : verrouillez puis rouvrez l’espace avec le PIN.'
+  // 5xx (P2-2) : le serveur n'a pas pu enregistrer l'action — jamais « Erreur du serveur (500) » ni un message
+  // qui impute la faute à l'équipe ; réessayer suffit le plus souvent, sinon on signale.
+  if (r.statut >= 500) return 'Problème technique : réessayez ; si ça persiste, signalez-le.'
   return r.corps.erreur ?? `Erreur du serveur (${r.statut}).`
 }
 

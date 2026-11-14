@@ -248,6 +248,35 @@ test.describe('commande à table — simulation deux contextes navigateur (deux 
     await expect.poll(() => notes(), { timeout: 5_000 }).toEqual([880, 1174.66])
     await cuisine.context().close()
   })
+
+  test('cuisine : erreur technique du serveur (500) → message « Problème technique », carte remise à sa place', async ({ page: cuisine, request }) => {
+    const c = await preparer(request)
+    // Commande passée par l'API publique (même chemin que la page), table 1.
+    const r = await request.post(`/api/v1/commerces/${c.id}/commandes`, {
+      data: { jetonTable: c.jetons[0], cleIdempotence: `e2e-${Date.now()}`, secret: 'e2e-secret-de-suivi-0123456789abcd', lignes: [{ produitId: await idProduit(request, c.id, 'Pad Thaï'), quantite: 1 }] },
+    })
+    expect(r.status(), await r.text()).toBe(201)
+    const commande = (await r.json()).commande as { id: string }
+
+    // Horloge figée : la relecture automatique (10 s) ne passe pas avant le clic, l'échec est déterministe.
+    await cuisine.clock.install()
+    await ouvrirCuisine(cuisine, c.nom)
+    const carte = cuisine.getByRole('article', { name: /^Table 1, commande de / })
+    await expect(carte.getByRole('button', { name: 'Accepter' })).toBeVisible()
+
+    // Le serveur échoue techniquement (500) : ni « déjà mise à jour » ni « Erreur du serveur (500) ».
+    await cuisine.route('**/api/v1/commerces/*/commandes/*/statut', (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ erreur: 'Problème technique : la transition n’a pas été enregistrée. Réessayez ; si ça persiste, signalez-le.' }) }),
+    )
+    await carte.getByRole('button', { name: 'Accepter' }).click()
+    await expect(cuisine.getByRole('status').filter({ hasText: 'Problème technique' })).toBeVisible()
+    await expect(cuisine.getByRole('status').filter({ hasText: 'déjà mise à jour' })).toHaveCount(0)
+    await expect(cuisine.getByRole('alert')).toHaveCount(0)
+    // La carte revient dans « Nouvelles » : l'action n'a pas été enregistrée, on peut réessayer.
+    await expect(cuisine.getByRole('region', { name: 'Nouvelles' })).toContainText('Table 1')
+    await expect(carte.getByRole('button', { name: 'Accepter' })).toBeVisible()
+    expect((await commandesDuJour(request, c.id)).map((x) => x.statut)).toEqual(['recue'])
+  })
 })
 
 async function idProduit(request: APIRequestContext, commerceId: string, nom: string): Promise<string> {

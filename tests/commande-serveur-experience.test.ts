@@ -15,7 +15,7 @@ import type { AddressInfo } from 'node:net'
 
 import { creerServeur, LIMITE_COMMANDES_PAR_IP, TABLES_COMMANDE_MAX } from '../server/app.ts'
 import { ouvrirStockage, type Stockage } from '../server/stockage.ts'
-import { changerStatut, cleIdempotence, cleIndexCommandes, ConflitCommande, creerCommande, listerCommandes, TransitionInvalide } from '../server/commandes.ts'
+import { changerStatut, cleIdempotence, cleIndexCommandes, ConflitCommande, creerCommande, ErreurTechniqueCommande, listerCommandes, TransitionInvalide } from '../server/commandes.ts'
 import { calculerCommande, jourParis, transitionValide, STATUTS_COMMANDE } from '../src/lib/commande.ts'
 import { commercePublic } from '../src/lib/vuePublique.ts'
 import { validerMenu } from '../src/lib/menu.ts'
@@ -160,6 +160,34 @@ describe('Commande à table : module server/commandes.ts (concurrence)', () => {
     const gagnant = (r.find((x) => x.status === 'fulfilled') as PromiseFulfilledResult<Commande>).value.statut
     assert.equal((await listerCommandes(st, AH, '2026-11-10'))[0].statut, gagnant)
     await assert.rejects(changerStatut(st, AH, 'c1', 'servie', MIDI), TransitionInvalide)
+  })
+
+  test('écriture perdue sans changement (valeur relue inchangée) : ErreurTechniqueCommande, pas ConflitCommande', async () => {
+    const st = ouvrirStockage(':memory:')
+    await creerCommande(st, commande('c2'), 'cle-c2-aaaa')
+    // Sabotage ponctuel : la première écriture conditionnelle échoue, mais la valeur en base n'a pas bougé
+    // (écart technique, comme l'incident 409) — ce n'est pas un conflit, et le message ne doit pas le dire.
+    let sabote = true
+    const lent: Stockage = {
+      ...st,
+      majMetaSi: async (cle, attendue, valeur) => {
+        if (sabote) {
+          sabote = false
+          return false
+        }
+        return st.majMetaSi(cle, attendue, valeur)
+      },
+    }
+    const erreur = await changerStatut(lent, AH, 'c2', 'acceptee', MIDI).then(
+      () => null,
+      (e) => e as Error,
+    )
+    assert.ok(erreur instanceof ErreurTechniqueCommande, String(erreur))
+    assert.match(erreur.message, /Problème technique : la transition n’a pas été enregistrée/)
+    assert.doesNotMatch(erreur.message, /modifiée par ailleurs/)
+    assert.equal((await listerCommandes(st, AH, '2026-11-10')).find((c) => c.id === 'c2')?.statut, 'recue')
+    // Une fois le sabotage levé, la transition passe normalement.
+    assert.equal((await changerStatut(st, AH, 'c2', 'acceptee', MIDI)).statut, 'acceptee')
   })
 
   test('deux créations simultanées de commandes différentes : l’index du jour garde les deux (CAS + réessai)', async () => {
@@ -463,22 +491,61 @@ describe('Commande à table : vrai serveur HTTP (SQLite)', () => {
     assert.equal((await statut('inexistante', 'acceptee')).statut, 404)
   })
 
-  test('conflit à l’écriture conditionnelle (valeur changée entre lecture et écriture) → 409, rien d’écrit', async () => {
+  test('écriture perdue sans changement (déclencheur qui ignore l’écriture) → 500 « Problème technique », rien d’écrit, journal d’équipe', async () => {
     const r = await commander([{ produitId: 'p-nems', quantite: 1 }])
     const { id } = r.contenu.commande
     const cleMeta = `commande:${AH}:${id}`
     const db = new DatabaseSync(fichierDb)
     try {
+      // Le déclencheur ignore l'écriture : la valeur relue ensuite est inchangée — ce n'est PAS un conflit
+      // (P2-2 : pendant l'incident 409, l'équipe lisait « modifiée par ailleurs » dans ce cas précis).
       db.exec(`CREATE TRIGGER perdre_course BEFORE UPDATE ON meta WHEN OLD.cle = '${cleMeta}' BEGIN SELECT RAISE(IGNORE); END`)
       const c = await api('POST', `/commerces/${AH}/commandes/${id}/statut`, { vers: 'acceptee' }, PIN)
-      assert.equal(c.statut, 409, JSON.stringify(c.contenu))
+      assert.equal(c.statut, 500, JSON.stringify(c.contenu))
+      assert.equal(c.contenu.code, 'COMMANDE_TECHNIQUE')
+      assert.match(c.contenu.erreur, /Problème technique : la transition n’a pas été enregistrée/)
+      assert.doesNotMatch(c.contenu.erreur, /modifiée par ailleurs/)
       db.exec('DROP TRIGGER perdre_course')
     } finally {
       db.close()
     }
     const lu = await api('GET', `/commerces/${AH}/commandes/${id}`, undefined, { 'X-Secret-Commande': r.secret })
     assert.equal(lu.contenu.commande.statut, 'recue')
+    // Journal d'équipe : l'échec technique est consigné, visible au tableau de bord.
+    const journal = (await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.journal as { action: string; details: string }[]
+    const entree = journal.find((e) => e.action === 'technique')
+    assert.ok(entree, JSON.stringify(journal.map((e) => e.action)))
+    assert.match(entree.details, /Transition non enregistrée \(problème technique\)/)
+    assert.match(entree.details, /Table 1, recue → acceptee/)
     assert.equal((await api('POST', `/commerces/${AH}/commandes/${id}/statut`, { vers: 'acceptee' }, PIN)).statut, 200)
+  })
+
+  test('conflit réel (valeur changée entre lecture et écriture) → 409 « modifiée par ailleurs », sans entrée technique', async () => {
+    const r = await commander([{ produitId: 'p-nems', quantite: 1 }])
+    const { id } = r.contenu.commande
+    const cleMeta = `commande:${AH}:${id}`
+    const nbTechniquesAvant = ((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.journal as { action: string }[]).filter((e) => e.action === 'technique').length
+    const db = new DatabaseSync(fichierDb)
+    try {
+      // Le déclencheur écrit une autre valeur (une autre transition est passée entre-temps) puis ignore
+      // l'écriture : la relecture confirme le conflit, le 409 dit vrai.
+      db.exec(
+        `CREATE TRIGGER changer_course BEFORE UPDATE ON meta WHEN OLD.cle = '${cleMeta}' BEGIN UPDATE meta SET valeur = replace(NEW.valeur, '"statut":"acceptee"', '"statut":"refusee"') WHERE cle = OLD.cle; SELECT RAISE(IGNORE); END`,
+      )
+      const c = await api('POST', `/commerces/${AH}/commandes/${id}/statut`, { vers: 'acceptee' }, PIN)
+      assert.equal(c.statut, 409, JSON.stringify(c.contenu))
+      assert.equal(c.contenu.code, 'COMMANDE_CONFLIT')
+      assert.match(c.contenu.erreur, /modifiée par ailleurs/)
+      db.exec('DROP TRIGGER changer_course')
+    } finally {
+      db.close()
+    }
+    // La valeur écrite par le déclencheur reste : la commande est « refusee », terminale.
+    const lu = await api('GET', `/commerces/${AH}/commandes/${id}`, undefined, { 'X-Secret-Commande': r.secret })
+    assert.equal(lu.contenu.commande.statut, 'refusee')
+    // Un conflit réel ne journalise pas d'échec technique.
+    const nbTechniquesApres = ((await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.journal as { action: string }[]).filter((e) => e.action === 'technique').length
+    assert.equal(nbTechniquesApres, nbTechniquesAvant, 'un conflit réel ne journalise pas d’échec technique')
   })
 
   test('isolation : la commande du commerce A est introuvable depuis le commerce B (public et commerçant)', async () => {

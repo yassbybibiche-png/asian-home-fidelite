@@ -27,6 +27,7 @@ const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
   avisGoogle: 'Avis Google',
   rgpd: 'Données personnelles',
   acces: 'Accès à la carte',
+  technique: 'Problème technique',
 }
 
 function Chiffre({ valeur, libelle, aide }: { valeur: string | number; libelle: string; aide: string }) {

@@ -8,7 +8,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path'
 
 import type { Apparence, Avis, Client, Commande, Commerce, CommerceCaisse, CommercePublic, ConfigCommande, CreneauCreux, DecisionParrainage, DemandeRattrapage, EntreeJournal, EnvoiRelance, InstantsDuJour, Lot, MembreEquipe, ModeleRelance, Parrainage, RecompensePoints, ReglesMessages, StatutEnvoi, TableCommande, TestsAB, Tirage, TypeCommerce, TypeEvenement, TypeLot } from '../src/types.ts'
 import { calculerCommande, estStatutCommande, lireInstructions, STATUTS_COMMANDE } from '../src/lib/commande.ts'
-import { changerStatut, CommandeIntrouvable, commandeDejaCreee, ConflitCommande, creerCommande, lireCommande, listerCommandes, purgerSiDue, sansSecret, TransitionInvalide } from './commandes.ts'
+import { changerStatut, CommandeIntrouvable, commandeDejaCreee, ConflitCommande, creerCommande, ErreurTechniqueCommande, lireCommande, listerCommandes, purgerSiDue, sansSecret, TransitionInvalide } from './commandes.ts'
 import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
@@ -237,11 +237,11 @@ class ErreurHttp extends Error {
 const err = (statut: number, message: string, code?: string, details?: Record<string, string>) => new ErreurHttp(statut, message, undefined, code, details)
 
 /**
- * Erreurs typées de `server/commandes.ts` → réponse HTTP (conflit 409, transition 400, introuvable 404).
- * `COMMANDE_CONFLIT` : côté client, seul `commander` peut la déclencher (double envoi simultané) — la
- * traduction anglaise dit « réessayez » ; la transition commerçant garde son message français (P2-2 la
- * reformulera). */
+ * Erreurs typées de `server/commandes.ts` → réponse HTTP (conflit 409, technique 500, transition 400, introuvable 404).
+ * P2-2 : l'échec technique (écriture perdue sans changement) répond 500 avec le message « Problème technique »,
+ * jamais « modifiée par ailleurs ». */
 function erreurCommande(e: unknown): unknown {
+  if (e instanceof ErreurTechniqueCommande) return err(500, e.message, 'COMMANDE_TECHNIQUE')
   if (e instanceof ConflitCommande) return err(409, e.message, 'COMMANDE_CONFLIT')
   if (e instanceof TransitionInvalide) return err(400, e.message, 'COMMANDE_INVALIDE')
   if (e instanceof CommandeIntrouvable) return err(404, e.message, 'COMMANDE_INTROUVABLE')
@@ -1942,6 +1942,19 @@ export async function creerServeur(o: OptionsServeur) {
       e.clientPrenom = client.prenom
     }
     await st.ajouterJournal(e)
+  }
+
+  /**
+   * Journalise un échec technique (P2-2) sans jamais masquer l'erreur d'origine : la réponse reste l'erreur
+   * technique (500), même si l'écriture du journal échoue — sinon l'équipe lirait « Erreur interne du serveur »
+   * au lieu du message qui dit de réessayer et de signaler.
+   */
+  async function journaliserTechnique(commerceId: string, auteur: Auteur, details: string, client?: Client) {
+    try {
+      await journaliser(commerceId, auteur, 'technique', details, client)
+    } catch (e) {
+      console.warn(`[journal] échec technique non journalisé (${commerceId}) : ${e instanceof Error ? e.message : e}`)
+    }
   }
 
   const nouvelIdMessage = () => `msg-${randomUUID()}`
@@ -3767,7 +3780,16 @@ export async function creerServeur(o: OptionsServeur) {
       if (!remis) {
         const relu = (await st.tiragesParCode(id, code)).find((x) => x.id === trouve.id)
         if (relu) refus(relu, maintenant())
-        if (relu && !relu.remis) throw err(409, 'Le code vient de changer d’état : vérifiez-le à nouveau.')
+        if (relu && !relu.remis) {
+          // Rien n'a changé depuis la lecture (`activeLe` / `relanceGainLe` identiques, pas remis) : l'écriture
+          // s'est perdue pour une raison technique, pas parce qu'une autre caisse est passée — dire « vient de
+          // changer d'état » tromperait l'équipe (P2-2).
+          if (relu.activeLe === trouve.activeLe && relu.relanceGainLe === trouve.relanceGainLe) {
+            await journaliserTechnique(id, auteur, `Remise non enregistrée (problème technique) : gain « ${trouve.lot} » (code ${code}).`)
+            throw err(500, 'Problème technique : la remise n’a pas été enregistrée. Réessayez ; si ça persiste, signalez-le.', 'REMISE_TECHNIQUE')
+          }
+          throw err(409, 'Le code vient de changer d’état : vérifiez-le à nouveau.')
+        }
         throw err(409, 'Lot déjà remis : un code ne sert qu’une fois.')
       }
       const client = await st.client(id, remis.clientId)
@@ -4239,13 +4261,22 @@ export async function creerServeur(o: OptionsServeur) {
     }
 
     if (sous === 'commandes' && sousId && action === 'statut' && !extra && m === 'POST') {
-      // Commerçant : transition de statut, écrite par comparaison-et-échange (409 si une autre vient de passer).
-      await exigerCommercant(req, id)
+      // Commerçant : transition de statut, écrite par comparaison-et-échange (409 si une autre vient de passer ;
+      // 500 + journal d'équipe si l'écriture s'est perdue sans qu'une autre passe — P2-2).
+      const gerant = await exigerCommercant(req, id)
       const corps = await lireCorps(req, 200)
       if (!estStatutCommande(corps.vers)) throw err(400, `« vers » doit valoir : ${STATUTS_COMMANDE.join(', ')}.`)
       try {
         return { json: { commande: sansSecret(await changerStatut(st, id, sousId, corps.vers, maintenant())) } }
       } catch (e) {
+        if (e instanceof ErreurTechniqueCommande) {
+          const cmd = await lireCommande(st, id, sousId)
+          await journaliserTechnique(
+            id,
+            { type: 'gerant', nom: gerant },
+            `Transition non enregistrée (problème technique) : ${cmd?.table ?? sousId}, ${cmd?.statut ?? '?'} → ${corps.vers}.`,
+          )
+        }
         throw erreurCommande(e)
       }
     }
@@ -4374,7 +4405,20 @@ export async function creerServeur(o: OptionsServeur) {
         if (refus) throw err(refus.statut, refus.message, refus.code, refus.details)
         return { ...frais, activeLe: t.toISOString() }
       })
-      if (!active) throw err(409, 'Ce gain a déjà été remis au comptoir.', 'GAIN_DEJA_REMIS')
+      if (!active) {
+        // Comme la remise : écriture perdue sans changement = échec technique, pas « déjà remis » (P2-2).
+        const frais = await st.tirage(id, sousId)
+        if (frais && !frais.remis && frais.activeLe === tirage.activeLe && frais.relanceGainLe === tirage.relanceGainLe) {
+          await journaliserTechnique(
+            id,
+            { type: 'client', nom: 'Client (depuis sa carte)' },
+            `Activation du code non enregistrée (problème technique) : gain « ${tirage.lot} ».`,
+            await st.client(id, charge.cid),
+          )
+          throw err(500, 'Problème technique : le code n’a pas pu être activé. Réessayez ; si ça persiste, signalez-le au comptoir.', 'ACTIVATION_TECHNIQUE')
+        }
+        throw err(409, 'Ce gain a déjà été remis au comptoir.', 'GAIN_DEJA_REMIS')
+      }
       return { json: { tirageId: active.id, lot: active.lot, code: active.code, activeLe: active.activeLe, expireActivation: finActivation(active) } }
     }
 
