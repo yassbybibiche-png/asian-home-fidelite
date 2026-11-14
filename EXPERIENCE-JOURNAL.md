@@ -482,3 +482,50 @@ Critique aux 10 questions :
 10. **Que manque-t-il encore ?** Des titres de catégorie à la hauteur de l'ambition (typo géante
     cinétique) et un plat-star plein cadre. → Cycle 2 : typographie cinétique des « moments ».
 
+### Cycle 2 — « Typographie cinétique des moments » (menu Découverte) — références : Ciao Kombucha, Drimify
+
+Signature : les titres des en-têtes « moment » deviennent géants et entrent en scène. Titre en
+`clamp(2,6 rem, 13 vw, 4,6 rem)` plafonné par le plus long mot (`--lettres` + `cqw` : aucun mot ne
+déborde), révélé mot à mot depuis un masque (`translateY(130 %) → 0`, 0,7 s, 70 ms d'écart) par le
+mécanisme `data-revelation` existant (aucun nouvel observateur) ; mot fantôme géant en creux
+(contour blanc 38 %) qui dérive lentement (20 s) derrière le titre — il reprend la ligne
+`titre-logo` épinglée par les tests, qui change de rôle sans changer de texte. En-têtes sans photo :
+calque mot à mot à taille inchangée posé sur le h2 (transparent via `:has()`, repli = h2 visible).
+Cadre h-56 inchangé. Branche `anim/cycle2-typo` (278e0d9) ; logique pure dans
+`src/lib/titreCinetique.ts`. Vidéos : `captures-animations/cycle1.webm` → `cycle2.webm`.
+Relecture coordinateur : diff lu ligne à ligne, suite relancée en entier (1736/1736), typechecks
+front et serveur, 2 mutations de contre-épreuve détectées (masque à 0 %, fantôme renommé).
+
+Critique aux 10 questions :
+1. **La signature est-elle visible dès le premier défilement ?** Oui : le premier « moment »
+   (Entrées thaï, Maki…) affiche un titre de ~54 px qui monte mot à mot, fantôme en creux au-dessus.
+   En capture fixe, le saut de taille est évident (24 px → ~54 px) ; le mouvement se juge en vidéo.
+2. **Le mouvement sert-il le contenu ?** Oui : la révélation orchestre l'arrivée de chaque famille,
+   dans le même esprit que le fondu d'univers du cycle 1 ; le fantôme reste un décor (contour seul,
+   jamais de remplissage) et ne concurrence pas le titre.
+3. **L'identité est-elle intacte ?** Oui : serif maison (`font-titre`), blanc sur photo, noir et
+   magenta inchangés ; aucun nom, prix ou texte de plat touché ; le h2 sémantique est intact.
+4. **Performance ?** Bundle initial inchangé (484 259 o, le nouveau module vit dans le morceau
+   différé du menu) ; CSS +~2 Ko. A/B même fenêtre : FCP menu 692–700 → 712–716 ms, LCP
+   2412–2432 → 2440–2448 ms — le témoin `#/jouer`, intouché, dérive du même ordre dans la même
+   fenêtre : bruit de charge, pas de régression attribuable. CLS 0 mesuré, mouvement normal et réduit.
+5. **Mouvement réduit ?** Tout est coupé : mots affichés d'emblée, fantôme immobile ; bloc du cycle
+   placé avant le dernier bloc `prefers-reduced-motion` (garde épinglée par les tests) ; vérifié en
+   Chromium.
+6. **Charge mentale ?** Aucune interaction ajoutée ; la révélation se joue une fois par en-tête.
+   Les en-têtes déjà à l'écran au chargement ne s'animent pas (patron existant des révélations,
+   assumé : pas de clignotement).
+7. **Le gain est-il net par rapport à l'avant ?** Net, et supérieur à celui du cycle 1 : le manque
+   n°1 (l'intensité) est traité sur les moments photo. DA menu Découverte : 8,9 → **9,2/10**. Pas
+   plus : le cadre reste à 224 px (pas le plein cadre de Ciao), les catégories sans photo gardent un
+   en-tête compact, et le plat-star manque toujours.
+8. **La référence est-elle atteinte ?** Le principe typographique de Ciao (immense, mis en scène)
+   est là, à l'échelle d'un cadre de liste ; son plein écran reste à conquérir.
+9. **Risques ?** Le fantôme en contour blanc s'efface sur les photos claires (décor : acceptable) ;
+   le plafonnement par `cqw` repose sur un facteur de chasse de 0,8 vérifié en capture sur les pires
+   cas (« Boissons », « Desserts », « Maki Neige x6 » : aucun mot tronqué ni débordant, page à
+   412 px) ; le calque sans photo dépend de `:has()` (repli propre : le h2 seul).
+10. **Que manque-t-il encore ?** Le plat-star plein cadre qui vit au scroll. → Cycle 3 : un moment
+    plat-star (photo réelle d'un plat photographié en très grand, zoom lent / parallaxe au
+    défilement), sans jamais présenter une image générée comme un plat.
+

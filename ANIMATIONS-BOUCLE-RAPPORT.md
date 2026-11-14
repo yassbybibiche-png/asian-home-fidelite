@@ -25,7 +25,7 @@ _Méthode et limite : pages publiques consultées par extraction de texte et doc
 ### Manques relevés chez nous, par ordre de visibilité
 
 1. **Aucune transition d'univers par catégorie** (Ciao) — le fond/l'ambiance du menu ne change jamais. → **Cycle 1**
-2. Typographie des titres de catégorie statique — pas de typo cinétique géante (Ciao/Drimify).
+2. Typographie des titres de catégorie statique — pas de typo cinétique géante (Ciao/Drimify). → **Cycle 2**
 3. Le rail « En photos » n'a ni inertie ni vie propre (Fideliz).
 4. Pas de plat-star plein cadre qui suit le défilement (Ciao/Menu vivant).
 5. Aucune transition entre pages (changement de route sec).
@@ -39,3 +39,11 @@ L'ambiance du menu change avec la famille de plats affichée : deux calques fixe
 Mesures (protocole SCORES.md, avant/après alternés puis confirmées au calme) : bundle initial **inchangé** 484 259 o (CSS +1 969 o) ; FCP menu 692–704 ms ; LCP 2 368–2 524 ms au calme — élément LCP = photo du héros, intacte : niveau de la baseline pré-boucle (déjà frontalière à ~2,5 s selon la charge), **aucune régression du cycle** ; CLS **0**. Mouvement réduit : tout coupé, testé et vérifié en Chromium.
 
 Vidéos : `captures-animations/avant.webm` → `captures-animations/cycle1.webm`. **Verdict de la critique (détail au journal §8) : gain réel mais modéré** — la teinte fond visiblement d'une famille à l'autre en défilement, mais les cartes couvrent l'écran et les halos restent aux bords ; DA menu Découverte 8,6 → **8,9/10**. Le manque n°1 devient l'intensité : titres de catégorie encore modestes et pas de plat-star plein cadre → cycle 2.
+
+### Cycle 2 — « Typographie cinétique des moments » (menu Découverte) — références : Ciao Kombucha (typo immense), Drimify (révélation orchestrée)
+
+Les titres des en-têtes « moment » deviennent géants et entrent en scène : taille fluide `clamp(2,6 rem, 13 vw, 4,6 rem)` plafonnée par le plus long mot (`--lettres` + unité `cqw`, aucun mot tronqué ni débordant), révélation **mot à mot** depuis un masque (`translateY(130 %) → 0`, 0,7 s, 70 ms d'écart) par le mécanisme de révélation existant (aucun nouvel observateur, jouée une fois par en-tête). Derrière le titre, un **mot fantôme** géant en creux (contour blanc 38 %) dérive lentement (20 s, transform seul) — il reprend la ligne `titre-logo` épinglée par les tests, changée de rôle sans changer de texte. En-têtes sans photo : même révélation mot à mot à taille inchangée, en calque posé sur le h2 (transparent via `:has()`, repli propre sans `:has()`). Cadre photo inchangé (h-56). Branche `anim/cycle2-typo` (`278e0d9`), logique pure dans `src/lib/titreCinetique.ts`, 15 tests ajoutés, suite **1736/1736** (116 fichiers, revérifiée par le coordinateur, typechecks front + serveur, 2 mutations de contre-épreuve détectées).
+
+Mesures (protocole SCORES.md, A/B même fenêtre) : bundle initial **inchangé** 484 259 o (plafond 484 422) ; FCP menu 692–700 → 712–716 ms et LCP 2412–2432 → 2440–2448 ms, avec le témoin `#/jouer` (intouché) dérivant du même ordre dans la même fenêtre — écart attribué au bruit de charge, pas de régression ; CLS **0** (mouvement normal et réduit) ; mouvement réduit : titres affichés d'emblée, fantôme immobile, vérifié en Chromium ; aucun débordement (page à 412 px, pires cas « Boissons », « Desserts », « Maki Neige x6 » vérifiés en capture).
+
+Vidéos : `captures-animations/cycle1.webm` → `captures-animations/cycle2.webm`. **Verdict de la critique (détail au journal §8) : gain net, supérieur au cycle 1** — le manque n°1 (l'intensité) est traité sur les moments photo ; DA menu Découverte 8,9 → **9,2/10**. Restes : le cadre reste à 224 px (pas le plein cadre de Ciao) et il n'y a toujours pas de plat-star → cycle 3 : moment plat-star plein cadre qui vit au scroll (photo réelle uniquement).
