@@ -2,9 +2,11 @@
 // • Coût des lots : coût unitaire saisi dans Réglages (`Lot.coutCentimes`) × lots gagnés / distribués.
 // • Séries par jour / semaine / mois, comparaison avec le mois précédent, export CSV.
 // • Entonnoir ANONYME : compteurs du serveur (scan, tirage, gain, clic Google) sans aucune identité.
-// • Test A/B « accroche » : variante décidée par le JOUR (jamais par le client).
+// • Test A/B « accroche » : ARRÊTÉ le 14/11/2026 (P2-3, audit produit) — avec un seul commerce réel,
+//   l'échantillon ne conclura jamais ; l'accroche est unique (générique). Les fonctions pures restent, testées,
+//   pour une éventuelle réactivation dans un cadre de mesure décidé ; le produit ne les appelle plus.
 // Tous les jours sont des jours calendaires à Paris (AAAA-MM-JJ), comme le serveur (index unique des tirages).
-import type { Client, CommercePublic, CompteurEvenement, Lot, TestsAB, Tirage, TypeEvenement } from '../types'
+import type { Client, CompteurEvenement, Lot, TestsAB, Tirage, TypeEvenement } from '../types'
 import { celluleCsv } from './csv.ts'
 import { lotsJouables } from './roulette.ts'
 import { estGainPhysique, typeLot, typeTirage } from './lots.ts'
@@ -352,7 +354,9 @@ export function formaterEuros(centimes: number): string {
   return `${euros(centimes)} €`
 }
 
-// ---------- Test A/B « accroche » (docs/TESTS-AB.md) ----------
+// ---------- Test A/B « accroche » (docs/TESTS-AB.md) — ARRÊTÉ le 14/11/2026 (P2-3) ----------
+// Fonctions pures conservées et testées pour une éventuelle réactivation dans un cadre de mesure décidé ;
+// le produit ne les appelle plus : l'accroche affichée est unique (générique), voir `accrocheJeu`.
 
 export type Variante = 'A' | 'B'
 
@@ -375,16 +379,15 @@ export function lotAccroche(lots: Pick<Lot, 'libelle' | 'type'>[]): string | nul
 }
 
 /**
- * Phrase sous le nom du commerce sur la page de jeu : modèle à traduire (`t`) et valeurs. Test actif = fiche publique
- * (`testAccroche`, mode serveur) ou réglage du commerce (`testsAB`, démo locale).
+ * Phrase sous le nom du commerce sur la page de jeu : l'accroche générique, toujours la même.
+ * Le test A/B est arrêté depuis le 14/11/2026 (P2-3) : un seul commerce réel ne conclura jamais. Les paramètres
+ * sont conservés (préfixés `_`) pour que le point d'appel ne change pas si le test est réactivé un jour dans un
+ * cadre de mesure décidé — ils ne sont plus lus.
  */
 export function accrocheJeu(
-  commerce: Pick<CommercePublic, 'testAccroche'> & { lots: Pick<Lot, 'libelle' | 'type'>[]; testsAB?: TestsAB },
-  jour: string,
+  _commerce: { lots: Pick<Lot, 'libelle' | 'type'>[] },
+  _jour: string,
 ): { modele: string; valeurs?: { lot: string } } {
-  const lot = lotAccroche(commerce.lots)
-  const actif = commerce.testAccroche || commerce.testsAB?.accroche?.actif
-  if (actif && lot && varianteDuJour(jour) === 'B') return { modele: ACCROCHE_LOT, valeurs: { lot } }
   return { modele: ACCROCHE_GENERIQUE }
 }
 

@@ -1,5 +1,6 @@
 // P2-Q3 — Dashboard & mesure : coût des lots, séries jour / semaine / mois, comparaison au mois précédent, export CSV,
-// entonnoir ANONYME (compteurs sans identité), retour après gain, test A/B « accroche » (variante par jour).
+// entonnoir ANONYME (compteurs sans identité), retour après gain, test A/B « accroche » (arrêté, P2-3 — fonctions
+// archivées, accroche unique).
 // Logique pure (`src/lib/mesure.ts`) + vrai serveur HTTP sur SQLite temporaire + sources du front (.tsx non chargeables).
 // Supabase (faux PostgREST) : tests/supabase.test.ts ; migration 0008 sur Postgres : tests/migration-pglite.test.ts.
 import { test, describe, after } from 'node:test'
@@ -16,7 +17,6 @@ import { marquerScanSignale, signalerScan } from '../src/data/jeuApi.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import {
   ACCROCHE_GENERIQUE,
-  ACCROCHE_LOT,
   accrocheJeu,
   basculerAccroche,
   comparaisonMoisPrecedent,
@@ -27,6 +27,7 @@ import {
   finPeriode,
   jourParis,
   libellePeriode,
+  lotAccroche,
   periodes,
   resultatsAccroche,
   retourApresGain,
@@ -254,7 +255,7 @@ describe('Export CSV des chiffres', () => {
 
 // ---------- Test A/B « accroche » ----------
 
-describe('Test A/B « accroche » : variante par jour, sans identité', () => {
+describe('Test A/B « accroche » (arrêté, P2-3) : fonctions archivées, accroche unique', () => {
   test('un jour sur deux ; chaque jour de la semaine change de variante d’une semaine à l’autre', () => {
     const j = ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12'].map(varianteDuJour)
     assert.deepEqual(j, [j[0], j[0] === 'A' ? 'B' : 'A', j[0], j[0] === 'A' ? 'B' : 'A'])
@@ -262,17 +263,15 @@ describe('Test A/B « accroche » : variante par jour, sans identité', () => {
     assert.equal(varianteDuJour('2026-11-09'), varianteDuJour('2026-11-23'))
   })
 
-  test('accroche : générique hors test ; variante B = 1er lot gagnant (jamais « Dommage ! ») ; traduite en anglais', () => {
+  test('accroche : unique et générique — le test A/B est arrêté (P2-3), tous les jours', () => {
     const jourB = ['2026-11-09', '2026-11-10'].find((j) => varianteDuJour(j) === 'B')!
     const jourA = ['2026-11-09', '2026-11-10'].find((j) => varianteDuJour(j) === 'A')!
     const lots = [{ libelle: 'Dommage !' }, { libelle: 'Nems offerts' }]
     assert.deepEqual(accrocheJeu({ lots }, jourB), { modele: ACCROCHE_GENERIQUE })
-    assert.deepEqual(accrocheJeu({ lots, testAccroche: true }, jourA), { modele: ACCROCHE_GENERIQUE })
-    assert.deepEqual(accrocheJeu({ lots, testAccroche: true }, jourB), { modele: ACCROCHE_LOT, valeurs: { lot: 'Nems offerts' } })
-    assert.deepEqual(accrocheJeu({ lots, testsAB: { accroche: { actif: true } } }, jourB).valeurs, { lot: 'Nems offerts' }, 'démo locale')
-    assert.deepEqual(accrocheJeu({ lots: [{ libelle: 'Dommage !' }], testAccroche: true }, jourB), { modele: ACCROCHE_GENERIQUE })
-    assert.ok(TRADUCTIONS_EN[ACCROCHE_LOT] && TRADUCTIONS_EN[ACCROCHE_GENERIQUE])
-    assert.equal(traduire(ACCROCHE_LOT, 'en', { lot: 'Nems offerts' }), 'Spin the wheel: Nems offerts to win!')
+    assert.deepEqual(accrocheJeu({ lots }, jourA), { modele: ACCROCHE_GENERIQUE })
+    assert.equal(lotAccroche(lots), 'Nems offerts', 'helper archivé pour une éventuelle réactivation décidée')
+    assert.ok(TRADUCTIONS_EN[ACCROCHE_GENERIQUE])
+    assert.equal(traduire(ACCROCHE_GENERIQUE, 'en'), 'Spin the wheel and win a gift!')
   })
 
   test('activation / arrêt : dates posées au changement d’état, réactivation = nouveau départ', () => {
@@ -385,11 +384,11 @@ describe('Tableau de bord et réglages (sources)', () => {
     assert.match(mesure, /aria-pressed=\{g === x\.valeur\}/)
   })
 
-  test('réglages : coût de chaque lot en euros (converti en centimes), interrupteur du test A/B', () => {
+  test('réglages : coût de chaque lot en euros (converti en centimes) ; plus d’interrupteur de test A/B (P2-3)', () => {
     const r = source('src/pages/Reglages.tsx')
     assert.match(r, /htmlFor=\{`cout-\$\{i\}`\}/)
     assert.match(r, /coutCentimes: e\.target\.value === '' \? undefined : Math\.round\(e\.target\.valueAsNumber \* 100\)/)
-    assert.match(r, /basculerAccroche\(brouillon\.testsAB\?\.accroche, v, jourParis\(new Date\(\)\)\)/)
+    assert.doesNotMatch(r, /basculerAccroche|Test A\/B : phrase d’accroche|testsAB/)
     assert.equal(r.match(/grid grid-cols-1 gap-3 sm:grid-cols-3/g)?.length, 3, 'grilles mobiles inchangées')
     assert.doesNotMatch(mesure + r, /window\.confirm/)
   })
@@ -528,13 +527,13 @@ describe('Serveur : événements anonymes, mesures, coût des lots, test A/B', (
     }
   })
 
-  test('test A/B : dates posées par le serveur (jamais celles du navigateur) ; fiche publique = indicateur seul', async () => {
+  test('test A/B : dates posées par le serveur (jamais celles du navigateur) ; fiche publique = plus d’indicateur (P2-3)', async () => {
     const { app, api } = await demarrer(join(dossier, 'ab.db'))
     try {
       const r = await api('PATCH', `/commerces/${AH}`, { testsAB: { accroche: { actif: true, depuis: '2020-01-01' } } }, PIN)
       assert.equal(r.statut, 200)
       assert.deepEqual(r.contenu.commerce.testsAB, { accroche: { actif: true, depuis: '2026-11-10' } })
-      assert.equal((await api('GET', `/commerces/${AH}`)).contenu.commerce.testAccroche, true)
+      assert.equal((await api('GET', `/commerces/${AH}`)).contenu.commerce.testAccroche, undefined, 'P2-3 : la fiche publique n’expose plus le test')
       const arret = await api('PATCH', `/commerces/${AH}`, { testsAB: { accroche: { actif: false } } }, PIN)
       assert.deepEqual(arret.contenu.commerce.testsAB, { accroche: { actif: false, depuis: '2026-11-10', jusqua: '2026-11-10' } })
       assert.equal((await api('GET', `/commerces/${AH}`)).contenu.commerce.testAccroche, undefined)
@@ -545,11 +544,11 @@ describe('Serveur : événements anonymes, mesures, coût des lots, test A/B', (
     }
   })
 
-  test('vue publique (fonction) : ni coût, ni dates de test', () => {
+  test('vue publique (fonction) : ni coût, ni dates de test, ni indicateur de test A/B arrêté', () => {
     const c = { ...nouveauCommerce('Chez Lin', 'restaurant', ''), lots: LOTS, testsAB: { accroche: { actif: true, depuis: '2026-11-10' } } }
     const pub = commercePublic(c)
     assert.ok(pub.lots.every((l) => Object.keys(l).sort().join() === 'id,libelle,type'), 'R1 : id, libellé et type seulement')
-    assert.equal(pub.testAccroche, true)
+    assert.equal(pub.testAccroche, undefined, 'P2-3 : la fiche publique n’expose plus le test')
     assert.doesNotMatch(JSON.stringify(pub), /coutCentimes|depuis|testsAB/)
   })
 })

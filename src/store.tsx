@@ -528,9 +528,8 @@ function StoreApi({ children, api }: { children: ReactNode; api: ClientApi }) {
             plagesOuverture: c.plagesOuverture,
             // Créneaux heures creuses (D2) : même forme (absents = non envoyés).
             creneauxCreux: c.creneauxCreux,
-            // Test A/B (P2-Q3) : seul l'état est envoyé, le serveur pose lui-même les dates. Sans test : `undefined`, non
-            // envoyé (même corps que l'ancien `...(x ? { testsAB } : {})`, plus court : plafond du bundle initial, D2).
-            testsAB: c.testsAB?.accroche && { accroche: { actif: c.testsAB.accroche.actif } },
+            // Test A/B « accroche » arrêté (P2-3, 14/11/2026) : plus rien n'est envoyé — le serveur conserve un
+            // éventuel drapeau stocké, sans effet (la fiche publique ne l'expose plus, l'accroche est unique).
           })
         }),
       creerCommerce: (n: NouveauCommerce) =>
