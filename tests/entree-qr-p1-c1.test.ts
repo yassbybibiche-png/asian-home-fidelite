@@ -120,10 +120,11 @@ describe('Page de jeu et inscription en caisse (source)', () => {
     assert.match(ident, /await onEnvoyer\(contactSaisi, prenomSaisi\.trim\(\), consentement\)/)
     // Le tirage serveur reçoit toujours le prénom connu (vide) : pas de changement de la route de tirage.
     assert.match(jouer, /lancerTirage\(api, commerce, joueur\.contact, joueur\.prenom\)/)
-    // Demande du prénom : seulement dans le bloc affiché après le résultat (ou « déjà joué »), dans les deux modes.
-    assert.equal(jouer.match(/<DemandePrenom\b/g)?.length, 2)
-    assert.match(jouer, /\(etape === 'resultat' \|\| dejaJoue\) && \(\s*<>[\s\S]{0,120}<DemandePrenom prenom=\{joueur\.prenom\}/)
-    assert.match(jouer, /\(etape === 'resultat' \|\| jeu\?\.statut === 'dejaJoue'\) && \(\s*<>[\s\S]{0,120}<DemandePrenom\s+prenom=\{joueur\.prenom\}/)
+    // Demande du prénom : dans le bloc affiché après le résultat (ou « déjà joué »).
+    // Mode API (production) : prouvé par le rendu, E2E `entree-jeu-p3-2` (résultat ET déjà joué après rechargement).
+    // Mode local (démo sans serveur : aucun harnais de rendu ne l'atteint) : la demande reste cantonnée au bloc
+    // gardé par la condition de résultat — sans plafond de distance ni forme de ligne imposée (P3-2).
+    assert.match(corpsDe(jouer, 'PartieLocale'), /\(etape === 'resultat' \|\| dejaJoue\) && \([\s\S]*?<DemandePrenom/)
     assert.match(jouer, /api\.prenomCarte\(commerce\.id, joueur\.clientId, joueur\.contact, p\)/)
     assert.match(jouer, /nommerClient\(joueur\.id, p\)/)
     const demande = corpsDe(jouer, 'DemandePrenom')
@@ -137,9 +138,10 @@ describe('Page de jeu et inscription en caisse (source)', () => {
     assert.doesNotMatch(continuer, /<input/)
     assert.match(continuer, /t\('Continuer en tant que \{prenom\}', \{ prenom: p \}\)/)
     assert.match(continuer, /t\('Continuer avec ma carte'\)/)
-    // Les deux modes : le profil mémorisé est repris tel quel (aucun formulaire), « Ce n'est pas moi » l'oublie.
-    assert.match(jouer, /<Continuer prenom=\{memorise\.prenom\} onContinuer=\{\(\) => choisirJoueur\(memorise\)\} onOublier=\{\(\) => \(memoriserJoueur\(commerce\.id, null\), setMemoriseId\(null\)\)\} \/>/)
-    assert.match(jouer, /<Continuer prenom=\{memorise\.prenom\} onContinuer=\{\(\) => choisirJoueur\(memorise\)\} onOublier=\{\(\) => \(memoire\.memoriser\(null\), setMemorise\(null\)\)\} \/>/)
+    // Le profil mémorisé est repris tel quel (aucun formulaire), « Ce n'est pas moi » l'oublie.
+    // Mode API (production) : prouvé par le rendu, E2E `entree-jeu-p3-2` (zéro champ, reprise, oubli).
+    // Mode local : Continuer est rendu quand un profil est mémorisé — sans forme de ligne imposée (P3-2).
+    assert.match(corpsDe(jouer, 'PartieLocale'), /memorise \? \(\s*<Continuer/)
   })
 
   test('une seule case de consentement (pas de doublon), jamais pré-cochée', () => {
