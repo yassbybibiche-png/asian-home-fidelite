@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { MESSAGE_MODE_SERVEUR, useStore } from '../store'
 import { useRoute } from '../router'
 import type { CommercePublic, Menu } from '../types'
@@ -19,6 +19,7 @@ import { activerParallaxe } from '../lib/parallaxe'
 import { motsUniques } from '../lib/bandeau'
 import { BandeauDefilant } from '../components/BandeauDefilant'
 import { croiserCouches, universCategorie, type Couches } from '../lib/univers'
+import { motsTitre, plusLongMot } from '../lib/titreCinetique'
 
 /** Traductions des badges de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
 enregistrerTraductions({
@@ -305,6 +306,13 @@ export function MenuAffiche({
                         (le titre h2 reste dans le document pour les lecteurs d'écran et le plan de la page). */}
                     <div className={photo ? 'sr-only' : 'flex flex-wrap items-center gap-2'}>
                       <h2 className="font-titre text-xl font-bold">{c.nom}</h2>
+                      {/* Sans photo (cycle 2) : calque décoratif posé exactement sur le h2 (rendu transparent par le CSS),
+                          qui révèle le nom mot à mot à taille inchangée — le h2 reste le titre lu. */}
+                      {!photo && (
+                        <span aria-hidden="true" className="titre-calque font-titre text-xl font-bold" data-revelation>
+                          <MotsReveles nom={c.nom} />
+                        </span>
+                      )}
                       {bandeauMidi && midi && c.id === midi.id && (
                         <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('🍱 Menu Midi')}</span>
                       )}
@@ -319,8 +327,15 @@ export function MenuAffiche({
                           </picture>
                         </div>
                         <span aria-hidden="true" className="absolute inset-0 bg-linear-to-t from-nuit-950/90 via-nuit-950/25 to-transparent" />
-                        <span aria-hidden="true" className="absolute inset-x-5 bottom-4 flex flex-wrap items-end gap-2">
+                        {/* Cycle 2 : mot fantôme géant en creux qui dérive lentement derrière le titre (décor recadré par le cadre). */}
+                        <span aria-hidden="true" className="titre-fantome">
                           <span className="titre-logo text-2xl text-white">{c.nom}</span>
+                        </span>
+                        <span aria-hidden="true" className="titre-cadre absolute inset-x-5 bottom-4 flex flex-wrap items-end gap-2">
+                          {/* Titre géant révélé mot à mot (taille réglée sur le plus long mot : jamais tronqué). */}
+                          <span className="titre-geant text-white" style={{ '--lettres': plusLongMot(c.nom) } as CSSProperties}>
+                            <MotsReveles nom={c.nom} />
+                          </span>
                           {bandeauMidi && midi && c.id === midi.id && (
                             <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('🍱 Menu Midi')}</span>
                           )}
@@ -454,6 +469,19 @@ function AmbianceUnivers({ univers }: { univers: number }) {
       <div className={`ambiance-couche univers-${couches.b}`} data-visible={couches.devant === 'b'} />
     </div>
   )
+}
+
+/** Nom de catégorie mot à mot (cycle 2) : chaque mot monte depuis son masque quand l'en-tête est révélé
+    (`.revelation-attente` → `.revelation-faite`, src/lib/revelation.ts) ; visible d'emblée sinon. */
+function MotsReveles({ nom }: { nom: string }) {
+  return motsTitre(nom).map((mot, i) => (
+    <Fragment key={i}>
+      {i > 0 && ' '}
+      <span className="mot-masque">
+        <span className="mot">{mot}</span>
+      </span>
+    </Fragment>
+  ))
 }
 
 /** Onglet de catégorie : `choisi` = filtre appliqué (aria-pressed), `indique` = barre sous l'onglet (catégorie à l'écran). */

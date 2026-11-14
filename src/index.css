@@ -1215,6 +1215,121 @@ h3 {
   }
 }
 
+/* Boucle animations, cycle 2 : typographie cinétique des en-têtes de catégorie du menu Découverte (MenuPublic.tsx).
+   Le nom est révélé mot à mot quand son en-tête entre à l'écran (mécanisme `data-revelation`, src/lib/revelation.ts) :
+   chaque mot monte depuis son propre masque, 70 ms d'écart. Transform seul, cadre photo inchangé (h-56) → CLS nul. */
+.mot-masque {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  /* Marge intérieure compensée : accents des capitales et jambages jamais rognés, boîte de ligne inchangée. */
+  padding-block: 0.14em;
+  margin-block: -0.14em;
+}
+.mot {
+  display: inline-block;
+}
+.revelation-attente .mot {
+  transform: translateY(130%);
+}
+.revelation-faite .mot {
+  transition: transform 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.15s;
+}
+.revelation-faite .mot-masque:nth-child(2) .mot {
+  transition-delay: 0.22s;
+}
+.revelation-faite .mot-masque:nth-child(3) .mot {
+  transition-delay: 0.29s;
+}
+.revelation-faite .mot-masque:nth-child(4) .mot {
+  transition-delay: 0.36s;
+}
+.revelation-faite .mot-masque:nth-child(5) .mot {
+  transition-delay: 0.43s;
+}
+.revelation-faite .mot-masque:nth-child(n + 6) .mot {
+  transition-delay: 0.5s;
+}
+/* Titre géant sur la photo : taille fluide, plafonnée par le plus long mot (`--lettres`, posé par MenuPublic) pour
+   qu'aucun mot ne dépasse la largeur du cadre (unité cqw : largeur de `.titre-cadre`). */
+.titre-cadre {
+  container-type: inline-size;
+}
+.titre-geant {
+  font-family: var(--font-titre);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 0.95;
+  font-size: min(clamp(2.6rem, 13vw, 4.6rem), calc(100cqw / (var(--lettres, 8) * 0.8)));
+  text-shadow: 0 2px 18px rgb(0 0 0 / 0.35);
+}
+/* Mot fantôme : le nom en ENCORE plus grand, en creux (contour fin), qui dérive lentement derrière le titre.
+   Décor recadré par le cadre photo (overflow-hidden), jamais plus lisible que le vrai titre. */
+@keyframes fantome-derive {
+  from {
+    transform: translateX(3%);
+  }
+  to {
+    transform: translateX(-12%);
+  }
+}
+.titre-fantome {
+  position: absolute;
+  top: 0.4rem;
+  left: 0;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: fantome-derive 20s ease-in-out infinite alternate;
+}
+.titre-fantome .titre-logo {
+  display: block;
+  font-size: clamp(5.5rem, 30vw, 8.5rem);
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: transparent;
+  -webkit-text-stroke: 1px rgb(255 255 255 / 0.38);
+}
+/* Catégorie sans photo : le calque mot à mot recouvre exactement le h2 (même police, même largeur, même équilibrage) ;
+   le h2 devient transparent mais reste le titre lu et sélectionnable. Sans :has(), pas de calque : le h2 s'affiche. */
+@supports selector(:has(*)) {
+  [data-categorie] > div:has(> .titre-calque) {
+    position: relative;
+  }
+  [data-categorie] > div:has(> .titre-calque) > h2 {
+    color: transparent;
+  }
+  .titre-calque {
+    position: absolute;
+    inset: 0 0 auto 0;
+    line-height: 1.25;
+    text-wrap: balance;
+    pointer-events: none;
+  }
+}
+@supports not selector(:has(*)) {
+  .titre-calque {
+    display: none;
+  }
+}
+/* Le calque garde sa place : seuls ses mots sont masqués (pas le fondu + montée commun des blocs révélés). */
+.titre-calque.revelation-attente {
+  opacity: 1;
+  transform: none;
+}
+/* Mouvement réduit : titres affichés d'emblée (aucun masque, aucun décalage), fantôme immobile. */
+@media (prefers-reduced-motion: reduce) {
+  .titre-fantome {
+    animation: none;
+  }
+  .revelation-attente .mot {
+    transform: none;
+  }
+  .revelation-faite .mot {
+    transition: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .revelation-attente,
   .revelation-attente .titre-logo {
