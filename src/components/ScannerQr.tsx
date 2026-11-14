@@ -4,8 +4,27 @@ import { creerLecteurQr, ErreurScanQr, MESSAGE_DECODEUR_INDISPONIBLE, type Const
 // Lecture d'un QR avec la caméra (getUserMedia). Décodage : `BarcodeDetector` du navigateur s'il existe (Chrome Android),
 // sinon `jsqr` chargé à la demande (morceau séparé, jamais téléchargé si le navigateur sait déjà lire les QR).
 // En cas de refus de la caméra ou d'échec, la saisie manuelle reste toujours possible (page Caisse).
+// Deux usages en caisse : la carte du client (défauts ci-dessous) et le code gagnant (titre, instruction et libellé
+// de repli passés par l'appelant — P1-4).
 
-export function ScannerQr({ onLu, onFermer, onSaisieManuelle }: { onLu(texte: string): void; onFermer(): void; onSaisieManuelle?(): void }) {
+export function ScannerQr({
+  onLu,
+  onFermer,
+  onSaisieManuelle,
+  titre = 'Scanner la carte du client',
+  instruction = 'Visez le QR code de la carte du client.',
+  libelleSaisieManuelle,
+}: {
+  onLu(texte: string): void
+  onFermer(): void
+  onSaisieManuelle?(): void
+  /** Titre du panneau (défaut : scan de la carte du client). */
+  titre?: string
+  /** Consigne affichée une fois la caméra ouverte (défaut : viser le QR de la carte). */
+  instruction?: string
+  /** Libellé du bouton de repli manuel (défaut : « Saisir le prénom », usage carte). */
+  libelleSaisieManuelle?: string
+}) {
   const video = useRef<HTMLVideoElement>(null)
   const [erreur, setErreur] = useState<string | null>(null)
   const [pret, setPret] = useState(false)
@@ -91,7 +110,7 @@ export function ScannerQr({ onLu, onFermer, onSaisieManuelle }: { onLu(texte: st
   return (
     <div className="carte space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="titre-carte">Scanner la carte du client</h2>
+        <h2 className="titre-carte">{titre}</h2>
         <button type="button" className="min-h-11 px-2 font-semibold text-gray-700 underline" onClick={onFermer}>
           Fermer
         </button>
@@ -104,7 +123,7 @@ export function ScannerQr({ onLu, onFermer, onSaisieManuelle }: { onLu(texte: st
           {/* Caméra refusée / indisponible : la saisie manuelle est proposée ici même, pas seulement après « Fermer ». */}
           {onSaisieManuelle && (
             <button type="button" className="bouton w-full" onClick={onSaisieManuelle}>
-              ⌨ Saisir le prénom
+              {libelleSaisieManuelle ?? '⌨ Saisir le prénom'}
             </button>
           )}
         </>
@@ -112,7 +131,7 @@ export function ScannerQr({ onLu, onFermer, onSaisieManuelle }: { onLu(texte: st
         <>
           <video ref={video} className="aspect-square w-full rounded-2xl bg-gray-900 object-cover" muted playsInline aria-label="Image de la caméra" />
           <p className="text-sm text-gray-600" role="status">
-            {pret ? 'Visez le QR code de la carte du client.' : 'Ouverture de la caméra…'}
+            {pret ? instruction : 'Ouverture de la caméra…'}
           </p>
         </>
       )}

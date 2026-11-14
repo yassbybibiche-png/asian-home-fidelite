@@ -24,7 +24,8 @@ const QrCode = lazy(() => import('./QrCode').then((m) => ({ default: m.QrCode })
  * carte (tampons, points) reste visible. Le QR suit la règle des pages différées (P2-Q2) :
  * disponible hors ligne après une première ouverture en ligne, pas avant.
  */
-class ErreurQr extends Component<{ children: ReactNode; message: string }, { erreur: boolean }> {
+/** Frontière partagée avec la carte (GainsRoue) : voir le commentaire ci-dessus. */
+export class ErreurQr extends Component<{ children: ReactNode; message: string }, { erreur: boolean }> {
   state = { erreur: false }
   static getDerivedStateFromError() {
     return { erreur: true }
