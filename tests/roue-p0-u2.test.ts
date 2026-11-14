@@ -198,7 +198,6 @@ describe('P0-U2 : compteur dans Réglages', () => {
 
 describe('P0-U2 : roue et légende (source des composants)', () => {
   const roue = lire('src/components/Roue.tsx')
-  const jouer = lire('src/pages/Jouer.tsx')
 
   test('la roue écrit le texte calculé par secteursAffiches, en police POLICE_ROUE (plus de 6,5 / 7,8)', () => {
     assert.match(roue, /secteursAffiches\(lots\)/)
@@ -218,7 +217,6 @@ describe('P0-U2 : roue et légende (source des composants)', () => {
     assert.match(lire('src/index.css'), /font-size: 17px/)
   })
 
-  test('#/jouer affiche la légende juste sous la roue', () => {
-    assert.match(jouer, /<Roue lots=\{commerce\.lots\} rotation=\{rotation\} \/>\n\s*<LegendeRoue lots=\{commerce\.lots\} \/>/)
-  })
+  // « #/jouer affiche la légende juste sous la roue » : prouvé par le rendu, E2E `entree-jeu-p3-2` (a).
+  // L'ancienne assertion (ligne JSX exacte `<Roue … />` suivie de `<LegendeRoue … />`) est supprimée, P3-2.
 })
