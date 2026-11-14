@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import type { AddressInfo } from 'node:net'
 
 import { creerServeur } from '../server/app.ts'
@@ -270,6 +271,54 @@ describe('R3 : serveur (SQLite, mode strict)', () => {
     assert.ok(!apres.texte.includes(j.code))
     const carte = await api('GET', `/cartes/${j.client.id}`, undefined, bearer(j.jeton))
     assert.deepEqual(carte.contenu.gainsEnCours, [], 'remis : terminal')
+  })
+
+  test('remise : écriture perdue sans changement → 500 « Problème technique », gain non remis, journal d’équipe', async () => {
+    horloge.t = le(0, 12)
+    const j = await joueur('0610000007')
+    horloge.t = le(1, 12)
+    assert.equal((await activer(j.tirageId, j.jeton)).statut, 200)
+    const db = new DatabaseSync(join(dossier, 'r3.db'))
+    try {
+      // Le déclencheur ignore l'écriture : le tirage relu ensuite est inchangé — ce n'est PAS « le code vient de
+      // changer d'état » (P2-2 : la caisse ne doit pas croire qu'une autre caisse est passée).
+      db.exec(`CREATE TRIGGER perdre_remise BEFORE UPDATE ON tirages WHEN OLD.id = '${j.tirageId}' BEGIN SELECT RAISE(IGNORE); END`)
+      const r = await api('POST', `${gains(j.code)}/remise`, undefined, CODE_EQUIPE)
+      assert.equal(r.statut, 500, r.texte)
+      assert.match(r.contenu.erreur, /Problème technique : la remise n’a pas été enregistrée/)
+      assert.doesNotMatch(r.contenu.erreur, /changer d’état|déjà remis/)
+      db.exec('DROP TRIGGER perdre_remise')
+    } finally {
+      db.close()
+    }
+    // Rien n'est écrit : le gain est toujours utilisable, la remise passe ensuite.
+    assert.equal((await api('GET', gains(j.code), undefined, CODE_EQUIPE)).contenu.gain.statut, 'utilisable')
+    const journal = (await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.journal as { action: string; details: string }[]
+    const entree = journal.find((e) => e.action === 'technique')
+    assert.ok(entree, JSON.stringify(journal.map((e) => e.action)))
+    assert.match(entree.details, /Remise non enregistrée \(problème technique\)/)
+    assert.equal((await api('POST', `${gains(j.code)}/remise`, undefined, CODE_EQUIPE)).statut, 200)
+  })
+
+  test('activation : écriture perdue sans changement → 500 « Problème technique », pas « déjà remis »', async () => {
+    horloge.t = le(0, 12)
+    const j = await joueur('0610000008')
+    horloge.t = le(1, 12)
+    const db = new DatabaseSync(join(dossier, 'r3.db'))
+    try {
+      db.exec(`CREATE TRIGGER perdre_activation BEFORE UPDATE ON tirages WHEN OLD.id = '${j.tirageId}' BEGIN SELECT RAISE(IGNORE); END`)
+      const r = await activer(j.tirageId, j.jeton)
+      assert.equal(r.statut, 500, r.texte)
+      assert.match(r.contenu.erreur, /Problème technique : le code n’a pas pu être activé/)
+      assert.doesNotMatch(r.contenu.erreur, /déjà remis/)
+      db.exec('DROP TRIGGER perdre_activation')
+    } finally {
+      db.close()
+    }
+    const journal = (await api('GET', `/commerces/${AH}/etat`, undefined, PIN)).contenu.journal as { action: string; details: string }[]
+    const entree = journal.find((e) => e.action === 'technique' && /Activation du code/.test(e.details))
+    assert.ok(entree, JSON.stringify(journal.map((e) => e.details)))
+    assert.equal((await activer(j.tirageId, j.jeton)).statut, 200)
   })
 
   test('J+30 : dernier jour utilisable ; J+31 : activation 410, caisse « expire », remise 410', async () => {
