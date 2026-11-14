@@ -10,6 +10,7 @@ import { masquerPrixNonConfirmes, retirerPhotosDetachees } from '../data/menu-re
 import { enregistrerTraductions } from '../lib/langue'
 import {
   ajouter,
+  ajouterService,
   changerQuantite,
   cleLigne,
   clesStockage,
@@ -26,11 +27,15 @@ import {
   prixLigne,
   prixUnitaire,
   QUANTITE_MAX,
+  reconstruirePanier,
   retirer,
+  suggestionApres,
   totalPanier,
   type EnvoiEnCours,
   type LignePanier,
 } from '../lib/panier'
+import { SERVICES_COMMANDE } from '../lib/servicesCommande'
+import { animerAjoutPanier, prefereMouvementReduit, pulserPanier } from '../lib/volPanier'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 import { useLangue } from '../components/Langue'
 
@@ -92,6 +97,23 @@ enregistrerTraductions({
   'Votre commande a été servie. Bon appétit !': 'Your order has been served. Enjoy your meal!',
   'Nous sommes désolés : votre commande n’a pas pu être acceptée. Merci de vous adresser au personnel.':
     'We are sorry: your order could not be accepted. Please speak to the staff.',
+  // Menu Appétit, lot 2 : fiche plat, rail, services, « Encore la même ».
+  'Fermer': 'Close',
+  'Quantité': 'Quantity',
+  'À découvrir aussi': 'Also worth trying',
+  'Signatures': 'Signatures',
+  'À votre service': 'At your service',
+  'La demande part en cuisine, comme une commande — c’est gratuit.': 'The request goes to the kitchen like an order — it’s free.',
+  'Demander': 'Request',
+  'Demander : {nom}': 'Request: {nom}',
+  'Service': 'Service',
+  'Gratuit': 'Free',
+  'Appeler le serveur': 'Call the waiter',
+  'De l’eau': 'Some water',
+  'Des baguettes': 'Chopsticks',
+  'L’addition': 'The bill',
+  'Encore la même': 'Same again',
+  'Certains articles ne sont plus disponibles et n’ont pas été repris : {noms}': 'Some items are no longer available and were not added back: {noms}',
 })
 
 type Traduire = ReturnType<typeof useLangue>['t']
@@ -143,6 +165,18 @@ const ecrire = (cle: string, valeur: string | null) => {
 
 type Chargement = { table: string; menu: Menu; commerce: CommercePublic }
 type Suivi = { commande: CommandeClient; secret: string }
+/** « Encore la même » : panier rebâti depuis la commande suivie, et ce qui n'a pas pu être repris. */
+type Reprise = ReturnType<typeof reconstruirePanier>
+type SetPanier = (f: (p: LignePanier[]) => LignePanier[]) => void
+
+/** Nom d'une demande de service dans la langue de la page ; `undefined` pour un plat. */
+function nomService(id: string, t: Traduire): string | undefined {
+  if (id === 'service-serveur') return t('Appeler le serveur')
+  if (id === 'service-eau') return t('De l’eau')
+  if (id === 'service-baguettes') return t('Des baguettes')
+  if (id === 'service-addition') return t('L’addition')
+  return undefined
+}
 
 /**
  * Commande à table #/commande/<commerceId>/<jetonTable> (Expérience 10/10, lot 2) : MODE COMMANDE, rapide et
@@ -166,6 +200,7 @@ function CommandeApi({ api, commerceId, jetonTable }: { api: ClientApi; commerce
   const [erreur, setErreur] = useState<'qr' | 'indisponible' | 'horsLigne' | null>(null)
   const [suivi, setSuivi] = useState<Suivi | null>(null)
   const [vue, setVue] = useState<'menu' | 'panier' | 'suivi'>('menu')
+  const [reprise, setReprise] = useState<Reprise | null>(null)
   const { t } = useLangue()
 
   const charger = useCallback(() => {
@@ -212,7 +247,20 @@ function CommandeApi({ api, commerceId, jetonTable }: { api: ClientApi; commerce
         </div>
       </header>
       {vue === 'suivi' && suivi ? (
-        <VueSuivi api={api} commerceId={commerceId} suivi={suivi} onMaj={setSuivi} onNouvelle={() => setVue('menu')} />
+        <VueSuivi
+          api={api}
+          commerceId={commerceId}
+          suivi={suivi}
+          onMaj={setSuivi}
+          onNouvelle={() => setVue('menu')}
+          onRecommander={() => {
+            // Même menu que celui affiché par Prise (prix non confirmés masqués = non commandables) ; l'envoi suit
+            // ensuite le flux normal, avec une nouvelle clé d'idempotence (l'envoi précédent a été soldé et effacé).
+            setReprise(reconstruirePanier(suivi.commande.lignes, masquerPrixNonConfirmes(donnees.menu), !!donnees.commerce.servicesCommande))
+            setVue('panier')
+            window.scrollTo(0, 0)
+          }}
+        />
       ) : (
         <Prise
           api={api}
@@ -222,6 +270,8 @@ function CommandeApi({ api, commerceId, jetonTable }: { api: ClientApi; commerce
           vue={vue === 'panier' ? 'panier' : 'menu'}
           setVue={setVue}
           suiviEnCours={suivi}
+          reprise={reprise}
+          onRepriseAppliquee={() => setReprise(null)}
           onCommandee={(s) => {
             setSuivi(s)
             setVue('suivi')
@@ -244,6 +294,8 @@ function Prise({
   vue,
   setVue,
   suiviEnCours,
+  reprise,
+  onRepriseAppliquee,
   onCommandee,
   onQrInvalide,
 }: {
@@ -254,6 +306,8 @@ function Prise({
   vue: 'menu' | 'panier'
   setVue: (v: 'menu' | 'panier' | 'suivi') => void
   suiviEnCours: Suivi | null
+  reprise?: Reprise | null
+  onRepriseAppliquee?: () => void
   onCommandee: (s: Suivi) => void
   onQrInvalide: () => void
 }) {
@@ -266,6 +320,25 @@ function Prise({
   const verrou = useRef(false)
   const [erreur, setErreur] = useState<{ reseau: boolean; message: string } | null>(null)
   useEffect(() => ecrire(clePanier, panier.length ? JSON.stringify(panier) : null), [clePanier, panier])
+  // Plat dont la fiche (feuille basse) est ouverte, depuis une ligne de catégorie ou le rail Signatures.
+  const [fiche, setFiche] = useState<Produit | null>(null)
+
+  // « Encore la même » : panier remplacé UNE fois par la reprise (garde par identité), puis la reprise est rendue à
+  // CommandeApi pour qu'un retour plus tard sur cette vue ne l'applique pas une seconde fois. Les articles non repris
+  // restent signalés tant que la vue panier est ouverte.
+  const repriseAppliquee = useRef<Reprise | null>(null)
+  const [nonRepris, setNonRepris] = useState<string[]>([])
+  useEffect(() => {
+    if (!reprise || repriseAppliquee.current === reprise) return
+    repriseAppliquee.current = reprise
+    setPanier(reprise.panier)
+    setNonRepris(reprise.ignores)
+    setErreur(null)
+    onRepriseAppliquee?.()
+  }, [reprise, onRepriseAppliquee])
+  useEffect(() => {
+    if (vue !== 'panier') setNonRepris([])
+  }, [vue])
 
   // Mêmes données et photos que #/menu (prix non confirmés masqués, photos détachées retirées) : uniquement le menu
   // ENREGISTRÉ — c'est celui que le serveur relit pour calculer la commande.
@@ -273,6 +346,13 @@ function Prise({
     () => retirerPhotosDetachees(masquerPrixNonConfirmes(donnees.menu)).categories.filter((c) => c.produits.length),
     [donnees.menu],
   )
+  // Tous les plats dans l'ordre du menu (un plat présent dans deux catégories compte une fois) ; rail Signatures =
+  // ceux qui ont une vraie photo et se commandent.
+  const plats = useMemo(() => {
+    const tous = categories.flatMap((c) => c.produits)
+    return tous.filter((p, i) => tous.findIndex((x) => x.id === p.id) === i)
+  }, [categories])
+  const signatures = useMemo(() => plats.filter((p) => p.photo && estCommandable(p)), [plats])
   const articles = nombreArticles(panier)
   const total = totalPanier(panier)
 
@@ -331,24 +411,41 @@ function Prise({
             {erreur.reseau && <p className="mt-1 text-sm">{t('Votre panier est conservé : réessayez, la commande ne sera pas envoyée deux fois.')}</p>}
           </div>
         )}
+        {nonRepris.length > 0 && (
+          <p className="rounded-2xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="status">
+            {t('Certains articles ne sont plus disponibles et n’ont pas été repris : {noms}', { noms: nonRepris.join(', ') })}
+          </p>
+        )}
         {panier.length === 0 ? (
           <p className="carte text-center text-gray-600">{t('Votre panier est vide.')}</p>
         ) : (
           <ul className="space-y-3">
-            {panier.map((l) => (
+            {panier.map((l) => {
+              // Demande de service : pastille, et « — » au lieu des prix (0 €, le total n'en bouge pas).
+              const service = nomService(l.produitId, t)
+              return (
               <li key={l.cle} className="carte space-y-3">
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold">{l.nom}</p>
+                    <p className="font-semibold">
+                      {service ?? l.nom}
+                      {service && <PastilleService />}
+                    </p>
                     {l.options.length > 0 && <p className="text-sm text-gray-600">{l.options.map((o) => o.nom).join(' · ')}</p>}
-                    <p className="text-sm text-gray-600 tabular-nums">{t('{prix} l’unité', { prix: formaterPrix(prixUnitaire(l)) })}</p>
+                    {service ? (
+                      <p className="text-sm text-gray-600">
+                        <Gratuit />
+                      </p>
+                    ) : (
+                      <p className="text-sm text-gray-600 tabular-nums">{t('{prix} l’unité', { prix: formaterPrix(prixUnitaire(l)) })}</p>
+                    )}
                   </div>
-                  <p className="shrink-0 font-semibold text-magenta-700 tabular-nums">{formaterPrix(prixLigne(l))}</p>
+                  <p className="shrink-0 font-semibold text-magenta-700 tabular-nums">{service ? <Gratuit /> : formaterPrix(prixLigne(l))}</p>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <Quantite
                     quantite={l.quantite}
-                    nom={l.nom}
+                    nom={service ?? l.nom}
                     onMoins={() => setPanier((p) => (l.quantite > 1 ? changerQuantite(p, l.cle, l.quantite - 1) : retirer(p, l.cle)))}
                     onPlus={() => setPanier((p) => changerQuantite(p, l.cle, l.quantite + 1))}
                   />
@@ -370,7 +467,8 @@ function Prise({
                   />
                 </div>
               </li>
-            ))}
+              )
+            })}
           </ul>
         )}
         {panier.length > 0 && (
@@ -407,6 +505,28 @@ function Prise({
           {t('Suivre ma commande')}
         </button>
       )}
+      {signatures.length > 0 && (
+        <section className="space-y-2" aria-labelledby="titre-signatures" data-rail-signatures>
+          <h2 id="titre-signatures" className="font-titre text-xl font-bold">
+            {t('Signatures')}
+          </h2>
+          {/* Rangée défilée au doigt seulement : mode Commande, rien ne bouge tout seul. */}
+          <ul className="-mx-4 flex snap-x scroll-px-4 gap-3 overflow-x-auto px-4 pb-1">
+            {signatures.map((p) => (
+              <li key={p.id} className="flex w-44 shrink-0 snap-start flex-col overflow-hidden rounded-2xl bg-white shadow-douce ring-1 ring-gray-900/5">
+                <button type="button" className="block w-full flex-1 text-left" aria-haspopup="dialog" onClick={() => setFiche(p)}>
+                  <img src={p.photoVignette ?? p.photo} alt="" loading="lazy" className="h-28 w-full object-cover" />
+                  <span className="block px-3 pt-2 leading-snug font-semibold">{p.nom}</span>
+                  <span className="block px-3 font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix ?? 0)}</span>
+                </button>
+                <div className="flex justify-end px-3 pt-1 pb-3">
+                  <ActionAjout produit={p} panier={panier} setPanier={setPanier} ouvrir={setFiche} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {categories.length === 0 ? (
         <MessagePublic titre="Menu à venir">Le commerce n’a pas encore publié son menu.</MessagePublic>
       ) : (
@@ -419,13 +539,53 @@ function Prise({
             ))}
           </nav>
           {categories.map((c) => (
-            <Categorie key={c.id} categorie={c} panier={panier} setPanier={setPanier} />
+            <Categorie key={c.id} categorie={c} panier={panier} setPanier={setPanier} ouvrir={setFiche} />
           ))}
         </>
       )}
+      {donnees.commerce.servicesCommande && (
+        <section className="space-y-2" aria-labelledby="titre-services" data-services>
+          <h2 id="titre-services" className="font-titre text-xl font-bold">
+            {t('À votre service')}
+          </h2>
+          <p className="text-sm text-gray-600">{t('La demande part en cuisine, comme une commande — c’est gratuit.')}</p>
+          <ul className="space-y-2">
+            {SERVICES_COMMANDE.map((s) => {
+              const nom = nomService(s.id, t) ?? s.nom
+              const ligne = panier.find((l) => l.cle === s.id)
+              return (
+                <li key={s.id} className="flex items-center gap-3 rounded-2xl bg-white px-3 py-3 shadow-douce ring-1 ring-gray-900/5">
+                  <span aria-hidden="true" className="w-8 shrink-0 text-center text-2xl">
+                    {s.icone}
+                  </span>
+                  <span className="min-w-0 flex-1 font-semibold">{nom}</span>
+                  {ligne ? (
+                    <Quantite
+                      quantite={ligne.quantite}
+                      nom={nom}
+                      onMoins={() => (setPanier((pa) => (ligne.quantite > 1 ? changerQuantite(pa, s.id, ligne.quantite - 1) : retirer(pa, s.id))), pulserPanier())}
+                      onPlus={() => (setPanier((pa) => changerQuantite(pa, s.id, ligne.quantite + 1)), pulserPanier())}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="bouton min-h-11 shrink-0 px-4 py-2 text-sm"
+                      aria-label={t('Demander : {nom}', { nom })}
+                      onClick={(e) => (setPanier((pa) => ajouterService(pa, s)), animerAjoutPanier(e.currentTarget))}
+                    >
+                      {t('Demander')}
+                    </button>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+      {fiche && <FichePlat key={fiche.id} produit={fiche} suggestion={suggestionApres(plats, fiche)} setPanier={setPanier} onFermer={() => setFiche(null)} onVoir={setFiche} />}
       {articles > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-30 bg-nuit-950/95 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-4px_16px_-8px_rgb(0_0_0/0.6)] backdrop-blur">
-          <button type="button" className="bouton mx-auto flex w-full max-w-md justify-between" onClick={() => (setVue('panier'), window.scrollTo(0, 0))}>
+        <div className="fixed inset-x-0 bottom-0 z-30 bg-nuit-950/95 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-4px_16px_-8px_rgb(0_0_0/0.6)] backdrop-blur" data-barre-panier>
+          <button type="button" className="bouton mx-auto flex w-full max-w-md justify-between" data-bouton-panier onClick={() => (setVue('panier'), window.scrollTo(0, 0))}>
             <span>{t('Voir le panier')}</span>
             <span className="tabular-nums">{t(articles > 1 ? '{n} articles · {total}' : '{n} article · {total}', { n: articles, total: formaterPrix(total) })}</span>
           </button>
@@ -435,7 +595,7 @@ function Prise({
   )
 }
 
-function Categorie({ categorie, panier, setPanier }: { categorie: CategorieMenu; panier: LignePanier[]; setPanier: (f: (p: LignePanier[]) => LignePanier[]) => void }) {
+function Categorie({ categorie, panier, setPanier, ouvrir }: { categorie: CategorieMenu; panier: LignePanier[]; setPanier: SetPanier; ouvrir: (p: Produit) => void }) {
   return (
     <section id={`cmd-${categorie.id}`} className="scroll-mt-20 space-y-2" aria-labelledby={`titre-cmd-${categorie.id}`}>
       <h2 id={`titre-cmd-${categorie.id}`} className="font-titre text-xl font-bold">
@@ -443,43 +603,26 @@ function Categorie({ categorie, panier, setPanier }: { categorie: CategorieMenu;
       </h2>
       <ul className="space-y-2">
         {categorie.produits.map((p) => (
-          <LigneProduit key={p.id} produit={p} panier={panier} setPanier={setPanier} />
+          <LigneProduit key={p.id} produit={p} panier={panier} setPanier={setPanier} ouvrir={ouvrir} />
         ))}
       </ul>
     </section>
   )
 }
 
-/** Un plat : vignette, nom, prix ; commandable → « Ajouter » puis − / + ; sinon badge honnête et aucun bouton d'ajout. */
-function LigneProduit({ produit: p, panier, setPanier }: { produit: Produit; panier: LignePanier[]; setPanier: (f: (p: LignePanier[]) => LignePanier[]) => void }) {
+/**
+ * Un plat : vignette, nom, prix — le toucher ouvre sa fiche (feuille basse) ; commandable → bouton rapide (« Ajouter »
+ * puis − / +, ou « Choisir » s'il a des options) ; sinon badge honnête et aucun bouton d'ajout.
+ */
+function LigneProduit({ produit: p, panier, setPanier, ouvrir }: { produit: Produit; panier: LignePanier[]; setPanier: SetPanier; ouvrir: (p: Produit) => void }) {
   const { t } = useLangue()
-  const [ouvert, setOuvert] = useState(false)
-  const [choix, setChoix] = useState<string[]>([])
-  const [note, setNote] = useState('')
   const commandable = estCommandable(p)
-  const avecOptions = !!p.options?.length
-  // Ligne « simple » (sans option) de ce plat : celle que le − / + de la liste modifie.
-  const simple = panier.find((l) => l.cle === p.id)
   const vignette = p.photoVignette ?? p.photo
-
-  // Options cochées, dans l'ordre du menu (prix affiché sur le bouton d'ajout).
-  const options = (p.options ?? []).filter((o) => choix.includes(o.nom))
-
-  function ajouterDepuisFiche() {
-    const cle = cleLigne(p.id, options)
-    setPanier((avant) => {
-      const apres = ajouter(avant, p, choix)
-      return note.trim() ? majInstructions(apres, cle, note) : apres
-    })
-    setChoix([])
-    setNote('')
-    setOuvert(false)
-  }
 
   return (
     <li className="overflow-hidden rounded-2xl bg-white shadow-douce ring-1 ring-gray-900/5">
       <div className="flex items-center gap-3 px-3 py-3">
-        <button type="button" className="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-left" aria-expanded={ouvert} onClick={() => setOuvert(!ouvert)}>
+        <button type="button" className="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-left" aria-haspopup="dialog" onClick={() => ouvrir(p)}>
           {vignette ? <img src={vignette} alt="" loading="lazy" className="h-16 w-16 shrink-0 rounded-xl object-cover" /> : null}
           <span className="min-w-0 flex-1">
             <span className="block font-semibold">{p.nom}</span>
@@ -493,73 +636,211 @@ function LigneProduit({ produit: p, panier, setPanier }: { produit: Produit; pan
         {!commandable ? (
           // Pastille (étiquette décorative) : text-xs, exception documentée (P2-Q1).
           p.indisponible ? <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">{t('Indisponible')}</span> : null
-        ) : avecOptions ? (
-          <button type="button" className="bouton min-h-11 shrink-0 px-4 py-2 text-sm" aria-expanded={ouvert} onClick={() => setOuvert(!ouvert)}>
-            {t('Choisir')}
-          </button>
-        ) : simple ? (
-          <Quantite
-            quantite={simple.quantite}
-            nom={p.nom}
-            onMoins={() => setPanier((pa) => (simple.quantite > 1 ? changerQuantite(pa, simple.cle, simple.quantite - 1) : retirer(pa, simple.cle)))}
-            onPlus={() => setPanier((pa) => changerQuantite(pa, simple.cle, simple.quantite + 1))}
-          />
         ) : (
-          <button type="button" className="bouton min-h-11 shrink-0 px-4 py-2 text-sm" aria-label={t('Ajouter : {nom}', { nom: p.nom })} onClick={() => setPanier((pa) => ajouter(pa, p))}>
-            {t('Ajouter')}
-          </button>
+          <ActionAjout produit={p} panier={panier} setPanier={setPanier} ouvrir={ouvrir} />
         )}
       </div>
-      {ouvert && (
-        <div className="space-y-3 border-t border-gray-100 px-4 py-3">
-          {p.description && <p className="text-sm text-gray-700">{p.description}</p>}
-          {!commandable && (
-            <p className="text-sm text-gray-600">{p.indisponible ? t('Ce plat n’est pas disponible pour le moment.') : t('Ce plat se commande directement auprès du personnel.')}</p>
-          )}
-          {commandable && avecOptions && (
-            <fieldset className="space-y-1">
-              <legend className="etiquette">{t('Options')}</legend>
-              {p.options!.map((o) => (
-                <label key={o.nom} className="flex min-h-11 cursor-pointer items-center gap-3">
-                  <span className="zone-case my-0">
-                    <input
-                      type="checkbox"
-                      className="case-a-cocher"
-                      checked={choix.includes(o.nom)}
-                      onChange={(e) => setChoix((c) => (e.target.checked ? [...c, o.nom] : c.filter((x) => x !== o.nom)))}
-                    />
-                  </span>
-                  <span className="min-w-0 flex-1">{o.nom}</span>
-                  <span className="shrink-0 text-sm text-gray-700 tabular-nums">{o.prix ? `+ ${formaterPrix(o.prix)}` : t('inclus')}</span>
-                </label>
-              ))}
-            </fieldset>
-          )}
-          {commandable && (
-            <>
-              <div>
-                <label className="etiquette" htmlFor={`note-${p.id}`}>
-                  {t('Instructions pour ce plat (optionnel)')}
-                </label>
-                <input id={`note-${p.id}`} className="champ" maxLength={INSTRUCTIONS_MAX} placeholder={t('ex : sans coriandre')} value={note} onChange={(e) => setNote(e.target.value)} />
-              </div>
-              <button type="button" className="bouton w-full" onClick={ajouterDepuisFiche}>
-                {t('Ajouter au panier · {prix}', { prix: formaterPrix(prixUnitaire({ prix: p.prix ?? 0, options })) })}
-              </button>
-            </>
-          )}
-        </div>
-      )}
     </li>
   )
 }
 
-function Quantite({ quantite, nom, onMoins, onPlus }: { quantite: number; nom: string; onMoins: () => void; onPlus: () => void }) {
+/**
+ * Bouton rapide d'un plat commandable (ligne de catégorie, rail Signatures) : « Choisir » s'il a des options (ouvre
+ * la fiche) ; sinon « Ajouter » (vol vers la barre panier), puis − / + sur sa ligne simple (pulsation seulement).
+ */
+function ActionAjout({ produit: p, panier, setPanier, ouvrir }: { produit: Produit; panier: LignePanier[]; setPanier: SetPanier; ouvrir: (p: Produit) => void }) {
+  const { t } = useLangue()
+  // Ligne « simple » (sans option) de ce plat : celle que le − / + modifie.
+  const simple = panier.find((l) => l.cle === p.id)
+  if (p.options?.length)
+    return (
+      <button type="button" className="bouton min-h-11 shrink-0 px-4 py-2 text-sm" aria-haspopup="dialog" onClick={() => ouvrir(p)}>
+        {t('Choisir')}
+      </button>
+    )
+  if (simple)
+    return (
+      <Quantite
+        quantite={simple.quantite}
+        nom={p.nom}
+        onMoins={() => (setPanier((pa) => (simple.quantite > 1 ? changerQuantite(pa, simple.cle, simple.quantite - 1) : retirer(pa, simple.cle))), pulserPanier())}
+        onPlus={() => (setPanier((pa) => changerQuantite(pa, simple.cle, simple.quantite + 1)), pulserPanier())}
+      />
+    )
+  return (
+    <button
+      type="button"
+      className="bouton min-h-11 shrink-0 px-4 py-2 text-sm"
+      aria-label={t('Ajouter : {nom}', { nom: p.nom })}
+      onClick={(e) => (setPanier((pa) => ajouter(pa, p)), animerAjoutPanier(e.currentTarget, { image: p.photoVignette ?? p.photo }))}
+    >
+      {t('Ajouter')}
+    </button>
+  )
+}
+
+/**
+ * Fiche d'un plat en feuille basse (Menu Appétit, lot 2) : grande photo (la vraie, sinon rien), description, options,
+ * note, quantité à ajouter, et le bouton d'ajout collé en bas. Voile, Échap ou « Fermer » referment ; montée courte,
+ * sauf mouvement réduit (affichée d'emblée). En bas, un autre plat photographié à découvrir (`suggestionApres`).
+ */
+function FichePlat({
+  produit: p,
+  suggestion,
+  setPanier,
+  onFermer,
+  onVoir,
+}: {
+  produit: Produit
+  suggestion: Produit | null
+  setPanier: SetPanier
+  onFermer: () => void
+  onVoir: (p: Produit) => void
+}) {
+  const { t } = useLangue()
+  const [choix, setChoix] = useState<string[]>([])
+  const [note, setNote] = useState('')
+  const [quantite, setQuantite] = useState(1)
+  const [mouvement] = useState(() => !prefereMouvementReduit())
+  const fermer = useRef<HTMLButtonElement>(null)
+  const boutonAjout = useRef<HTMLButtonElement>(null)
+  const surFermeture = useRef(onFermer)
+  surFermeture.current = onFermer
+  const commandable = estCommandable(p)
+  const avecOptions = !!p.options?.length
+  // Options cochées, dans l'ordre du menu (prix affiché sur le bouton d'ajout).
+  const options = (p.options ?? []).filter((o) => choix.includes(o.nom))
+
+  // Ouverture : focus sur « Fermer », page figée dessous, Échap ferme ; fermeture : focus rendu à l'élément d'origine.
+  useEffect(() => {
+    const origine = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const defilement = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    fermer.current?.focus()
+    const clavier = (e: KeyboardEvent) => e.key === 'Escape' && surFermeture.current()
+    document.addEventListener('keydown', clavier)
+    return () => {
+      document.removeEventListener('keydown', clavier)
+      document.body.style.overflow = defilement
+      origine?.focus({ preventScroll: true })
+    }
+  }, [])
+
+  function ajouterDepuisFiche() {
+    const cle = cleLigne(p.id, options)
+    setPanier((avant) => {
+      const apres = ajouter(avant, p, choix, quantite)
+      return note.trim() ? majInstructions(apres, cle, note) : apres
+    })
+    animerAjoutPanier(boutonAjout.current, { image: p.photoVignette ?? p.photo })
+    onFermer()
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center">
+      <button type="button" tabIndex={-1} aria-hidden="true" className="absolute inset-0 h-full w-full cursor-default bg-black/60" onClick={onFermer} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={p.nom}
+        className={`relative flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl bg-white shadow-relief${mouvement ? ' feuille-montee' : ''}`}
+      >
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {p.photo && <img src={p.photo} alt="" className="h-60 w-full object-cover" />}
+          <div className="space-y-4 px-4 pt-4 pb-5">
+            <div className="flex items-start gap-3">
+              <h2 className="min-w-0 flex-1 font-titre text-2xl font-bold">{p.nom}</h2>
+              <button ref={fermer} type="button" className="lien shrink-0" onClick={onFermer}>
+                {t('Fermer')}
+              </button>
+            </div>
+            {p.prix == null ? (
+              <p className="text-gray-600 italic">{t('Prix sur place')}</p>
+            ) : (
+              <p className="text-lg font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix)}</p>
+            )}
+            {p.description && <p className="text-gray-700">{p.description}</p>}
+            {!commandable && (
+              <p className="text-sm text-gray-600">{p.indisponible ? t('Ce plat n’est pas disponible pour le moment.') : t('Ce plat se commande directement auprès du personnel.')}</p>
+            )}
+            {commandable && avecOptions && (
+              <fieldset className="space-y-1">
+                <legend className="etiquette">{t('Options')}</legend>
+                {p.options!.map((o) => (
+                  <label key={o.nom} className="flex min-h-11 cursor-pointer items-center gap-3">
+                    <span className="zone-case my-0">
+                      <input
+                        type="checkbox"
+                        className="case-a-cocher"
+                        checked={choix.includes(o.nom)}
+                        onChange={(e) => setChoix((c) => (e.target.checked ? [...c, o.nom] : c.filter((x) => x !== o.nom)))}
+                      />
+                    </span>
+                    <span className="min-w-0 flex-1">{o.nom}</span>
+                    <span className="shrink-0 text-sm text-gray-700 tabular-nums">{o.prix ? `+ ${formaterPrix(o.prix)}` : t('inclus')}</span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            {commandable && (
+              <>
+                <div>
+                  <label className="etiquette" htmlFor={`note-${p.id}`}>
+                    {t('Instructions pour ce plat (optionnel)')}
+                  </label>
+                  <input id={`note-${p.id}`} className="champ" maxLength={INSTRUCTIONS_MAX} placeholder={t('ex : sans coriandre')} value={note} onChange={(e) => setNote(e.target.value)} />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-semibold">{t('Quantité')}</span>
+                  <Quantite
+                    quantite={quantite}
+                    nom={p.nom}
+                    plancher
+                    onMoins={() => setQuantite((q) => Math.max(1, q - 1))}
+                    onPlus={() => setQuantite((q) => Math.min(QUANTITE_MAX, q + 1))}
+                  />
+                </div>
+              </>
+            )}
+            {suggestion && (
+              <div className="space-y-2 border-t border-gray-100 pt-4">
+                <h3 className="font-semibold">{t('À découvrir aussi')}</h3>
+                <button type="button" className="flex min-h-11 w-full items-center gap-3 rounded-2xl p-2 text-left ring-1 ring-gray-900/10" onClick={() => onVoir(suggestion)}>
+                  <img src={suggestion.photoVignette ?? suggestion.photo} alt="" loading="lazy" className="h-16 w-16 shrink-0 rounded-xl object-cover" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-semibold">{suggestion.nom}</span>
+                    <span className="block font-semibold text-magenta-700 tabular-nums">{formaterPrix(suggestion.prix ?? 0)}</span>
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        {commandable && (
+          <div className="border-t border-gray-100 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+            <button ref={boutonAjout} type="button" className="bouton w-full text-lg" onClick={ajouterDepuisFiche}>
+              {t('Ajouter au panier · {prix}', { prix: formaterPrix(prixUnitaire({ prix: p.prix ?? 0, options }) * quantite) })}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** − / + d'une quantité. `plancher` (fiche plat) : le − s'arrête à 1 au lieu de retirer la ligne du panier. */
+function Quantite({ quantite, nom, plancher, onMoins, onPlus }: { quantite: number; nom: string; plancher?: boolean; onMoins: () => void; onPlus: () => void }) {
   const { t } = useLangue()
   const rond = 'inline-flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-xl font-bold text-white ring-1 ring-white/30 active:scale-95 disabled:opacity-40'
   return (
     <div className="flex shrink-0 items-center gap-1" role="group" aria-label={t('Quantité : {nom}', { nom })}>
-      <button type="button" className={rond} aria-label={quantite > 1 ? t('Un de moins : {nom}', { nom }) : t('Retirer du panier : {nom}', { nom })} onClick={onMoins}>
+      <button
+        type="button"
+        className={rond}
+        aria-label={quantite > 1 || plancher ? t('Un de moins : {nom}', { nom }) : t('Retirer du panier : {nom}', { nom })}
+        disabled={plancher && quantite <= 1}
+        onClick={onMoins}
+      >
         −
       </button>
       <span className="min-w-8 text-center font-semibold tabular-nums">{quantite}</span>
@@ -570,8 +851,40 @@ function Quantite({ quantite, nom, onMoins, onPlus }: { quantite: number; nom: s
   )
 }
 
+/** Pastille « Service » d'une demande à 0 € (panier, suivi). Étiquette décorative : text-xs, exception documentée (P2-Q1). */
+function PastilleService() {
+  const { t } = useLangue()
+  return <span className="ml-2 inline-block rounded-full bg-magenta-500 px-2 py-0.5 align-middle text-xs font-semibold text-white">{t('Service')}</span>
+}
+
+/** « — » à la place d'un prix (demande de service, 0 €), lu « Gratuit » par les lecteurs d'écran. */
+function Gratuit() {
+  const { t } = useLangue()
+  return (
+    <>
+      <span aria-hidden="true">—</span>
+      <span className="sr-only">{t('Gratuit')}</span>
+    </>
+  )
+}
+
 /** Suivi : statut en langage clair, relu toutes les 10 s (pause si l'onglet est caché), annoncé poliment. */
-function VueSuivi({ api, commerceId, suivi, onMaj, onNouvelle }: { api: ClientApi; commerceId: string; suivi: Suivi; onMaj: (s: Suivi) => void; onNouvelle: () => void }) {
+function VueSuivi({
+  api,
+  commerceId,
+  suivi,
+  onMaj,
+  onNouvelle,
+  onRecommander,
+}: {
+  api: ClientApi
+  commerceId: string
+  suivi: Suivi
+  onMaj: (s: Suivi) => void
+  onNouvelle: () => void
+  /** « Encore la même » : panier rebâti depuis cette commande (CommandeApi). */
+  onRecommander?: () => void
+}) {
   const { t } = useLangue()
   const [horsLigne, setHorsLigne] = useState(false)
   const { commande, secret } = suivi
@@ -630,11 +943,12 @@ function VueSuivi({ api, commerceId, suivi, onMaj, onNouvelle }: { api: ClientAp
           <li key={i} className="flex gap-3 py-2">
             <span className="shrink-0 font-semibold tabular-nums">{l.quantite} ×</span>
             <span className="min-w-0 flex-1">
-              {l.nom}
+              {l.service ? (nomService(l.produitId, t) ?? l.nom) : l.nom}
+              {l.service && <PastilleService />}
               {l.options.length > 0 && <span className="block text-sm text-gray-600">{l.options.map((o) => o.nom).join(' · ')}</span>}
               {l.instructions && <span className="block text-sm text-gray-600 italic">{l.instructions}</span>}
             </span>
-            <span className="shrink-0 tabular-nums">{formaterPrix((l.prixUnitaire + l.options.reduce((s, o) => s + o.prix, 0)) * l.quantite)}</span>
+            <span className="shrink-0 tabular-nums">{l.service ? <Gratuit /> : formaterPrix((l.prixUnitaire + l.options.reduce((s, o) => s + o.prix, 0)) * l.quantite)}</span>
           </li>
         ))}
         <li className="flex justify-between py-2 font-bold">
@@ -645,6 +959,11 @@ function VueSuivi({ api, commerceId, suivi, onMaj, onNouvelle }: { api: ClientAp
       <button type="button" className="bouton-secondaire w-full" onClick={onNouvelle}>
         {t('Commander autre chose')}
       </button>
+      {onRecommander && commande.statut !== 'refusee' && commande.lignes.length > 0 && (
+        <button type="button" className="bouton-secondaire w-full" onClick={onRecommander}>
+          {t('Encore la même')}
+        </button>
+      )}
     </section>
   )
 }
