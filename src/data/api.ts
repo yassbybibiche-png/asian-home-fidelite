@@ -17,10 +17,16 @@ export const DELAI_TELECHARGEMENT_MS = 120_000
 export class ErreurApi extends Error {
   /** Code HTTP ; 0 = serveur injoignable (réseau coupé, serveur arrêté, délai dépassé). */
   statut: number
-  constructor(statut: number, message: string) {
+  /** Code d'erreur stable renvoyé par l'API (P2-1) ; absent = erreur non codée (message affiché tel quel). */
+  code?: string
+  /** Détails à interpoler dans la traduction du code (dates ISO AAAA-MM-JJ, jour de Paris). */
+  details?: Record<string, string>
+  constructor(statut: number, message: string, code?: string, details?: Record<string, string>) {
     super(message)
     this.name = 'ErreurApi'
     this.statut = statut
+    this.code = code
+    this.details = details
   }
   get horsLigne(): boolean {
     return this.statut === 0
@@ -335,14 +341,23 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     }
     if (!r.ok) {
       let message = `Erreur du serveur (${r.status}).`
+      let code: string | undefined
+      let details: Record<string, string> | undefined
       try {
-        const j = (await r.json()) as { erreur?: unknown }
+        const j = (await r.json()) as { erreur?: unknown; code?: unknown; details?: unknown }
         if (typeof j.erreur === 'string') message = j.erreur
+        // P2-1 : code stable + détails (dates ISO) — le client traduit les codes connus.
+        if (typeof j.code === 'string' && j.code) code = j.code
+        if (j.details && typeof j.details === 'object' && !Array.isArray(j.details)) {
+          const d = Object.fromEntries(Object.entries(j.details).filter(([, v]) => typeof v === 'string')) as Record<string, string>
+          if (Object.keys(d).length) details = d
+        }
       } catch {
         // Réponse non JSON (proxy, page d'erreur de l'hébergeur…) : message générique.
       }
       // 502/503/504 : l'hébergeur répond mais le serveur de l'app est arrêté ou en réveil.
-      throw new ErreurApi(r.status >= 502 && r.status <= 504 ? 0 : r.status, r.status >= 502 && r.status <= 504 ? MESSAGE_HORS_LIGNE : message)
+      if (r.status >= 502 && r.status <= 504) throw new ErreurApi(0, MESSAGE_HORS_LIGNE)
+      throw new ErreurApi(r.status, message, code, details)
     }
     try {
       // Pièce jointe binaire (sauvegarde) : octets intacts + nom du fichier donné par le serveur (Content-Disposition).

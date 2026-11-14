@@ -57,8 +57,6 @@ export function mentionDesinscriptionSms(lien: string): string {
 /** Lien court de désinscription, pour les SMS (le serveur redirige `/d/<id>/<jeton>` vers `/#/desinscription/<id>/<jeton>`). */
 export const lienCourtDesinscription = (site: string, clientId: string, jeton: string) => `${site.replace(/\/+$/, '')}/d/${clientId}/${jeton}`
 
-/** Lien court vers la carte, pour les SMS (le serveur redirige `/c/<id>` vers `/#/carte/<id>`). */
-export const lienCourtCarte = (site: string, clientId: string) => `${site.replace(/\/+$/, '')}/c/${clientId}`
 /** Lien complet vers la carte (e-mails). */
 export const lienCarte = (site: string, clientId: string) => `${site.replace(/\/+$/, '')}/#/carte/${clientId}`
 

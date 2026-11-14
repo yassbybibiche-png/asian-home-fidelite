@@ -200,10 +200,6 @@ export function exportClientCsv(client: Client, tirages: Tirage[], envois: Envoi
   return '﻿' + [entete.join(';'), ...lignes.map((x) => x.map(celluleCsv).join(';'))].join('\r\n') + '\r\n'
 }
 
-export function nomFichierExportClient(clientId: string): string {
-  return `donnees-${clientId}.csv`.replace(/[^\w.-]/g, '_')
-}
-
 // ---------- Politique de confidentialité ----------
 
 /** Hébergement : Render vérifié dans `render.yaml` (region: frankfurt). Supabase : la région du projet n'est déclarée nulle part dans le code. */

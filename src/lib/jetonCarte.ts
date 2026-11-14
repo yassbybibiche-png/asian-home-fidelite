@@ -77,3 +77,6 @@ export function lienAccesDuHash(hash: string): string | null {
 export function hashSansLienAcces(hash: string): string {
   return hash.replace(/[?&]acces=[\w.-]{1,2048}/, '')
 }
+
+/** Lien court vers la carte, pour les SMS (le serveur redirige `/c/<id>` vers `/#/carte/<id>`). */
+export const lienCourtCarte = (site: string, clientId: string) => `${site.replace(/\/+$/, '')}/c/${clientId}`

@@ -68,7 +68,7 @@ import { ContexteRoue, LegendeRoue, Roue, useMouvementReduit } from '../componen
 import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteJeu } from '../components/Squelette'
 import { CommutateurLangue, useLangue } from '../components/Langue'
-import { localeDate, texteValiditeLangue } from '../lib/langue'
+import { localeDate, texteValiditeLangue, traduireErreur } from '../lib/langue'
 import { BadgeDemo, BoutonCopier, LienConfidentialite, LogoCommerce, MessageErreur, PiedPublic } from '../components/ui'
 
 export function MessagePublic({ titre, children }: { titre: string; children: ReactNode }) {
@@ -609,7 +609,7 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
   useEffect(() => () => window.clearTimeout(minuterie.current), [])
   const reduit = useMouvementReduit()
   const jeuRoue = useJeuRoue()
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
   const visiteValidee = useVisiteValidee(jeu?.statut)
   // Mesure anonyme (P2-Q3) : page de jeu ouverte, une fois par onglet ; seul le type part, jamais la carte.
   // Arrivée par la redirection courte du QR (`/r/` : la seule requête émise est `?via=qr`) : le scan est déjà
@@ -652,7 +652,7 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
           setJeu(null)
         } else {
           setHorsLigne(!(e instanceof ErreurApi) || e.horsLigne)
-          setMessage(e instanceof ErreurApi ? e.message : MESSAGE_HORS_LIGNE)
+          setMessage(e instanceof ErreurApi ? traduireErreur(e.code, e.message, langue, e.details) : MESSAGE_HORS_LIGNE)
         }
         return null
       }
@@ -727,7 +727,7 @@ function PartieApi({ api: apiServeur, commerce }: { api: ClientApi; commerce: Co
     }
     if (!issue.ok) {
       // Refusé par le serveur ou serveur injoignable : la roue ne tourne pas, aucun lot n'est affiché.
-      setMessage(issue.message)
+      setMessage(traduireErreur(issue.code, issue.message, langue, issue.details))
       if (issue.refus) void majStatut(joueur)
       return
     }
@@ -884,7 +884,7 @@ function Identification({
   const contact = analyserContact(contactSaisi)
   const saisie = etatSaisieContact(contactSaisi, essaye)
   const attributs = attributsChamp(mode)
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
 
   function choisirMode(m: ModeContact) {
     setMode(m)
@@ -900,7 +900,7 @@ function Identification({
     try {
       await onEnvoyer(contactSaisi, prenomSaisi.trim(), consentement)
     } catch (err) {
-      setErreur(err instanceof Error ? err.message : MESSAGE_HORS_LIGNE)
+      setErreur(err instanceof ErreurApi ? traduireErreur(err.code, err.message, langue, err.details) : err instanceof Error ? err.message : MESSAGE_HORS_LIGNE)
     } finally {
       setEnCours(false)
     }
@@ -996,7 +996,7 @@ function DemandePrenom({ prenom, onEnregistrer }: { prenom: string; onEnregistre
   const [enregistre, setEnregistre] = useState(false)
   const [enCours, setEnCours] = useState(false)
   const [erreur, setErreur] = useState<string | null>(null)
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
 
   if (prenom.trim()) {
     return enregistre ? (
@@ -1016,7 +1016,7 @@ function DemandePrenom({ prenom, onEnregistrer }: { prenom: string; onEnregistre
       await onEnregistrer(p)
       setEnregistre(true)
     } catch (err) {
-      setErreur(err instanceof Error ? err.message : MESSAGE_HORS_LIGNE)
+      setErreur(err instanceof ErreurApi ? traduireErreur(err.code, err.message, langue, err.details) : err instanceof Error ? err.message : MESSAGE_HORS_LIGNE)
     } finally {
       setEnCours(false)
     }

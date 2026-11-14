@@ -21,3 +21,8 @@ export function clientsEnCsv(clients: Client[]): string {
 export function nomFichierCsv(commerceId: string): string {
   return `clients-${commerceId}.csv`.replace(/[^\w.-]/g, '_')
 }
+
+/** Nom du fichier d'export d'UN client (même forme que le serveur). */
+export function nomFichierExportClient(clientId: string): string {
+  return `donnees-${clientId}.csv`.replace(/[^\w.-]/g, '_')
+}
