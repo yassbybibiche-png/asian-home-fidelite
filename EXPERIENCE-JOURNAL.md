@@ -578,3 +578,46 @@ Critique aux 10 questions :
     (b) Le rail « En photos » de l'accueil est encore un défilement sec sans inertie ni vie →
     cycle 4 : rail vivant (inertie, zoom au centre façon Fideliz, tuiles qui respirent).
 
+### Cycle 4 — « Rail En photos vivant » (menu Découverte) — référence : Fideliz (rail photos vivant)
+
+1. **Problème qui justifie le changement ?** Le rail « En photos » défilait déjà tout seul
+   (aller-retour lent, Expérience lot 2) mais restait plat : tuiles identiques en taille et en
+   lumière, aucun point focal — l'œil ne savait pas où se poser.
+2. **Qu'est-ce qui change à l'écran ?** La tuile la plus proche du centre du rail grandit
+   (échelle jusqu'à 1,05) et sa photo passe à pleine luminosité ; les voisines s'atténuent
+   progressivement (luminosité jusqu'à 0,82 à une tuile et demie, courbe en cosinus). Le focus
+   suit le défilement, automatique comme manuel. Mathématique pure + pilote rAF dans
+   `src/lib/railVivant.ts` : actif seulement rail à l'écran, images sautées si le rail n'a pas
+   bougé, écritures seulement si la valeur arrondie change, jamais de `scrollLeft` touché
+   (`defilerRail` reste le seul conducteur). L'échelle vit sur un conteneur interne de la
+   tuile : l'enfoncement tactile du bouton (0,97) se compose avec elle au lieu de l'écraser.
+3. **Plus beau ?** Oui, mais c'est le gain le plus discret de la boucle : en capture fixe, un
+   « projecteur doux » (tuile centrale ~4 px plus large, franchement plus lumineuse, voisines
+   atténuées d'environ 15 %) ; en mouvement, le focus qui glisse se lit nettement mieux.
+   Amplitude volontairement retenue : assombrir davantage (0,75) ou grossir plus (1,08)
+   rendrait la majorité des photos de plats moins appétissantes pour éclairer une seule
+   tuile — la nourriture ne se met pas en pénombre. DA menu Découverte 9,4 → **9,5/10**.
+4. **Plus rapide ?** Aucune régression mesurée au-delà du bruit (A/B alterné après/avant :
+   FCP 712–884 ms des deux côtés, LCP dominé par la photo d'en-tête et ses valeurs aberrantes
+   des deux côtés, témoin `#/jouer` équivalent). Bundle initial inchangé (484 259 o) ;
+   CLS 0 — le rail gagne 16 px de hauteur dès le premier rendu (rembourrage anti-rognage de
+   l'échelle), donc rien ne bouge après coup.
+5. **Plus accessible ?** Ordre de lecture et libellés inchangés, aucune tuile dupliquée ;
+   mouvement réduit : pilote inactif, aucune échelle ni filtre posés (vérifié en Chromium).
+6. **Plus crédible ?** Les tuiles restent les vraies photos des plats nommés ; l'effet ne
+   maquille rien, il hiérarchise.
+7. **Cohérent avec la DA ?** Le rail vit désormais au même titre que le bandeau défilant
+   juste au-dessus et les univers derrière : la page d'accueil du menu n'a plus de zone morte.
+8. **Trop complexe ?** Un module, un effet, un conteneur interne par tuile ; le pilote
+   s'arrête hors écran. Contre-épreuves : Claude Code a cassé le pilote de 4 façons pendant
+   le développement (garde d'écriture, saut d'image, garde mouvement réduit, arrêt hors
+   écran) — ses 12 tests les attrapent toutes ; mutation du coordinateur (amplitude 0,05 →
+   0) : 2 tests rouges ; suite complète revérifiée 1771/1771.
+9. **Risques ?** Effet subtil en fixe — assumé (question 3). Le pilote écrit transform/filter
+   sur 11 tuiles au plus, seulement quand le rail bouge à l'écran : coût négligeable, vérifié
+   sans effet sur les mesures.
+10. **Que manque-t-il encore ?** Le dernier manque du catalogue d'inspiration : les
+    transitions ENTRE pages (accueil ↔ menu en coupe sèche). → Cycle 5 : entrée en scène des
+    navigations internes — avec une contrainte dure : jamais au premier chargement (le QR
+    d'une table ouvre directement le menu ; son LCP ne doit pas bouger).
+
