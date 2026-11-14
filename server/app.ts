@@ -1842,9 +1842,20 @@ export async function creerServeur(o: OptionsServeur) {
   /** Révoque TOUS les jetons et liens d'accès de la carte (version + 1, relue en base). */
   async function revoquerAccesCarte(commerceId: string, clientId: string) {
     const cle = cleVersionAcces(commerceId, clientId)
-    const v = (Number(await st.meta(cle)) || 0) + 1
-    await st.majMeta(cle, String(v))
-    versionsAcces.set(cle, v)
+    // P2-5 : lecture-modification-écriture en CAS (`majMetaSi`) avec réessai — l'ancienne écriture inconditionnelle
+    // (`majMeta`) perdait une révocation quand deux révocations de la même carte se croisaient (toutes deux
+    // lisaient N puis écrivaient N+1) : un jeton émis entre les deux lectures survivait à la seconde révocation.
+    // Après 8 essais (même borne que `ESSAIS_INDEX` côté commandes), ErreurConflit (409) : la révocation n'a pas
+    // eu lieu, l'appelant ne doit pas la présenter comme faite — et rien n'est journalisé comme révoqué.
+    for (let i = 0; i < 8; i++) {
+      const lue = await st.meta(cle)
+      const suivante = (Number(lue) || 0) + 1
+      if (await st.majMetaSi(cle, lue, String(suivante))) {
+        versionsAcces.set(cle, suivante)
+        return
+      }
+    }
+    throw new ErreurConflit(`Version d'accès modifiée entre-temps (${commerceId}).`)
   }
 
   const cleClientIp = (req: IncomingMessage) => `client-ip:${ipDe(req)}`
