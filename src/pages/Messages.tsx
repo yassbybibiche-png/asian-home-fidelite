@@ -86,25 +86,33 @@ function RelancesSmsEmail() {
       <p className="text-sm text-gray-600">
         {MENTION_ENVOI}. Le client se désinscrit par le lien de désinscription de chaque SMS ou e-mail, ou auprès du commerçant ; vous pouvez aussi retirer son consentement sur sa fiche.
       </p>
+      {/* P2-4 : bandeau permanent tant que le mode test est actif — l'interrupteur ne doit jamais ressembler à un
+          service live quand rien ne part réellement. L'état détaillé (prestataires, migration) reste dans la liste
+          ci-dessus ; le bandeau est l'information à ne pas rater, juste au-dessus des interrupteurs. */}
+      {statut?.modeTest && (
+        <p className="rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-900 ring-1 ring-amber-200" role="status" data-bandeau-mode-test>
+          Mode test : aucun SMS/e-mail ne part réellement. Les relances sont simulées (e-mail en sandbox Brevo, SMS simulé) et tracées « Test — rien envoyé » dans le journal.
+        </p>
+      )}
       <fieldset className="space-y-2 border-t border-gray-100 pt-3">
-        <legend className="etiquette">Relances automatiques (à l’ouverture du tableau de bord, une fois par jour)</legend>
+        <legend className="etiquette">Relances automatiques</legend>
         <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-gray-700">
           <span className="zone-case">
             <input type="checkbox" className="case-a-cocher" checked={regles.inactif} disabled={enCours} onChange={(e) => void basculer('inactif', e.target.checked)} />
           </span>
-          <span>« Vous nous manquez » aux clients inactifs depuis 30 jours</span>
+          <span>« Vous nous manquez » aux clients inactifs depuis 30 jours — envoi à l’ouverture du tableau de bord, une fois par jour</span>
         </label>
         <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-gray-700">
           <span className="zone-case">
             <input type="checkbox" className="case-a-cocher" checked={regles.anniversaire} disabled={enCours} onChange={(e) => void basculer('anniversaire', e.target.checked)} />
           </span>
-          <span>Message d’anniversaire (si la date est renseignée)</span>
+          <span>Message d’anniversaire (si la date est renseignée) — envoi à l’ouverture du tableau de bord, une fois par jour</span>
         </label>
         <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-gray-700">
           <span className="zone-case">
             <input type="checkbox" className="case-a-cocher" checked={regles.gainExpire !== false} disabled={enCours} onChange={(e) => void basculer('gainExpire', e.target.checked)} />
           </span>
-          <span>« Votre gain expire bientôt » : lot de la roue non retiré, 72 h avant son expiration (une fois par gain)</span>
+          <span>« Votre gain expire bientôt » : lot de la roue non retiré, 72 h avant son expiration (une fois par gain) — envoi à l’ouverture du tableau de bord, une fois par jour</span>
         </label>
         <p className="text-sm text-gray-600">Seulement vers les clients qui ont consenti, et seulement si le prestataire du canal est configuré.</p>
       </fieldset>
