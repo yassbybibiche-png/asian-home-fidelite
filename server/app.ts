@@ -776,9 +776,11 @@ function apparence(v: unknown): Apparence {
 function configCommande(v: unknown, existant: ConfigCommande | undefined): ConfigCommande {
   const o = (v ?? {}) as Corps
   if (typeof v !== 'object' || v === null || Array.isArray(v)) throw err(400, '« commande » doit valoir { active, tables }.')
-  const inconnus = Object.keys(o).filter((k) => k !== 'active' && k !== 'tables')
+  const inconnus = Object.keys(o).filter((k) => k !== 'active' && k !== 'tables' && k !== 'services')
   if (inconnus.length) throw err(400, `« commande » : champ inconnu (${inconnus.join(', ')}).`)
   const active = booleen(o.active, 'commande.active')
+  // Demandes de service à 0 € (Menu Appétit) : booléen optionnel, absent = désactivé.
+  const services = o.services === undefined ? undefined : booleen(o.services, 'commande.services')
   if (!Array.isArray(o.tables) || o.tables.length > TABLES_COMMANDE_MAX) throw err(400, `« commande.tables » doit être une liste de ${TABLES_COMMANDE_MAX} tables maximum.`)
   const connus = new Set((existant?.tables ?? []).map((t) => t.jeton))
   const noms = new Set<string>()
@@ -794,7 +796,7 @@ function configCommande(v: unknown, existant: ConfigCommande | undefined): Confi
     jetons.add(jeton)
     return { nom, jeton }
   })
-  return { active, tables }
+  return { active, tables, ...(services !== undefined ? { services } : {}) }
 }
 
 const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB', 'modeAccesRoue', 'limiteGainsMois', 'plagesOuverture', 'creneauxCreux', 'commande']
@@ -4167,7 +4169,7 @@ export async function creerServeur(o: OptionsServeur) {
       // changé depuis — sans son secret, que le navigateur d'origine a déjà puisqu'il l'a tiré lui-même (corps.secret).
       // Le cas simultané est tranché par creerCommande.
       const nouvelle = async () => {
-        const calcul = calculerCommande(await st.menu(id), corps.lignes)
+        const calcul = calculerCommande(await st.menu(id), corps.lignes, { services: !!config.services })
         if (!calcul.ok) throw err(400, calcul.message)
         const instructions = lireInstructions(corps.instructions)
         if (typeof instructions === 'object') throw err(400, instructions.message)
