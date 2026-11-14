@@ -71,3 +71,36 @@ Les navigations internes accueil ↔ menu entrent en scène (montée 14 px + fon
 Mesures : fenêtre de mesure très chargée (FCP 1,1–1,9 s des deux côtés en A/B alterné, témoin `#/jouer` équivalent — bruit, aucune conclusion tirée des chronos) ; la porte « premier chargement inchangé » est tenue par la construction + le contrôle navigateur. Bundle initial 484 259 → **484 328 o** (+69 o, plafond 484 422 : marge restante 94 o — point de vigilance). CLS **0**. Écarts assumés : squelette de premier chargement en coupe sèche (partagé avec Commande, hors périmètre) ; observation préexistante hors cycle : `#/menu` s'ouvre défilé d'environ 393 px (effet onglets antérieur à la boucle), inchangé.
 
 Vidéos : `captures-animations/cycle4.webm` → `captures-animations/cycle5.webm`. **Verdict de la critique (détail au journal §8) : gain net de politesse** — la coupe sèche disparaît du parcours Découverte ; DA menu Découverte 9,5 → **9,6/10**. Le catalogue d'inspiration initial est épuisé → passe d'inspiration fraîche, puis bilan final de la boucle ci-dessous.
+
+## Passe d'inspiration fraîche (14/11, après le cycle 5)
+
+Relu ce que le paysage 2025-2026 récompense (sites de restaurants primés — mention Awwwards pour Mister Pio : imagerie forte, typographie expressive, animation subtile continue ; palmarès et guides « meilleurs sites de restaurants 2026 » ; tendances menus QR 2026). Trois familles ressortent, aucune actionnable ici :
+
+- **Récit 3D / WebGL au défilement** (ex. Sebastiano, Three.js + GSAP) : incompatible avec les portes dures (bundle, fluidité sur téléphones modestes) et exige des actifs de marque 3D qui n'existent pas pour ce restaurant.
+- **Boucles vidéo des plats / de la préparation** (ex. Fiola Mare) : exige des vidéos réelles du restaurant — aucune n'existe, et en générer reviendrait à présenter du synthétique comme du réel.
+- **Modèles 3D / RA des plats, personnalisation IA** : fonctions produit, pas signatures d'animation ; hors périmètre de la boucle.
+
+Le reste (imagerie forte, typo expressive, micro-interactions) est déjà couvert par les cycles 1 à 5. Les guides convergent d'ailleurs avec le constat du cycle 3 : **la photographie est l'élément de design n°1** d'un site de restaurant.
+
+## Bilan final de la boucle (arrêt motivé)
+
+**Cycles livrés — tous en production, staging vérifié avant production à chaque fois :**
+
+| Cycle | Signature | DA menu Découverte | Tests (suite) | Vidéo |
+|---|---|---|---|---|
+| 1 | Univers par catégorie | 8,6 → 8,9 | 1721 | `cycle1.webm` |
+| 2 | Typographie cinétique des moments | 8,9 → 9,2 | 1736 | `cycle2.webm` |
+| 3 | Plat-star plein cadre (+ seuil de résolution) | 9,2 → 9,4 | 1759 | `cycle3.webm` |
+| 4 | Rail « En photos » vivant | 9,4 → 9,5 | 1771 | `cycle4.webm` |
+| 5 | Transitions de navigation | 9,5 → 9,6 | 1784 | `cycle5.webm` |
+
+Production finale : master `9f70e9c`, asset `index-D1s-jATX.js`, santé 200, marqueurs des cycles 2 à 5 vérifiés dans les morceaux servis. Portes tenues sur les 5 cycles : suite complète verte à chaque cycle (revérifiée par le coordinateur, contre-épreuves par mutation à chaque cycle), FCP/LCP sans régression au-delà du bruit (A/B même fenêtre, témoin `#/jouer`), CLS 0, `prefers-reduced-motion` intégralement coupé et vérifié, mode Commande et Cuisine intacts, aucune donnée ni prix ni règle touchés. Bundle initial final : 484 328 o (plafond 484 422).
+
+**Pourquoi la boucle s'arrête.** Les gains décroissent nettement (＋0,3, ＋0,3, ＋0,2, ＋0,1, ＋0,1) : le catalogue d'inspiration initial est épuisé et la passe fraîche n'a dégagé aucune signature compatible avec les portes dures. Continuer serait du raffinement sans signature — exactement ce que la règle d'arrêt veut éviter.
+
+**Ce qui plafonne, honnêtement (et ce n'est pas le code) :**
+1. **La matière photo.** 9 photos de plats sur 11 font ~340 px (extraites du PDF du menu) et 70 plats n'ont pas de photo : le plat-star ne couvre que 2 catégories sur 16. Des photos plus grandes du restaurant débloqueraient 9 stars supplémentaires sans une ligne de code (le seuil du cycle 3 les admettra tout seul) et nourriraient le rail. C'est le chantier « photos » déjà ouvert côté restaurant — le levier n°1, devant tout nouveau cycle.
+2. **La marge de bundle** : 94 o restants sous le plafond. Tout futur travail d'animation devra d'abord récupérer des octets (CSS) ou relever le plafond en connaissance de cause.
+3. **L'écart restant avec la référence (Ciao)** tient à l'univers de marque complet (actifs dédiés, photographie professionnelle, vidéo) — un chantier de contenu et de marque, pas d'animation.
+
+**Restes et observations hors boucle** : le `#/menu` s'ouvre défilé d'environ 393 px (comportement antérieur à la boucle, effet `scrollIntoView` des onglets — inchangé, à arbitrer séparément) ; la branche `autonome/integration` porte aussi, depuis le 14/11, le chantier « produit P1-1 » d'une session parallèle (fusionné proprement par-dessus les cycles ; la production n'a reçu que les cycles d'animation, par fusions ciblées des branches de cycles dans master).

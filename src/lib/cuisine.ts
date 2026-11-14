@@ -103,6 +103,14 @@ export function nouvellesCommandes(commandes: readonly CommandeCuisine[], deja: 
   return r
 }
 
+/**
+ * Arrivées à sonner : les signalées qui ne l'étaient pas à la lecture précédente. Une commande déjà signalée qui
+ * attend toujours ne re-sonne pas à chaque relecture (10 s) : un seul « ding » par commande.
+ */
+export function arriveesDepuis(signalees: ReadonlySet<string>, precedentes: ReadonlySet<string>): string[] {
+  return [...signalees].filter((id) => !precedentes.has(id))
+}
+
 /** Remplace une commande dans la liste (réponse d'une transition, ou affichage immédiat avant la réponse). */
 export const remplacerCommande = (commandes: readonly CommandeCuisine[], c: CommandeCuisine): CommandeCuisine[] =>
   commandes.map((x) => (x.id === c.id ? c : x))

@@ -11,6 +11,7 @@ import { formaterPrix } from '../lib/points'
 import {
   actionsCuisine,
   anciennete,
+  arriveesDepuis,
   commandesDeSection,
   heureCommande,
   INTERVALLE_CUISINE_MS,
@@ -22,12 +23,22 @@ import {
   type CommandeCuisine,
   type SectionCuisine,
 } from '../lib/cuisine'
+import { creerAlerteCuisine, memoriserSonCuisine, sonCuisineActif, type AlerteCuisine } from '../lib/sonCuisine'
 
 /** Session si elle existe, sinon le PIN en en-tête (serveur sans sessions) — mêmes règles que `entetesAcces`. */
 function entetesGerant(a: Acces): Record<string, string> {
   if (a.jeton) return { 'X-Session': a.jeton }
   if (a.pin === undefined) return {}
   return a.role === 'admin' ? { 'X-Admin-PIN': a.pin } : { 'X-Commerce-PIN': a.pin }
+}
+
+/** Préférence sonore de l'appareil, lue sans jamais lever (navigation privée, stockage refusé). */
+function stockageLocal(): Storage | null {
+  try {
+    return localStorage
+  } catch {
+    return null
+  }
 }
 
 /** Réponse lue : statut HTTP (0 = serveur injoignable) et corps JSON (ou vide). */
@@ -104,6 +115,14 @@ function EcranCuisine({ base, commerceId, acces, sansTable }: { base: string; co
   const [signalees, setSignalees] = useState<ReadonlySet<string>>(new Set())
   const [maintenant, setMaintenant] = useState(Date.now)
   const [majA, setMajA] = useState<number | null>(null)
+  // Son de l'alerte (produit cycle 2, P1-2) : préférence de l'appareil, défaut activé ; le contexte audio n'est
+  // ouvert qu'au premier geste du personnel (sinon le navigateur bloque le son).
+  const [son, setSon] = useState(() => sonCuisineActif(stockageLocal()))
+  const alerteRef = useRef<AlerteCuisine | null>(null)
+  if (alerteRef.current === null) {
+    alerteRef.current = creerAlerteCuisine()
+    alerteRef.current.actif = son
+  }
   // Jour « aujourd'hui » selon le serveur (Paris), base de « hier » : l'horloge de l'appareil n'entre pas en jeu.
   const aujourdhui = useRef<string | null>(null)
   // Commandes déjà affichées (null avant le premier affichage du jour) et numéro de la dernière lecture lancée.
@@ -126,9 +145,12 @@ function EcranCuisine({ base, commerceId, acces, sansTable }: { base: string; co
     if (!hier) {
       aujourdhui.current = jour
       const nouv = nouvellesCommandes(commandes, deja.current, signaleesRef.current)
+      const arrivees = arriveesDepuis(nouv, signaleesRef.current)
       deja.current = new Set(commandes.map((c) => c.id))
       signaleesRef.current = nouv
       setSignalees(nouv)
+      // Un seul « ding » par commande : les arrivées depuis la lecture précédente, pas celles qui attendent déjà.
+      if (arrivees.length > 0) alerteRef.current?.alerter()
     }
     setErreur(null)
     setListe({ jour, commandes })
@@ -152,11 +174,32 @@ function EcranCuisine({ base, commerceId, acces, sansTable }: { base: string; co
     }
   }, [choix, charger])
 
+  // Le son ne part qu'après un geste du personnel : le contexte audio est ouvert au premier appui ou à la
+  // première touche, jamais au chargement (politique audio des navigateurs). Sans geste, l'alerte reste visuelle.
+  useEffect(() => {
+    const deverrouiller = () => {
+      alerteRef.current?.deverrouiller()
+    }
+    window.addEventListener('pointerdown', deverrouiller)
+    window.addEventListener('keydown', deverrouiller)
+    return () => {
+      window.removeEventListener('pointerdown', deverrouiller)
+      window.removeEventListener('keydown', deverrouiller)
+    }
+  }, [])
+
   // « il y a X min » avance même sans nouvelle lecture.
   useEffect(() => {
     const minuterie = window.setInterval(() => setMaintenant(Date.now()), 30_000)
     return () => window.clearInterval(minuterie)
   }, [])
+
+  const basculerSon = () => {
+    const prochain = !son
+    memoriserSonCuisine(stockageLocal(), prochain)
+    if (alerteRef.current) alerteRef.current.actif = prochain
+    setSon(prochain)
+  }
 
   const changer = async (c: CommandeCuisine, vers: StatutCommande) => {
     if (enCours.has(c.id)) return
@@ -187,7 +230,8 @@ function EcranCuisine({ base, commerceId, acces, sansTable }: { base: string; co
   }
 
   const commandes = liste?.commandes ?? []
-  const nbNouvelles = commandes.filter((c) => signalees.has(c.id) && c.statut === 'recue').length
+  const nouvelles = commandes.filter((c) => signalees.has(c.id) && c.statut === 'recue')
+  const nbNouvelles = nouvelles.length
   const aFaire = commandes.filter((c) => c.statut === 'recue' || c.statut === 'acceptee' || c.statut === 'en_preparation').length
 
   return (
@@ -223,7 +267,18 @@ function EcranCuisine({ base, commerceId, acces, sansTable }: { base: string; co
             {choix === 'aujourdhui' ? ' · relu toutes les 10 s' : ''}
           </p>
         )}
+        <button type="button" className="bouton-secondaire min-h-11" aria-pressed={son} onClick={basculerSon}>
+          {son ? 'Son activé' : 'Son coupé'}
+        </button>
       </div>
+
+      {/* Encart persistant en haut de l'écran tant qu'une commande attend d'être acceptée : visible même si
+          l'équipe a fait défiler la liste. Le nombre est aussi annoncé aux lecteurs d'écran (paragraphe ci-dessous). */}
+      {choix === 'aujourdhui' && nbNouvelles > 0 && (
+        <p className="rounded-xl bg-magenta-500 px-3 py-2 text-sm font-bold text-white">
+          {nbNouvelles === 1 ? `Nouvelle commande en attente : ${nouvelles[0].table}` : `${nbNouvelles} nouvelles commandes en attente`}
+        </p>
+      )}
 
       <p className="sr-only" aria-live="polite">
         {nbNouvelles ? `${nbNouvelles} nouvelle${nbNouvelles > 1 ? 's' : ''} commande${nbNouvelles > 1 ? 's' : ''}` : ''}

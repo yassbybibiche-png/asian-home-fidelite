@@ -183,6 +183,71 @@ test.describe('commande à table — simulation deux contextes navigateur (deux 
     await expect(cuisine.getByRole('alert')).toHaveCount(0)
     expect((await commandesDuJour(request, c.id)).map((x) => x.statut)).toEqual(['acceptee'])
   })
+
+  test('cuisine : alerte sonore (deux notes) + encart persistant à l’arrivée d’une commande ; interrupteur sonore', async ({ page: client, browser, baseURL, request }) => {
+    const c = await preparer(request)
+    const cuisine = await telephone(browser, baseURL!)
+    // Espionne les fréquences jouées : le son est une synthèse WebAudio, inaudible dans le test — les appels à
+    // setValueAtTime sur les oscillateurs prouvent que l'alerte a bien été déclenchée.
+    await cuisine.addInitScript(() => {
+      const w = window as unknown as { __notesCuisine: number[] }
+      w.__notesCuisine = []
+      const AC = window.AudioContext
+      window.AudioContext = class extends AC {
+        override createOscillator(): OscillatorNode {
+          const o = super.createOscillator()
+          const param = o.frequency
+          const dorigine = param.setValueAtTime.bind(param)
+          param.setValueAtTime = ((f: number, t: number) => {
+            w.__notesCuisine.push(f)
+            return dorigine(f, t)
+          }) as typeof param.setValueAtTime
+          return o
+        }
+      }
+    })
+    const notes = () => cuisine.evaluate(() => (window as unknown as { __notesCuisine?: number[] }).__notesCuisine ?? [])
+
+    await ouvrirCuisine(cuisine, c.nom)
+    await expect(cuisine.getByText('Aucune commande pour l’instant.', { exact: false })).toBeVisible()
+    const boutonSon = cuisine.getByRole('button', { name: 'Son activé' })
+    await expect(boutonSon).toBeVisible()
+    await expect(boutonSon).toHaveAttribute('aria-pressed', 'true')
+    await expect(cuisine.getByText('Nouvelle commande en attente')).toHaveCount(0)
+    // Premier geste du personnel : il déverrouille le son (politique audio des navigateurs).
+    await cuisine.getByRole('button', { name: 'Actualiser' }).click()
+
+    // Téléphone du client : Table 1, 1 × Pad Thaï.
+    await client.goto(`/#/commande/${c.id}/${c.jetons[0]}`)
+    await client.getByRole('button', { name: 'Ajouter : Pad Thaï' }).click()
+    await client.getByRole('button', { name: /Voir le panier/ }).click()
+    await client.getByRole('button', { name: 'Confirmer la commande' }).click()
+    await expect(client.getByRole('heading', { name: 'Votre commande' })).toBeVisible()
+
+    // Téléphone de la cuisine : l'encart persistant nomme la table et le son a joué ses deux notes (la, ré).
+    const carte = cuisine.getByRole('article', { name: /^Table 1, commande de / })
+    await expect(carte).toBeVisible({ timeout: 20_000 })
+    await expect(cuisine.getByText('Nouvelle commande en attente : Table 1')).toBeVisible()
+    await expect(carte.getByText('Nouveau', { exact: true })).toBeVisible()
+    await expect.poll(() => notes(), { timeout: 10_000 }).toEqual([880, 1174.66])
+
+    // Une fois acceptée, l'encart disparaît : plus rien en attente.
+    await carte.getByRole('button', { name: 'Accepter' }).click()
+    await expect(cuisine.getByText('Nouvelle commande en attente')).toHaveCount(0)
+
+    // Son coupé : la préférence est mémorisée et la commande suivante arrive en silence (encart seul).
+    await cuisine.getByRole('button', { name: 'Son activé' }).click()
+    await expect(cuisine.getByRole('button', { name: 'Son coupé' })).toBeVisible()
+    await expect(cuisine.getByRole('button', { name: 'Son coupé' })).toHaveAttribute('aria-pressed', 'false')
+    expect(await cuisine.evaluate(() => localStorage.getItem('fidelite:son-cuisine'))).toBe('0')
+    await client.goto(`/#/commande/${c.id}/${c.jetons[1]}`)
+    await client.getByRole('button', { name: 'Ajouter : Pad Thaï' }).click()
+    await client.getByRole('button', { name: /Voir le panier/ }).click()
+    await client.getByRole('button', { name: 'Confirmer la commande' }).click()
+    await expect(cuisine.getByText('Nouvelle commande en attente : Table 2')).toBeVisible({ timeout: 20_000 })
+    await expect.poll(() => notes(), { timeout: 5_000 }).toEqual([880, 1174.66])
+    await cuisine.context().close()
+  })
 })
 
 async function idProduit(request: APIRequestContext, commerceId: string, nom: string): Promise<string> {
