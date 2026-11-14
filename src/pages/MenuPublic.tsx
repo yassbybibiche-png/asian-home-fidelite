@@ -22,6 +22,7 @@ import { BandeauDefilant } from '../components/BandeauDefilant'
 import { croiserCouches, universCategorie, type Couches } from '../lib/univers'
 import { motsTitre, plusLongMot } from '../lib/titreCinetique'
 import { platStar } from '../lib/platStar'
+import { rejouerEntree, suiviOnglet } from '../lib/entreeScene'
 
 /** Traductions des badges de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
 enregistrerTraductions({
@@ -157,6 +158,12 @@ export function MenuAffiche({
   useEffect(() => (liste.current ? preparerRevelations(liste.current, dependancesNavigateur()) : undefined), [active, recherche, visibles.length])
   // Parallaxe des photos d'en-tête de catégorie (cycle 3) : les cibles sont relues à chaque image, la liste peut changer.
   useEffect(() => (liste.current ? activerParallaxe(liste.current, prefereMouvementReduit()) : undefined), [total === 0])
+  // Changement d'onglet (cycle 5) : la liste entrante monte en fondu (rapide) ; jamais au montage ni à la frappe dans
+  // la recherche. Le conteneur reste le même : révélations et parallaxe gardent leurs cibles.
+  const [ongletChange] = useState(() => suiviOnglet(categorie))
+  useEffect(() => {
+    if (ongletChange(categorie)) rejouerEntree(liste.current)
+  }, [categorie])
   // L'onglet indiqué reste visible dans la barre (défilement horizontal).
   useEffect(() => {
     nav.current?.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
