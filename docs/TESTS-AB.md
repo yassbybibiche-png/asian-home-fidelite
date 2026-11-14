@@ -1,18 +1,31 @@
 # Tests A/B — Asian Home Fidélité (lot P2-Q3, 10/11/2026)
 
-Deux tests simples. Le **test 1 est outillé** dans l'app (répartition automatique + compteurs + résultats dans le
-tableau de bord). Le **test 2 n'est PAS automatisé** : c'est un **protocole manuel** à lancer par le gérant, mesuré avec
-les chiffres et l'export CSV du tableau de bord.
+Deux tests simples. Le **test 1 est ARRÊTÉ** depuis le 14/11/2026 (P2-3, audit produit — voir ci-dessous). Le **test 2
+n'est PAS automatisé** : c'est un **protocole manuel** à lancer par le gérant, mesuré avec les chiffres et l'export CSV
+du tableau de bord.
 
 Règle commune : **aucune identité**. Aucun identifiant de client, de téléphone ou d'appareil n'est utilisé pour répartir
 ou pour mesurer ; rien n'est stocké sur le téléphone du client pour ces tests.
 
 ---
 
-## Test 1 — Accroche : « gagnez un cadeau » ou le nom d'un lot ? (outillé)
+## Test 1 — Accroche : « gagnez un cadeau » ou le nom d'un lot ? (ARRÊTÉ le 14/11/2026)
 
-**Question.** Sur la page de jeu (après le scan du QR), la phrase sous le nom du restaurant donne-t-elle plus envie de
-jouer si elle cite un vrai lot ?
+**Statut : arrêté (P2-3, audit produit, cycle produit 7).** Avec un seul commerce réel, l'échantillon ne conclura
+jamais : la moitié des clients voyait une accroche différente sans que personne ne pilote le test au quotidien.
+L'accroche affichée est donc unique, la générique : « Tournez la roue et gagnez un cadeau ! ».
+
+**Ce qui a été retiré :** l'interrupteur de Réglages → *Lots de la roulette*, la section « Test A/B · phrase
+d'accroche » du tableau de bord, et l'indicateur `testAccroche` de la fiche publique. **Ce qui reste :** les fonctions
+pures (`varianteDuJour`, `lotAccroche`, `basculerAccroche`, `resultatsAccroche` dans `src/lib/mesure.ts`), toujours
+testées, et le stockage serveur d'un éventuel drapeau `testsAB.accroche` — sans effet : la fiche publique ne l'expose
+plus et l'accroche affichée ne le lit plus.
+
+**Réactivation :** uniquement dans un cadre de mesure décidé (plusieurs commerces, effectif suffisant, protocole
+écrit) — pas un interrupteur à rallumer seul.
+
+**Mécanisme archivé (pour mémoire).** Question d'origine : sur la page de jeu (après le scan du QR), la phrase sous le
+nom du restaurant donne-t-elle plus envie de jouer si elle cite un vrai lot ?
 
 | Variante | Phrase affichée (FR / EN) |
 |---|---|
@@ -27,17 +40,18 @@ d'une même journée voient la même phrase.
 - Une semaine a 7 jours (impair) : chaque jour de la semaine **alterne** de variante d'une semaine à l'autre (le samedi
   n'est pas toujours B). Sur 2 semaines complètes, chaque variante a eu chaque jour de la semaine une fois.
 
-**Mesure.** Compteurs anonymes par jour (table `evenements_jour`, migration 0008) : `scan` = QR scanné — compté par la
+**Mesure (archivée).** Compteurs anonymes par jour (table `evenements_jour`, migration 0008) : `scan` = QR scanné — compté par la
 redirection courte `/r/<commerceId>` du serveur, **même si la page de jeu ne se charge jamais** (réseau coupé, serveur
 endormi) — ou page de jeu ouverte directement (lien partagé, parrainage), signalée une fois par onglet ; `tirage` =
 tirage enregistré par le serveur. **Indicateur** : tirages ÷ scans, par variante.
 
-**Lancer / arrêter.** Réglages → *Lots de la roulette* → interrupteur « Test A/B : phrase d'accroche de la page de jeu ».
-Le serveur note le jour de début (et le jour d'arrêt) ; ces dates ne viennent jamais du navigateur. Réactiver = nouveau
-test qui repart de zéro. Pendant le test, la fiche publique du commerce ne contient que `testAccroche: true`.
+**Lancer / arrêter (archivé).** C'était Réglages → *Lots de la roulette* → interrupteur « Test A/B : phrase d'accroche
+de la page de jeu ». Le serveur notait le jour de début (et le jour d'arrêt) ; ces dates ne venaient jamais du
+navigateur. Réactiver = nouveau test qui repartait de zéro. Pendant le test, la fiche publique du commerce ne
+contenait que `testAccroche: true`.
 
-**Lire le résultat.** Tableau de bord → *Mesure* → « Test A/B · phrase d'accroche » : jours, pages ouvertes, tirages et
-taux de chaque variante.
+**Lire le résultat (archivé).** C'était Tableau de bord → *Mesure* → « Test A/B · phrase d'accroche » : jours, pages
+ouvertes, tirages et taux de chaque variante.
 - Moins de **100 pages ouvertes par variante** : « pas encore assez de données » — ne rien conclure.
 - Au-delà : test z de deux proportions au seuil de 95 %. « Écart significatif » → garder la meilleure phrase (arrêter le
   test ; pour garder B en permanence il faudra une petite modification du code, la phrase par défaut restant A).

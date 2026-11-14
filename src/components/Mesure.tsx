@@ -15,9 +15,7 @@ import {
   JOURS_RETOUR,
   jourParis,
   libellePeriode,
-  MIN_SCANS_VARIANTE,
   nomFichierMesures,
-  resultatsAccroche,
   retourApresGain,
   serie,
   serieEnCsv,
@@ -30,7 +28,7 @@ import {
   type Totaux,
 } from '../lib/mesure'
 import { comparerOffreSemaine, JOURS_OFFRE, JOURS_SEMAINE_COURTS } from '../lib/mesure-offre'
-import { telecharger, Vide } from './ui'
+import { telecharger } from './ui'
 
 const GRANULARITES: { valeur: Granularite; libelle: string; courante: string }[] = [
   { valeur: 'jour', libelle: 'Jour', courante: 'Aujourd’hui' },
@@ -123,7 +121,6 @@ export function Mesure() {
   const etapes = entonnoir(courant)
   // Retour après gain : gains d'il y a 30 à 120 jours (fenêtre de 30 jours close).
   const retour = retourApresGain(clients, tirages, ajouterJours(aujourdhui, -(JOURS_RETOUR + 90)), aujourdhui, aujourdhui)
-  const ab = resultatsAccroche(compteurs, commerce.testsAB?.accroche, aujourdhui)
   // Test A/B « offre de la semaine » (test 2, docs/TESTS-AB.md) : par défaut, les deux derniers blocs complets de
   // 4 semaines (lundi il y a 8 semaines, puis lundi il y a 4 semaines) — à ajuster aux vraies dates du protocole.
   const [debutOffreA, setDebutOffreA] = useState(() => debutPeriode(ajouterJours(aujourdhui, -2 * JOURS_OFFRE), 'semaine'))
@@ -299,61 +296,6 @@ export function Mesure() {
           <p className="mt-2 text-sm text-gray-600">
             Compteurs sans aucune identité (un nombre par jour). Retour après gain : part des gagnants revenus faire valider une visite dans les {JOURS_RETOUR} jours suivant leur gain (jour du gain exclu).
           </p>
-        </div>
-
-        <div className="carte">
-          <h3 className="surtitre">Test A/B · phrase d’accroche</h3>
-          {!ab ? (
-            <Vide>Aucun test en cours. Activez-le dans Réglages → Lots de la roulette (protocole : docs/TESTS-AB.md).</Vide>
-          ) : (
-            <>
-              <p className="mt-1 text-sm text-gray-600">
-                Du {libellePeriode(ab.depuis, 'jour')} au {libellePeriode(ab.jusqua, 'jour')}
-                {commerce.testsAB?.accroche?.actif ? ' (en cours)' : ' (arrêté)'} · A = « gagnez un cadeau », B = cite un lot, un jour sur deux.
-              </p>
-              <table className="mt-2 w-full text-sm">
-                <thead className="text-gray-600">
-                  <tr>
-                    <th scope="col" className="py-1 text-left font-medium">
-                      Variante
-                    </th>
-                    <th scope="col" className="text-right font-medium">
-                      Jours
-                    </th>
-                    <th scope="col" className="text-right font-medium">
-                      Pages ouvertes
-                    </th>
-                    <th scope="col" className="text-right font-medium">
-                      Tirages
-                    </th>
-                    <th scope="col" className="text-right font-medium">
-                      Taux
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {(['A', 'B'] as const).map((v) => (
-                    <tr key={v}>
-                      <th scope="row" className="py-1.5 text-left font-medium">
-                        {v}
-                      </th>
-                      <td className="text-right tabular-nums">{ab[v].jours}</td>
-                      <td className="text-right tabular-nums">{ab[v].scans}</td>
-                      <td className="text-right tabular-nums">{ab[v].tirages}</td>
-                      <td className="text-right tabular-nums">{pct(ab[v].taux)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p className="mt-2 text-sm text-gray-600">
-                {!ab.assezDeDonnees
-                  ? `Pas encore assez de données pour conclure (au moins ${MIN_SCANS_VARIANTE} pages ouvertes par variante).`
-                  : ab.significatif
-                    ? 'Écart significatif (seuil 95 %) : la variante au meilleur taux peut être gardée.'
-                    : 'Pas d’écart significatif (seuil 95 %) : les deux phrases se valent pour l’instant.'}
-              </p>
-            </>
-          )}
         </div>
       </div>
 

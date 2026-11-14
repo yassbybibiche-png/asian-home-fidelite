@@ -380,8 +380,6 @@ export interface CommercePublic {
   programme: ProgrammePublic
   /** Durée de conservation EFFECTIVE en mois (défaut appliqué), affichée sur la page de confidentialité (P1-B6). */
   conservationMois: number
-  /** Test A/B « accroche » en cours (P2-Q3) : présent seulement s'il est actif ; la variante se déduit du jour. */
-  testAccroche?: true
 }
 
 /**

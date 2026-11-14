@@ -144,7 +144,7 @@ function decorRoue(commerce: CommerceJeu, jeu: JeuRoue, fete?: TypeLot) {
 /** En-tête + roue, communs aux deux modes. `infos` (R4) : avant le tirage, lots du jour + règles + lien règlement. */
 function Cadre({ commerce, rotation, children, pied, infos, jeu, fete, table }: { commerce: CommerceJeu; rotation: number; children: ReactNode; pied: ReactNode; infos: boolean; jeu: JeuRoue; fete?: TypeLot; table?: string }) {
   const { t } = useLangue()
-  // Test A/B « accroche » (P2-Q3, docs/TESTS-AB.md) : variante du jour, la même pour tous les clients de la journée.
+  // Accroche unique (P2-3, test A/B arrêté le 14/11/2026) : la même phrase pour tous les clients, tous les jours.
   const accroche = accrocheJeu(commerce, jourParis(new Date()))
   return (
     <ContexteRoue.Provider value={decorRoue(commerce, jeu, fete)}>

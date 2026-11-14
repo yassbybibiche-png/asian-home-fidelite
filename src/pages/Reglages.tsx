@@ -11,7 +11,7 @@ import { COULEUR_DEFAUT, FOND_DEFAUT, problemesApparence } from '../lib/apparenc
 import { JOURS_SEMAINE, PALIERS_DEFAUT } from '../lib/programme'
 import { compteurLibelle, MAX_CARACTERES_ROUE } from '../lib/roue'
 import { CONSERVATION_DEFAUT_MOIS, CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, libelleDuree } from '../lib/rgpd'
-import { basculerAccroche, coutLotValide, formaterEuros, jourParis } from '../lib/mesure'
+import { coutLotValide, formaterEuros } from '../lib/mesure'
 import { formaterParJour, JOURS_MOYENNE_TIRAGES, JOURS_PROJECTION, simulerCout, type SimulationCout } from '../lib/coutRoue'
 import { libellesEnDouble, normaliserLots, nouvelIdLot } from '../lib/lots'
 import { LIMITE_GAINS_MOIS_DEFAUT, LIMITE_GAINS_MOIS_MAX, modeAccesRoue } from '../lib/roulette'
@@ -852,12 +852,6 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
                           ? ' — le total ne fait pas 100 % : les chances seront recalculées au prorata'
                           : ''}
         </p>
-        <Interrupteur
-          libelle="Test A/B : phrase d’accroche de la page de jeu"
-          aide="Un jour sur deux, la phrase sous votre nom cite un lot (« Tournez la roue : Nems offerts à gagner ! ») au lieu de « Tournez la roue et gagnez un cadeau ! ». Résultats dans le tableau de bord. Aucune donnée client en plus."
-          actif={!!brouillon.testsAB?.accroche?.actif}
-          onChange={(v) => maj('testsAB', { ...brouillon.testsAB, accroche: basculerAccroche(brouillon.testsAB?.accroche, v, jourParis(new Date())) })}
-        />
       </fieldset>
       {/* Simulateur de coût (D3) : recalculé à chaque frappe sur le brouillon des lots, avant tout enregistrement. */}
       <SimulateurCout simulation={simulerCout(lots, etat.tirages.filter((t) => t.commerceId === commerce.id))} />
