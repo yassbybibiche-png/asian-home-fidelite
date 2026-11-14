@@ -20,7 +20,6 @@ import {
   estMotStop,
   inactifARelancer,
   jourParis,
-  lienCourtCarte,
   lienCourtDesinscription,
   mentionDesinscriptionSms,
   MODELES_RELANCE,
@@ -28,6 +27,7 @@ import {
   relanceAutoDue,
   smsRelance,
 } from '../src/lib/relances.ts'
+import { lienCourtCarte } from '../src/lib/jetonCarte.ts'
 import { nouveauClient } from '../src/lib/fidelite.ts'
 import { nouveauCommerce } from '../src/data/defaults.ts'
 import type { Client, EntreeJournal, EnvoiRelance } from '../src/types.ts'

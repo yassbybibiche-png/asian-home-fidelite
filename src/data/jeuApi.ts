@@ -11,6 +11,9 @@ export type IssueTirage =
   | {
       ok: false
       message: string
+      /** Code d'erreur stable du serveur (P2-1) + détails : la page traduit l'affichage quand elle est en anglais. */
+      code?: string
+      details?: Record<string, string>
       /** Serveur injoignable : rien n'a été joué. */ horsLigne: boolean
       /** Refus d'une règle (409) : sans visite du jour, déjà joué… */ refus: boolean
       /** 401 (P0-S7) : ce téléphone n'a plus de jeton valable pour la carte (expiré, révoqué) → « Retrouver ma carte ». */
@@ -41,7 +44,16 @@ export async function lancerTirage(
     const resultat = await api.tirer(commerce.id, contact, prenom, undefined, jeton)
     return { ok: true, resultat, secteur: secteurDuLot(commerce.lots, resultat) }
   } catch (e) {
-    if (e instanceof ErreurApi) return { ok: false, message: e.message, horsLigne: e.horsLigne, refus: e.statut === 409, ...(e.statut === 401 ? { accesRefuse: true as const } : {}) }
+    if (e instanceof ErreurApi)
+      return {
+        ok: false,
+        message: e.message,
+        ...(e.code ? { code: e.code } : {}),
+        ...(e.details ? { details: e.details } : {}),
+        horsLigne: e.horsLigne,
+        refus: e.statut === 409,
+        ...(e.statut === 401 ? { accesRefuse: true as const } : {}),
+      }
     return { ok: false, message: MESSAGE_HORS_LIGNE, horsLigne: true, refus: false }
   }
 }
@@ -137,6 +149,9 @@ export type IssueActivation =
   | {
       ok: false
       message: string
+      /** Code d'erreur stable du serveur (P2-1) + détails : la carte traduit l'affichage quand elle est en anglais. */
+      code?: string
+      details?: Record<string, string>
       horsLigne: boolean
       /** 409 / 410 : pas encore utilisable (dès demain), expiré, déjà remis — le message du serveur le dit. */
       refus: boolean
@@ -154,12 +169,20 @@ export async function activerCode(
   gain: { commerceId: string; clientId: string; tirageId: string },
 ): Promise<IssueActivation> {
   const jeton = jetons.lire(gain.clientId)?.jeton
-  if (!jeton) return { ok: false, message: 'Ouvrez votre carte sur ce téléphone pour utiliser votre gain.', horsLigne: false, refus: false, accesRefuse: true }
+  if (!jeton) return { ok: false, message: 'Ouvrez votre carte sur ce téléphone pour utiliser votre gain.', code: 'SANS_JETON', horsLigne: false, refus: false, accesRefuse: true }
   try {
     return { ok: true, activation: await api.activerCode(gain.commerceId, gain.tirageId, jeton) }
   } catch (e) {
     if (e instanceof ErreurApi) {
-      return { ok: false, message: e.message, horsLigne: e.horsLigne, refus: e.statut === 409 || e.statut === 410, ...(e.statut === 401 ? { accesRefuse: true as const } : {}) }
+      return {
+        ok: false,
+        message: e.message,
+        ...(e.code ? { code: e.code } : {}),
+        ...(e.details ? { details: e.details } : {}),
+        horsLigne: e.horsLigne,
+        refus: e.statut === 409 || e.statut === 410,
+        ...(e.statut === 401 ? { accesRefuse: true as const } : {}),
+      }
     }
     return { ok: false, message: MESSAGE_HORS_LIGNE, horsLigne: true, refus: false }
   }

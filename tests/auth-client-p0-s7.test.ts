@@ -285,7 +285,9 @@ describe('P0-S7 : serveur en mode strict', () => {
       const r = await s.api('POST', `/commerces/${AH}/clients`, { contact, prenom: 'Pirate', consentementRelance: true })
       assert.equal(r.statut, 409)
       assert.ok(!r.texte.includes(client.id), 'ni identifiant ni jeton')
-      assert.deepEqual(Object.keys(r.contenu), ['erreur'])
+      // P2-1 : le code stable voyage avec le message (ordre d'insertion : erreur, code).
+      assert.deepEqual(Object.keys(r.contenu), ['erreur', 'code'])
+      assert.equal(r.contenu.code, 'CONTACT_DEJA_INSCRIT')
     }
     const apres = await s.etat()
     assert.equal(apres.clients.length, nombre, 'aucun doublon')

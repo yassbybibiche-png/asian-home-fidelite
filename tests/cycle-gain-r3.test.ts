@@ -80,7 +80,12 @@ describe('R3 : cycle de vie (fonctions pures)', () => {
     assert.match(MESSAGE_ACTIVATION, /« Utiliser mon gain ».*10 minutes après activation/)
     assert.equal(messageGain({ ...base, lot: '+10 points', statut: 'consolation' }), 'Ce tirage n’a pas de lot à remettre (+10 points).')
 
-    assert.deepEqual(refusActivation(gain, le(0, 12)), { statut: 409, message: `Votre gain sera utilisable dès demain, ${jourEnClair(le(1))}, et jusqu’au ${jourEnClair(le(30))}.` })
+    assert.deepEqual(refusActivation(gain, le(0, 12)), {
+      statut: 409,
+      message: `Votre gain sera utilisable dès demain, ${jourEnClair(le(1))}, et jusqu’au ${jourEnClair(le(30))}.`,
+      code: 'GAIN_TROP_TOT',
+      details: { utilisableLe: '2026-11-11', dernierJour: '2026-12-10' },
+    })
     assert.equal(refusActivation(gain, le(1)), null)
     assert.equal(refusActivation(gain, le(30, 23, 59)), null)
     assert.equal(refusActivation(gain, le(31))?.statut, 410)

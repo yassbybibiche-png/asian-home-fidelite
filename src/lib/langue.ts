@@ -331,7 +331,8 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'N° de ticket (optionnel)': 'Receipt number (optional)',
   'Envoyer ma demande': 'Send my request',
   // Confirmations et erreurs des formulaires du programme (P2-Q1, revue Codex point 4) : affichées via
-  // t(message) / t(erreur) — les messages d'erreur du serveur restent en français (API en français).
+  // t(message) / t(erreur) — les erreurs du serveur codées (P2-1) passent par `traduireErreur`, les autres
+  // gardent le message du serveur, en français.
   'Merci, votre profil est à jour !': 'Thank you, your profile is up to date!',
   'Demande envoyée : le restaurant la validera et votre visite sera créditée.': 'Request sent: the restaurant will validate it and your visit will be credited.',
   'Indiquez la date de la visite et le montant payé.': 'Enter the visit date and the amount paid.',
@@ -420,6 +421,67 @@ export function enregistrerTraductions(supplement: Record<string, string>): void
 export function traduire(fr: string, langue: Langue, valeurs: Record<string, string | number> = {}): string {
   const modele = langue === 'en' ? (TRADUCTIONS_EN[fr] ?? fr) : fr
   return modele.replace(/\{(\w+)\}/g, (tout, cle: string) => (cle in valeurs ? String(valeurs[cle]) : tout))
+}
+
+/**
+ * Erreurs serveur localisées (P2-1) : le serveur renvoie un code stable (`code` dans le corps `{ erreur, code, details? }`)
+ * et le client affiche la traduction anglaise quand il est en anglais. Sans code, ou code inconnu (vieux serveur) :
+ * le message du serveur s'affiche tel quel, en français — jamais de texte inventé, jamais de texte vide.
+ * Les modèles `{x}` sont remplis par `traduireErreur` ; une valeur de détail au format AAAA-MM-JJ est reformattée
+ * en date anglaise (« Tue, 17 Nov 2026 »), comme `jourEnClair` côté français.
+ */
+export const ERREURS_EN: Record<string, string> = {
+  ACCES_CARTE_REFUSE:
+    'Access to this card was refused: open it on the phone you signed up with, ask for an access link at the counter, or find it again with your phone number or e-mail.',
+  CARTE_INTROUVABLE: 'Loyalty card not found.',
+  COMMERCE_INACTIF: 'This business is not active at the moment.',
+  CONTACT_INVALIDE: 'Invalid contact: enter a phone number (06 12 34 56 78) or an e-mail address.',
+  CONTACT_DEJA_INSCRIT:
+    'This phone number or e-mail already has a card here. Open it on the phone you signed up with, ask for an access link at the counter, or use “Find my card”.',
+  CONTACT_NON_CORRESPONDANT: 'This phone number or e-mail does not match this card: enter the one you gave when signing up.',
+  JEU_NON_DISPONIBLE:
+    'You cannot play right now: ask at the counter to validate today’s visit — if you already spun the wheel today, come back at your next visit.',
+  LOTS_EPUISES: 'All of today’s prizes are gone: come back tomorrow!',
+  AUCUN_LOT: 'No prizes have been set up yet.',
+  POINTS_NON_CREDITES: 'Your draw is saved but your points could not be credited: show this screen at the counter.',
+  TIRAGE_ANNULE: 'Your points could not be credited: your draw was cancelled, you can try again right now.',
+  GAIN_INTROUVABLE: 'Prize not found on this card.',
+  GAIN_DEJA_REMIS: 'This prize has already been collected at the counter.',
+  GAIN_TROP_TOT: 'Your prize will be usable from tomorrow, {utilisableLe}, until {dernierJour}.',
+  GAIN_EXPIRE: 'Prize expired on {dernierJour}: it can no longer be used.',
+  GAIN_EXPIRE_ANCIENNE_REGLE: 'Prize expired on {dernierJour} (old rule: valid on the day of the draw only).',
+  GAIN_HERITE_DIRECT:
+    'This prize (from before the new wheel, valid on the day of the draw only) is collected directly at the counter today, with no activation.',
+  GAIN_SANS_LOT: 'This draw has no prize to collect at the counter.',
+  // Refus côté navigateur (sans appel serveur) : la carte n'est pas ouverte sur ce téléphone.
+  SANS_JETON: 'Open your card on this phone to use your prize.',
+  TABLE_INCONNUE: 'Table not found: please scan your table’s QR code again.',
+  COMMANDE_DESACTIVEE: 'Online ordering is not enabled for this business.',
+  COMMANDE_INTROUVABLE: 'Order not found.',
+  COMMANDE_CONFLIT: 'Too many orders at once: please try again.',
+  COMMANDE_INVALIDE: 'This change is not possible for this order.',
+}
+
+/** Une valeur de détail au format AAAA-MM-JJ → « Tue 17 Nov 2026 » en anglais, telle quelle sinon. */
+function formaterDetailErreur(valeur: string, langue: Langue): string {
+  if (langue !== 'en' || !/^\d{4}-\d{2}-\d{2}$/.test(valeur)) return valeur
+  const d = new Date(`${valeur}T12:00:00`)
+  return Number.isNaN(d.getTime()) ? valeur : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+/**
+ * Message d'erreur à afficher : la traduction anglaise du code quand elle existe, sinon le message du serveur
+ * (en français). En français, le message du serveur est toujours affiché tel quel — il porte les dates et les
+ * précisions que le code ne contient pas.
+ */
+export function traduireErreur(code: string | undefined, messageServeur: string, langue: Langue, details: Record<string, string> = {}): string {
+  if (langue !== 'en' || !code) return messageServeur
+  const modele = ERREURS_EN[code]
+  if (!modele) return messageServeur
+  // Détail manquant pour un modèle qui en attend un : le message du serveur (qui porte les dates) vaut mieux
+  // qu'une phrase anglaise à trou.
+  if ([...modele.matchAll(/\{(\w+)\}/g)].some(([, cle]) => !(cle in details))) return messageServeur
+  return modele.replace(/\{(\w+)\}/g, (tout, cle: string) => (cle in details ? formaterDetailErreur(details[cle], langue) : tout))
 }
 
 /** « Encore 3 repas avant votre plat offert » → « 3 more meals until your free dish » (même règle que `texteProgression`). */

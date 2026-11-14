@@ -374,19 +374,26 @@ export function messageGain(g: { statut: StatutGain; lot: string; date: string; 
   return `Gain à remettre : ${g.lot} (gagné le ${gagneLe}).`
 }
 
-/** Refus d'activation vu par le CLIENT (route …/activer) : null = le gain peut être activé maintenant. */
-export function refusActivation(t: Tirage, maintenant = new Date()): { statut: 409 | 410; message: string } | null {
+/** « 2026-11-17 » : jour de Paris d'une date, pour les détails d'erreur (P2-1) — le même jour que `jourEnClair`. */
+export function jourIsoParis(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+}
+
+/** Refus d'activation vu par le CLIENT (route …/activer) : null = le gain peut être activé maintenant.
+ *  `code` = code d'erreur stable (P2-1) : le client affiche la traduction anglaise quand il est en anglais ;
+ *  `details` = dates ISO (jour de Paris, AAAA-MM-JJ) que la traduction anglaise reformate. Le message français est inchangé. */
+export function refusActivation(t: Tirage, maintenant = new Date()): { statut: 409 | 410; message: string; code: string; details?: Record<string, string> } | null {
   const cycle = cycleGain(t, maintenant)
   // Tirage hérité (revue Codex F2) : jamais activable — l'ancienne règle n'avait pas d'activation, il se remet
   // directement au comptoir le jour même, et il est expiré ensuite.
   if (tirageHerite(t) && (cycle === 'utilisable' || cycle === 'expire')) {
     return cycle === 'expire'
-      ? { statut: 410, message: `Gain expiré le ${jourEnClair(dernierJourGain(t))} (${MESSAGE_ANCIENNE_REGLE}).` }
-      : { statut: 409, message: `Ce gain (${MESSAGE_ANCIENNE_REGLE}) se retire directement au comptoir aujourd’hui, sans activation.` }
+      ? { statut: 410, message: `Gain expiré le ${jourEnClair(dernierJourGain(t))} (${MESSAGE_ANCIENNE_REGLE}).`, code: 'GAIN_EXPIRE_ANCIENNE_REGLE', details: { dernierJour: jourIsoParis(dernierJourGain(t)) } }
+      : { statut: 409, message: `Ce gain (${MESSAGE_ANCIENNE_REGLE}) se retire directement au comptoir aujourd’hui, sans activation.`, code: 'GAIN_HERITE_DIRECT' }
   }
   if (cycle === 'utilisable' && t.code) return null
-  if (cycle === 'enAttente') return { statut: 409, message: `Votre gain sera utilisable dès demain, ${jourEnClair(utilisableLe(t))}, et jusqu’au ${jourEnClair(dernierJourGain(t))}.` }
-  if (cycle === 'expire') return { statut: 410, message: `Gain expiré le ${jourEnClair(dernierJourGain(t))} : il n’est plus utilisable.` }
-  if (cycle === 'remis') return { statut: 409, message: 'Ce gain a déjà été remis au comptoir.' }
-  return { statut: 409, message: 'Ce tirage n’a pas de lot à retirer au comptoir.' }
+  if (cycle === 'enAttente') return { statut: 409, message: `Votre gain sera utilisable dès demain, ${jourEnClair(utilisableLe(t))}, et jusqu’au ${jourEnClair(dernierJourGain(t))}.`, code: 'GAIN_TROP_TOT', details: { utilisableLe: jourIsoParis(utilisableLe(t)), dernierJour: jourIsoParis(dernierJourGain(t)) } }
+  if (cycle === 'expire') return { statut: 410, message: `Gain expiré le ${jourEnClair(dernierJourGain(t))} : il n’est plus utilisable.`, code: 'GAIN_EXPIRE', details: { dernierJour: jourIsoParis(dernierJourGain(t)) } }
+  if (cycle === 'remis') return { statut: 409, message: 'Ce gain a déjà été remis au comptoir.', code: 'GAIN_DEJA_REMIS' }
+  return { statut: 409, message: 'Ce tirage n’a pas de lot à retirer au comptoir.', code: 'GAIN_SANS_LOT' }
 }

@@ -97,7 +97,12 @@ describe('Revue Codex R3 F2 : tirages d’avant la roue v2 — ancienne règle, 
     const midi = instantParis(2026, 11, 10, 12)
     const hier = herite(instantParis(2026, 11, 9, 12).toISOString())
     assert.equal(statutGain(hier, midi), 'expire', 'avant R3 : « valable le jour du tirage seulement »')
-    assert.deepEqual(refusActivation(hier, midi), { statut: 410, message: `Gain expiré le lun. 9 nov. 2026 (${MESSAGE_ANCIENNE_REGLE}).` })
+    assert.deepEqual(refusActivation(hier, midi), {
+      statut: 410,
+      message: `Gain expiré le lun. 9 nov. 2026 (${MESSAGE_ANCIENNE_REGLE}).`,
+      code: 'GAIN_EXPIRE_ANCIENNE_REGLE',
+      details: { dernierJour: '2026-11-09' },
+    })
     assert.equal(messageGain({ statut: 'expire', lot: 'Thé glacé', date: hier.date, remis: null, ancienneRegle: true }), `Gain expiré le lun. 9 nov. 2026 : rien à remettre (${MESSAGE_ANCIENNE_REGLE}).`)
     // Même avec une activation (impossible par la route, mais par sécurité) ou rattaché : expiré quand même.
     assert.equal(statutGain({ ...hier, activeLe: midi.toISOString() }, midi), 'expire')

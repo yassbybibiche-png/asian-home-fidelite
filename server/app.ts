@@ -13,7 +13,8 @@ import { nouveauCommerce, TYPES_COMMERCE } from '../src/data/defaults.ts'
 import { seedRecale } from '../src/data/depot.ts'
 import seed from '../src/data/seed.json' with { type: 'json' }
 import { analyserContact, cleContact, estIdClientActuel, nouveauClient, offrirRecompense, recompenseDebloquee, tamponsAffiches } from '../src/lib/fidelite.ts'
-import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
+import { canalDuClient, echecAutoDuJour, emailRelance, estModeleRelance, estMotStop, jourParis, lienCarte, lienCourtDesinscription, MODELES_RELANCE, relanceAutoDue, smsRelance } from '../src/lib/relances.ts'
+import { lienCourtCarte } from '../src/lib/jetonCarte.ts'
 import { emailGainExpire, gainBientotExpire, gainsARelancer, relanceGainFaite, smsGainExpire } from '../src/lib/relanceGain.ts'
 import {
   debutDuJourParis, DUREE_GAIN_JOURS, finActivation, finGain, gainEnCours, gainsSur30Jours, LIMITE_GAINS_MOIS_MAX, limiteGainsMois, lotsJouables,
@@ -23,7 +24,7 @@ import {
 import { cleLibelle, estGainPhysique, estTypeLot, FORMAT_ID_LOT, libellesEnDouble, normaliserLots, POINTS_LOT_MAX, POINTS_LOT_MIN, rattachementsTirages, TYPES_LOT, typeDeduitDuLibelle, typeTirage } from '../src/lib/lots.ts'
 import { appliquerRegles, fusionnerImport, publicationAutomatique, refusPublication } from '../src/lib/avis.ts'
 import { ajouterMessagePrive, validerMessagePrive } from '../src/lib/messagePrive.ts'
-import { clientsEnCsv } from '../src/lib/csv.ts'
+import { clientsEnCsv, nomFichierExportClient } from '../src/lib/csv.ts'
 import { actionDejaTraitee, avecAction, echangerPoints, formaterPrix, soldePoints } from '../src/lib/points.ts'
 import { analyserAnniversaire, clientsCibles, deposerMessage, genererMessages, marquerLus, TYPES_MESSAGES, type Cible, type Evenement } from '../src/lib/messages.ts'
 import { chiffresRecherche, correspondRecherche } from '../src/lib/recherche.ts'
@@ -54,7 +55,7 @@ import { donneesReglement } from '../src/lib/reglement.ts'
 import { ErreurMenu, validerMenu } from '../src/lib/menu.ts'
 import { ErreurLogo, LIMITES_LOGO, messageTropLourd, urlLogo, validerLogo, type FormatLogo } from '../src/lib/logo.ts'
 import { EVENEMENTS_PUBLICS, ajouterJours, basculerAccroche } from '../src/lib/mesure.ts'
-import { CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, dureeConservationMois, estPurgeable, exportClientCsv, libelleDuree, listePurge, nomFichierExportClient } from '../src/lib/rgpd.ts'
+import { CONSERVATION_MAX_MOIS, CONSERVATION_MIN_MOIS, dureeConservationMois, estPurgeable, exportClientCsv, libelleDuree, listePurge } from '../src/lib/rgpd.ts'
 import { ErreurConflit, ErreurMigrationManquante, ouvrirStockage, type BilanSuppression, type CompteurPublic, type Pin, type PorteeAuth, type Stockage } from './stockage.ts'
 import { modeleColonneEnvoi, ouvrirStockageSupabase, type ConfigSupabase } from './stockage-supabase.ts'
 import { chiffrerSauvegarde, exporterSauvegarde, nomFichierSauvegarde } from './sauvegarde.ts'
@@ -217,20 +218,33 @@ export interface OptionsServeur {
 class ErreurHttp extends Error {
   statut: number
   entetes?: Record<string, string>
-  constructor(statut: number, message: string, entetes?: Record<string, string>) {
+  /**
+   * Code d'erreur stable (P2-1) : le client affiche la traduction anglaise de ce code quand il est en anglais,
+   * au lieu du message français. `details` = valeurs à interpoler dans la traduction (dates ISO AAAA-MM-JJ).
+   * Absent = erreur non codée : le client affiche le message du serveur tel quel (en français).
+   */
+  code?: string
+  details?: Record<string, string>
+  constructor(statut: number, message: string, entetes?: Record<string, string>, code?: string, details?: Record<string, string>) {
     super(message)
     this.statut = statut
     this.entetes = entetes
+    this.code = code
+    this.details = details
   }
 }
 
-const err = (statut: number, message: string) => new ErreurHttp(statut, message)
+const err = (statut: number, message: string, code?: string, details?: Record<string, string>) => new ErreurHttp(statut, message, undefined, code, details)
 
-/** Erreurs typées de `server/commandes.ts` → réponse HTTP (conflit 409, transition 400, introuvable 404). */
+/**
+ * Erreurs typées de `server/commandes.ts` → réponse HTTP (conflit 409, transition 400, introuvable 404).
+ * `COMMANDE_CONFLIT` : côté client, seul `commander` peut la déclencher (double envoi simultané) — la
+ * traduction anglaise dit « réessayez » ; la transition commerçant garde son message français (P2-2 la
+ * reformulera). */
 function erreurCommande(e: unknown): unknown {
-  if (e instanceof ConflitCommande) return err(409, e.message)
-  if (e instanceof TransitionInvalide) return err(400, e.message)
-  if (e instanceof CommandeIntrouvable) return err(404, e.message)
+  if (e instanceof ConflitCommande) return err(409, e.message, 'COMMANDE_CONFLIT')
+  if (e instanceof TransitionInvalide) return err(400, e.message, 'COMMANDE_INVALIDE')
+  if (e instanceof CommandeIntrouvable) return err(404, e.message, 'COMMANDE_INTROUVABLE')
   return e
 }
 
@@ -932,7 +946,7 @@ function codeEquipe(v: unknown): string {
 
 function contactOuErreur(v: unknown) {
   const contact = typeof v === 'string' ? analyserContact(v) : null
-  if (!contact) throw err(400, 'Contact invalide : indiquez un numéro de téléphone (06 12 34 56 78) ou un e-mail.')
+  if (!contact) throw err(400, 'Contact invalide : indiquez un numéro de téléphone (06 12 34 56 78) ou un e-mail.', 'CONTACT_INVALIDE')
   return contact
 }
 
@@ -1854,7 +1868,7 @@ export async function creerServeur(o: OptionsServeur) {
   /** Échec d'accès client (compté par IP dans `tentatives_auth`, portée `client`) → 401 uniforme, ou 404 « introuvable ». */
   async function refusCarte(req: IncomingMessage, statut: 401 | 404 = 401): Promise<never> {
     await limiteur.echec([[cleClientIp(req), MAX_ECHECS_CLIENT_IP]], 'client')
-    throw err(statut, statut === 404 ? 'Carte de fidélité introuvable.' : REFUS_CARTE)
+    throw err(statut, statut === 404 ? 'Carte de fidélité introuvable.' : REFUS_CARTE, statut === 404 ? 'CARTE_INTROUVABLE' : 'ACCES_CARTE_REFUSE')
   }
 
   /**
@@ -1869,7 +1883,7 @@ export async function creerServeur(o: OptionsServeur) {
     const jeton = /^Bearer\s+(\S+)$/i.exec(brut)?.[1]
     const c = jeton && o.secretSession ? lireJetonClient(o.secretSession, jeton) : null
     if (!c || c.typ !== 'client' || (cible.clientId && c.cid !== cible.clientId) || (cible.commerceId && c.com !== cible.commerceId)) return refusCarte(req)
-    if (c.exp * 1000 <= maintenant().getTime() || c.ver !== (await versionAcces(c.com, c.cid))) throw err(401, REFUS_CARTE)
+    if (c.exp * 1000 <= maintenant().getTime() || c.ver !== (await versionAcces(c.com, c.cid))) throw err(401, REFUS_CARTE, 'ACCES_CARTE_REFUSE')
     return c
   }
 
@@ -1892,7 +1906,7 @@ export async function creerServeur(o: OptionsServeur) {
   async function carteDuJeton(c: ChargeClient): Promise<{ commerce: Commerce; client: Client }> {
     const commerce = await st.commerce(c.com)
     const client = commerce && (await st.client(commerce.id, c.cid))
-    if (!commerce || !client) throw err(401, REFUS_CARTE)
+    if (!commerce || !client) throw err(401, REFUS_CARTE, 'ACCES_CARTE_REFUSE')
     return { commerce, client }
   }
 
@@ -2589,10 +2603,10 @@ export async function creerServeur(o: OptionsServeur) {
         commerce: tirage.commerceId, tirage: tirage.id, client: empreinte(tirage.clientId), points: tirage.points,
         causeCredit: raison, causeSuppression: e instanceof Error ? e.message : String(e),
       }))
-      throw err(500, 'Votre tirage est enregistré mais vos points n’ont pas pu être crédités : montrez cet écran au comptoir.')
+      throw err(500, 'Votre tirage est enregistré mais vos points n’ont pas pu être crédités : montrez cet écran au comptoir.', 'POINTS_NON_CREDITES')
     }
     console.warn(`[tirage] crédit des points échoué, tirage annulé (le client peut rejouer) : ${raison}`)
-    throw err(500, 'Vos points n’ont pas pu être crédités : votre tirage est annulé, vous pouvez retenter dès maintenant.')
+    throw err(500, 'Vos points n’ont pas pu être crédités : votre tirage est annulé, vous pouvez retenter dès maintenant.', 'TIRAGE_ANNULE')
   }
 
   /**
@@ -2614,12 +2628,12 @@ export async function creerServeur(o: OptionsServeur) {
   /** Carte d'un jeton client valable, supprimée depuis : même refus qu'un jeton invalide (P0-S7). */
   async function clientOu401(commerceId: string, id: string): Promise<Client> {
     const c = await st.client(commerceId, id)
-    if (!c) throw err(401, REFUS_CARTE)
+    if (!c) throw err(401, REFUS_CARTE, 'ACCES_CARTE_REFUSE')
     return c
   }
 
   function exigerActif(c: Commerce) {
-    if (!c.actif) throw err(409, 'Ce commerce n’est pas actif pour le moment.')
+    if (!c.actif) throw err(409, 'Ce commerce n’est pas actif pour le moment.', 'COMMERCE_INACTIF')
   }
 
   /**
@@ -2879,7 +2893,7 @@ export async function creerServeur(o: OptionsServeur) {
       const client = await st.client(c.id, clientId)
       if (client) return { commerce: c, client }
     }
-    throw err(404, 'Carte de fidélité introuvable.')
+    throw err(404, 'Carte de fidélité introuvable.', 'CARTE_INTROUVABLE')
   }
 
   /**
@@ -3175,7 +3189,7 @@ export async function creerServeur(o: OptionsServeur) {
         }
       }
       // Carte supprimée depuis l'émission du jeton : même refus qu'un jeton invalide.
-      if (charge) throw err(401, REFUS_CARTE)
+      if (charge) throw err(401, REFUS_CARTE, 'ACCES_CARTE_REFUSE')
       return refusCarte(req, 404)
     }
     if (ressource === 'cartes' && id && sous === 'lus' && m === 'POST') {
@@ -3193,7 +3207,7 @@ export async function creerServeur(o: OptionsServeur) {
         })
         return { json: { ok: true } }
       }
-      throw err(404, 'Carte de fidélité introuvable.')
+      throw err(404, 'Carte de fidélité introuvable.', 'CARTE_INTROUVABLE')
     }
     if (ressource === 'cartes' && id && (sous === 'donnees' || sous === 'suppression') && !sousId && m === 'POST') {
       // PUBLIC (P1-B6, RGPD) — depuis la carte du client : « Recevoir mes données » (CSV de SES données) et « Demander
@@ -3207,7 +3221,7 @@ export async function creerServeur(o: OptionsServeur) {
       const corps = await lireCorps(req)
       const { commerce: c, client } = charge ? await carteDuJeton(charge) : await clientDeCarte(id)
       if (!contactDuClient(client, corps.contact)) {
-        throw err(403, 'Ce téléphone ou cet e-mail ne correspond pas à cette carte : indiquez celui donné à l’inscription.')
+        throw err(403, 'Ce téléphone ou cet e-mail ne correspond pas à cette carte : indiquez celui donné à l’inscription.', 'CONTACT_NON_CORRESPONDANT')
       }
       const auteur: Auteur = { type: 'client', nom: 'Client (depuis sa carte)' }
       if (sous === 'donnees') {
@@ -3534,7 +3548,7 @@ export async function creerServeur(o: OptionsServeur) {
       if (existant) {
         if (modeAuthClient === 'stricte') {
           await limiteur.echec([[cleClientIp(req), MAX_ECHECS_CLIENT_IP]], 'client')
-          throw err(409, CONTACT_DEJA_INSCRIT)
+          throw err(409, CONTACT_DEJA_INSCRIT, 'CONTACT_DEJA_INSCRIT')
         }
         accesSansJeton++
         return { statut: 201, json: { client: cartePublique(client) } }
@@ -4145,9 +4159,9 @@ export async function creerServeur(o: OptionsServeur) {
       // régénéré, ou inventé) : 404.
       limiterIp(req, 'lecture', limites.lectureParIp)
       exigerActif(commerce)
-      if (!commerce.commande?.active) throw err(409, 'La commande en ligne n’est pas activée pour ce commerce.')
+      if (!commerce.commande?.active) throw err(409, 'La commande en ligne n’est pas activée pour ce commerce.', 'COMMANDE_DESACTIVEE')
       const table = commerce.commande.tables.find((t) => t.jeton === sousId)
-      if (!table) throw err(404, 'Table introuvable : scannez à nouveau le QR code de votre table.')
+      if (!table) throw err(404, 'Table introuvable : scannez à nouveau le QR code de votre table.', 'TABLE_INCONNUE')
       return { json: { table: table.nom } }
     }
 
@@ -4157,10 +4171,10 @@ export async function creerServeur(o: OptionsServeur) {
       limiterIp(req, 'commande', o.limiteCommandesParIp ?? LIMITE_COMMANDES_PAR_IP)
       exigerActif(commerce)
       const config = commerce.commande
-      if (!config?.active) throw err(409, 'La commande en ligne n’est pas activée pour ce commerce.')
+      if (!config?.active) throw err(409, 'La commande en ligne n’est pas activée pour ce commerce.', 'COMMANDE_DESACTIVEE')
       const corps = await lireCorps(req)
       const table = typeof corps.jetonTable === 'string' ? config.tables.find((t) => t.jeton === corps.jetonTable) : undefined
-      if (!table) throw err(404, 'Table introuvable : scannez à nouveau le QR code de votre table.')
+      if (!table) throw err(404, 'Table introuvable : scannez à nouveau le QR code de votre table.', 'TABLE_INCONNUE')
       const cle = corps.cleIdempotence
       if (typeof cle !== 'string' || !FORMAT_CLE_IDEMPOTENCE.test(cle)) throw err(400, '« cleIdempotence » manquante ou invalide (8 à 100 caractères : lettres, chiffres, - et _).')
       const secret = corps.secret
@@ -4211,7 +4225,7 @@ export async function creerServeur(o: OptionsServeur) {
       limiterIp(req, 'lecture', limites.lectureParIp)
       const secret = enTete(req, 'x-secret-commande') ?? new URL(req.url ?? '/', 'http://localhost').searchParams.get('secret') ?? ''
       const c = await lireCommande(st, id, sousId)
-      if (!c || !egaux(Buffer.from(secret), Buffer.from(c.secret))) throw err(404, 'Commande introuvable.')
+      if (!c || !egaux(Buffer.from(secret), Buffer.from(c.secret))) throw err(404, 'Commande introuvable.', 'COMMANDE_INTROUVABLE')
       return { json: { commande: sansSecret(c) } }
     }
 
@@ -4351,16 +4365,16 @@ export async function creerServeur(o: OptionsServeur) {
       await clientOu401(id, charge.cid)
       // Lu parmi les tirages du titulaire : l'id d'un tirage d'un autre client donne le même 404 qu'un id inconnu.
       const tirage = (await st.tiragesClient(id, charge.cid)).find((x) => x.id === sousId)
-      if (!tirage) throw err(404, 'Gain introuvable sur cette carte.')
+      if (!tirage) throw err(404, 'Gain introuvable sur cette carte.', 'GAIN_INTROUVABLE')
       const t = maintenant()
       // Même écriture conditionnelle que la remise : une caisse qui vient de remettre le lot gagne, l'activation échoue.
       // Revue Codex 2 R7 (F1) : appliquée sur la ligne fraîche — un marqueur de relance posé depuis la lecture survit.
       const active = await modifierTirage(tirage, (frais) => {
         const refus = refusActivation(frais, t)
-        if (refus) throw err(refus.statut, refus.message)
+        if (refus) throw err(refus.statut, refus.message, refus.code, refus.details)
         return { ...frais, activeLe: t.toISOString() }
       })
-      if (!active) throw err(409, 'Ce gain a déjà été remis au comptoir.')
+      if (!active) throw err(409, 'Ce gain a déjà été remis au comptoir.', 'GAIN_DEJA_REMIS')
       return { json: { tirageId: active.id, lot: active.lot, code: active.code, activeLe: active.activeLe, expireActivation: finActivation(active) } }
     }
 
@@ -4394,7 +4408,7 @@ export async function creerServeur(o: OptionsServeur) {
         const tiragesClient = await st.tiragesClient(id, client.id)
         // R2 : mode 'libre' = prêt dès l'identification ; 'visite' (défaut des configs d'avant R2) = comme avant.
         const statut = statutJeu(client, tiragesClient, id, t, modeAccesRoue(commerce))
-        if (statut === 'dejaJoue' || statut === 'sansVisite') return { refus: refusJeu }
+        if (statut === 'dejaJoue' || statut === 'sansVisite') return { refus: refusJeu, code: 'JEU_NON_DISPONIBLE' as const }
         // R1 : lots normalisés (id + type résolus, mêmes ids que la vue publique) ; le tirage fige l'id et le type du lot.
         // R2 : ensemble tirable du jour — sans les lots physiques plafonnés aujourd'hui, ni aucun lot physique si le
         // client a atteint sa limite de gains sur 30 jours ; il reste alors points / perdant (repli consolation).
@@ -4419,7 +4433,9 @@ export async function creerServeur(o: OptionsServeur) {
           })
           const jouables = lotsJouables(tirables)
           if (!jouables.length) {
-            return { refus: lotsJouables(normalises).length ? 'Tous les lots du jour sont partis : revenez demain !' : 'Aucun lot n’est configuré pour le moment.' }
+            return lotsJouables(normalises).length
+              ? { refus: 'Tous les lots du jour sont partis : revenez demain !', code: 'LOTS_EPUISES' as const }
+              : { refus: 'Aucun lot n’est configuré pour le moment.', code: 'AUCUN_LOT' as const }
           }
           const tirageId = `ti-${randomUUID()}`
           // D1 — instant gagnant en cours (non consommé, depuis moins de 5 min) : il attribue SON lot, avant le tirage
@@ -4498,7 +4514,7 @@ export async function creerServeur(o: OptionsServeur) {
           } catch (e) {
             // Deux tirages simultanés : la base (index unique client + jour) a refusé le 2e — même message unique.
             await rendreInstant()
-            if (e instanceof ErreurConflit) return { refus: refusJeu }
+            if (e instanceof ErreurConflit) return { refus: refusJeu, code: 'JEU_NON_DISPONIBLE' as const }
             throw e
           }
           // R2 : consolation en points créditée dans la MÊME transaction (client relu juste avant l'écriture : sous
@@ -4525,7 +4541,7 @@ export async function creerServeur(o: OptionsServeur) {
         })
       })
       // Le client éventuellement créé reste inscrit même en cas de refus (la transaction est validée).
-      if ('refus' in resultat) throw err(409, resultat.refus!)
+      if ('refus' in resultat) throw err(409, resultat.refus!, resultat.code)
       // R3 (burn-on-reveal) : jamais de code dans cette réponse — le gain ne s'utilise qu'à partir de demain, et son code
       // n'est servi au titulaire que par l'activation (POST …/tirages/:tirageId/activer), 10 minutes à la fois.
       const { id: tirageId, lot, lotId, typeLot, date, points, pointsDoubles } = resultat.tirage!
@@ -5010,7 +5026,14 @@ export async function creerServeur(o: OptionsServeur) {
         statut,
         { ...entetes, ...(http ? e.entetes : {}), 'Cache-Control': 'no-store' },
         'application/json; charset=utf-8',
-        Buffer.from(JSON.stringify({ erreur: http ? e.message : 'Erreur interne du serveur.' })),
+        // P2-1 : le code stable (et ses détails) voyage avec le message — le client traduit les codes connus.
+        Buffer.from(
+          JSON.stringify({
+            erreur: http ? e.message : 'Erreur interne du serveur.',
+            ...(http && e.code ? { code: e.code } : {}),
+            ...(http && e.details ? { details: e.details } : {}),
+          }),
+        ),
       )
     }
   })

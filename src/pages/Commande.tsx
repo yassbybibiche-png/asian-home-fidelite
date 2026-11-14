@@ -7,7 +7,7 @@ import { formaterPrix } from '../lib/points'
 import { LogoCommerce, PiedPublic } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
 import { masquerPrixNonConfirmes, retirerPhotosDetachees } from '../data/menu-reel'
-import { enregistrerTraductions } from '../lib/langue'
+import { enregistrerTraductions, traduireErreur } from '../lib/langue'
 import {
   ajouter,
   ajouterService,
@@ -314,7 +314,7 @@ function Prise({
   onCommandee: (s: Suivi) => void
   onQrInvalide: () => void
 }) {
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
   const clePanier = clesStockage.panier(commerceId, jetonTable)
   const cleEnvoi = clesStockage.envoi(commerceId, jetonTable)
   const [panier, setPanier] = useState<LignePanier[]>(() => lirePanier(lire(clePanier)))
@@ -391,7 +391,7 @@ function Prise({
     } catch (e) {
       if (e instanceof ErreurApi && e.statut === 404) return onQrInvalide()
       // Refus du serveur (plat devenu indisponible…) : le panier se rouvre avec son message ; réseau : réessayer.
-      setErreur({ reseau: e instanceof ErreurApi && e.horsLigne, message: e instanceof Error ? e.message : MESSAGE_HORS_LIGNE })
+      setErreur({ reseau: e instanceof ErreurApi && e.horsLigne, message: e instanceof ErreurApi ? traduireErreur(e.code, e.message, langue, e.details) : e instanceof Error ? e.message : MESSAGE_HORS_LIGNE })
       setVue('panier')
     } finally {
       verrou.current = false

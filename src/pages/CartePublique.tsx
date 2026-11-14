@@ -4,7 +4,7 @@ import { useRoute } from '../router'
 import type { Client, Commerce, CommercePublic, MessageClient } from '../types'
 import { ErreurApi, estVueLimitee, type AccesCarte, type ClientApi, type ReponseCarte } from '../data/api'
 import { activerCode, assurerJetonClient, avecJetonClient, memoireJoueur, memoriserJoueurCarte } from '../data/jeuApi'
-import { hashSansLienAcces, idCarteDuParam, lienAccesDuHash, memoireJetons } from '../lib/jetonCarte'
+import { hashSansLienAcces, idCarteDuParam, lienAccesDuHash, lienCourtCarte, memoireJetons } from '../lib/jetonCarte'
 import { CarteFidelite } from '../components/CarteFidelite'
 import { InvitationAvis } from '../components/InvitationAvis'
 import { SqueletteCarte } from '../components/Squelette'
@@ -26,13 +26,12 @@ import {
   type LigneHistorique,
   type LotHistorique,
 } from '../lib/carte'
-import { lienCourtCarte } from '../lib/relances'
 import { estAsianHome, VISUELS } from '../lib/visuels'
 import { configRattrapage, peutCompleterProfil } from '../lib/programme'
-import { nomFichierExportClient } from '../lib/rgpd'
+import { nomFichierExportClient } from '../lib/csv'
 import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
-import { localeDate } from '../lib/langue'
+import { localeDate, traduireErreur } from '../lib/langue'
 import { Confirmation } from '../components/Confirmation'
 import { TEXTE_GAIN_SANS_CODE } from '../lib/animationRoue'
 
@@ -450,7 +449,7 @@ function GainsRoue({
     setEnCours(null)
     // Décalage d'horloge mesuré à la réception : le compte à rebours suit l'heure du serveur (revue Codex R4, F1).
     if (issue.ok) setActivations((a) => ({ ...a, [tirageId]: activationRecue(issue.activation, new Date()) }))
-    else setErreurs((e) => ({ ...e, [tirageId]: issue.message }))
+    else setErreurs((e) => ({ ...e, [tirageId]: traduireErreur(issue.code, issue.message, langue, issue.details) }))
   }
 
   return (
@@ -494,7 +493,7 @@ function GainsRoue({
               <p className="text-sm text-gray-600">{t('Appuyez au comptoir : le code ne s’affiche que 10 minutes.')}</p>
             </>
           )}
-          {/* Message du serveur (en français, comme les autres erreurs de l'API). */}
+          {/* Erreur du serveur, traduite par son code quand elle en a un (P2-1) — sinon le message du serveur, en français. */}
           {erreurs[g.tirageId] && <MessageErreur>{erreurs[g.tirageId]}</MessageErreur>}
         </section>
       ))}
@@ -514,7 +513,7 @@ function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi
   const [enCours, setEnCours] = useState(false)
   const rattrapage = configRattrapage(commerce)
   const enAttente = (client.demandesRattrapage ?? []).filter((d) => d.statut === 'en_attente')
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
 
   async function envoyerProfil(e: FormEvent) {
     e.preventDefault()
@@ -529,7 +528,7 @@ function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi
       setPlat('')
       onMaj()
     } catch (err) {
-      setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
+      setErreur(err instanceof ErreurApi ? traduireErreur(err.code, err.message, langue, err.details) : 'Envoi impossible pour le moment.')
     } finally {
       setEnCours(false)
     }
@@ -551,7 +550,7 @@ function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi
       setTicket('')
       onMaj()
     } catch (err) {
-      setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
+      setErreur(err instanceof ErreurApi ? traduireErreur(err.code, err.message, langue, err.details) : 'Envoi impossible pour le moment.')
     } finally {
       setEnCours(false)
     }
@@ -647,7 +646,7 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
       telecharger(nomFichierExportClient(client.id), await api.donneesCarte(client.id, contact.trim()))
       setMessage('Vos données ont été téléchargées (fichier CSV, lisible dans un tableur).')
     } catch (err) {
-      setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
+      setErreur(err instanceof ErreurApi ? traduireErreur(err.code, err.message, langue, err.details) : 'Envoi impossible pour le moment.')
     } finally {
       setEnCours(false)
     }
@@ -665,7 +664,7 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
       setMessage('Demande enregistrée : le restaurant supprimera votre carte et vos données.')
       onMaj()
     } catch (err) {
-      setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
+      setErreur(err instanceof ErreurApi ? traduireErreur(err.code, err.message, langue, err.details) : 'Envoi impossible pour le moment.')
     } finally {
       setEnCours(false)
     }
@@ -803,7 +802,7 @@ function DeconnecterAppareils({ api, clientId, jeton, onFait }: { api: ClientApi
   const [enCours, setEnCours] = useState(false)
   const [erreur, setErreur] = useState('')
   const [demande, setDemande] = useState(false)
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
 
   async function agir() {
     if (!jeton || enCours) return
@@ -814,7 +813,7 @@ function DeconnecterAppareils({ api, clientId, jeton, onFait }: { api: ClientApi
       await api.revoquerCarte(clientId, jeton)
       onFait()
     } catch (err) {
-      setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
+      setErreur(err instanceof ErreurApi ? traduireErreur(err.code, err.message, langue, err.details) : 'Envoi impossible pour le moment.')
     } finally {
       setEnCours(false)
     }
@@ -857,7 +856,7 @@ function RetrouverCarte({ api }: { api: ClientApi }) {
   const [erreur, setErreur] = useState('')
   const [enCours, setEnCours] = useState(false)
 
-  const { t } = useLangue()
+  const { langue, t } = useLangue()
 
   async function envoyer(e: FormEvent) {
     e.preventDefault()
@@ -871,7 +870,7 @@ function RetrouverCarte({ api }: { api: ClientApi }) {
       setReponse(messageRechercheCarte(r.envoi))
     } catch (err) {
       // 400 (format du contact) et 429 seulement : jamais un « contact inconnu ».
-      setErreur(err instanceof ErreurApi ? err.message : 'Envoi impossible pour le moment.')
+      setErreur(err instanceof ErreurApi ? traduireErreur(err.code, err.message, langue, err.details) : 'Envoi impossible pour le moment.')
     } finally {
       setEnCours(false)
     }
