@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { MESSAGE_MODE_SERVEUR, useStore } from '../store'
 import { useRoute } from '../router'
-import type { CommercePublic, Menu } from '../types'
+import type { CommercePublic, Menu, Produit } from '../types'
 import { ErreurApi } from '../data/api'
 import { formaterPrix } from '../lib/points'
 import { bandeauPrixManquants, filtrerMenu, LIBELLE_ALLERGENES_ABSENTS } from '../lib/menu'
@@ -20,6 +20,7 @@ import { motsUniques } from '../lib/bandeau'
 import { BandeauDefilant } from '../components/BandeauDefilant'
 import { croiserCouches, universCategorie, type Couches } from '../lib/univers'
 import { motsTitre, plusLongMot } from '../lib/titreCinetique'
+import { platStar } from '../lib/platStar'
 
 /** Traductions des badges de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
 enregistrerTraductions({
@@ -300,6 +301,8 @@ export function MenuAffiche({
               </p>
               {visibles.map((c) => {
                 const photo = photoCategorie(c.nom)
+                // Cycle 3 : plat-star plein cadre (photo du plat lui-même), jamais pendant une recherche.
+                const star = recherche ? null : platStar(c)
                 return (
                   <section key={c.id} id={`m-${c.id}`} data-categorie={c.id} data-univers-actif={ongletIndique === c.id || undefined} className="apparition scroll-mt-36 space-y-2">
                     {/* Avec une photo, la catégorie devient un « moment » : le nom en typographie logo sur la photo
@@ -342,6 +345,7 @@ export function MenuAffiche({
                         </span>
                       </div>
                     )}
+                    {star && <PlatStar plat={star} voir={() => allerAuPlat(c.id, star.id)} />}
                     <ul className="cartes-echelonnees space-y-2">
                       {c.produits.map((p) => {
                         const detail = ouvert === p.id
@@ -456,6 +460,40 @@ export function MenuAffiche({
       <PiedPublic commerceId={commerce.id} />
     </div>
     </>
+  )
+}
+
+/** Plat-star plein cadre (cycle 3) : la photo du plat en très grand entre l'en-tête de sa catégorie et la liste, qui vit au
+    défilement (parallaxe + zoom lent des en-têtes) ; nom révélé mot à mot, description, prix. Hauteur fixée par `.plat-star`. */
+function PlatStar({ plat, voir }: { plat: Produit; voir: () => void }) {
+  const { t } = useLangue()
+  return (
+    <div className="plat-star" data-revelation data-plat-star>
+      <button
+        type="button"
+        onClick={voir}
+        aria-label={t('Voir le plat : {nom}', { nom: plat.nom })}
+        className="relative block size-full overflow-hidden rounded-3xl text-left shadow-relief transition-transform active:scale-[0.98]"
+      >
+        {/* Parallaxe (±28 px) : la photo déborde de 32 px en haut et en bas du cadre ; zoom lent (ken burns). */}
+        <span className="cadre-parallaxe ken-burns absolute inset-x-0 -inset-y-8" data-parallaxe>
+          <img src={plat.photo} alt="" loading="lazy" className="w-full object-cover" />
+        </span>
+        <span aria-hidden="true" className="absolute inset-0 bg-linear-to-t from-nuit-950/95 via-nuit-950/35 to-transparent" />
+        <span className="titre-cadre absolute inset-x-5 bottom-5 flex flex-col items-start gap-2">
+          {estSignature(plat.nom) && (
+            <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('★ Signature')}</span>
+          )}
+          <span className="titre-geant text-white" style={{ '--lettres': plusLongMot(plat.nom) } as CSSProperties}>
+            <MotsReveles nom={plat.nom} />
+          </span>
+          {plat.description && <span className="line-clamp-3 text-sm text-white/85">{plat.description}</span>}
+          <span className="rounded-full bg-nuit-950/85 px-3 py-1 font-semibold text-white tabular-nums backdrop-blur">
+            {plat.prix == null ? <span className="text-sm italic">{t('Prix sur place')}</span> : formaterPrix(plat.prix)}
+          </span>
+        </span>
+      </button>
+    </div>
   )
 }
 
