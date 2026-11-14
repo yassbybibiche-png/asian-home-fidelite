@@ -23,6 +23,8 @@ export function ReglagesCommande() {
   // chaque enregistrement.
   const [enregistree, setEnregistree] = useState(commerce.commande ?? { active: false, tables: [] })
   const [active, setActive] = useState(enregistree.active)
+  // Menu Appétit : demandes de service à 0 € ; absent = décoché.
+  const [services, setServices] = useState(enregistree.services === true)
   const [tables, setTables] = useState<TableEditee[]>(() => versEdition(enregistree.tables))
   const [nouveau, setNouveau] = useState('')
   const [enregistre, setEnregistre] = useState(false)
@@ -39,7 +41,7 @@ export function ReglagesCommande() {
     )
 
   const probleme = problemeTables(tables.map((t) => t.nom))
-  const modifie = active !== enregistree.active || JSON.stringify(tables.map((t) => [t.nom.trim(), t.jeton ?? ''])) !== JSON.stringify(enregistree.tables.map((t) => [t.nom, t.jeton]))
+  const modifie = active !== enregistree.active || services !== (enregistree.services === true) || JSON.stringify(tables.map((t) => [t.nom.trim(), t.jeton ?? ''])) !== JSON.stringify(enregistree.tables.map((t) => [t.nom, t.jeton]))
   const qrs = enregistree.tables
 
   const changer = (f: (t: TableEditee[]) => TableEditee[]) => (setTables(f), setEnregistre(false))
@@ -58,12 +60,13 @@ export function ReglagesCommande() {
 
   async function enregistrer() {
     if (probleme || enCours) return
-    const commande = { active, tables: tables.map((t) => ({ nom: t.nom.trim(), ...(t.jeton ? { jeton: t.jeton } : {}) })) }
+    const commande = { active, services, tables: tables.map((t) => ({ nom: t.nom.trim(), ...(t.jeton ? { jeton: t.jeton } : {}) })) }
     const r = await executer(() => avecPin((a, api) => api.majCommerce(commerce.id, a, { commande })))
     if (!r.ok) return
     const relue = r.valeur.commande ?? { active: false, tables: [] }
     setEnregistree(relue)
     setActive(relue.active)
+    setServices(relue.services === true)
     setTables(versEdition(relue.tables))
     setEnregistre(true)
     void recharger()
@@ -89,6 +92,14 @@ export function ReglagesCommande() {
         libelle="Activer la commande à table"
         aide={active ? 'Les QR des tables permettent de commander.' : 'Désactivée : les QR des tables affichent « commande indisponible ».'}
       />
+      {active && (
+        <Interrupteur
+          actif={services}
+          onChange={(v) => (setServices(v), setEnregistre(false))}
+          libelle="Demandes de service à 0 €"
+          aide="Vos clients peuvent demander le serveur, de l’eau, des baguettes ou l’addition depuis leur téléphone : la demande arrive en cuisine comme une commande."
+        />
+      )}
 
       <div className="space-y-2">
         <p className="etiquette">Tables ({tables.length})</p>
