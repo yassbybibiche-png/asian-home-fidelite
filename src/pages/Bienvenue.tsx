@@ -10,7 +10,7 @@ import { enregistrerTraductions } from '../lib/langue'
 import { dependancesNavigateur, preparerRevelations } from '../lib/revelation'
 import { prefereMouvementReduit } from '../lib/menuClient'
 import { HorsLignePublic, MessagePublic } from './Jouer'
-import { useLangue } from '../components/Langue'
+import { CommutateurLangue, useLangue } from '../components/Langue'
 import { BandeauDefilant } from '../components/BandeauDefilant'
 import { motsBandeauxAccueil } from '../lib/bandeau'
 import { activerParallaxe } from '../lib/parallaxe'
@@ -112,6 +112,7 @@ function Accueil({ commerce }: { commerce: CommercePublic }) {
       <section className="hero-sombre relative flex min-h-dvh flex-col justify-end overflow-hidden" aria-labelledby="bienvenue-titre">
         <FondHeros photo={photo} />
         <div className="relative mx-auto w-full max-w-md px-6 pt-16 pb-8 text-center">
+          <CommutateurLangue sombre />
           <div className="cascade flex justify-center">
             <LogoCommerce commerce={commerce} taille="lg" />
           </div>

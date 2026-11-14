@@ -1,5 +1,7 @@
-// Version anglaise des pages clientes (P2-Q1) : #/jouer, #/carte, #/menu, #/desinscription, #/confidentialite,
-// #/reglement (R4 : chrome traduit, texte légal en français comme la politique de confidentialité).
+// Version anglaise des pages clientes (P2-Q1) : #/jouer, #/carte, #/menu, #/bienvenue, #/commande,
+// #/desinscription, #/confidentialite, #/reglement (R4 : chrome traduit, texte légal en français comme la
+// politique de confidentialité). Le commutateur FR / EN est affiché sur #/jouer, #/carte, #/menu,
+// #/bienvenue et #/commande (P1-3).
 // Le back-office et la caisse restent en français. #/desinscription et #/confidentialite n'ont pas de
 // commutateur : elles appliquent la langue mémorisée sur les autres pages clientes.
 // Logique pure (testée sans React) : le français est la clé, l'anglais la traduction ; une chaîne absente du
@@ -11,8 +13,8 @@ export type Langue = 'fr' | 'en'
 export const CLE_LANGUE = 'fideliz:langue'
 
 /** Pages où la langue mémorisée s'applique (pages publiques du client final ; le commutateur FR / EN
- *  n'est affiché que sur #/jouer, #/carte et #/menu — #/bienvenue et #/commande, Expérience 10/10, appliquent
- *  la langue choisie sur ces pages, comme #/desinscription). */
+ *  est affiché sur #/jouer, #/carte, #/menu, #/bienvenue et #/commande (P1-3) — #/desinscription et
+ *  #/confidentialite appliquent la langue choisie sur ces pages, sans commutateur). */
 export const PAGES_TRADUITES = ['jouer', 'carte', 'menu', 'desinscription', 'confidentialite', 'reglement', 'bienvenue', 'commande'] as const
 
 export function estPageTraduite(page: string): boolean {

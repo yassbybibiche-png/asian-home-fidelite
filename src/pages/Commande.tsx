@@ -32,7 +32,7 @@ import {
   type LignePanier,
 } from '../lib/panier'
 import { HorsLignePublic, MessagePublic } from './Jouer'
-import { useLangue } from '../components/Langue'
+import { CommutateurLangue, useLangue } from '../components/Langue'
 
 /** Traductions de cette page différée : hors du dictionnaire initial (P2-Q1, bundle P2-Q2). */
 enregistrerTraductions({
@@ -199,7 +199,10 @@ function CommandeApi({ api, commerceId, jetonTable }: { api: ClientApi; commerce
 
   return (
     <div className="mx-auto max-w-md space-y-5 px-4 pt-4 pb-32">
-      <header className="hero-sombre -mx-4 flex items-center gap-3 rounded-b-3xl px-4 pt-2 pb-4 shadow-relief">
+      <header className="hero-sombre -mx-4 rounded-b-3xl px-4 pt-2 pb-4 shadow-relief">
+        {/* Commutateur FR / EN (P1-3) : en tête de l'en-tête sombre, comme sur #/menu — le parcours de commande est le moment où l'erreur coûte un plat. */}
+        <CommutateurLangue sombre />
+        <div className="flex items-center gap-3">
         <LogoCommerce commerce={donnees.commerce} taille="md" />
         <div className="min-w-0 flex-1">
           <p className="titre-magenta truncate text-lg">{donnees.commerce.nom}</p>
@@ -209,6 +212,7 @@ function CommandeApi({ api, commerceId, jetonTable }: { api: ClientApi; commerce
           <a href={`#/jouer/${encodeURIComponent(commerceId)}/${encodeURIComponent(jetonTable)}`} className="mt-1 inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-magenta-300 underline" data-lien-jeu-table>
             <span aria-hidden>🎡</span> {t('Jouer et gagner')}
           </a>
+        </div>
         </div>
       </header>
       {vue === 'suivi' && suivi ? (
