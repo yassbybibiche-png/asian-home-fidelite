@@ -196,6 +196,10 @@ export function ouvrirStockageSupabase(config: ConfigSupabase): Stockage {
     type: 'supabase',
 
     meta: async (cle) => (await ok<{ valeur: string }[]>('meta', sb.from('meta').select('valeur').eq('cle', cle)))[0]?.valeur,
+    // P2-5 : upsert « dernier écrit gagne » — JAMAIS pour une lecture-modification-écriture (compteur, version) :
+    // deux écrivains simultanés perdraient une écriture. Toute écriture conditionnelle sur `meta` passe par
+    // `majMetaSi` (comparaison-et-échange, sûr que `meta.valeur` soit `text` ou `jsonb` — voir docs/SCHEMA-META.md,
+    // inventaire des clés et règle imposée par le test `tests/meta-cas-p2-5.test.ts`).
     majMeta: async (cle, valeur) => void (await ok('meta', sb.from('meta').upsert({ cle, valeur }, { onConflict: 'cle' }))),
     // Revue Codex (rotation du PIN) : clé absente → INSERT (la clé primaire refuse le 2e : ErreurConflit → false) ;
     // présente → UPDATE … WHERE valeur = <attendue> (0 ligne → false). Une requête, atomique pour Postgres.
