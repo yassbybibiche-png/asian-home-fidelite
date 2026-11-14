@@ -413,6 +413,8 @@ function CarteCommande({
             <p className="flex items-baseline gap-2 text-lg">
               <span className="font-bold tabular-nums">{l.quantite} ×</span>
               <span className="min-w-0 flex-1 font-semibold break-words">{l.nom}</span>
+              {/* Menu Appétit : demande de service à 0 € (eau, addition…), traitée comme une commande. */}
+              {l.service && <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-sm font-bold text-gray-800 ring-1 ring-gray-300">Service</span>}
             </p>
             {l.options.length > 0 && <p className="pl-8 text-gray-700">+ {l.options.map((o) => o.nom).join(', ')}</p>}
             {l.instructions && <p className="mt-1 ml-8 rounded-lg bg-amber-100 px-2 py-1 font-semibold text-amber-900 ring-1 ring-amber-400">« {l.instructions} »</p>}

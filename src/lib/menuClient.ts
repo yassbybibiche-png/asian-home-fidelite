@@ -18,6 +18,12 @@ export function prefereMouvementReduit(): boolean {
   return typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
+/** Numéro de chaque plat (id → 1..N) dans l'ordre complet de la carte : catégories puis plats, tels que reçus.
+    Calculé sur la carte entière (avant recherche et onglet) : un plat garde son numéro quel que soit le filtre. */
+export function numerosPlats(categories: readonly CategorieMenu[]): ReadonlyMap<string, number> {
+  return new Map(categories.flatMap((c) => c.produits).map((p, i) => [p.id, i + 1]))
+}
+
 // ---------- Badges « épicé » / « végétarien » ----------
 // La carte officielle ne marque aucun plat épicé ni végétarien : ces badges sont DÉDUITS des mots du nom ou de la
 // description (rien d'autre), et toujours affichés « à confirmer ». Règles volontairement étroites :

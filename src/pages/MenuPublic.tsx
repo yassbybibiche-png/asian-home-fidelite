@@ -5,7 +5,7 @@ import type { CommercePublic, Menu, Produit } from '../types'
 import { ErreurApi } from '../data/api'
 import { formaterPrix } from '../lib/points'
 import { bandeauPrixManquants, filtrerMenu, LIBELLE_ALLERGENES_ABSENTS } from '../lib/menu'
-import { badgesPlat, boutonsMenu, categorieEffective, categorieMidi, estHeureMenuMidi, LIBELLES_BADGES, MENTION_BADGE_DEDUIT, photoCartePlat, prefereMouvementReduit } from '../lib/menuClient'
+import { badgesPlat, boutonsMenu, categorieEffective, categorieMidi, estHeureMenuMidi, LIBELLES_BADGES, MENTION_BADGE_DEDUIT, numerosPlats, photoCartePlat, prefereMouvementReduit } from '../lib/menuClient'
 import { LogoCommerce, PiedPublic } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
 import { estAsianHome, photoCategorie, VISUELS } from '../lib/visuels'
@@ -121,6 +121,8 @@ export function MenuAffiche({
     () => menuAffiche.categories.flatMap((c) => c.produits.filter((p) => p.photo).map((p) => ({ categorieId: c.id, p }))),
     [menuAffiche],
   )
+  // Numéros des plats (lignes typographiques, lot 3) : sur la carte complète, avant recherche et onglet.
+  const numeros = useMemo(() => numerosPlats(menuAffiche.categories), [menuAffiche])
   // Interface traduite (P2-Q1) ; les noms de plats et de catégories restent ceux du restaurant.
   const { langue, t } = useLangue()
 
@@ -249,8 +251,12 @@ export function MenuAffiche({
       {avecRail && <BandeauDefilant mots={motsUniques(platsPhoto.map(({ p }) => p.nom))} className="-mx-4" />}
 
       {avecRail && (
-        <section aria-label={t('En photos')} className="space-y-2">
-          <p className="font-titre text-lg font-bold">{t('En photos')}</p>
+        <section aria-label={t('En photos')} className="space-y-2" data-rail-signatures>
+          {/* Lot 3 (Menu Appétit) : titre visible « Signatures » ; l'aria-label « En photos » est conservé (épinglé). */}
+          <p className="font-titre text-lg font-bold">
+            <span aria-hidden="true">★ </span>
+            {t('Signatures')}
+          </p>
           <div ref={rail} className="flex gap-3 overflow-x-auto pb-1" data-rail-photos>
             {platsPhoto.map(({ categorieId, p }) => (
               <button
@@ -261,8 +267,12 @@ export function MenuAffiche({
                 className="w-36 shrink-0 py-2 text-left transition-transform active:scale-[0.97]"
               >
                 {/* Conteneur interne (cycle 4) : porte l'échelle du rail vivant, le bouton garde son enfoncement tactile. */}
-                <span className="block overflow-hidden rounded-2xl bg-white shadow-douce ring-1 ring-gray-900/5" data-rail-vivant>
+                <span className="block overflow-hidden rounded-2xl bg-white shadow-douce ring-1 ring-gray-900/5 relative" data-rail-vivant>
                   <img src={photoCartePlat(p)} alt="" loading="lazy" className="h-24 w-full object-cover" />
+                  {/* Pastille posée sur la photo : la tuile garde sa taille (lot 3). */}
+                  {estSignature(p.nom) && (
+                    <span className="absolute top-2 left-2 rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('★ Signature')}</span>
+                  )}
                   <span className="block px-3 py-2">
                     <span className="block truncate text-sm font-semibold">{p.nom}</span>
                     <span className="block text-sm font-semibold text-magenta-700 tabular-nums">{p.prix == null ? t('Prix sur place') : formaterPrix(p.prix)}</span>
@@ -364,6 +374,94 @@ export function MenuAffiche({
                         const detail = ouvert === p.id
                         const signature = estSignature(p.nom)
                         const badges = badgesPlat(p)
+                        // Pastilles et fiche dépliée : un seul code pour la carte photo et la ligne typographique (lot 3).
+                        const pastilles = (
+                          <>
+                            {/* Pastilles (étiquettes décoratives) : text-xs, 12,75 px, exception documentée (P2-Q1). */}
+                            {signature && (
+                              <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('★ Signature')}</span>
+                            )}
+                            {badges.map((b) => (
+                              <span key={b} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700" title={t('Déduit de la description — {mention}', { mention: t(MENTION_BADGE_DEDUIT) })}>
+                                {t(LIBELLES_BADGES[b])}*<span className="sr-only"> ({t(MENTION_BADGE_DEDUIT)})</span>
+                              </span>
+                            ))}
+                          </>
+                        )
+                        const fiche = detail && (
+                          <div className="depliage border-t border-gray-100">
+                          <div>
+                          <div className="space-y-3 px-4 py-3">
+                            {p.photo && <img src={p.photo} alt={t('Photo du plat : {nom}', { nom: p.nom })} loading="lazy" className="h-56 w-full rounded-2xl object-cover" />}
+                            {p.description ? (
+                              <p className="text-sm text-gray-700">{p.description}</p>
+                            ) : (
+                              <p className="text-sm text-gray-600 italic">{t('Description à venir — demandez conseil à l’équipe.')}</p>
+                            )}
+                            <p className="text-sm">
+                              <span className="font-semibold">{t('Prix :')} </span>
+                              {p.prix == null ? <span className="text-gray-600 italic">{t('sur place')}</span> : <span className="font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix)}</span>}
+                            </p>
+                            {badges.length > 0 && (
+                              <p className="text-sm text-gray-600">
+                                {langue === 'en'
+                                  ? t('{labels} — {mention} — ask the team.', {
+                                      labels: badges.map((b) => t(LIBELLES_BADGES[b])).join(' · '),
+                                      mention: t(MENTION_BADGE_DEDUIT),
+                                    })
+                                  : // Branche FR conservée telle quelle : menu-client-p1-c5.test.ts:246 épingle
+                                    // littéralement `{MENTION_BADGE_DEDUIT} auprès de l’équipe`.
+                                    `${badges.map((b) => t(LIBELLES_BADGES[b])).join(' · ')} — ${MENTION_BADGE_DEDUIT} auprès de l’équipe.`}
+                              </p>
+                            )}
+                            {/* P1-M2 : la ligne allergènes est toujours affichée — la liste si elle est
+                                renseignée (préfixe traduit), sinon la mention explicite « demander en caisse ». */}
+                            {p.allergenes.length > 0 ? (
+                              <p className="text-sm text-gray-600">{t('Allergènes :')} {p.allergenes.join(', ')}</p>
+                            ) : (
+                              <p className="text-sm text-gray-600">{t(LIBELLE_ALLERGENES_ABSENTS)}</p>
+                            )}
+                            {signature && <p className="text-sm font-semibold text-magenta-700">{t('★ Plat signature — l’un des best-sellers du restaurant.')}</p>}
+                          </div>
+                          </div>
+                          </div>
+                        )
+                        // Plat sans photo (lot 3) : ligne typographique posée sur le fond d'univers, pas de carte — numéro,
+                        // nom, pastilles, pointillés, prix. Même ancre, même ouverture de la fiche que la carte.
+                        if (!p.photo)
+                          return (
+                            <li key={p.id} id={`plat-${p.id}`} className="ligne-typo border-b border-white/10" data-revelation data-ligne-typo>
+                              <button
+                                type="button"
+                                className="flex min-h-11 w-full items-baseline gap-3 px-1 py-3 text-left transition-transform active:scale-[0.99] active:bg-white/5"
+                                aria-expanded={detail}
+                                onClick={() => setOuvert(detail ? null : p.id)}
+                              >
+                                <span aria-hidden="true" className="w-7 shrink-0 font-titre text-sm font-bold text-white/60 tabular-nums">
+                                  {numeros.get(p.id)}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="flex items-baseline gap-2">
+                                    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                      <span className="font-titre text-lg font-bold text-white">{p.nom}</span>
+                                      {pastilles}
+                                    </span>
+                                    <span aria-hidden="true" className="min-w-4 flex-1 border-b border-dotted border-white/25" />
+                                    {p.prix == null ? (
+                                      <span className="shrink-0 text-sm text-white/70 italic">{t('Prix sur place')}</span>
+                                    ) : (
+                                      <span className="ligne-typo__prix shrink-0 text-lg font-bold tabular-nums">{formaterPrix(p.prix)}</span>
+                                    )}
+                                  </span>
+                                  {p.description && !detail && <span className="mt-1 line-clamp-2 block text-sm text-white/70">{p.description}</span>}
+                                </span>
+                                <span aria-hidden="true" className="chevron-detail shrink-0 text-gray-400">
+                                  ▾
+                                </span>
+                              </button>
+                              {fiche}
+                            </li>
+                          )
                         return (
                           <li key={p.id} id={`plat-${p.id}`} className="overflow-hidden rounded-3xl bg-white shadow-douce ring-1 ring-gray-900/5" data-revelation>
                             {p.photo && (
@@ -392,15 +490,7 @@ export function MenuAffiche({
                               <span className="min-w-0 flex-1">
                                 <span className="flex flex-wrap items-center gap-2">
                                   <span className="font-semibold">{p.nom}</span>
-                                  {/* Pastilles (étiquettes décoratives) : text-xs, 12,75 px, exception documentée (P2-Q1). */}
-                                  {signature && (
-                                    <span className="rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">{t('★ Signature')}</span>
-                                  )}
-                                  {badges.map((b) => (
-                                    <span key={b} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700" title={t('Déduit de la description — {mention}', { mention: t(MENTION_BADGE_DEDUIT) })}>
-                                      {t(LIBELLES_BADGES[b])}*<span className="sr-only"> ({t(MENTION_BADGE_DEDUIT)})</span>
-                                    </span>
-                                  ))}
+                                  {pastilles}
                                 </span>
                                 {p.description && !detail && <span className="mt-0.5 line-clamp-2 block text-sm text-gray-700">{p.description}</span>}
                               </span>
@@ -413,44 +503,7 @@ export function MenuAffiche({
                                 ▾
                               </span>
                             </button>
-                            {detail && (
-                              <div className="depliage border-t border-gray-100">
-                              <div>
-                              <div className="space-y-3 px-4 py-3">
-                                {p.photo && <img src={p.photo} alt={t('Photo du plat : {nom}', { nom: p.nom })} loading="lazy" className="h-56 w-full rounded-2xl object-cover" />}
-                                {p.description ? (
-                                  <p className="text-sm text-gray-700">{p.description}</p>
-                                ) : (
-                                  <p className="text-sm text-gray-600 italic">{t('Description à venir — demandez conseil à l’équipe.')}</p>
-                                )}
-                                <p className="text-sm">
-                                  <span className="font-semibold">{t('Prix :')} </span>
-                                  {p.prix == null ? <span className="text-gray-600 italic">{t('sur place')}</span> : <span className="font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix)}</span>}
-                                </p>
-                                {badges.length > 0 && (
-                                  <p className="text-sm text-gray-600">
-                                    {langue === 'en'
-                                      ? t('{labels} — {mention} — ask the team.', {
-                                          labels: badges.map((b) => t(LIBELLES_BADGES[b])).join(' · '),
-                                          mention: t(MENTION_BADGE_DEDUIT),
-                                        })
-                                      : // Branche FR conservée telle quelle : menu-client-p1-c5.test.ts:246 épingle
-                                        // littéralement `{MENTION_BADGE_DEDUIT} auprès de l’équipe`.
-                                        `${badges.map((b) => t(LIBELLES_BADGES[b])).join(' · ')} — ${MENTION_BADGE_DEDUIT} auprès de l’équipe.`}
-                                  </p>
-                                )}
-                                {/* P1-M2 : la ligne allergènes est toujours affichée — la liste si elle est
-                                    renseignée (préfixe traduit), sinon la mention explicite « demander en caisse ». */}
-                                {p.allergenes.length > 0 ? (
-                                  <p className="text-sm text-gray-600">{t('Allergènes :')} {p.allergenes.join(', ')}</p>
-                                ) : (
-                                  <p className="text-sm text-gray-600">{t(LIBELLE_ALLERGENES_ABSENTS)}</p>
-                                )}
-                                {signature && <p className="text-sm font-semibold text-magenta-700">{t('★ Plat signature — l’un des best-sellers du restaurant.')}</p>}
-                              </div>
-                              </div>
-                              </div>
-                            )}
+                            {fiche}
                           </li>
                         )
                       })}

@@ -380,6 +380,8 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'Photo du plat : {nom}': 'Photo of the dish: {nom}',
   // Menu visuel (13/11/2026) : rail « En photos », grandes cartes photo, pastille de la catégorie midi.
   'En photos': 'In pictures',
+  // Rail « Signatures » (Menu Appétit) : #/menu (lot 3) et #/commande (lot 2) — clé partagée, donc ici.
+  'Signatures': 'Signatures',
   'Voir le plat : {nom}': 'See the dish: {nom}',
   '🍱 Menu Midi': '🍱 Lunch menu',
   // Expérience 10/10 (lot 2) : barre « commande à table » du menu et lien vers l'accueil #/bienvenue.

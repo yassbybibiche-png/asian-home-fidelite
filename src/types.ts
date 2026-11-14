@@ -199,6 +199,8 @@ export interface Commerce {
 export interface ConfigCommande {
   active: boolean
   tables: TableCommande[]
+  /** Demandes de service à 0 € (Menu Appétit) : absent = désactivé, y compris pour les nouveaux commerces. */
+  services?: boolean
 }
 
 export interface TableCommande {
@@ -219,6 +221,8 @@ export interface LigneCommande {
   /** Options choisies, prix en centimes (supplément par unité). */
   options: OptionProduit[]
   instructions?: string
+  /** Demande de service (src/lib/servicesCommande.ts) : prix figé à 0, nom canonique, sans options. */
+  service?: true
 }
 
 /** Commande à table (table `meta`, `server/commandes.ts`). Montants en centimes. */
@@ -367,6 +371,8 @@ export interface CommercePublic {
   menuDisponible?: true
   /** Commande à table activée avec au moins une table (Expérience 10/10) : présent (true) seulement dans ce cas. */
   commandeActive?: true
+  /** Demandes de service à 0 € (Menu Appétit) : présent (true) seulement si `commandeActive` ET `commande.services`. */
+  servicesCommande?: true
   actif: boolean
   demo: boolean
   catalogue?: Pick<RecompensePoints, 'nom' | 'cout' | 'description'>[]
