@@ -107,7 +107,8 @@ function Accueil({ commerce }: { commerce: CommercePublic }) {
   const bandeaux = motsBandeauxAccueil(asianHome)
 
   return (
-    <div ref={page}>
+    // `entree-page` (cycle 5) : montée + fondu après une navigation interne seulement, jamais au premier chargement.
+    <div ref={page} className="entree-page">
       <section className="hero-sombre relative flex min-h-dvh flex-col justify-end overflow-hidden" aria-labelledby="bienvenue-titre">
         <FondHeros photo={photo} />
         <div className="relative mx-auto w-full max-w-md px-6 pt-16 pb-8 text-center">

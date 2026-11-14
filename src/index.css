@@ -1352,6 +1352,32 @@ h3 {
   }
 }
 
+/* Boucle animations, cycle 5 : transitions de navigation des pages Découverte. La page entrante monte en fondu
+   (transform + opacity : CLS nul, cliquable pendant sa montée) seulement sous `html.navigue`, classe posée par le
+   routeur au premier `hashchange` (src/router.ts, `apresNavigation`) : le premier chargement n'est jamais animé.
+   Accueil : `.entree-page` sur sa racine ; menu : le contenu qui suit le calque d'ambiance (la couche fixe d'univers
+   reste hors de l'animation, sinon elle se repositionnerait sur le conteneur transformé). Changement d'onglet du
+   menu : même entrée en plus rapide, rejouée sur la liste (src/lib/entreeScene.ts). */
+@keyframes entree-page {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+.navigue :is(.entree-page, .ambiance-univers + div) {
+  animation: entree-page 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.entree-liste {
+  animation: entree-page 0.18s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+/* Mouvement réduit : coupes franches partout. */
+@media (prefers-reduced-motion: reduce) {
+  .navigue :is(.entree-page, .ambiance-univers + div),
+  .entree-liste {
+    animation: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .revelation-attente,
   .revelation-attente .titre-logo {

@@ -97,12 +97,23 @@ export function urlQrJeu(commerceId: string): string {
   return `${window.location.origin}/r/${encodeURIComponent(commerceId)}`
 }
 
+/**
+ * Navigation interne (boucle animations, cycle 5) : `hashchange` ne part jamais à l'ouverture de la page, seulement
+ * aux changements de route qui suivent — la classe `navigue` posée sur <html> marque donc « déjà navigué ». Les pages
+ * Découverte (#/bienvenue, #/menu) n'entrent en scène qu'avec elle (`.navigue .entree-page`, index.css) : le premier
+ * chargement (QR d'une table ouvrant directement #/menu) n'est jamais animé.
+ */
+export function apresNavigation() {
+  document.documentElement.classList.add('navigue')
+  window.scrollTo(0, 0)
+}
+
 export function useRoute(): Route {
   const [route, setRoute] = useState<Route>(lireRoute)
   useEffect(() => {
     const surChangement = () => {
       setRoute(lireRoute())
-      window.scrollTo(0, 0)
+      apresNavigation()
     }
     window.addEventListener('hashchange', surChangement)
     return () => window.removeEventListener('hashchange', surChangement)
