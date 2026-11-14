@@ -1,13 +1,16 @@
-// Parcours de bout en bout dans Chromium (roue v2, R4) : scan du QR vitrine (#/jouer) → lots du jour + lien règlement
-// → inscription → accès LIBRE, tirage immédiat → gain (utilisable dès demain) → carte de fidélité : gain en attente →
-// LENDEMAIN (date du tirage reculée d'un jour dans la base TEMPORAIRE du serveur de test) → « Utiliser mon gain » → code
-// + compte à rebours → la caisse vérifie le code (code équipe) puis remet le lot → le gain quitte la carte.
+// Parcours de bout en bout dans Chromium (roue v2, R4 ; P1-4 : QR du code gagnant) : scan du QR vitrine (#/jouer)
+// → lots du jour + lien règlement → inscription → accès LIBRE, tirage immédiat → gain (utilisable dès demain) →
+// carte de fidélité : gain en attente → LENDEMAIN (date du tirage reculée d'un jour dans la base TEMPORAIRE du
+// serveur de test) → « Utiliser mon gain » → code + compte à rebours + QR du code → la caisse vérifie le code
+// (code équipe) puis remet le lot → le gain quitte la carte.
+// La vérification en caisse est testée par les deux voies : saisie manuelle, et scan du QR (caméra et détecteur
+// simulés — Chromium sans caméra ne peut pas lire un vrai QR). Un troisième test couvre le repli caméra refusée.
 // Serveur local + base SQLite temporaire (tests-e2e/serveur.ts), jamais la production.
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { expect, test, type APIRequestContext } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test'
 
 const ADMIN = { 'X-Admin-PIN': '000000' }
 const PIN = '4321'
@@ -68,14 +71,9 @@ function avancerAuLendemain(commerceId: string, port: number) {
   }
 }
 
-test('scan → lots du jour + règlement → tirage libre → gain en attente → lendemain : activation, code, remise en caisse', async ({ page, browser, request, baseURL }) => {
+/** Parcours client jusqu'au code activé (étapes 1 à 5) : retourne le commerce et le code à 6 caractères. */
+async function obtenirCodeGain(page: Page, request: APIRequestContext, baseURL: string) {
   const commerce = await preparerCommerce(request)
-
-  // P0-D1 : aucune requête échouée sur le parcours client (le refus d'activation n'est jamais provoqué ici).
-  const requetesEchouees: string[] = []
-  page.on('response', (r) => {
-    if (r.status() >= 400) requetesEchouees.push(`${r.status()} ${r.url()}`)
-  })
 
   // 1. Le client scanne le QR vitrine : lots du jour, règles en une ligne, lien vers le règlement.
   await page.goto(`/#/jouer/${commerce.id}`)
@@ -114,7 +112,7 @@ test('scan → lots du jour + règlement → tirage libre → gain en attente �
   await expect(page.getByRole('button', { name: 'Utiliser mon gain' })).toHaveCount(0)
 
   // 5. Le lendemain (base de test seulement) : « Utiliser mon gain » → code + compte à rebours de 10 minutes.
-  avancerAuLendemain(commerce.id, Number(new URL(baseURL!).port))
+  avancerAuLendemain(commerce.id, Number(new URL(baseURL).port))
   await page.reload()
   await expect(bloc).toHaveAttribute('data-gain', 'aActiver')
   await page.getByRole('button', { name: 'Utiliser mon gain' }).click()
@@ -122,14 +120,33 @@ test('scan → lots du jour + règlement → tirage libre → gain en attente �
   const code = (await bloc.locator('[data-code-active] p.font-mono').textContent())!.trim()
   expect(code).toMatch(/^[A-Z0-9]{6}$/)
   await expect(bloc.locator('[data-compte-a-rebours]')).toContainText(/Il expire dans (10:00|09:[0-5]\d)/)
+  // P1-4 : le même code est aussi affiché en QR, sous le code en texte.
+  await expect(bloc.locator('[data-qr-code-gagnant] svg[role="img"]')).toBeVisible()
+  return { commerce, code }
+}
 
-  // 6. La caisse (autre appareil, code équipe) vérifie le code puis remet le lot.
+/** Caisse ouverte sur un autre appareil (code équipe), prête à vérifier un code gagnant. */
+async function ouvrirCaisse(browser: Browser, baseURL: string, commerceId: string) {
   const tablette = await browser.newContext({ baseURL, locale: 'fr-FR', timezoneId: 'Europe/Paris', serviceWorkers: 'block', reducedMotion: 'reduce' })
   const caisse = await tablette.newPage()
-  await caisse.goto(`/#/caisse/${commerce.id}`)
+  await caisse.goto(`/#/caisse/${commerceId}`)
   await caisse.getByLabel('Votre code équipe (4 chiffres)').fill(CODE_EQUIPE)
   await caisse.getByRole('button', { name: 'Ouvrir la caisse' }).click()
   await expect(caisse.getByText('Connecté : Camille')).toBeVisible()
+  return { tablette, caisse }
+}
+
+test('scan → lots du jour + règlement → tirage libre → gain en attente → lendemain : activation, code, remise en caisse (saisie manuelle)', async ({ page, browser, request, baseURL }) => {
+  // P0-D1 : aucune requête échouée sur le parcours client (le refus d'activation n'est jamais provoqué ici).
+  const requetesEchouees: string[] = []
+  page.on('response', (r) => {
+    if (r.status() >= 400) requetesEchouees.push(`${r.status()} ${r.url()}`)
+  })
+
+  const { commerce, code } = await obtenirCodeGain(page, request, baseURL!)
+
+  // 6. La caisse (autre appareil, code équipe) vérifie le code saisi puis remet le lot.
+  const { tablette, caisse } = await ouvrirCaisse(browser, baseURL!, commerce.id)
   await caisse.getByLabel('Code gagnant (6 caractères)').fill(code.toLowerCase())
   await caisse.getByRole('button', { name: 'Vérifier', exact: true }).click()
   await expect(caisse.getByText(LOT, { exact: true })).toBeVisible()
@@ -143,4 +160,64 @@ test('scan → lots du jour + règlement → tirage libre → gain en attente �
   await page.getByText('Historique des visites et des lots').click()
   await expect(page.getByText(`Roue : ${LOT} (retiré)`)).toBeVisible()
   expect(requetesEchouees).toEqual([])
+})
+
+test('QR du code → la caisse le scanne (vérification automatique) puis remet le lot', async ({ page, browser, request, baseURL }) => {
+  const { commerce, code } = await obtenirCodeGain(page, request, baseURL!)
+
+  // Fausse caméra + faux détecteur : le QR « lu » est le vrai code activé. Le flux vient d'un canvas (aucun
+  // périphérique réel) ; le détecteur renvoie le code à chaque lecture, comme le ferait BarcodeDetector.
+  const tablette = await browser.newContext({ baseURL, locale: 'fr-FR', timezoneId: 'Europe/Paris', serviceWorkers: 'block', reducedMotion: 'reduce' })
+  await tablette.addInitScript((codeGain: string) => {
+    const w = window as unknown as { __codeGainE2E: string; BarcodeDetector: unknown }
+    w.__codeGainE2E = codeGain
+    w.BarcodeDetector = class {
+      constructor(_options: unknown) {}
+      async detect(): Promise<{ rawValue: string }[]> {
+        return [{ rawValue: w.__codeGainE2E }]
+      }
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = 640
+    canvas.height = 640
+    const ctx = canvas.getContext('2d')!
+    const flux = canvas.captureStream(25)
+    // Le flux ne produit des images que si le canvas est repeint : on le repeint en boucle, sinon la vidéo
+    // ne démarre jamais (play() attend la première image) et le scanner reste sur « Ouverture de la caméra… ».
+    ctx.fillStyle = '#ffffff'
+    setInterval(() => ctx.fillRect(0, 0, 640, 640), 100)
+    navigator.mediaDevices.getUserMedia = async () => flux
+  }, code)
+  const caisse = await tablette.newPage()
+  await caisse.goto(`/#/caisse/${commerce.id}`)
+  await caisse.getByLabel('Votre code équipe (4 chiffres)').fill(CODE_EQUIPE)
+  await caisse.getByRole('button', { name: 'Ouvrir la caisse' }).click()
+  await expect(caisse.getByText('Connecté : Camille')).toBeVisible()
+
+  // Le scan vérifie tout seul : le lot s'affiche sans que la caisse tape quoi que ce soit…
+  await caisse.getByRole('button', { name: '📷 Scanner le code' }).click()
+  await expect(caisse.getByText(LOT, { exact: true })).toBeVisible()
+  // …et le code scanné a rempli la saisie (la caisse voit ce qui a été vérifié).
+  await expect(caisse.getByLabel('Code gagnant (6 caractères)')).toHaveValue(code)
+  await caisse.getByRole('button', { name: '🎁 Marquer remis' }).click()
+  await expect(caisse.getByText(`Le code ne pourra plus resservir.`, { exact: false })).toBeVisible()
+  await tablette.close()
+
+  // Le gain remis quitte la carte ; l'historique le garde.
+  await page.reload()
+  await expect(page.locator('[data-gains-roue]')).toHaveCount(0)
+  await page.getByText('Historique des visites et des lots').click()
+  await expect(page.getByText(`Roue : ${LOT} (retiré)`)).toBeVisible()
+})
+
+test('caméra indisponible : le panneau de scan propose la saisie manuelle du code', async ({ browser, request, baseURL }) => {
+  const commerce = await preparerCommerce(request)
+  const { tablette, caisse } = await ouvrirCaisse(browser, baseURL!, commerce.id)
+  await caisse.getByRole('button', { name: '📷 Scanner le code' }).click()
+  await expect(caisse.getByRole('heading', { name: 'Scanner le code gagnant' })).toBeVisible()
+  // Chromium sans caméra : getUserMedia est refusé (ou absent) → l'erreur s'affiche, avec son repli manuel.
+  await expect(caisse.getByText(/Accès à la caméra refusé|Caméra indisponible/)).toBeVisible()
+  await caisse.getByRole('button', { name: '⌨ Saisir le code' }).click()
+  await expect(caisse.getByLabel('Code gagnant (6 caractères)')).toBeVisible()
+  await tablette.close()
 })

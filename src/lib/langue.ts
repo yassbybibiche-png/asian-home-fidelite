@@ -191,6 +191,10 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   'À retirer directement au comptoir aujourd’hui.': 'Collect it directly at the counter today.',
   'Présentez ce code au comptoir :': 'Show this code at the counter:',
   'Il expire dans {reste} — passé ce délai, réactivez-le ici.': 'It expires in {reste} — after that, reactivate it here.',
+  // P1-4 : QR du code gagnant, scanné par la caisse.
+  'Ou présentez ce QR au comptoir.': 'Or show this QR code at the counter.',
+  'QR code du gain à présenter au comptoir': 'QR code for your prize, to show at the counter',
+  'QR indisponible — le code ci-dessus suffit, la caisse peut le saisir.': 'QR code unavailable — the code above is enough, the counter can type it in.',
   'Utilisable jusqu’au {au}.': 'Usable until {au}.',
   'Code expiré : appuyez de nouveau au comptoir pour en afficher un nouveau.': 'Code expired: tap again at the counter to show a new one.',
   'Utiliser mon gain': 'Use my prize',

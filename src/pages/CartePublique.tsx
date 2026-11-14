@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, Commerce, CommercePublic, MessageClient } from '../types'
@@ -40,6 +40,12 @@ import { TEXTE_GAIN_SANS_CODE } from '../lib/animationRoue'
 function Traduit({ texte }: { texte: string }) {
   return <>{useLangue().t(texte)}</>
 }
+
+/**
+ * QR du code gagnant (P1-4) : module différé (voir `src/components/QrCodeGain.tsx`) — il ne se charge que quand
+ * un gain affiche son code, jamais dans le bundle initial (page critique, plafond P2-Q2).
+ */
+const QrCodeGain = lazy(() => import('../components/QrCodeGain').then((m) => ({ default: m.QrCodeGain })))
 
 /** Page publique #/carte/<clientId> : la carte de fidélité sur le téléphone du client. */
 export default function CartePublique() {
@@ -471,6 +477,12 @@ function GainsRoue({
               <p className="text-base font-bold text-gray-900" role="timer" data-compte-a-rebours>
                 {t('Il expire dans {reste} — passé ce délai, réactivez-le ici.', { reste: compteARebours(vue.resteMs) })}
               </p>
+              {/* P1-4 : le même code en QR, pour que la caisse le scanne au lieu de le taper. */}
+              <div data-qr-code-gagnant className="flex flex-col items-center gap-1 pt-1">
+                <Suspense fallback={<div className="h-40 w-40 bg-white" aria-hidden="true" />}>
+                  <QrCodeGain code={vue.code} />
+                </Suspense>
+              </div>
             </div>
           ) : (
             <>

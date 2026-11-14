@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { MESSAGE_MODE_SERVEUR, messageErreur, useStore } from '../store'
 import { useRoute } from '../router'
 import type { Client, CommerceCaisse, EntreeJournal } from '../types'
 import { echangerContreSession, ErreurApi, type AccesCaisse, type ClientApi, type GainCaisse } from '../data/api'
-import { messageGain, normaliserCodeGagnant } from '../lib/roulette'
 import { creerCoffrePin, rangementIndexedDb } from '../data/coffrePin'
 import { ErreurCoffre, journaliserEchec, lireCoffreBorne, MESSAGE_COFFRE_ILLISIBLE } from '../lib/connexion'
 import { tamponsAffiches } from '../lib/fidelite'
@@ -17,8 +16,11 @@ import { nomAffiche } from '../lib/inscriptionJeu'
 import { classerErreur, clientIdDepuisQr, creerFileCaisse, libelleFile, nouvelIdAction, type ActionCaisse, type EtatFile, type Envoi, type TypeActionCaisse } from '../lib/fileCaisse'
 import { LogoCommerce, MessageErreur } from '../components/ui'
 import { ScannerQr } from '../components/ScannerQr'
-import { SqueletteCaisse } from '../components/Squelette'
+import { Bloc, Squelette, SqueletteCaisse } from '../components/Squelette'
 import { MessagePublic } from './Jouer'
+
+/** Section du code gagnant (P1-4) : module différé, hors bundle initial — la caisse la charge à l'ouverture. */
+const CodeGagnantCaisse = lazy(() => import('../components/CodeGagnantCaisse').then((m) => ({ default: m.CodeGagnantCaisse })))
 
 /** Page caisse #/caisse/<commerceId> : tablette du comptoir, déverrouillée par le code équipe (4 chiffres). */
 export default function Caisse() {
@@ -369,24 +371,29 @@ function CaisseApi({ api, commerceId }: { api: ClientApi; commerceId: string }) 
     return { statut: 'ok' as const, client: apres }
   }
 
+  /** Code gagnant de la roue : toujours en ligne (jamais mis en file : la remise doit être vérifiée par le serveur).
+   * Mémorisé, et déclaré AVANT les retours anticipés ci-dessous : un hook après un `return` conditionnel casse
+   * l'ordre des hooks entre deux rendus (la caisse ne s'ouvrait plus). */
+  const gain = useCallback(
+    async (quoi: 'verifier' | 'remettre', code: string): Promise<GainCaisse> => {
+      const a = accesRef.current
+      if (!a) throw new Error('Caisse verrouillée : saisissez votre code équipe.')
+      try {
+        return await (quoi === 'verifier' ? api.verifierGain(commerceId, a, code) : api.remettreGain(commerceId, a, code))
+      } catch (e) {
+        if (e instanceof ErreurApi && e.horsLigne) {
+          setEnLigne(false)
+          throw new ErreurApi(0, 'Hors ligne : un code gagnant ne peut être vérifié qu’avec le réseau. Réessayez dans un instant.')
+        }
+        throw e
+      }
+    },
+    [api, commerceId],
+  )
+
   if (!pret) return <SqueletteCaisse libelle="Ouverture de la caisse…" />
   if (!acces) return <Deverrouillage commerce={donnees?.commerce} erreur={erreurAcces} onCode={deverrouiller} attente={etatFile.attente.length} />
   if (!donnees) return enLigne ? <SqueletteCaisse libelle="Chargement des clients…" /> : <MessagePublic titre="Caisse">Hors ligne et aucune donnée en mémoire sur cet appareil.</MessagePublic>
-
-  /** Code gagnant de la roue : toujours en ligne (jamais mis en file : la remise doit être vérifiée par le serveur). */
-  async function gain(quoi: 'verifier' | 'remettre', code: string): Promise<GainCaisse> {
-    const a = accesRef.current
-    if (!a) throw new Error('Caisse verrouillée : saisissez votre code équipe.')
-    try {
-      return await (quoi === 'verifier' ? api.verifierGain(commerceId, a, code) : api.remettreGain(commerceId, a, code))
-    } catch (e) {
-      if (e instanceof ErreurApi && e.horsLigne) {
-        setEnLigne(false)
-        throw new ErreurApi(0, 'Hors ligne : un code gagnant ne peut être vérifié qu’avec le réseau. Réessayez dans un instant.')
-      }
-      throw e
-    }
-  }
 
   return (
     <Comptoir
@@ -742,7 +749,16 @@ function Comptoir({
         </section>
       )}
 
-      <CodeGagnantCaisse onGain={onGain} />
+      <Suspense
+        fallback={
+          <Squelette libelle="Chargement…" className="carte space-y-3">
+            <Bloc className="h-6 w-48 rounded-lg" />
+            <Bloc className="h-11 rounded-xl" />
+          </Squelette>
+        }
+      >
+        <CodeGagnantCaisse onGain={onGain} />
+      </Suspense>
 
       {choisi && (
         <section className="carte space-y-4" aria-label={`Client : ${nomAffiche(choisi.prenom)}`}>
@@ -881,97 +897,3 @@ function Comptoir({
   )
 }
 
-/** Code gagnant de la roue (P0-U3) : le client le montre, l'équipe le saisit, vérifie le lot puis le marque remis. */
-function CodeGagnantCaisse({ onGain }: { onGain(quoi: 'verifier' | 'remettre', code: string): Promise<GainCaisse> }) {
-  const [saisi, setSaisi] = useState('')
-  const [gain, setGain] = useState<GainCaisse | null>(null)
-  const [remisIci, setRemisIci] = useState(false)
-  const [erreur, setErreur] = useState<string | null>(null)
-  const [enCours, setEnCours] = useState(false)
-  const code = normaliserCodeGagnant(saisi)
-
-  async function appeler(quoi: 'verifier' | 'remettre', c: string) {
-    setEnCours(true)
-    setErreur(null)
-    try {
-      setGain(await onGain(quoi, c))
-      setRemisIci(quoi === 'remettre')
-    } catch (e) {
-      setErreur(messageErreur(e))
-      // Remise refusée (déjà remise par une autre caisse entre-temps…) : on réaffiche l'état à jour du code.
-      if (quoi === 'remettre' && e instanceof ErreurApi && (e.statut === 409 || e.statut === 410)) {
-        setGain(await onGain('verifier', c).catch(() => null))
-      } else setGain(null)
-    } finally {
-      setEnCours(false)
-    }
-  }
-
-  function verifier(e: FormEvent) {
-    e.preventDefault()
-    if (!code || enCours) return
-    void appeler('verifier', code)
-  }
-
-  const date = gain && new Date(gain.date)
-  return (
-    <section className="carte space-y-3" aria-labelledby="caisse-gain-titre">
-      <h2 id="caisse-gain-titre" className="titre-carte">
-        🎡 Code gagnant de la roue
-      </h2>
-      <form onSubmit={verifier} className="flex gap-2">
-        <label className="sr-only" htmlFor="caisse-code-gagnant">
-          Code gagnant (6 caractères)
-        </label>
-        <input
-          id="caisse-code-gagnant"
-          className="champ min-w-0 flex-1 text-center font-mono text-xl tracking-[0.3em] uppercase"
-          placeholder="ABC234"
-          autoComplete="off"
-          autoCapitalize="characters"
-          spellCheck={false}
-          maxLength={11}
-          value={saisi}
-          onChange={(e) => {
-            setSaisi(e.target.value.toUpperCase())
-            setGain(null)
-            setErreur(null)
-          }}
-          aria-invalid={!!erreur}
-          aria-describedby="caisse-code-aide"
-        />
-        <button type="submit" className="bouton shrink-0" disabled={!code || enCours}>
-          {enCours ? '…' : 'Vérifier'}
-        </button>
-      </form>
-      <p id="caisse-code-aide" className="text-sm text-gray-600">
-        6 lettres ou chiffres, affichés sur le téléphone du client. Majuscules et espaces sans importance. Gain utilisable du lendemain du tirage à 30 jours, code valable 10 minutes après activation par le client.
-      </p>
-      <MessageErreur>{erreur}</MessageErreur>
-      {gain && date && (
-        <div className="space-y-2 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-200">
-          <p className="font-titre text-2xl font-bold">{gain.lot}</p>
-          <p className="text-sm text-gray-700">
-            {gain.client ? <strong>{nomAffiche(gain.client.prenom)}</strong> : 'Client supprimé'} · tiré le {date.toLocaleDateString('fr-FR')} à{' '}
-            {date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · code <span className="font-mono">{gain.code}</span>
-          </p>
-          {gain.statut === 'utilisable' ? (
-            <button className="bouton min-h-14 w-full bg-green-700 text-lg hover:bg-green-800 active:bg-green-900" disabled={enCours} onClick={() => void appeler('remettre', gain.code)}>
-              🎁 Marquer remis
-            </button>
-          ) : remisIci ? (
-            <p className="alerte-succes apparition" role="status">
-              ✓ Lot remis{gain.client ? ` à ${nomAffiche(gain.client.prenom)}` : ''} : {gain.lot}. Le code ne pourra plus resservir.
-            </p>
-          ) : (
-            !erreur && (
-              <p className="rounded-xl bg-red-50 p-3 text-sm text-red-900 ring-1 ring-red-200" role="alert">
-                {messageGain(gain)}
-              </p>
-            )
-          )}
-        </div>
-      )}
-    </section>
-  )
-}
