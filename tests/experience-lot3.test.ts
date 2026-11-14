@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs'
 import {
   actionsCuisine,
   anciennete,
+  arriveesDepuis,
   commandesDeSection,
   heureCommande,
   INTERVALLE_CUISINE_MS,
@@ -20,6 +21,14 @@ import {
   SECTIONS_CUISINE,
   type CommandeCuisine,
 } from '../src/lib/cuisine.ts'
+import {
+  CLE_SON_CUISINE,
+  creerAlerteCuisine,
+  memoriserSonCuisine,
+  NOTES_ALERTE_CUISINE,
+  ouvrirContexteAudio,
+  sonCuisineActif,
+} from '../src/lib/sonCuisine.ts'
 import { STATUTS_COMMANDE, transitionValide } from '../src/lib/commande.ts'
 import { lireRoute, PAGES_PUBLIQUES } from '../src/router.ts'
 import type { StatutCommande } from '../src/types.ts'
@@ -182,10 +191,11 @@ describe('Lot 3 — page #/cuisine (source)', () => {
     assert.match(page, /role="status">\s*<span>\{note\}<\/span>/)
   })
 
-  test('« Nouveau » visuel (pastille + bordure), sans son ; annonce polie pour les lecteurs d’écran', () => {
+  test('« Nouveau » visuel (pastille + bordure) et sonore (synthèse WebAudio, aucun fichier) ; annonce polie pour les lecteurs d’écran', () => {
     assert.match(page, /nouvelle && <span [^>]*>Nouveau<\/span>/)
     assert.match(page, /\$\{nouvelle \? 'ring-4 ring-magenta-500' : ''\}/)
-    assert.doesNotMatch(page, /<audio|new Audio|\.mp3|\.ogg|\.wav/)
+    // Son par synthèse (sonCuisine.ts), jamais un fichier ni un élément audio ; le contexte n'est pas créé ici.
+    assert.doesNotMatch(page, /<audio|new Audio|\.mp3|\.ogg|\.wav|new \(webkit\)?AudioContext/)
     assert.match(page, /aria-live="polite"/)
   })
 
@@ -216,3 +226,161 @@ describe('Lot 3 — page #/cuisine (source)', () => {
     assert.doesNotMatch(page, /useLangue|CommutateurLangue|enregistrerTraductions|\bt\('/)
   })
 })
+
+describe('Produit cycle 2 — alerte sonore + visuelle à l’arrivée d’une commande (P1-2)', () => {
+  test('arriveesDepuis : seules les signalées nouvelles sonnent ; une commande qui attend ne re-sonne pas', () => {
+    assert.deepEqual(arriveesDepuis(new Set(['b']), new Set()), ['b'])
+    assert.deepEqual(arriveesDepuis(new Set(['b']), new Set(['b'])), [])
+    assert.deepEqual(arriveesDepuis(new Set(['b', 'c']), new Set(['b'])), ['c'])
+    assert.deepEqual(arriveesDepuis(new Set(), new Set(['b'])), [])
+    // Une commande acceptée entre-temps sort des signalées : elle ne sonne pas non plus.
+    assert.deepEqual(arriveesDepuis(new Set(['b']), new Set(['a', 'b'])), [])
+  })
+
+  test('préférence sonore : défaut activé ; « 0 » en localStorage = coupé ; clé unique par appareil, pas par commerce', () => {
+    const stockage = (init: Record<string, string> = {}) => {
+      const m = new Map(Object.entries(init))
+      return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), m }
+    }
+    assert.equal(sonCuisineActif(stockage()), true)
+    assert.equal(sonCuisineActif(null), true)
+    assert.equal(sonCuisineActif(stockage({ [CLE_SON_CUISINE]: '0' })), false)
+    assert.equal(sonCuisineActif(stockage({ [CLE_SON_CUISINE]: '1' })), true)
+    assert.notEqual(CLE_SON_CUISINE, 'fidelite:son-roue')
+    assert.doesNotMatch(CLE_SON_CUISINE, /commerce|\$\{/)
+    const s = stockage()
+    memoriserSonCuisine(s, false)
+    assert.equal(s.m.get(CLE_SON_CUISINE), '0')
+    memoriserSonCuisine(s, true)
+    assert.equal(s.m.get(CLE_SON_CUISINE), '1')
+    // Stockage plein ou refusé : pas d'erreur, le choix vaut pour la page.
+    memoriserSonCuisine(
+      {
+        setItem() {
+          throw new Error('quota')
+        },
+      },
+      false,
+    )
+  })
+
+  test('ouvrirContexteAudio : un contexte créé et réveillé ; sans WebAudio ou constructeur qui lève : undefined', () => {
+    const { journal, Ctx } = fauxAudio()
+    const ctx = ouvrirContexteAudio({ AudioContext: Ctx })
+    assert.ok(ctx)
+    assert.equal(journal.contextes, 1)
+    assert.equal(journal.reveils, 1)
+    assert.equal(ouvrirContexteAudio({}), undefined)
+    assert.equal(
+      ouvrirContexteAudio({
+        AudioContext: class {
+          constructor() {
+            throw new Error('refusé')
+          }
+        } as unknown as new () => AudioContext,
+      }),
+      undefined,
+    )
+  })
+
+  test('creerAlerteCuisine : rien sans déverrouillage ; deux notes (la, ré) après le premier geste ; silence si coupé', () => {
+    const { journal, Ctx } = fauxAudio()
+    const ctx = new Ctx()
+    const alerte = creerAlerteCuisine(() => ctx)
+    // Avant tout geste : le contexte n'existe pas encore, rien ne sonne.
+    alerte.alerter()
+    assert.equal(journal.oscillateurs.length, 0)
+    alerte.deverrouiller()
+    assert.equal(journal.contextes, 1)
+    assert.equal(journal.reveils, 1)
+    // Le deuxième geste ne recrée pas de contexte.
+    alerte.deverrouiller()
+    assert.equal(journal.contextes, 1)
+    alerte.alerter()
+    assert.equal(journal.oscillateurs.length, 2)
+    assert.deepEqual(journal.notes, NOTES_ALERTE_CUISINE)
+    assert.deepEqual(NOTES_ALERTE_CUISINE, [880, 1174.66])
+    assert.ok(journal.oscillateurs.every((o) => o.demarre), 'les deux notes démarrent')
+    assert.ok(journal.oscillateurs.every((o) => o.arrets.length === 1), 'les deux notes s’arrêtent')
+    // Son coupé : plus rien, même après déverrouillage.
+    alerte.actif = false
+    alerte.alerter()
+    assert.equal(journal.oscillateurs.length, 2)
+    alerte.actif = true
+    alerte.alerter()
+    assert.equal(journal.oscillateurs.length, 4, 'une nouvelle arrivée re-sonne')
+    // Sans WebAudio du tout : ni création ni erreur.
+    const muette = creerAlerteCuisine(() => undefined)
+    muette.deverrouiller()
+    muette.alerter()
+  })
+
+  test('page #/cuisine : l’alerte ne sonne qu’aux arrivées ; interrupteur sonore ; encart persistant', () => {
+    const page = lire('src/pages/Cuisine.tsx')
+    // La page délègue le son au module de synthèse ; la création du contexte n'a pas lieu dans la page.
+    assert.match(page, /from '\.\.\/lib\/sonCuisine'/)
+    assert.match(page, /creerAlerteCuisine, memoriserSonCuisine, sonCuisineActif/)
+    assert.doesNotMatch(page, /new \(webkit\)?AudioContext/)
+    // Préférence lue au montage, mémorisée au basculement (bouton nommé, état pressé).
+    assert.match(page, /useState\(\(\) => sonCuisineActif\(stockageLocal\(\)\)\)/)
+    assert.match(page, /memoriserSonCuisine\(stockageLocal\(\), prochain\)/)
+    assert.match(page, /aria-pressed=\{son\} onClick=\{basculerSon\}>/)
+    assert.match(page, /\{son \? 'Son activé' : 'Son coupé'\}/)
+    // Déverrouillage audio au premier geste du personnel (appui ou touche), jamais au chargement.
+    assert.match(page, /window\.addEventListener\('pointerdown', deverrouiller\)/)
+    assert.match(page, /window\.addEventListener\('keydown', deverrouiller\)/)
+    // Une seule sonnerie par commande : les arrivées depuis la lecture précédente, pas celles qui attendent déjà.
+    assert.match(page, /const arrivees = arriveesDepuis\(nouv, signaleesRef\.current\)/)
+    assert.match(page, /if \(arrivees\.length > 0\) alerteRef\.current\?\.alerter\(\)/)
+    // Encart persistant en haut de l'écran tant qu'une commande attend (aujourd'hui seulement), table nommée si unique.
+    assert.match(page, /choix === 'aujourdhui' && nbNouvelles > 0/)
+    assert.match(page, /Nouvelle commande en attente : \$\{nouvelles\[0\]\.table\}/)
+    assert.match(page, /\$\{nbNouvelles\} nouvelles commandes en attente/)
+    assert.match(page, /bg-magenta-500 px-3 py-2 text-sm font-bold text-white/)
+  })
+})
+
+/** Faux AudioContext qui compte ses constructions, les réveils et les notes jouées (adapté de roue-premium-r58). */
+function fauxAudio() {
+  const journal = {
+    contextes: 0,
+    reveils: 0,
+    notes: [] as number[],
+    oscillateurs: [] as { demarre: boolean; arrets: (number | undefined)[] }[],
+    destination: {},
+  }
+  class Ctx {
+    currentTime = 0
+    state = 'running'
+    destination = journal.destination
+    constructor() {
+      journal.contextes++
+    }
+    resume() {
+      journal.reveils++
+      return Promise.resolve()
+    }
+    createOscillator() {
+      const o = {
+        type: '',
+        demarre: false,
+        arrets: [] as (number | undefined)[],
+        frequency: { setValueAtTime: (f: number) => journal.notes.push(f) },
+        connect: (g: unknown) => g,
+        start() {
+          o.demarre = true
+        },
+        stop(t?: number) {
+          o.arrets.push(t)
+        },
+      }
+      journal.oscillateurs.push(o)
+      return o
+    }
+    createGain() {
+      const g = { gain: { value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (d: unknown) => d }
+      return g
+    }
+  }
+  return { journal, Ctx: Ctx as unknown as new () => AudioContext }
+}
