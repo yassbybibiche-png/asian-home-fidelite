@@ -529,3 +529,52 @@ Critique aux 10 questions :
     plat-star (photo réelle d'un plat photographié en très grand, zoom lent / parallaxe au
     défilement), sans jamais présenter une image générée comme un plat.
 
+### Cycle 3 — « Plat-star plein cadre » (menu Découverte) — référence : Ciao Kombucha (le produit est l'univers)
+
+1. **Problème qui justifie le changement ?** Les cycles 1 et 2 ont habillé les catégories
+   (univers, typo géante) mais aucun PLAT n'occupait l'écran : chez la référence, c'est le
+   produit lui-même, en très grand, qui porte l'émotion — et nos photos de plats restaient
+   cantonnées aux vignettes des cartes.
+2. **Qu'est-ce qui change à l'écran ?** Chaque catégorie dont un plat photographié supporte le
+   plein cadre reçoit, entre son en-tête et sa liste, un bloc de 62 vh : la photo du plat
+   lui-même en plein cadre (parallaxe + zoom lent de la catégorie active, « plongée »
+   scale 1,14 → 1 à la révélation via la propriété `scale`, sans conflit avec le `transform`
+   de parallaxe), son nom en titre géant révélé mot à mot, description, pastille prix — tout
+   le bloc est un bouton qui mène à la fiche du plat. Sur la carte réelle : **Loc Lac** (Plats
+   thaï, signature, photo 1109×720) et **Mango Stick** (Desserts, 411×412).
+3. **Plus beau ?** Oui, nettement, là où il s'applique : le bloc Loc Lac est le moment le plus
+   fort de la boucle jusqu'ici — image nette (agrandissement ×0,72), couleurs pleines, nom
+   géant. DA menu Découverte 9,2 → **9,4/10**. Pas plus haut : la couverture est fine (2
+   catégories sur 16) pour une raison qui n'est pas du design mais de la matière (question 10).
+4. **Plus rapide ?** Mesures dans le bruit (FCP 712–716 ms, LCP 2500–2512 ms contre témoin
+   `#/jouer` dérivant autant ; l'élément LCP reste la photo d'en-tête ; les photos stars sont
+   chargées paresseusement au défilement). Bundle initial inchangé (484 259 o) ; CLS 0.
+5. **Plus accessible ?** Bloc = vrai bouton libellé « Voir le plat : {nom} » ; masqué pendant
+   une recherche ; mouvement réduit statique (parallaxe coupée, plongée annulée, contenu
+   visible d'emblée) ; la liste de cartes en dessous reste le chemin principal.
+6. **Plus crédible ?** La photo est celle du plat nommé — jamais une image d'ambiance déguisée.
+   Et le cycle a refusé deux stars plutôt que de les afficher floues (question 7) : la
+   crédibilité du plein cadre tient à sa netteté.
+7. **Cohérent avec la DA ?** Vocabulaire strictement repris : univers (cycle 1), titre géant et
+   masques (cycle 2), parallaxe et ken burns existants, pastilles signature/prix des cartes.
+   Nouveauté du cycle, décidée en relecture coordinateur après captures : un **seuil de
+   résolution** (`src/lib/platStar.ts`) — une photo n'est éligible que si son agrandissement
+   au cadre (recadrage `object-cover` au ratio 0,731, cadre 380×520) reste ≤ ×1,5. Mesuré sur
+   les fichiers : Dynamite ×2,31, Poke Bowl ×3,94 et les 7 photos extraites du PDF (×2,3)
+   écartées ; Loc Lac ×0,72 et Mango Stick ×1,26 conservées. Une photo de dimensions
+   inconnues (commerçant) est éligible par défaut. Un test revérifie les dimensions réelles
+   des fichiers contre la table.
+8. **Trop complexe ?** Un composant, une fonction pure, 22 lignes de CSS. Le seuil ajoute une
+   table de dimensions — assumée et testée contre les fichiers eux-mêmes.
+9. **Risques ?** Le doublon star/carte (Poke Bowl) a disparu avec le seuil. Restent : deux
+   moments forts mais éloignés dans un long défilement ; la hauteur 62 vh est constante,
+   y compris pour une photo presque carrée (Mango : rendu correct en capture). Contre-épreuves
+   du coordinateur : seuil porté à ×99 → 6 tests rouges ; classe `.plat-star` renommée →
+   2 tests rouges ; suite complète revérifiée 1759/1759.
+10. **Que manque-t-il encore ?** Deux choses, par ordre : (a) la MATIÈRE — 9 photos de plats
+    sur 11 font ~340 px (extraites du PDF du menu) : le jour où le restaurant fournit des
+    photos plus grandes, 9 catégories gagneront leur star sans une ligne de code (le seuil
+    les admettra tout seul) ; c'est le même chantier « photos » déjà ouvert côté restaurant.
+    (b) Le rail « En photos » de l'accueil est encore un défilement sec sans inertie ni vie →
+    cycle 4 : rail vivant (inertie, zoom au centre façon Fideliz, tuiles qui respirent).
+
