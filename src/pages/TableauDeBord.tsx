@@ -2,13 +2,13 @@ import { useState } from 'react'
 import { useDonneesCommerce, useStore } from '../store'
 import { calculerChiffres, calculerChiffresCartes, compterPartiesParTable, noteMoyenne } from '../lib/stats'
 import { listePurge, resumeRappelPurge } from '../lib/rgpd'
-import { dateRelative } from '../lib/format'
+import { dateCourte, dateRelative } from '../lib/format'
 import { Etoiles, Vide } from '../components/ui'
 import { Mesure } from '../components/Mesure'
 import { InstantsGagnants } from '../components/InstantsGagnants'
-import { DEFINITION_TAUX_UTILISATION, JOURS_KPI_GAINS, kpiGains, type KpiGains } from '../lib/gainsRoue'
-import { formaterEuros, jourParis } from '../lib/mesure'
-import type { ActionJournal } from '../types'
+import { DEFINITION_TAUX_UTILISATION, JOURS_KPI_GAINS, kpiGains, retoursDemain, type KpiGains, type RetourDemain } from '../lib/gainsRoue'
+import { ajouterJours, formaterEuros, jourParis } from '../lib/mesure'
+import type { ActionJournal, Client } from '../types'
 
 const LIBELLES_JOURNAL: Record<ActionJournal, string> = {
   passage: 'Passage',
@@ -55,6 +55,56 @@ function GainsRoue({ kpi: k }: { kpi: KpiGains }) {
         {valeur}
       </p>
       <p className="text-sm text-gray-600">{DEFINITION_TAUX_UTILISATION} En attente : gains encore utilisables aujourd’hui ou dès demain.</p>
+    </section>
+  )
+}
+
+/** Section « Retours de demain » (P1-1) : qui détient un gain utilisable aujourd'hui ou dès demain. */
+function RetoursDemain({ retours, clients }: { retours: RetourDemain[]; clients: Client[] }) {
+  const aujourdhui = jourParis(new Date())
+  const demain = ajouterJours(aujourdhui, 1)
+  const [toutVoir, setToutVoir] = useState(false)
+  const debut = (du: string) => (du === aujourdhui ? 'dès aujourd’hui' : du === demain ? 'dès demain' : `dès le ${dateCourte(du)}`)
+  return (
+    <section className="carte space-y-1" aria-labelledby="retours-demain-titre">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="retours-demain-titre" className="titre-carte">
+          Retours de demain
+        </h2>
+        {retours.length > 8 && (
+          <button className="lien" onClick={() => setToutVoir((v) => !v)}>
+            {toutVoir ? 'Réduire' : `Tout voir (${retours.length})`}
+          </button>
+        )}
+      </div>
+      {retours.length === 0 ? (
+        <Vide>Aucun gain en attente pour demain.</Vide>
+      ) : (
+        <ul className="divide-y divide-gray-100 py-1 sm:py-1">
+          {(toutVoir ? retours : retours.slice(0, 8)).map((r) => {
+            const client = clients.find((c) => c.id === r.clientId)
+            return (
+              <li key={r.tirageId} className="flex items-center justify-between gap-3 py-2.5">
+                <span>
+                  {client ? (
+                    <a href={`#/client/${client.id}`} className="font-semibold">
+                      {client.prenom}
+                    </a>
+                  ) : (
+                    <span className="font-semibold">Client</span>
+                  )}
+                  <span className="block text-gray-700">🎁 {r.lot}</span>
+                </span>
+                <span className="shrink-0 text-right text-sm text-gray-600 tabular-nums">
+                  Utilisable {debut(r.utilisableDu)}
+                  <span className="block">jusqu’au {dateCourte(r.utilisableAu)}</span>
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <p className="text-sm text-gray-600">Gains de la roue ni remis ni expirés. Un gain gagné aujourd’hui n’est utilisable que dès demain.</p>
     </section>
   )
 }
@@ -158,6 +208,8 @@ export default function TableauDeBord() {
       </section>
 
       <GainsRoue kpi={kpiGains(tirages, commerce.lots)} />
+
+      <RetoursDemain retours={retoursDemain(tirages)} clients={clients} />
 
       {parTable.length > 0 && (
         <section className="carte space-y-1" aria-labelledby="parties-table-titre">

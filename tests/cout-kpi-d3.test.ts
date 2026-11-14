@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { coutParTirage, formaterParJour, pireCasJour, simulerCout, tiragesParJour } from '../src/lib/coutRoue.ts'
-import { coutDuTirage, estLotPhysique, etapeGain, kpiGains } from '../src/lib/gainsRoue.ts'
+import { coutDuTirage, estLotPhysique, etapeGain, kpiGains, retoursDemain } from '../src/lib/gainsRoue.ts'
 import { cycleGain, instantParis, typeTirage } from '../src/lib/roulette.ts'
 import type { Lot, Tirage } from '../src/types.ts'
 
@@ -200,6 +200,65 @@ describe('D3 : KPI « Gains de la roue » sur tirages aux statuts v2 (R3)', () =
   })
 })
 
+describe('P1-1 : « Retours de demain » — liste nominative des gains en attente', () => {
+  let n = 0
+  const tirage = (jours: number, p: Partial<Tirage> = {}): Tirage => ({
+    id: `r${++n}`,
+    commerceId: 'c',
+    clientId: `cl${n}`,
+    lot: 'Nems offerts',
+    lotId: 'nems',
+    typeLot: 'lot',
+    date: ilYa(jours),
+    ...p,
+  })
+
+  test('seuls les lots physiques ni remis ni expirés ; fenêtre J+1 à J+30 (v2), jour J seul (hérité)', () => {
+    const g0 = tirage(0)
+    const g1 = tirage(1)
+    const g30 = tirage(30)
+    const liste = retoursDemain(
+      [
+        g0,
+        g1,
+        g30,
+        tirage(31), // expiré hier : exclu
+        tirage(2, { remis: { le: ilYa(1), par: 'Gérant' } }), // remis : exclu
+        tirage(2, { lot: '+10 points', lotId: 'pts', typeLot: 'points', points: 10 }), // consolation : exclue
+        tirage(2, { lot: 'Perdu', lotId: 'perdu', typeLot: 'perdant' }), // perdant : exclu
+        tirage(0, { typeLot: undefined, lotId: undefined }), // hérité gagné aujourd'hui : utilisable aujourd'hui seulement
+        tirage(1, { typeLot: undefined, lotId: undefined }), // hérité gagné hier : expiré, exclu
+        tirage(0, { typeLot: 'lot', typeDeduit: true }), // type posé après coup : reste sous l'ancienne règle
+      ],
+      MAINTENANT,
+    )
+    assert.equal(liste.length, 5)
+    // Triés par premier jour d'utilisation, puis par fin de validité.
+    assert.deepEqual(
+      liste.map((r) => [r.utilisableDu, r.utilisableAu]),
+      [
+        ['2026-10-14', '2026-11-12'], // gagné il y a 30 jours : dernier jour aujourd'hui
+        ['2026-11-12', '2026-11-12'], // hérité gagné aujourd'hui
+        ['2026-11-12', '2026-11-12'], // type déduit, gagné aujourd'hui
+        ['2026-11-12', '2026-12-11'], // gagné hier
+        ['2026-11-13', '2026-12-12'], // gagné aujourd'hui : utilisable dès demain
+      ],
+    )
+    assert.equal(liste[0].clientId, g30.clientId)
+    assert.equal(liste[0].lot, 'Nems offerts')
+    assert.equal(liste[4].clientId, g0.clientId)
+    assert.equal(liste[3].clientId, g1.clientId)
+  })
+
+  test('même ensemble que le KPI « en attente », nominatif ; aucun tirage : liste vide', () => {
+    const tirages = [tirage(0), tirage(3), tirage(3, { activeLe: MAINTENANT.toISOString() }), tirage(32), tirage(2, { remis: { le: ilYa(1), par: 'Gérant' } })]
+    const liste = retoursDemain(tirages, MAINTENANT)
+    assert.equal(liste.length, kpiGains(tirages, [], MAINTENANT).enAttente)
+    assert.equal(liste.length, 3)
+    assert.deepEqual(retoursDemain([], MAINTENANT), [])
+  })
+})
+
 describe('D3 : branchement dans les pages commerçant (différées)', () => {
   test('Réglages → Roulette : simulateur sous les lots, calculé sur le brouillon (pas sur le commerce enregistré)', () => {
     const r = lire('src/pages/Reglages.tsx')
@@ -209,6 +268,19 @@ describe('D3 : branchement dans les pages commerçant (différées)', () => {
     assert.ok(lotsFin > 0 && simu > lotsFin && simu < r.indexOf('id="regles-jeu-titre"'), 'bloc juste sous les lots')
     assert.match(r, /coût partiel/)
     assert.match(r, /Coût non renseigné pour : \{s\.lotsSansCout\.join/)
+  })
+
+  test('Tableau de bord : section « Retours de demain » (P1-1) juste sous la carte des gains, état vide honnête, lien fiche client', () => {
+    const t = lire('src/pages/TableauDeBord.tsx')
+    const gains = t.indexOf('<GainsRoue kpi={kpiGains(tirages, commerce.lots)} />')
+    const retours = t.indexOf('<RetoursDemain retours={retoursDemain(tirages)} clients={clients} />')
+    assert.ok(gains > 0 && retours > gains, 'section juste sous la carte des gains')
+    assert.match(t, /Retours de demain/)
+    assert.match(t, /Aucun gain en attente pour demain\./)
+    assert.match(t, /#\/client\/\$\{client\.id\}/)
+    assert.match(t, /Utilisable \{debut\(r\.utilisableDu\)\}/)
+    assert.match(t, /jusqu’au \{dateCourte\(r\.utilisableAu\)\}/)
+    assert.match(t, /dès demain/)
   })
 
   test('Tableau de bord : carte « Gains de la roue » ; les modules D3 ne sont importés que par leur page', () => {
