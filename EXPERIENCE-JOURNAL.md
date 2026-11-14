@@ -621,3 +621,54 @@ Critique aux 10 questions :
     navigations internes — avec une contrainte dure : jamais au premier chargement (le QR
     d'une table ouvre directement le menu ; son LCP ne doit pas bouger).
 
+### Cycle 5 — « Transitions de navigation » (Découverte) — références : Ciao, Drimify (navigation fluide)
+
+1. **Problème qui justifie le changement ?** Tout l'intérieur des pages vivait (cycles 1 à 4),
+   mais le passage accueil ↔ menu restait une coupe sèche : le clic « Découvrir la carte »
+   téléportait le client dans le menu, sans continuité.
+2. **Qu'est-ce qui change à l'écran ?** Après une navigation interne, la page entrante monte
+   de 14 px en fondant (0,28 s, courbe du projet) ; le changement d'onglet du menu rejoue la
+   même entrée sur la liste en 0,18 s (jamais sur la frappe dans la recherche). Mécanisme :
+   le routeur pose une classe `navigue` sur `<html>` au premier `hashchange`
+   (`src/router.ts`) et le CSS n'anime que sous cette classe — l'événement ne se déclenchant
+   jamais au chargement, **le premier affichage n'est jamais animé, par construction**. Au
+   menu, la cible est le contenu qui suit le calque d'ambiance (`.ambiance-univers + div`,
+   la ligne du conteneur étant épinglée par un test du cycle 1) : la couche fixe d'univers
+   reste hors de l'animation.
+3. **Plus beau ?** La coupe sèche disparaît ; le parcours accueil → menu → catégorie devient
+   un enchaînement. Gain réel mais de politesse, pas de spectacle : DA Découverte (menu)
+   9,5 → **9,6/10**. C'est le dernier manque du catalogue d'inspiration initial.
+4. **Plus rapide ?** Le chargement direct (QR de table) est inchangé par construction —
+   preuve par le contrôle navigateur (aucune animation démarrée, aucune classe posée en
+   ouverture directe) plutôt que par les mesures du jour, prises dans une fenêtre très
+   chargée (FCP 1,1–1,9 s des DEUX côtés, témoin `#/jouer` équivalent : bruit, cité comme
+   tel). CLS 0. Bundle initial 484 259 → **484 328 o** (+69 o : la classe du routeur) —
+   plafond respecté mais marge réduite à 94 o, point de vigilance pour tout futur cycle.
+5. **Plus accessible ?** Page entrante cliquable pendant sa montée (aucun overlay) ;
+   mouvement réduit : coupes franches partout (bloc placé avant le dernier bloc
+   `prefers-reduced-motion`) ; aucun contenu masqué par défaut.
+6. **Plus crédible ?** La transition ne retient ni ne déguise rien : 0,28 s, jamais au
+   premier chargement, jamais sur les pages d'action (Commande, Cuisine, Jeu hors
+   périmètre).
+7. **Cohérent avec la DA ?** Même courbe et même vocabulaire que les révélations existantes ;
+   la montée de 14 px fait écho au `translateY` des masques du cycle 2.
+8. **Trop complexe ?** Une classe, deux keyframes déjà mutualisées, un petit module
+   (`entreeScene.ts`) pour l'onglet. Contre-épreuves : 5 auto-mutations attrapées pendant le
+   développement ; mutation du coordinateur (retrait de la garde `.navigue`) : 1 test
+   rouge ; suite complète revérifiée 1784/1784 (un premier passage avait échoué sur le test
+   du cycle 5 parce que la mutation du coordinateur a chevauché la course de la suite —
+   rerun sur arbre propre : 1784/1784).
+9. **Risques / écarts assumés ?** Deux, signalés par le développement et arbitrés : (a) au
+   tout premier passage vers le menu, le SQUELETTE de chargement apparaît en coupe sèche
+   avant que le contenu n'entre en scène — le squelette est partagé avec Commande (hors
+   périmètre) et l'animer créerait deux montées successives ; (b) observation PRÉEXISTANTE,
+   hors cycle : `#/menu` s'ouvre défilé d'environ 393 px (effet `scrollIntoView` des
+   onglets, antérieur à la boucle) — inchangé par le cycle, à traiter séparément si
+   l'utilisateur le souhaite.
+10. **Que manque-t-il encore ?** Le catalogue d'inspiration initial est épuisé (univers,
+    typo, plat-star, rail, transitions). Avant de conclure, la règle de la boucle impose une
+    passe d'inspiration fraîche ; si elle ne dégage pas de signature nouvelle à gain net
+    plausible sous les portes dures, la boucle s'arrête : les plafonds restants sont
+    documentés au rapport (résolution des photos sources, marge de bundle, pas de WebGL
+    sous les portes de performance).
+
