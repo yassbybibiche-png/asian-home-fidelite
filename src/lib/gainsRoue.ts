@@ -22,13 +22,17 @@ export function estLotPhysique(t: Pick<Tirage, 'lot' | 'typeLot'>): boolean {
   return (t.typeLot && TYPES.includes(t.typeLot) ? t.typeLot : ANCIEN_LIBELLE_PERDANT.test(t.lot) ? 'perdant' : 'lot') === 'lot'
 }
 
+/** Tirage hérité (ancienne règle : valable le jour J seulement) — même condition que `jourExpiration`. */
+function estHerite(t: Pick<Tirage, 'typeLot' | 'typeDeduit'>): boolean {
+  return !(t.typeLot && TYPES.includes(t.typeLot)) || t.typeDeduit === true
+}
+
 /**
  * Premier jour (Paris) où le gain est expiré : J+31 (v2 : utilisable jusqu'à J+30 inclus), J+1 pour un tirage hérité
  * (`tirageHerite` : sans type figé au tirage, ou type déduit après coup — valable le jour J seulement).
  */
 export function jourExpiration(t: Pick<Tirage, 'date' | 'typeLot' | 'typeDeduit'>): string {
-  const herite = !(t.typeLot && TYPES.includes(t.typeLot)) || t.typeDeduit === true
-  return ajouterJours(jourParis(t.date), herite ? 1 : 31)
+  return ajouterJours(jourParis(t.date), estHerite(t) ? 1 : 31)
 }
 
 /** Lot physique non remis : 'enCours' (en attente du lendemain ou utilisable) ou 'expire'. */
@@ -91,4 +95,39 @@ export function kpiGains(tirages: Tirage[], lots: Pick<Lot, 'id' | 'libelle' | '
   const echus = k.remis + k.expires
   k.tauxUtilisation = echus > 0 ? Math.round((k.remis / echus) * 100) : null
   return k
+}
+
+export interface RetourDemain {
+  /** Id du tirage (clé React). */
+  tirageId: string
+  clientId: string
+  lot: string
+  /** Premier jour (Paris) où le gain est utilisable : J+1 (v2), J (tirage hérité). */
+  utilisableDu: string
+  /** Dernier jour (Paris) où le gain est utilisable : J+30 (v2), J (tirage hérité). */
+  utilisableAu: string
+}
+
+/**
+ * « Retours de demain » (P1-1) : lots physiques gagnés, ni remis ni expirés — les clients qui peuvent revenir
+ * aujourd'hui ou dès demain, avec leur gain et sa fenêtre d'utilisation. Même ensemble que
+ * `kpiGains(...).enAttente`, nominatif. Triés par premier jour d'utilisation, puis par fin de validité.
+ */
+export function retoursDemain(tirages: Tirage[], maintenant = new Date()): RetourDemain[] {
+  const liste: RetourDemain[] = []
+  for (const t of tirages) {
+    if (!estLotPhysique(t)) continue
+    if (t.remis) continue
+    if (etapeGain(t, maintenant) !== 'enCours') continue
+    const jourTirage = jourParis(t.date)
+    liste.push({
+      tirageId: t.id,
+      clientId: t.clientId,
+      lot: t.lot,
+      utilisableDu: ajouterJours(jourTirage, estHerite(t) ? 0 : 1),
+      utilisableAu: ajouterJours(jourExpiration(t), -1),
+    })
+  }
+  liste.sort((a, b) => (a.utilisableDu < b.utilisableDu ? -1 : a.utilisableDu > b.utilisableDu ? 1 : a.utilisableAu < b.utilisableAu ? -1 : a.utilisableAu > b.utilisableAu ? 1 : 0))
+  return liste
 }
