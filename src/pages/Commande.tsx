@@ -101,7 +101,6 @@ enregistrerTraductions({
   'Fermer': 'Close',
   'Quantité': 'Quantity',
   'À découvrir aussi': 'Also worth trying',
-  'Signatures': 'Signatures',
   'À votre service': 'At your service',
   'La demande part en cuisine, comme une commande — c’est gratuit.': 'The request goes to the kitchen like an order — it’s free.',
   'Demander': 'Request',
