@@ -15,6 +15,7 @@ import { HorsLignePublic, MessagePublic } from './Jouer'
 import { CommutateurLangue, useLangue } from '../components/Langue'
 import { dependancesNavigateur, preparerRevelations } from '../lib/revelation'
 import { defilerRail } from '../lib/defilementRail'
+import { animerRailVivant } from '../lib/railVivant'
 import { activerParallaxe } from '../lib/parallaxe'
 import { motsUniques } from '../lib/bandeau'
 import { BandeauDefilant } from '../components/BandeauDefilant'
@@ -150,6 +151,8 @@ export function MenuAffiche({
   const rail = useRef<HTMLDivElement>(null)
   const avecRail = recherche === '' && platsPhoto.length >= 2
   useEffect(() => (avecRail && rail.current ? defilerRail(rail.current, prefereMouvementReduit()) : undefined), [avecRail])
+  // Rail vivant (cycle 4) : la tuile au centre grandit et s'éclaire ; pilote seul, la position reste à defilerRail.
+  useEffect(() => (avecRail && rail.current ? animerRailVivant(rail.current, prefereMouvementReduit()) : undefined), [avecRail])
   const liste = useRef<HTMLDivElement>(null)
   useEffect(() => (liste.current ? preparerRevelations(liste.current, dependancesNavigateur()) : undefined), [active, recherche, visibles.length])
   // Parallaxe des photos d'en-tête de catégorie (cycle 3) : les cibles sont relues à chaque image, la liste peut changer.
@@ -248,12 +251,15 @@ export function MenuAffiche({
                 type="button"
                 onClick={() => allerAuPlat(categorieId, p.id)}
                 aria-label={t('Voir le plat : {nom}', { nom: p.nom })}
-                className="w-36 shrink-0 overflow-hidden rounded-2xl bg-white text-left shadow-douce ring-1 ring-gray-900/5 transition-transform active:scale-[0.97]"
+                className="w-36 shrink-0 py-2 text-left transition-transform active:scale-[0.97]"
               >
-                <img src={photoCartePlat(p)} alt="" loading="lazy" className="h-24 w-full object-cover" />
-                <span className="block px-3 py-2">
-                  <span className="block truncate text-sm font-semibold">{p.nom}</span>
-                  <span className="block text-sm font-semibold text-magenta-700 tabular-nums">{p.prix == null ? t('Prix sur place') : formaterPrix(p.prix)}</span>
+                {/* Conteneur interne (cycle 4) : porte l'échelle du rail vivant, le bouton garde son enfoncement tactile. */}
+                <span className="block overflow-hidden rounded-2xl bg-white shadow-douce ring-1 ring-gray-900/5" data-rail-vivant>
+                  <img src={photoCartePlat(p)} alt="" loading="lazy" className="h-24 w-full object-cover" />
+                  <span className="block px-3 py-2">
+                    <span className="block truncate text-sm font-semibold">{p.nom}</span>
+                    <span className="block text-sm font-semibold text-magenta-700 tabular-nums">{p.prix == null ? t('Prix sur place') : formaterPrix(p.prix)}</span>
+                  </span>
                 </span>
               </button>
             ))}
