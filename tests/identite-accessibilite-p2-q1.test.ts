@@ -44,6 +44,8 @@ function fichiers(dossier: string, ext: RegExp): string[] {
 }
 const TSX = fichiers('src', /\.tsx$/)
 const PAGES_CLIENTES = ['src/pages/Jouer.tsx', 'src/pages/CartePublique.tsx', 'src/pages/MenuPublic.tsx']
+/** Pages clientes avec commutateur FR / EN (P1-3) : les 3 ci-dessus + #/bienvenue et #/commande. */
+const PAGES_COMMUTATEUR = [...PAGES_CLIENTES, 'src/pages/Bienvenue.tsx', 'src/pages/Commande.tsx']
 
 /** Lignes d'un fichier qui contiennent un motif (pour les messages d'échec). */
 function lignes(fichier: string, motif: RegExp): string[] {
@@ -160,8 +162,8 @@ describe('P2-Q1 : version anglaise des pages clientes', () => {
     assert.doesNotThrow(() => memoriserLangue(casse, 'en'))
   })
 
-  test('anglais seulement sur #/jouer, #/carte, #/menu ; back-office en français', () => {
-    for (const p of ['jouer', 'carte', 'menu']) assert.ok(estPageTraduite(p), p)
+  test('anglais seulement sur #/jouer, #/carte, #/menu, #/bienvenue, #/commande ; back-office en français', () => {
+    for (const p of ['jouer', 'carte', 'menu', 'bienvenue', 'commande']) assert.ok(estPageTraduite(p), p)
     for (const p of ['accueil', 'clients', 'roulette', 'reglages', 'caisse', 'avis', 'client']) assert.ok(!estPageTraduite(p), p)
     const langue = lire('src/components/Langue.tsx')
     assert.match(langue, /estPageTraduite\(lireRoute\(\)\.page\) \? lireLangue\(stockage\(\)\) : 'fr'/)
@@ -171,9 +173,9 @@ describe('P2-Q1 : version anglaise des pages clientes', () => {
     assert.match(lire('index.html'), /<html lang="fr">/)
   })
 
-  test('commutateur FR / EN visible sur les 3 pages clientes, absent du back-office', () => {
-    for (const f of PAGES_CLIENTES) assert.match(lire(f), /<CommutateurLangue( sombre)? \/>/, f)
-    for (const f of TSX.filter((f) => f.startsWith('src/pages/') && !PAGES_CLIENTES.includes(f))) assert.doesNotMatch(lire(f), /CommutateurLangue/, f)
+  test('commutateur FR / EN visible sur les 5 pages clientes, absent du back-office', () => {
+    for (const f of PAGES_COMMUTATEUR) assert.match(lire(f), /<CommutateurLangue( sombre)? \/>/, f)
+    for (const f of TSX.filter((f) => f.startsWith('src/pages/') && !PAGES_COMMUTATEUR.includes(f))) assert.doesNotMatch(lire(f), /CommutateurLangue/, f)
     const langue = lire('src/components/Langue.tsx')
     assert.match(langue, /role="group" aria-label=\{t\('Langue'\)\}/)
     assert.match(langue, /aria-pressed=\{langue === l\}/)
