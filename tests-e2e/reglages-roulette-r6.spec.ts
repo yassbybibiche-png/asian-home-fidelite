@@ -34,6 +34,9 @@ test('Réglages → Roulette : points sans montant refusé, champs nouveaux envo
   await page.getByRole('button', { name: 'Déverrouiller' }).click()
   await page.getByRole('tab', { name: 'Roulette' }).click()
   const enregistrer = page.getByRole('button', { name: 'Enregistrer' })
+  // P3-1 : récapitulatif en clair du mode d'accès — commerce neuf : 'libre' explicite, sans mention « jamais choisi ».
+  const recap = page.locator('[data-recap-mode-acces]')
+  await expect(recap).toHaveText('Mode actuel : libre — 1 tirage par jour. Le client joue dès qu’il s’est identifié, sans passer par le comptoir.')
 
   // 1. Lot « points » sans montant : message clair, « Enregistrer » désactivé (refus front).
   await page.getByRole('button', { name: '+ Ajouter un lot' }).click()
@@ -58,6 +61,8 @@ test('Réglages → Roulette : points sans montant refusé, champs nouveaux envo
   await visite.focus()
   await page.keyboard.press('Space')
   await expect(visite).toBeChecked()
+  // P3-1 : le récapitulatif suit le brouillon — mode visite et sa conséquence pour le client.
+  await expect(recap).toHaveText('Mode actuel : après visite validée au comptoir. Un client qui scanne le QR attend que vous ou votre équipe validiez sa visite avant de pouvoir tourner la roue — sans validation, il ne peut pas jouer aujourd’hui.')
   await expect(page.getByLabel('Limite de gains par client (lots par mois)')).toHaveValue('4')
   await page.getByLabel('Limite de gains par client (lots par mois)').fill('2')
   const envoi = page.waitForRequest((q) => q.method() === 'PATCH' && q.url().endsWith(`/commerces/${commerce.id}`))
@@ -84,6 +89,8 @@ test('Réglages → Roulette : points sans montant refusé, champs nouveaux envo
   await expect(page.getByLabel('Plafond par jour du lot 1')).toHaveValue('3')
   await expect(page.getByLabel(/Après visite validée au comptoir/)).toBeChecked()
   await expect(page.getByLabel('Limite de gains par client (lots par mois)')).toHaveValue('2')
+  // P3-1 : après rechargement, le récapitulatif reflète le mode enregistré (visite, choix explicite).
+  await expect(recap).toHaveText('Mode actuel : après visite validée au comptoir. Un client qui scanne le QR attend que vous ou votre équipe validiez sa visite avant de pouvoir tourner la roue — sans validation, il ne peut pas jouer aujourd’hui.')
 
   // 4. Aperçu : tirage de test (mouvement réduit dans ce projet Playwright → résultat presque immédiat).
   requetes.length = 0

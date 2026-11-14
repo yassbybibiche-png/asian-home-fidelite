@@ -15,7 +15,7 @@ import { basculerAccroche, coutLotValide, formaterEuros, jourParis } from '../li
 import { formaterParJour, JOURS_MOYENNE_TIRAGES, JOURS_PROJECTION, simulerCout, type SimulationCout } from '../lib/coutRoue'
 import { libellesEnDouble, normaliserLots, nouvelIdLot } from '../lib/lots'
 import { LIMITE_GAINS_MOIS_DEFAUT, LIMITE_GAINS_MOIS_MAX, modeAccesRoue } from '../lib/roulette'
-import { CHOIX_TYPE_LOT, lotPourEnvoi, problemeLot } from '../lib/reglagesRoue'
+import { CHOIX_TYPE_LOT, lotPourEnvoi, problemeLot, resumeModeAcces } from '../lib/reglagesRoue'
 import { ApercuRoue } from '../components/ApercuRoue'
 import type { ModeAccesRoue, PlageOuverture, TypeLot } from '../types'
 import { INSTANTS_JOUR_MAX, PLAGES_MAX, plagesOuverture, problemePlages } from '../lib/instants'
@@ -883,6 +883,10 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
             </label>
           ))}
         </div>
+        {/* P3-1 : le mode effectif en clair — ce que le client qui scanne le QR vit réellement, et si le réglage n'a jamais été choisi (défaut 'visite'). */}
+        <p role="status" data-recap-mode-acces className="text-sm text-gray-700">
+          {resumeModeAcces(modeAccesRoue(brouillon), brouillon.modeAccesRoue !== undefined)}
+        </p>
         <Nombre
           id="limiteGainsMois"
           libelle="Limite de gains par client (lots par mois)"

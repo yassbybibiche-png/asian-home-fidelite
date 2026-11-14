@@ -1,7 +1,7 @@
 // Réglages → Roulette (roue v2, R6) : validation front des champs propres à chaque type de lot (mêmes bornes que le
 // serveur, `lots()` dans server/app.ts), lot tel qu'envoyé, et tirage de TEST de l'aperçu — fait dans le navigateur,
 // sur les probabilités configurées, sans plafond ni limite client, jamais enregistré. Logique pure, testable sans navigateur.
-import type { Lot, TypeLot } from '../types'
+import type { Lot, ModeAccesRoue, TypeLot } from '../types'
 import { INSTANTS_JOUR_MAX } from './instants.ts'
 import { normaliserLots, type LotNormalise } from './lots.ts'
 import { PLAFOND_JOUR_MAX, POINTS_LOT_MAX, POINTS_LOT_MIN, secteurs, tirerLot, type Secteur } from './roulette.ts'
@@ -14,6 +14,22 @@ export const CHOIX_TYPE_LOT: readonly { valeur: TypeLot; libelle: string }[] = [
 ]
 
 const entierEntre = (n: unknown, min: number, max: number) => typeof n === 'number' && Number.isInteger(n) && n >= min && n <= max
+
+/**
+ * Récapitulatif en clair du mode d'accès (P3-1) : ce que le mode choisi change concrètement pour le client qui
+ * scanne le QR. `explicite` = le commerce a un `modeAccesRoue` enregistré ; sinon le mode par défaut s'applique
+ * (absent = 'visite', configs d'avant R2) et le récapitulatif le dit — le commerçant ne doit pas découvrir le mode
+ * effectif par hasard. Affiché dans Réglages > Règles du jeu ; le détail et la mesure de l'attente réelle sont
+ * dans docs/MODE-ACCES-ROUE.md. Ici et non dans roulette.ts : ce module n'est chargé qu'avec la page Réglages
+ * (différée), ses phrases ne pèsent pas sur le bundle initial.
+ */
+export function resumeModeAcces(mode: ModeAccesRoue, explicite: boolean): string {
+  const prefixe = explicite ? '' : 'Ce réglage n’a jamais été choisi pour ce commerce : le mode par défaut s’applique. '
+  if (mode === 'libre') {
+    return `${prefixe}Mode actuel : libre — 1 tirage par jour. Le client joue dès qu’il s’est identifié, sans passer par le comptoir.`
+  }
+  return `${prefixe}Mode actuel : après visite validée au comptoir. Un client qui scanne le QR attend que vous ou votre équipe validiez sa visite avant de pouvoir tourner la roue — sans validation, il ne peut pas jouer aujourd’hui.`
+}
 
 /**
  * Problème des champs liés au type d'un lot (null = rien à corriger) : un lot « points » doit indiquer son montant

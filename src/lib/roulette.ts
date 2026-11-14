@@ -53,6 +53,23 @@ export function modeAccesRoue(c: Pick<Commerce, 'modeAccesRoue'>): ModeAccesRoue
 }
 
 /**
+ * Délai réel d'attente en mode 'visite' (P3-1) : minutes entre l'identification du client (`creeLe`) et sa
+ * première visite validée le même jour calendaire (local, comme `statutJeu`). `null` quand il n'y a rien à
+ * mesurer : aucune visite ce jour-là, client identifié un autre jour, ou visite antérieure à l'identification
+ * (données incohérentes). Instrument de mesure seulement — aucune donnée réelle n'est lue ici, voir
+ * docs/MODE-ACCES-ROUE.md pour la méthode sur la base de production.
+ */
+export function delaiValidationVisite(client: Pick<Client, 'creeLe' | 'visites'>): number | null {
+  const cree = new Date(client.creeLe)
+  if (Number.isNaN(cree.getTime())) return null
+  const premieres = client.visites.map((v) => new Date(v)).filter((d) => !Number.isNaN(d.getTime()) && memeJour(d, cree))
+  if (!premieres.length) return null
+  const premiere = new Date(Math.min(...premieres.map((d) => d.getTime())))
+  const minutes = Math.round((premiere.getTime() - cree.getTime()) / 60_000)
+  return minutes < 0 ? null : minutes
+}
+
+/**
  * 1 tirage par client et par jour, toujours. Mode 'visite' (défaut) : il faut en plus une visite validée par le
  * commerçant le jour même — le jeu ne crée jamais de visite lui-même. Mode 'libre' (R2) : prêt dès l'identification,
  * jamais 'sansVisite'.
