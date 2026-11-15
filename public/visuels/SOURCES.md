@@ -200,3 +200,39 @@ retravaille-les de façon pro. » Rejeu complet le 13/11/2026, photo par photo :
 à compléter par le commerçant). Le retravail « pro » de cette mission porte sur le
 stock existant : variante WebP du Loc Lac ci-dessus, grandes cartes et rail
 « En photos » dans la page menu (mission « menu visuel », voir MENU-VISUEL-RAPPORT.md).
+
+---
+
+## Ajout du 15/11/2026 — photos d'illustration des 70 plats sans photo (mission « Version ultime finale »)
+
+**Décision explicite de l'utilisateur (14/11/2026)** : les plats sans photo réelle
+reçoivent une **photo d'illustration générée**, étiquetée comme telle dans
+l'interface — pastille magenta « Photo d'illustration » affichée en permanence
+sur l'image, mention complète dans la fiche du plat (« Cette image évoque le
+plat ; la présentation servie peut différer. ») et mention globale en pied de
+menu. Ces images **ne sont pas des photos du plat servi** et ne doivent jamais
+être présentées comme telles ; les 11 vraies photos restent sans aucun marquage
+et priment toujours sur l'illustration (champ séparé `illustration`, vraie
+photo gagnante par construction).
+
+**Génération** : 70 visuels générés le 15/11/2026 (outil de génération d'images
+de l'assistant), un par plat sans photo, d'après le nom et la description
+officielle du plat. Direction artistique unique : évocation du plat sur
+céramique sombre et fond ardoise noire, lumière latérale douce et dramatique,
+angle 45°, aucun texte, aucune personne, aucun logo, aucun prix. Chaque image
+a été **contrôlée visuellement** contre son plat (famille et ingrédient vedette
+cohérents) ; 5 visuels ont été rejetés et régénérés (2 dérives « aquarelle »,
+1 avocat lu comme concombre, 2 nigiri incohérents).
+
+**Fichiers** : `illustrations/<id-produit>.webp` (fiche, 800 px de large,
+WebP q80) et `illustrations/<id-produit>-vignette.webp` (384 px, WebP q78),
+soit 140 fichiers, 4 590 926 o au total (~50 Ko par fiche, ~15 Ko par
+vignette). Sources brutes (1920×1280) conservées hors dépôt dans
+`node_modules/.cache/version-finale/illu-src/` ; conversion rejouable par
+`node_modules/.cache/version-finale/traiter-illustrations.py`.
+
+**Rattachement** : par nom exact du plat, dans la couche données
+(`src/data/menu-reel.ts`, fonction `avecIllustrations`) — comme les vraies
+photos, les illustrations survivent à un ré-enregistrement du menu par le
+commerçant. Le rail « ★ Signatures », le plat-star plein cadre et les héros
+de catégorie restent réservés aux **vraies photos uniquement**.
