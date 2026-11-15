@@ -297,6 +297,48 @@ export function Mesure() {
             Compteurs sans aucune identité (un nombre par jour). Retour après gain : part des gagnants revenus faire valider une visite dans les {JOURS_RETOUR} jours suivant leur gain (jour du gain exclu).
           </p>
         </div>
+
+        <div className="carte">
+          <h3 className="surtitre">Démarrages à froid · {libelleCourant.toLowerCase()}</h3>
+          {etat === 'local' ? (
+            <p className="mt-2 text-gray-600">Disponible avec le serveur : la démo locale ne compte pas les démarrages à froid.</p>
+          ) : etat === 'erreur' ? (
+            <p className="mt-2 text-gray-600">Compteurs indisponibles pour le moment (serveur injoignable).</p>
+          ) : etat === null ? (
+            <p className="mt-2 text-gray-600">Chargement des compteurs…</p>
+          ) : !etat.migration ? (
+            <p className="mt-2 text-gray-600">Pas encore activé : la migration 0008 (compteurs anonymes) est à appliquer sur la base. Le jeu fonctionne sans.</p>
+          ) : courant.evenements.froid10a30s + courant.evenements.froidPlus30s === 0 ? (
+            <p className="mt-2 text-gray-600">Aucun démarrage à froid mesuré sur la période.</p>
+          ) : (
+            <ol className="mt-2 space-y-2">
+              <li className="flex items-baseline justify-between gap-3">
+                <span>Premier appel lent de 10 à 30 s</span>
+                <span className="shrink-0 tabular-nums">
+                  <strong>{nombre(courant.evenements.froid10a30s)}</strong>
+                </span>
+              </li>
+              <li className="flex items-baseline justify-between gap-3">
+                <span>Premier appel lent de plus de 30 s</span>
+                <span className="shrink-0 tabular-nums">
+                  <strong>{nombre(courant.evenements.froidPlus30s)}</strong>
+                </span>
+              </li>
+              <li className="flex items-baseline justify-between gap-3">
+                <span>Total</span>
+                <span className="shrink-0 tabular-nums">
+                  <strong>{nombre(courant.evenements.froid10a30s + courant.evenements.froidPlus30s)}</strong>
+                </span>
+              </li>
+            </ol>
+          )}
+          <p className="mt-2 text-sm text-gray-600">
+            Mesure en cours : seul le premier appel lent de chaque visite compte (10 s ou plus, au plus un par quart d’heure et par
+            onglet). La décision — plan payant ou statu quo — sera prise après 2 semaines de données (protocole : docs/VEILLE-RENDER.md).
+            Les ouvertures directes de carte ne sont pas comptées. Si des clients attendent plus de 10 s sans que le compteur bouge, la
+            migration 0011 n’est pas appliquée sur la base.
+          </p>
+        </div>
       </div>
 
       <div className="carte">

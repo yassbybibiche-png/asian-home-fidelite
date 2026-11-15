@@ -261,8 +261,10 @@ export interface TestsAB {
  * Mesure anonyme (P2-Q3, migration 0008 : `evenements_jour`) : un compteur par commerce, jour à Paris et type. Aucune
  * identité : ni client, ni contact, ni IP, ni appareil. `scan` = ouverture de la page de jeu (QR ou lien), `clicGoogle`
  * = tap sur le bouton d'avis Google, `tirage` / `gain` = comptés par le serveur au tirage (gain = lot non perdant).
+ * `froid10a30s` / `froidPlus30s` (P3-5, migration 0011) = premier appel API de la visite lent de 10–30 s / 30 s ou
+ * plus : un démarrage à froid Render subi par un client, signalé par le navigateur (voir `src/lib/demarrageAFroid.ts`).
  */
-export type TypeEvenement = 'scan' | 'tirage' | 'gain' | 'clicGoogle'
+export type TypeEvenement = 'scan' | 'tirage' | 'gain' | 'clicGoogle' | 'froid10a30s' | 'froidPlus30s'
 
 export interface CompteurEvenement {
   /** AAAA-MM-JJ, jour à Paris. */

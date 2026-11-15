@@ -1,5 +1,5 @@
 // P0-S10 — Staging + rollback : le Blueprint décrit bien 2 services (production + staging, même code,
-// autre branche, autre base), la commande de retour arrière est valide, et chaque migration 0001–0010 est
+// autre branche, autre base), la commande de retour arrière est valide, et chaque migration 0001–0011 est
 // compatible avec l'ancien code et le nouveau (vérification statique : aucune migration « up » ne détruit
 // quoi que ce soit — que des ajouts — et le code tolère les migrations absentes, ErreurMigrationManquante).
 // La procédure complète (création du staging, retour arrière, écritures partielles) est dans
@@ -204,11 +204,11 @@ describe('P0-S10 : scripts/rollback-render.mjs — commande de retour arrière',
   })
 })
 
-// ---------- Compatibilité des migrations 0001–0010 ----------
+// ---------- Compatibilité des migrations 0001–0011 ----------
 
 describe('P0-S10 : compatibilité des migrations (ancien code ↔ nouveau schéma, et inverse)', () => {
-  test('chaque migration 0001–0010 existe et est rejouable (IF NOT EXISTS / OR REPLACE / IF EXISTS)', () => {
-    for (let i = 1; i <= 10; i++) {
+  test('chaque migration 0001–0011 existe et est rejouable (IF NOT EXISTS / OR REPLACE / IF EXISTS)', () => {
+    for (let i = 1; i <= 11; i++) {
       const n = String(i).padStart(4, '0')
       const fichiers = readdirSync(MIGRATIONS).filter((f) => f.startsWith(n))
       assert.ok(fichiers.length >= 1, n)
@@ -218,7 +218,7 @@ describe('P0-S10 : compatibilité des migrations (ancien code ↔ nouveau schém
   })
 
   test('aucune migration « up » ne détruit : ni DROP TABLE, ni DROP COLUMN, ni renommage, ni DELETE, ni TRUNCATE', () => {
-    for (let i = 1; i <= 10; i++) {
+    for (let i = 1; i <= 11; i++) {
       const n = String(i).padStart(4, '0')
       const nom = readdirSync(MIGRATIONS).find((f) => f.startsWith(n) && !f.endsWith('.down.sql'))!
       const sql = readFileSync(join(MIGRATIONS, nom), 'utf8')
@@ -240,6 +240,7 @@ describe('P0-S10 : compatibilité des migrations (ancien code ↔ nouveau schém
       '0008': /create table if not exists public\.evenements_jour/,
       '0009': /check \(portee in \('admin', 'commerce', 'equipe', 'client'\)\)/,
       '0010': /create table if not exists public\.compteurs_publics/,
+      '0011': /check \(type in \('scan', 'tirage', 'gain', 'clicGoogle', 'froid10a30s', 'froidPlus30s'\)\)/,
     }
     for (const [n, motif] of Object.entries(natures)) {
       const nom = readdirSync(MIGRATIONS).find((f) => f.startsWith(n) && !f.endsWith('.down.sql'))!
@@ -252,8 +253,8 @@ describe('P0-S10 : compatibilité des migrations (ancien code ↔ nouveau schém
     assert.doesNotMatch(lireMigration('0002_rls'), /create table|\binsert\s+into\b|\bupdate\s+\w+\s+set\b|\bdelete\s+from\b/i)
   })
 
-  test('annulation : un .down.sql existe pour 0005–0010, pas pour 0001–0004 (fondations : retour = restauration)', () => {
-    for (let i = 1; i <= 10; i++) {
+  test('annulation : un .down.sql existe pour 0005–0011, pas pour 0001–0004 (fondations : retour = restauration)', () => {
+    for (let i = 1; i <= 11; i++) {
       const n = String(i).padStart(4, '0')
       const nom = readdirSync(MIGRATIONS).find((f) => f.startsWith(n) && !f.endsWith('.down.sql'))!.replace(/\.sql$/, '')
       const down = join(MIGRATIONS, `${nom}.down.sql`)
@@ -267,7 +268,7 @@ describe('P0-S10 : compatibilité des migrations (ancien code ↔ nouveau schém
     assert.match(stockage, /ErreurMigrationManquante/)
     // Les migrations optionnelles sont annoncées comme telles dans leur propre en-tête (dégradation documentée).
     // La phrase peut être coupée par un retour à la ligne + « -- » (0005) : on tolère jusqu'à 80 caractères entre les deux moitiés.
-    for (const n of ['0005_sessions_revoquees', '0006_tentatives_auth', '0007_relances', '0008_mesure', '0009_auth_client', '0010_compteurs_publics']) {
+    for (const n of ['0005_sessions_revoquees', '0006_tentatives_auth', '0007_relances', '0008_mesure', '0009_auth_client', '0010_compteurs_publics', '0011_mesure_froid']) {
       assert.match(lireMigration(n), /Tant que cette migration n'est pas appliquée,[\s\S]{0,80}?le serveur fonctionne/i, n)
     }
     // Exception documentée : 0003 et 0004 sont EXIGÉES au démarrage sous Supabase (server/app.ts, exigerMigrationsAudit).
@@ -282,7 +283,7 @@ describe('P0-S10 : compatibilité des migrations (ancien code ↔ nouveau schém
     assert.match(doc, /asian-home-fidelite-staging/)
     assert.match(doc, /rollback-render\.mjs/)
     assert.match(doc, /écritures partielles/)
-    for (let i = 1; i <= 10; i++) {
+    for (let i = 1; i <= 11; i++) {
       const n = String(i).padStart(4, '0')
       assert.match(doc, new RegExp(n), `migration ${n} absente de la doc`)
     }

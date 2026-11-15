@@ -37,7 +37,7 @@ import { attributsChamp, avecPrenom, etatSaisieContact, virgulePrenom, type Mode
 import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type ReponseCarte, type ResultatTirage } from '../data/api'
 import { assurerJetonClient, avecJetonClient, lancerTirage, marquerScanSignale, memoireJoueur, signalerScan, type JoueurMemorise } from '../data/jeuApi'
 import { memoireJetons } from '../lib/jetonCarte'
-import { accrocheJeu, jourParis } from '../lib/mesure'
+import { accrocheJeu, jourParis } from '../lib/accroche'
 import {
   delaiResultat,
   detecterPlateforme,

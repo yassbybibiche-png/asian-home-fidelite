@@ -13,7 +13,7 @@ faire par l'opérateur, depuis un navigateur.
 | Service Render | `asian-home-fidelite` | `asian-home-fidelite-staging` |
 | Branche suivie | `master` | `autonome/integration` |
 | URL | `https://asian-home-fidelite.onrender.com` | `https://asian-home-fidelite-staging.onrender.com` |
-| Base Supabase | Projet de production (migrations 0001–0008 appliquées ; 0009–0010 à la mise en production finale) | **Projet de test séparé, jamais la production** (migrations 0001–0010 appliquées : le staging teste le code tel qu'il tournera en production après la dernière migration) |
+| Base Supabase | Projet de production (migrations 0001–0008 appliquées ; 0009–0011 à la mise en production finale) | **Projet de test séparé, jamais la production** (migrations 0001–0010 appliquées ; 0011 à appliquer : le staging teste le code tel qu'il tournera en production après la dernière migration) |
 | Plan / région | Free / Frankfurt | Free / Frankfurt |
 | Build / start / santé | `npm ci && npm run build:api` / `npm run serveur` / `/api/v1/sante` | identiques (voir `render.yaml`) |
 
@@ -45,7 +45,7 @@ poussées).
 
 1. **Projet Supabase de test.** supabase.com → **New project** → nom `asian-home-fidelite-test`, région
    **Central EU (Frankfurt)**, plan **Free**. Ne rien activer de payant. Dans **SQL Editor**, appliquer
-   **dans l'ordre** `supabase/migrations/0001_schema_initial.sql` à `0010_compteurs_publics.sql`
+   **dans l'ordre** `supabase/migrations/0001_schema_initial.sql` à `0011_mesure_froid.sql`
    (chacun : coller tout le contenu → **Run** → « Success »). Vérifier ensuite les 15 tables avec
    `select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' order by 1;`
    (attendu : **15 lignes** `avis`, `clients`, `commerces`, `compteurs_publics`, `demandes_rattrapage`, `envois`,
@@ -70,7 +70,9 @@ poussées).
    clés exposées par `/sante` — `server/app.ts`). Les 2 autres migrations se vérifient séparément :
    0009 → `GET /api/v1/sante/acces-client` → `"migration": true` ; 0010 → dans Supabase (projet de
    test) → SQL Editor → `select count(*) from public.compteurs_publics;` → `0`, sans erreur (et aucun
-   avertissement « migration 0010 » dans les logs Render au démarrage).
+   avertissement « migration 0010 » dans les logs Render au démarrage) ; 0011 → dans Supabase (projet de
+   test) → SQL Editor → `select pg_get_constraintdef(oid) from pg_constraint where conname =
+   'evenements_jour_type_check';` → contient `froid10a30s` et `froidPlus30s`.
    Dans Supabase (projet de test) → Table Editor → `commerces` : **1 ligne** `c-asian-home-paris` ;
    `meta` : 1 ligne `initialise`. C'est le seed du 1er démarrage (`initialiser`, `server/app.ts`).
 5. **Parcours de base sur le staging** (données de test uniquement, jamais de vrais clients) :
@@ -145,7 +147,7 @@ build n'est pas prêt : **un build qui échoue ne remplace pas la version en cou
 Redéployer le commit précédent **ne restaure ni le schéma, ni les données, ni la configuration** :
 
 - **Schéma** : les migrations appliquées restent appliquées. C'est voulu et sans danger ici : chaque
-  migration 0001–0010 est compatible avec l'ancien code et le nouveau (§ 5). On n'annule **jamais** une
+  migration 0001–0011 est compatible avec l'ancien code et le nouveau (§ 5). On n'annule **jamais** une
   migration juste parce que le code revient en arrière — l'annulation (`.down.sql`, § 5) ne se fait que si
   le § 4 l'exige, et toujours après sauvegarde.
 - **Données** : les écritures faites par le code déployé restent en base. Voir § 4 si le déploiement a
@@ -200,7 +202,7 @@ arrière. Il a donc **déjà écrit en base**. Ne pas redéployer l'ancien code 
    ```
    Le `journal` dit qui a fait quoi (membre, client, action) ; les `tirages` et les `clients` créés disent
    si des visites ont été validées et des lots gagnés pendant la fenêtre.
-4. **Décider, cas par cas — pour les migrations 0001–0010, garder est le cas normal.**
+4. **Décider, cas par cas — pour les migrations 0001–0011, garder est le cas normal.**
    - **Nouvelles clés dans les JSONB existants** (`clients.donnees`, `commerces.donnees` : programme,
      parrainage, paliers…) : l'ancien code **ignore les clés inconnues**. Rien à faire, on garde.
    - **Lignes dans les nouvelles tables** (`equipe`, `journal`, `menus`, `parrainages`,
@@ -244,11 +246,11 @@ arrière. Il a donc **déjà écrit en base**. Ne pas redéployer l'ancien code 
    « Live » avant d'annoncer la reprise).
 6. **Ne jamais annuler une migration sur la production sans sauvegarde**, et ne jamais annuler 0001–0004
    (pas de `.down.sql` : le retour arrière du schéma, c'est la restauration de sauvegarde). Les
-   `.down.sql` de 0005–0010 ne suppriment que des données auxiliaires (révocations, compteurs, journal des
+   `.down.sql` de 0005–0011 ne suppriment que des données auxiliaires (révocations, compteurs, journal des
    envois, compteurs anonymes) — jamais de données métier — et la 0009 garde les versions d'accès des
    cartes (`meta`, clés `acces_client:…`) pour qu'une ré-application retrouve l'état.
 
-## 5. Compatibilité des migrations 0001–0010 (vérifiée une par une, 11/11/2026)
+## 5. Compatibilité des migrations 0001–0011 (vérifiée une par une, 11/11/2026 ; 0011 ajoutée le 15/11/2026)
 
 Règle vérifiée : chaque migration « up » est **additive seulement** — aucune ne supprime une table, une
 colonne ou une ligne, ne renomme rien (test `tests/deploiement-p0-s10.test.ts`). Conséquence dans les deux
@@ -263,7 +265,7 @@ sens :
   serveur refuse de démarrer plutôt que d'écrire un fait métier sans sa trace d'audit.
 
 **Portée de ces garanties (revue Codex, point 7).** « Ancien code » = le commit déployé juste avant celui
-qu'on quitte — en pratique un commit récent, qui connaît déjà toutes les migrations 0001–0010 et les
+qu'on quitte — en pratique un commit récent, qui connaît déjà toutes les migrations 0001–0011 et les
 chemins de tolérance (`ErreurMigrationManquante`, garde 0003/0004). Un retour arrière vers un commit
 beaucoup plus ancien (avant P0-S7/P0-S11, quand le code ne tolérait pas encore les migrations absentes)
 n'est **pas** couvert par ce tableau : il demanderait sa propre vérification. De même, les contrôles
@@ -284,11 +286,12 @@ de santé (§ 2, étape 4).
 | 0008 `mesure` | Crée `evenements_jour` + fonction `incrementer_evenement` | Ne compte rien | Événements ignorés, entonnoir vide | `.down.sql` : compteurs anonymes supprimés |
 | 0009 `auth_client` | Élargit le CHECK de `tentatives_auth` (`'client'` ajouté) + fonction `auth_client_active()` + clés `meta` `acces_client:…` ; **aucune table créée** | Écrit seulement `admin` / `commerce` / `equipe` : toujours valides sous la contrainte élargie ; ignore les clés `meta` | Échecs d'accès client comptés en mémoire | `.down.sql` : supprime les compteurs `client`, remet le CHECK d'origine, **garde** les versions d'accès des cartes |
 | 0010 `compteurs_publics` | Crée `compteurs_publics` (fenêtres d'une minute) | Ignore la table | Compteurs en mémoire + avertissement au démarrage | `.down.sql` : table supprimée, compteurs en cours perdus (fenêtres d'une minute) |
+| 0011 `mesure_froid` | Élargit le CHECK de `evenements_jour.type` (`froid10a30s`, `froidPlus30s`) | Les anciens types restent valides ; les balises froid sont ignorées par l'ancien code | Balises froid refusées par la contrainte (CHECK), donc ignorées ; entonnoir inchangé | `.down.sql` : remet le CHECK d'origine (4 types) — refusé tant qu'il reste des compteurs froid |
 
 **Ordre de déploiement (à respecter) :** (1) sauvegarde (`scripts/sauvegarde-base.mjs`), (2) appliquer les
 migrations **dans l'ordre** dans le SQL Editor, (3) vérifier : `/api/v1/sante` → `migrations`
 (`cartiz`, `programme`, `relances`, `mesure`) + `GET /api/v1/sante/acces-client` → `migration: true`
-(0009) + `select count(*) from public.compteurs_publics;` sans erreur (0010), (4) déployer le code (push
+(0009) + `select count(*) from public.compteurs_publics;` sans erreur (0010) + contrainte `evenements_jour_type_check` contenant les tranches froid (0011), (4) déployer le code (push
 sur la branche du service). **Ordre inverse au retour arrière :** (1) suspendre le service (§ 4, étape 1)
 puis sauvegarde de conservation, (2) redéployer l'ancien code (§ 3), (3) ne toucher au schéma que si le
 § 4 l'exige, (4) vérifier (§ 3.5).
