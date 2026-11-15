@@ -187,6 +187,13 @@ export interface Commerce {
    * visite, à défaut l'inscription). Absent = 36 mois (3 ans). Voir `src/lib/rgpd.ts`.
    */
   conservationMois?: number
+  /**
+   * QR vitrine imprimé (P3-3, parcours « premiers réglages ») : déclaration du commerçant — l'app ne peut pas
+   * vérifier une impression papier. Absent / false = pas encore confirmé. Écrit uniquement par son propre bouton
+   * dans Réglages (le formulaire principal ne l'envoie jamais : un brouillon ouvert avant la confirmation ne doit
+   * pas l'effacer — même piège que le logo, P1-B5).
+   */
+  qrImprime?: boolean
   /** Tests A/B (P2-Q3, docs/TESTS-AB.md). Absent = aucun test en cours. */
   testsAB?: TestsAB
   /**

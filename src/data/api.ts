@@ -222,6 +222,7 @@ export type ChampsReglages = Partial<
     | 'limiteGainsMois'
     | 'plagesOuverture'
     | 'creneauxCreux'
+    | 'qrImprime'
   >
 > & {
   testsAB?: { accroche?: { actif: boolean } }
