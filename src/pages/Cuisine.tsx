@@ -121,6 +121,9 @@ function EcranCuisine({ base, commerceId, acces, sansTable }: { base: string; co
   // Son de l'alerte (produit cycle 2, P1-2) : préférence de l'appareil, défaut activé ; le contexte audio n'est
   // ouvert qu'au premier geste du personnel (sinon le navigateur bloque le son).
   const [son, setSon] = useState(() => sonCuisineActif(stockageLocal()))
+  // L'audio est-il réellement débloqué (contexte ouvert par un geste) ? Tant que non, le libellé du bouton ne
+  // prétend pas « Son activé » (audit 15/11, volet B).
+  const [audioPret, setAudioPret] = useState(false)
   const alerteRef = useRef<AlerteCuisine | null>(null)
   if (alerteRef.current === null) {
     alerteRef.current = creerAlerteCuisine()
@@ -152,7 +155,9 @@ function EcranCuisine({ base, commerceId, acces, sansTable }: { base: string; co
       deja.current = new Set(commandes.map((c) => c.id))
       signaleesRef.current = nouv
       setSignalees(nouv)
-      // Un seul « ding » par commande : les arrivées depuis la lecture précédente, pas celles qui attendent déjà.
+      // Un seul « ding » par commande : les arrivées depuis la lecture précédente. Au premier affichage, les
+      // commandes déjà en attente sont signalées (pastille + encart) mais le « ding » ne peut pas partir :
+      // aucun geste n'a encore débloqué l'audio, `alerter()` reste muet sans contexte.
       if (arrivees.length > 0) alerteRef.current?.alerter()
     }
     setErreur(null)
@@ -182,6 +187,7 @@ function EcranCuisine({ base, commerceId, acces, sansTable }: { base: string; co
   useEffect(() => {
     const deverrouiller = () => {
       alerteRef.current?.deverrouiller()
+      setAudioPret(alerteRef.current?.contexteOuvert() ?? false)
     }
     window.addEventListener('pointerdown', deverrouiller)
     window.addEventListener('keydown', deverrouiller)
@@ -198,9 +204,23 @@ function EcranCuisine({ base, commerceId, acces, sansTable }: { base: string; co
   }, [])
 
   const basculerSon = () => {
+    const alerte = alerteRef.current
+    // Son demandé mais audio pas encore débloqué : ce clic est le geste qui débloque — il ne coupe pas le son.
+    if (son && alerte && !alerte.contexteOuvert()) {
+      alerte.deverrouiller()
+      setAudioPret(alerte.contexteOuvert())
+      return
+    }
     const prochain = !son
     memoriserSonCuisine(stockageLocal(), prochain)
-    if (alerteRef.current) alerteRef.current.actif = prochain
+    if (alerte) {
+      alerte.actif = prochain
+      if (prochain) {
+        // Réactivation par un clic : c'est un geste, le contexte peut s'ouvrir tout de suite.
+        alerte.deverrouiller()
+        setAudioPret(alerte.contexteOuvert())
+      }
+    }
     setSon(prochain)
   }
 
@@ -271,7 +291,7 @@ function EcranCuisine({ base, commerceId, acces, sansTable }: { base: string; co
           </p>
         )}
         <button type="button" className="bouton-secondaire min-h-11" aria-pressed={son} onClick={basculerSon}>
-          {son ? 'Son activé' : 'Son coupé'}
+          {!son ? 'Son coupé' : audioPret ? 'Son activé' : 'Son à débloquer'}
         </button>
       </div>
 

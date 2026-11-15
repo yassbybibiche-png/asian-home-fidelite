@@ -45,6 +45,46 @@ describe('P2-4 : bandeau permanent en mode test', () => {
   })
 })
 
+describe('P2-4 (audit 15/11, volet B) : un seul état, le vrai, par configuration', () => {
+  test('configuration réelle observée (sms+email configurés, mode test) : plus aucun « envois réels possibles »', () => {
+    const lignes = etatRelances({ sms: true, email: true, migration: true, modeTest: true })
+    const tout = lignes.join('\n')
+    assert.doesNotMatch(tout, /envois réels possibles/, 'la contradiction relevée par l’audit ne doit plus exister')
+    assert.match(lignes[0], /SMS : Brevo configuré, mais mode test actif — aucun SMS réel n’est envoyé/)
+    assert.match(lignes[1], /E-mail : Brevo configuré, mais mode test actif — aucun e-mail réel n’est envoyé/)
+    assert.match(lignes[2], /Mode test Brevo actif : aucun SMS \/ e-mail réel ne part/)
+    assert.equal(lignes.length, 3)
+  })
+
+  test('matrice des configurations : jamais « possibles » et « aucun ne part » en même temps', () => {
+    for (const sms of [false, true])
+      for (const email of [false, true])
+        for (const modeTest of [false, true])
+          for (const migration of [true, false]) {
+            const tout = etatRelances({ sms, email, modeTest, migration }).join('\n')
+            const possibles = tout.includes('envois réels possibles')
+            const rienNePart = tout.includes('aucun SMS / e-mail réel ne part')
+            assert.ok(!(possibles && rienNePart), `contradiction pour sms=${sms} email=${email} modeTest=${modeTest} migration=${migration}`)
+            // « Envois réels possibles » seulement si le canal est branché ET hors mode test.
+            if (modeTest) assert.ok(!possibles, `mode test : rien de « possible » (sms=${sms} email=${email})`)
+            if (!sms) assert.match(tout, /aucun SMS n’est envoyé/)
+            if (!email) assert.match(tout, /aucun e-mail n’est envoyé/)
+            if (migration === false) assert.match(tout, /migration 0007 non appliquée/)
+          }
+  })
+
+  test('hors mode test, canaux branchés : « envois réels possibles » reste dit, sans ligne mode test', () => {
+    const lignes = etatRelances({ sms: true, email: true, migration: true, modeTest: false })
+    assert.deepEqual(lignes, ['SMS : Brevo configuré — envois réels possibles.', 'E-mail : Brevo configuré — envois réels possibles.'])
+  })
+
+  test('configuration mixte en mode test : SMS en mode test, e-mail non branché — chaque ligne dit son vrai état', () => {
+    const lignes = etatRelances({ sms: true, email: false, migration: true, modeTest: true })
+    assert.match(lignes[0], /mode test actif — aucun SMS réel/)
+    assert.match(lignes[1], /E-mail : non branché/)
+  })
+})
+
 describe('P2-4 : déclencheur réel dans la phrase de chaque relance automatique', () => {
   test('chaque interrupteur dit « envoi à l’ouverture du tableau de bord, une fois par jour »', () => {
     const champ = champRelancesAuto()

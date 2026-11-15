@@ -210,12 +210,17 @@ test.describe('commande à table — simulation deux contextes navigateur (deux 
 
     await ouvrirCuisine(cuisine, c.nom)
     await expect(cuisine.getByText('Aucune commande pour l’instant.', { exact: false })).toBeVisible()
-    const boutonSon = cuisine.getByRole('button', { name: 'Son activé' })
+    // Libellé honnête (audit 15/11, volet B) : avant tout geste SUR l'écran cuisine, l'audio n'est pas
+    // débloqué — le bouton ne prétend pas « Son activé » (le clic « Déverrouiller » du portail PIN a eu lieu
+    // avant le montage de cet écran, il ne compte pas).
+    const boutonSon = cuisine.getByRole('button', { name: 'Son à débloquer' })
     await expect(boutonSon).toBeVisible()
     await expect(boutonSon).toHaveAttribute('aria-pressed', 'true')
+    await expect(cuisine.getByRole('button', { name: 'Son activé' })).toHaveCount(0)
     await expect(cuisine.getByText('Nouvelle commande en attente')).toHaveCount(0)
     // Premier geste du personnel : il déverrouille le son (politique audio des navigateurs).
     await cuisine.getByRole('button', { name: 'Actualiser' }).click()
+    await expect(cuisine.getByRole('button', { name: 'Son activé' })).toBeVisible()
 
     // Téléphone du client : Table 1, 1 × Pad Thaï.
     await client.goto(`/#/commande/${c.id}/${c.jetons[0]}`)
@@ -246,6 +251,24 @@ test.describe('commande à table — simulation deux contextes navigateur (deux 
     await client.getByRole('button', { name: 'Confirmer la commande' }).click()
     await expect(cuisine.getByText('Nouvelle commande en attente : Table 2')).toBeVisible({ timeout: 20_000 })
     await expect.poll(() => notes(), { timeout: 5_000 }).toEqual([880, 1174.66])
+    await cuisine.context().close()
+  })
+
+  test('cuisine : commande déjà en attente à l’OUVERTURE de l’écran → pastille + encart dès le premier affichage', async ({ browser, baseURL, request }) => {
+    const c = await preparer(request)
+    // La commande est passée AVANT l'ouverture de l'écran cuisine (API publique, comme le téléphone du client).
+    const r = await request.post(`/api/v1/commerces/${c.id}/commandes`, {
+      data: { jetonTable: c.jetons[0], cleIdempotence: `e2e-ouverture-${Date.now()}`, secret: 'e2e-secret-de-suivi-0123456789abcd', lignes: [{ produitId: await idProduit(request, c.id, 'Pad Thaï'), quantite: 1 }] },
+    })
+    expect(r.status(), await r.text()).toBe(201)
+
+    const cuisine = await telephone(browser, baseURL!)
+    await ouvrirCuisine(cuisine, c.nom)
+    // Dès le premier affichage (audit 15/11, volet B) : l'encart nomme la table en attente et la carte porte
+    // la pastille « Nouveau » — avant la correction, ni l'un ni l'autre n'apparaissaient à l'ouverture.
+    await expect(cuisine.getByText('Nouvelle commande en attente : Table 1')).toBeVisible()
+    const carte = cuisine.getByRole('article', { name: /^Table 1, commande de / })
+    await expect(carte.getByText('Nouveau', { exact: true })).toBeVisible()
     await cuisine.context().close()
   })
 

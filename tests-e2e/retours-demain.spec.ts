@@ -82,3 +82,22 @@ test('gain du jour : le client (prénom + lot) apparaît, utilisable dès demain
   await expect(section.getByRole('link', { name: PRENOM })).toBeVisible()
   await contexte.close()
 })
+
+test('gain du jour sans prénom : la ligne affiche le lien « Client sans prénom », jamais un lien vide', async ({ browser, page, request, baseURL }) => {
+  const commerce = await preparerCommerce(request)
+
+  // Le client joue et gagne, et ne donne PAS son prénom (il est facultatif) : la carte reste sans nom.
+  await page.goto(`/#/jouer/${commerce.id}`)
+  await page.getByLabel('Téléphone ou e-mail').fill('06 98 76 54 32')
+  await page.getByRole('button', { name: 'C’est parti' }).click()
+  await page.getByRole('button', { name: /Tourner la roue/ }).click()
+  const resultat = page.locator('[data-resultat="gain"]')
+  await expect(resultat).toBeVisible()
+  await expect(resultat).toContainText(LOT)
+
+  const { contexte, page: tableau } = await ouvrirTableauDeBord(browser, baseURL, commerce)
+  const section = tableau.locator('section[aria-labelledby="retours-demain-titre"]')
+  await expect(section).toContainText(LOT)
+  await expect(section.getByRole('link', { name: 'Client sans prénom' })).toBeVisible()
+  await contexte.close()
+})
