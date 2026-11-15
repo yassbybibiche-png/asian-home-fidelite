@@ -117,7 +117,7 @@ export function ScannerQr({
       </div>
       {erreur ? (
         <>
-          <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="alert">
+          <p className="alerte-ambre bg-amber-50" role="alert">
             {erreur}
           </p>
           {/* Caméra refusée / indisponible : la saisie manuelle est proposée ici même, pas seulement après « Fermer ». */}

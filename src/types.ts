@@ -527,6 +527,13 @@ export interface Produit {
   photo?: string
   /** Petite version pour la liste du menu (même format que `photo`) ; absente = `photo` est utilisée. */
   photoVignette?: string
+  /**
+   * Photo d'illustration générée (version finale) : posée côté client, seulement sur un plat SANS vraie `photo`
+   * (`avecIllustrations`), toujours étiquetée « Photo d’illustration ». Jamais envoyée ni lue par le serveur.
+   */
+  illustration?: string
+  /** Petite version de `illustration` (liste du menu, ligne de commande). */
+  illustrationVignette?: string
   allergenes: string[]
   /** Commande à table : true = ne peut pas être commandé (rupture). Absent = disponible. */
   indisponible?: boolean

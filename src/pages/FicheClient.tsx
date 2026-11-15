@@ -299,7 +299,7 @@ function DonneesPersonnelles({ client, commerce }: { client: Client; commerce: C
     <section className="carte space-y-3">
       <h2 className="titre-carte">Données personnelles (RGPD)</h2>
       {client.demandeSuppressionLe && (
-        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="status">
+        <p className="alerte-ambre bg-amber-50" role="status">
           ⚠️ Le client a demandé la suppression de ses données le {dateCourte(client.demandeSuppressionLe)} (depuis sa carte). Remettez-lui d’abord une
           éventuelle récompense en attente, puis supprimez-le ci-dessous.
         </p>

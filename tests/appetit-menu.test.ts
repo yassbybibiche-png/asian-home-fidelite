@@ -64,7 +64,7 @@ describe('MenuPublic.tsx (source) : rail « Signatures »', () => {
 
 describe('MenuPublic.tsx (source) : lignes typographiques des plats sans photo', () => {
   const menu = lire('src/pages/MenuPublic.tsx')
-  const debut = menu.indexOf('if (!p.photo)')
+  const debut = menu.indexOf('if (!p.photo && !p.illustration)')
   const ligne = menu.slice(debut, menu.indexOf('</li>', debut))
 
   test('numéros calculés sur la carte complète (avant recherche et onglet), affichés sur la seule ligne typo', () => {

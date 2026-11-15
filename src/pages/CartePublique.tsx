@@ -615,7 +615,7 @@ function FormulairesProgramme({ api, client, commerce, onMaj }: { api: ClientApi
           )}
         </form>
       )}
-      {message && <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">{t(message)}</p>}
+      {message && <p className="alerte-verte bg-green-50">{t(message)}</p>}
       {erreur && <MessageErreur>{t(erreur)}</MessageErreur>}
     </div>
   )
@@ -678,7 +678,7 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
           {t('Recevez une copie de vos données ou demandez leur suppression.')} <LienConfidentialite commerceId={commerce.id} />
         </p>
         {client.demandeSuppressionLe && (
-          <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+          <p className="alerte-ambre bg-amber-50">
             {t('Demande de suppression enregistrée le {date} : le restaurant va supprimer votre carte.', { date: new Date(client.demandeSuppressionLe).toLocaleDateString(localeDate(langue)) })}
           </p>
         )}
@@ -709,7 +709,7 @@ function MesDonnees({ api, client, commerce, onMaj }: { api: ClientApi; client: 
             onAnnuler={() => setDemande(false)}
           />
         )}
-        {message && <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">{message}</p>}
+        {message && <p className="alerte-verte bg-green-50">{message}</p>}
         {erreur && <MessageErreur>{erreur}</MessageErreur>}
       </div>
     </details>
@@ -764,7 +764,7 @@ function VueLimitee({
         <section className="carte space-y-2" data-acces="limite">
           <h2 className="titre-carte">{t('Accès limité sur ce téléphone')}</h2>
           {lienRefuse && (
-            <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="alert">
+            <p className="alerte-ambre bg-amber-50" role="alert">
               {t('Ce lien d’accès a expiré ou a déjà servi : demandez-en un nouveau.')}
             </p>
           )}
@@ -789,7 +789,7 @@ function VueLimitee({
 function BandeauGrace({ jusquAu }: { jusquAu: string }) {
   const { langue, t } = useLangue()
   return (
-    <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="note" data-grace>
+    <p className="alerte-ambre bg-amber-50" role="note" data-grace>
       {t('Votre carte est maintenant protégée sur ce téléphone. Après le {date}, son ancien lien ou son ancien QR ne l’ouvriront plus seuls : gardez-la ici (ou ajoutez-la à l’écran d’accueil).', {
         date: new Date(jusquAu).toLocaleDateString(localeDate(langue)),
       })}

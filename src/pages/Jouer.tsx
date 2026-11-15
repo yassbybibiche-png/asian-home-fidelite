@@ -911,7 +911,7 @@ function Identification({
     <form onSubmit={envoyer} className="carte space-y-3" noValidate>
       <p className="titre-carte">{t('Pour jouer, votre téléphone ou votre e-mail suffit')}</p>
       {parrain && (
-        <p className="rounded-xl bg-green-50 p-3 text-sm text-green-900 ring-1 ring-green-200">
+        <p className="alerte-verte bg-green-50">
           {t('👥 Vous êtes parrainé(e) ! Inscrivez-vous : vous gagnerez 50 points à votre 1re visite, et votre ami aussi.')}
         </p>
       )}
