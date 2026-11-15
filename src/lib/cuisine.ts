@@ -90,15 +90,17 @@ export const jourLisible = (jour: string): string =>
   new Intl.DateTimeFormat('fr-FR', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${jour}T12:00:00Z`))
 
 /**
- * Nouvelles commandes à signaler (pastille « Nouveau ») : celles encore « reçues » qui n'étaient pas dans la liste
- * déjà affichée. `deja` = identifiants affichés jusqu'ici, `null` au premier affichage (rien n'est « nouveau » :
- * tout est déjà dans la section Nouvelles). Les signalées restent signalées tant qu'elles sont « reçues ».
+ * Commandes à signaler (pastille « Nouveau », encart, compteur) : celles encore « reçues » qui n'étaient pas dans
+ * la liste déjà affichée. `deja` = identifiants affichés jusqu'ici, `null` au premier affichage : les reçues déjà
+ * en attente à l'ouverture sont signalées aussi (audit 15/11, volet B — avant, elles n'avaient ni pastille ni
+ * encart : l'équipe ouvrait l'écran sans voir qu'elles attendaient). Les signalées restent signalées tant
+ * qu'elles sont « reçues ».
  */
 export function nouvellesCommandes(commandes: readonly CommandeCuisine[], deja: ReadonlySet<string> | null, signalees: ReadonlySet<string>): Set<string> {
   const r = new Set<string>()
   for (const c of commandes) {
     if (c.statut !== 'recue') continue
-    if (signalees.has(c.id) || (deja && !deja.has(c.id))) r.add(c.id)
+    if (signalees.has(c.id) || deja === null || !deja.has(c.id)) r.add(c.id)
   }
   return r
 }

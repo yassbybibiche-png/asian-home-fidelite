@@ -329,8 +329,12 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     // (signal annulé, pendant l'envoi ou la lecture du corps) d'une panne réseau.
     const injoignable = () => new ErreurApi(0, signal?.aborted ? MESSAGE_DELAI_REQUETE : MESSAGE_HORS_LIGNE)
     let r: Response
-    // P3-5 : le délai est mesuré jusqu'à l'arrivée des en-têtes (le réveil retarde la réponse, pas le corps).
+    // P3-5 : le délai propre de l'appel est mesuré jusqu'à l'arrivée des en-têtes (le réveil retarde la
+    // réponse, pas le corps). Il est calculé dans le `finally`, AVANT le chargement différé de la librairie
+    // de mesure : la durée transmise ne contient donc pas le temps de chargement du module (avant le
+    // 15/11/2026, elle le contenait — la tranche « 30 s ou plus » n'était atteignable que par ce biais).
     const debutAppel = Date.now()
+    let reponseRecue = false
     try {
       r = await f(base + chemin, {
         method: methode,
@@ -339,15 +343,17 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
         cache: 'no-store',
         signal,
       })
+      reponseRecue = true
     } catch {
       throw injoignable()
     } finally {
-      // Démarrages à froid (P3-5) : la librairie n'est chargée qu'à la demande, quand un appel dépasse
-      // 10 s — elle ne pèse donc pas sur le bundle initial (plafond, voir tests/performance-bundle-p2-q2).
-      // La balise part en arrière-plan et n'attend jamais rien ; le `finally` couvre les deux issues
-      // (réponse reçue ou abandon) en un seul point d'appel.
+      // Démarrages à froid (P3-5) : la librairie n'est chargée qu'à la demande — elle ne pèse donc pas sur
+      // le bundle initial (plafond, voir tests/performance-bundle-p2-q2). La mesure part en arrière-plan et
+      // n'attend jamais rien ; le `finally` couvre les deux issues (réponse reçue ou abandon) en un seul
+      // point d'appel.
+      const delaiAppel = Date.now() - debutAppel
       void import('../lib/demarrageAFroid.ts')
-        .then((m) => m.noterAppelLent(chemin, debutAppel, !!options.acces, base, f, signalDelai))
+        .then((m) => m.noterAppelLent(chemin, debutAppel, delaiAppel, reponseRecue, !!options.acces, base, f))
         .catch(() => {})
     }
     if (!r.ok) {

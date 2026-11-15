@@ -16,12 +16,25 @@ export const EXPLICATION_WALLET =
 export const MENTION_ENVOI =
   'Relance SMS / e-mail depuis la fiche du client : envoi réel seulement si Brevo (SMS et e-mail) ou Twilio (SMS, en repli) est configuré sur le serveur et que le client a consenti'
 
-/** État des relances affiché dans Messages, selon `GET /sante` (`null` = état inconnu, serveur injoignable). */
+/**
+ * État des relances affiché dans Messages, selon `GET /sante` (`null` = état inconnu, serveur injoignable).
+ * Un seul état, le vrai, par configuration (audit 15/11, volet B) : en mode test, les lignes des canaux ne
+ * doivent pas dire « envois réels possibles » pendant qu'une autre ligne dit qu'aucun envoi ne part — le mode
+ * test est donc plié dans chaque ligne de canal, et la ligne de synthèse le répète sans le contredire.
+ */
 export function etatRelances(s: { sms?: boolean; email?: boolean; migration?: boolean; modeTest?: boolean } | null): string[] {
   if (!s) return ['État des prestataires inconnu (serveur injoignable) : aucune relance ne part sans prestataire configuré.']
   const lignes = [
-    s.sms ? 'SMS : Brevo configuré — envois réels possibles.' : 'SMS : non branché (Brevo non configuré — Twilio accepté en repli) — aucun SMS n’est envoyé.',
-    s.email ? 'E-mail : Brevo configuré — envois réels possibles.' : 'E-mail : non branché (Brevo non configuré) — aucun e-mail n’est envoyé.',
+    !s.sms
+      ? 'SMS : non branché (Brevo non configuré — Twilio accepté en repli) — aucun SMS n’est envoyé.'
+      : s.modeTest
+        ? 'SMS : Brevo configuré, mais mode test actif — aucun SMS réel n’est envoyé (SMS simulé).'
+        : 'SMS : Brevo configuré — envois réels possibles.',
+    !s.email
+      ? 'E-mail : non branché (Brevo non configuré) — aucun e-mail n’est envoyé.'
+      : s.modeTest
+        ? 'E-mail : Brevo configuré, mais mode test actif — aucun e-mail réel n’est envoyé (e-mail en sandbox Brevo).'
+        : 'E-mail : Brevo configuré — envois réels possibles.',
   ]
   if (s.modeTest) lignes.push('Mode test Brevo actif : aucun SMS / e-mail réel ne part (e-mail en sandbox Brevo, SMS simulé — journal « Test — rien envoyé »).')
   if (s.migration === false) lignes.push('Journal des envois : migration 0007 non appliquée sur la base — aucune relance ne part tant qu’elle manque.')

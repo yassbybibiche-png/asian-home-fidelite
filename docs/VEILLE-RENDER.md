@@ -8,17 +8,32 @@ peut donc coûter ~1 minute d'attente au client debout au comptoir. Ce n'est pas
 argent/expérience — et il n'a jamais été tranché avec des données. Ce document est le protocole de mesure
 qui doit précéder toute décision.
 
-## Ce qui est mesuré (depuis le 15/11/2026, cycle produit 14)
+## Ce qui est mesuré (depuis le 15/11/2026, cycle produit 14 ; protocole corrigé le 15/11/2026 après l'audit expert)
 
-- **Par qui :** le navigateur du client, sur son premier appel API lent — le serveur ne peut pas mesurer ce
-  délai lui-même (il ne voit la requête qu'une fois le conteneur réveillé). Voir `src/lib/demarrageAFroid.ts`.
-- **Seuil :** un appel de **10 s ou plus** compte comme démarrage à froid probable (la latence normale est très
-  inférieure ; le délai client par défaut est lui-même de 10 s).
+- **Par qui :** le navigateur du client — le serveur ne peut pas mesurer ce délai lui-même (il ne voit la
+  requête qu'une fois le conteneur réveillé). Voir `src/lib/demarrageAFroid.ts`.
+- **Quoi :** la durée de l'**épisode de réveil** — du premier appel resté sans réponse (délai client expiré
+  ou réseau coupé) à la première réponse reçue pour le même commerce. C'est l'attente réellement subie par
+  le client, réessais compris (`tenterPendant`, toutes les 3 s, 30 s au plus, puis réessai manuel). Un appel
+  lent mais réussi du premier coup est compté avec sa durée propre. La durée propre de chaque appel est
+  figée par le client API **avant** le chargement différé du module de mesure.
+  *(Avant la correction, la mesure prenait la durée d'un seul appel — plafonnée par le délai client de
+  10 s — augmentée du temps de chargement du module : la tranche « 30 s ou plus » n'était atteignable que
+  par ce biais, et la balise partait avec un abandon à 5 s vers un serveur encore endormi, garde marquée
+  avant l'envoi et sans renvoi : des démarrages à froid réels pouvaient n'être ni comptés, ni livrés.)*
+- **Seuil :** une attente de **10 s ou plus** compte comme démarrage à froid probable (la latence normale
+  est très inférieure ; le délai client par défaut est lui-même de 10 s).
 - **Tranches :** `froid10a30s` (10 à 30 s) et `froidPlus30s` (30 s ou plus, proche de la minute annoncée).
 - **Compteur :** un nombre par jour, sans aucune identité (même table anonyme que `scan`, migration 0008 +
   **0011** qui élargit le CHECK). Aucun délai exact n'est stocké, seule la tranche.
-- **Déduplication :** au plus **un événement par quart d'heure et par onglet** — les réessais d'un même réveil
-  (`tenterPendant`, toutes les 3 s, 30 s au plus) ne comptent qu'une fois.
+- **Livraison :** la balise est déposée dans une **file persistée** (sur le téléphone) puis livrée sans
+  délai d'abandon artificiel ; la livraison est retentée à chaque appel public réussi — donc aussi à la
+  visite suivante. Si la page se ferme pendant un réveil, un envoi `sendBeacon` signale l'attente déjà
+  subie. Limite : un épisode jamais fermé, sur un navigateur sans `sendBeacon` et sans visite suivante,
+  n'est pas compté.
+- **Déduplication :** au plus **un événement par quart d'heure et par navigateur** — la garde n'est marquée
+  qu'après une livraison confirmée par le serveur, et une balise encore en file vaut signalement du réveil
+  en cours.
 - **Périmètre :** seuls les appels publics sur un chemin `/commerces/<id>/…` (l'entrée par QR, `#/jouer/<id>`).
   Les appels marchands/équipe (tableau de bord, caisse, réglages) sont exclus ; les ouvertures directes de
   carte (`/cartes/<id>`) ne sont **pas comptées** (pas d'identifiant de commerce dans le chemin) — les chiffres

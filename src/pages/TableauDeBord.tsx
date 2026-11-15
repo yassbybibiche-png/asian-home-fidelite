@@ -84,12 +84,15 @@ function RetoursDemain({ retours, clients }: { retours: RetourDemain[]; clients:
         <ul className="divide-y divide-gray-100 py-1 sm:py-1">
           {(toutVoir ? retours : retours.slice(0, 8)).map((r) => {
             const client = clients.find((c) => c.id === r.clientId)
+            // Prénom facultatif à l'inscription (P1-C1) : sans prénom, le lien portait un nom vide
+            // (défaut relevé par l'audit, volet B) — repli sur le libellé utilisé partout ailleurs.
+            const nom = client ? client.prenom.trim() || 'Client sans prénom' : null
             return (
               <li key={r.tirageId} className="flex items-center justify-between gap-3 py-2.5">
                 <span>
                   {client ? (
                     <a href={`#/client/${client.id}`} className="font-semibold">
-                      {client.prenom}
+                      {nom}
                     </a>
                   ) : (
                     <span className="font-semibold">Client</span>

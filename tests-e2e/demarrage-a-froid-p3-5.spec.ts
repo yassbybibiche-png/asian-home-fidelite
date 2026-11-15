@@ -1,5 +1,11 @@
-// P3-5 — Démarrage à froid en vrai navigateur : le premier appel API lent (11 s, comme un réveil Render)
-// déclenche la balise anonyme `froid10a30s`, comptée par le serveur et lue dans le tableau de bord.
+// P3-5 — Démarrage à froid en vrai navigateur : le premier appel API reste sans réponse (11 s, comme un
+// réveil Render) ; la balise anonyme part à la PREMIÈRE RÉPONSE reçue, avec la durée de l'épisode entier
+// (`froid10a30s` ici), comptée par le serveur et lue dans le tableau de bord.
+// Protocole corrigé le 15/11/2026 (audit expert) : l'ancienne spec attendait la balise AVANT le réessai,
+// parce que l'ancien code l'envoyait dès l'abandon de l'appel, avec un délai plafonné et un abandon à 5 s
+// — en conditions réelles, elle partait vers un serveur encore endormi et se perdait, et la tranche
+// « 30 s ou plus » était inatteignable. La spec suit donc le protocole corrigé : abandon → épisode ouvert
+// (rien ne part) → réessai réussi → épisode fermé → balise livrée.
 // Serveur local + base SQLite temporaire (tests-e2e/serveur.ts), jamais la production.
 import { expect, test } from '@playwright/test'
 
@@ -10,7 +16,7 @@ test.beforeEach(({ baseURL }) => {
   expect(new URL(baseURL!).hostname).toBe('127.0.0.1')
 })
 
-test('premier appel lent (11 s) → balise froid10a30s comptée et lue dans le tableau de bord', async ({ page, request }) => {
+test('premier appel sans réponse (11 s) puis réessai → balise froid10a30s comptée et lue dans le tableau de bord', async ({ page, request }) => {
   const nom = `E2E Froid ${Date.now()}`
   const r = await request.post('/api/v1/commerces', {
     headers: ADMIN,
@@ -19,14 +25,8 @@ test('premier appel lent (11 s) → balise froid10a30s comptée et lue dans le t
   expect(r.status()).toBe(201)
   const { commerce } = await r.json()
 
-  // La balise part dès que le premier appel dépasse 10 s : l'attendre AVANT d'ouvrir la page.
-  const balise = page.waitForRequest(
-    (q) => q.method() === 'POST' && q.url().endsWith(`/commerces/${commerce.id}/evenements`),
-    { timeout: 30_000 },
-  )
-
   // Premier appel de la fiche ralenti une seule fois (11 s) : le client abandonne à 10 s (son délai par
-  // défaut) et signale le démarrage à froid ; la relecture ensuite passe sans délai.
+  // défaut) — l'épisode de réveil s'ouvre, aucune balise ne part encore ; la relecture ensuite passe sans délai.
   let retarde = true
   await page.route(`**/api/v1/commerces/${commerce.id}`, async (route) => {
     if (!retarde || route.request().method() !== 'GET') return route.continue()
@@ -41,19 +41,27 @@ test('premier appel lent (11 s) → balise froid10a30s comptée et lue dans le t
   })
 
   await page.goto(`/#/jouer/${commerce.id}`)
+
+  // La page a affiché l'écran hors ligne (appel abandonné) : un nouvel essai charge le jeu — et c'est sa
+  // réponse qui ferme l'épisode et déclenche la balise (attente totale ≈ 12 s : tranche 10–30 s).
+  // Délai d'attente explicite : le bouton n'apparaît qu'après l'abandon du client (10 s après le début de
+  // l'appel, lui-même postérieur au chargement de la page) — les 10 s par défaut de `expect` ne suffisent
+  // pas (échec constaté à la première passe complète : page encore en chargement à 10,6 s).
+  await expect(page.getByRole('button', { name: 'Réessayer' }).first()).toBeVisible({ timeout: 25_000 })
+  const balise = page.waitForRequest(
+    (q) => q.method() === 'POST' && q.url().endsWith(`/commerces/${commerce.id}/evenements`) && (q.postData() ?? '').includes('froid10a30s'),
+    { timeout: 30_000 },
+  )
+  await page.getByRole('button', { name: 'Réessayer' }).first().click()
   const requeteBalise = await balise
   expect(requeteBalise.postDataJSON()).toEqual({ type: 'froid10a30s' })
+  await expect(page.getByRole('list', { name: 'Lots de la roue' }).getByText('Nems offerts')).toBeVisible()
 
   // Compteur serveur : 1 événement froid10a30s aujourd'hui.
   const mesures = await request.get(`/api/v1/commerces/${commerce.id}/mesures`, { headers: { 'X-Commerce-PIN': PIN } })
   expect(mesures.status()).toBe(200)
   const compteurs = (await mesures.json()).compteurs as { jour: string; type: string; n: number }[]
   expect(compteurs).toContainEqual(expect.objectContaining({ type: 'froid10a30s', n: 1 }))
-
-  // La page a affiché l'écran hors ligne (appel abandonné) : un nouvel essai charge le jeu.
-  await expect(page.getByRole('button', { name: 'Réessayer' }).first()).toBeVisible()
-  await page.getByRole('button', { name: 'Réessayer' }).first().click()
-  await expect(page.getByRole('list', { name: 'Lots de la roue' }).getByText('Nems offerts')).toBeVisible()
 
   // Tableau de bord : la section affiche les deux tranches (le compteur 1 est prouvé par l'API ci-dessus).
   await page.goto('/#/reglages')

@@ -48,6 +48,11 @@ export interface AlerteCuisine {
   deverrouiller(): void
   /** Deux notes, si le son est activé et le contexte ouvert. Ne lève jamais. */
   alerter(): void
+  /**
+   * Le contexte audio existe-t-il ? Faux tant qu'aucun geste ne l'a ouvert : l'écran s'en sert pour ne pas
+   * afficher « Son activé » avant le déblocage réel (audit 15/11, volet B).
+   */
+  contexteOuvert(): boolean
 }
 
 /** Un seul contexte par écran, ouvert au premier geste ; `actif` reflète le choix de l'équipe (défaut : oui). */
@@ -88,6 +93,9 @@ export function creerAlerteCuisine(ouvrir: () => AudioContext | undefined = ouvr
       if (!actif || !ctx) return
       if (ctx.state === 'suspended') void ctx.resume().catch(() => {})
       NOTES_ALERTE_CUISINE.forEach((f, i) => note(f, (i * DELAI_NOTES_ALERTE_MS) / 1000))
+    },
+    contexteOuvert() {
+      return ctx !== undefined
     },
   }
 }

@@ -1,5 +1,10 @@
 // P3-5 — Démarrages à froid Render : mesure côté navigateur (tranches 10–30 s / 30 s+), balise anonyme,
 // compteurs serveur, section tableau de bord, migration 0011 (Postgres : tests/migration-pglite.test.ts).
+// Protocole de mesure corrigé le 15/11/2026 (audit expert : l’ancienne mesure plafonnait à ~10 s, la
+// tranche 30 s+ n’était atteignable que par le temps d’import du module, et la balise partait avec un
+// abandon à 5 s vers un serveur encore endormi, garde marquée avant l’envoi, sans renvoi) : épisodes de
+// réveil (premier essai sans réponse → première réponse), durée propre figée avant l’import différé, file
+// persistée, livraison keepalive, garde après livraison confirmée, sendBeacon à la fermeture de la page.
 // Rappel : ce cycle instrumente seulement — aucune décision (plan payant ou statu quo) n'est prise ici,
 // elle attend 2 semaines de données réelles (docs/VEILLE-RENDER.md).
 import { test, describe, after } from 'node:test'
@@ -14,16 +19,23 @@ import { creerServeur, type OptionsServeur } from '../server/app.ts'
 import { creerClientApi } from '../src/data/api.ts'
 import {
   cheminMesurable,
+  creerFileBalises,
   creerGardeFroid,
+  creerSuiviReveil,
+  definirDependancesFroid,
   DELAI_MIN_ENTRE_SIGNAUX_MS,
   evenementFroid,
   extraireCommerceId,
   noterAppelLent,
   SEUIL_FROID_LONG_MS,
   SEUIL_FROID_MS,
-  signalerSiFroid,
   trancheFroid,
   TYPES_FROID,
+  livrerBalises,
+  viderEnUrgence,
+  type BaliseFroid,
+  type DependancesFroid,
+  type StockageBalises,
 } from '../src/lib/demarrageAFroid.ts'
 import { entonnoir, EVENEMENTS_PUBLICS, totaux, TYPES_EVENEMENT, type DonneesMesure } from '../src/lib/mesure.ts'
 
@@ -64,22 +76,71 @@ describe('Démarrage à froid : seuils et tranches', () => {
     assert.equal(evenementFroid('/sante', 45_000), null)
   })
 
-  test('signalerSiFroid : un seul envoi par quart d’heure, jamais pour un appel rapide ou la balise', () => {
-    let t = 2_000_000
-    const garde = creerGardeFroid(() => t)
-    const envois: [string, string][] = []
-    const envoyer = (commerceId: string, tranche: string) => void envois.push([commerceId, tranche])
-    signalerSiFroid('/commerces/c1/', 12_000, envoyer, garde)
-    assert.deepEqual(envois, [['c1', 'froid10a30s']])
-    signalerSiFroid('/commerces/c1/', 45_000, envoyer, garde)
-    assert.equal(envois.length, 1, 'réessai du même réveil : pas de deuxième balise')
-    signalerSiFroid('/commerces/c1/', 500, envoyer, creerGardeFroid(() => t))
-    signalerSiFroid('/sante', 45_000, envoyer, creerGardeFroid(() => t))
-    signalerSiFroid('/commerces/c1/evenements', 45_000, envoyer, creerGardeFroid(() => t))
-    assert.equal(envois.length, 1, 'appel rapide, sans commerce ou balise : rien')
+  test('suivi de réveil : le début le plus ancien gagne ; fermer rend la durée totale, une seule fois', () => {
+    const suivi = creerSuiviReveil()
+    assert.equal(suivi.fermer('c1', 50_000), null, 'aucun épisode ouvert : rien à fermer')
+    suivi.ouvrir('c1', 10_000)
+    suivi.ouvrir('c1', 13_000)
+    assert.equal(suivi.fermer('c1', 52_000), 42_000, 'du premier essai (10 s) à la première réponse (52 s)')
+    assert.equal(suivi.fermer('c1', 60_000), null, 'épisode fermé : pas de deuxième mesure')
+    suivi.ouvrir('c1', 20_000)
+    suivi.ouvrir('c1', 18_000)
+    assert.equal(suivi.fermer('c1', 48_000), 30_000, 'un début plus ancien reçu après coup remplace')
+    assert.deepEqual(suivi.ouverts(), [])
+  })
+
+  test('épisode complet : échecs puis première réponse à 42 s → une balise froidPlus30s, garde marquée après livraison', async () => {
+    let t = 1_000_000
+    const { deps, stockage } = depsDeTest(() => t)
+    const envois: { url: string; init: RequestInit }[] = []
+    const envoyer = (async (url: string | URL | Request, init?: RequestInit) => {
+      envois.push({ url: String(url), init: init ?? {} })
+      return new Response('{}', { status: 202 })
+    }) as typeof fetch
+    // Premier appel : délai client expiré (10 s), aucune réponse — le serveur dort.
+    noterAppelLent('/commerces/c1/', t, 10_000, false, false, 'http://x/api/v1', envoyer, deps)
+    await attendreLivraison()
+    assert.equal(envois.length, 0, 'serveur injoignable : rien n’est envoyé, l’épisode s’ouvre')
+    // Réessai 3 s plus tard (tenterPendant) : toujours aucune réponse, l’épisode garde son début.
+    noterAppelLent('/commerces/c1/', t + 3_000, 10_000, false, false, 'http://x/api/v1', envoyer, deps)
+    await attendreLivraison()
+    assert.equal(envois.length, 0)
+    // Première réponse à 42 s du premier essai : l’épisode se ferme et la balise part avec la durée totale.
+    t += 42_000
+    noterAppelLent('/commerces/c1/', t - 2_000, 2_000, true, false, 'http://x/api/v1', envoyer, deps)
+    await attendreLivraison()
+    assert.equal(envois.length, 1)
+    assert.equal(envois[0].url, 'http://x/api/v1/commerces/c1/evenements')
+    assert.equal(envois[0].init.method, 'POST')
+    assert.equal(envois[0].init.body, JSON.stringify({ type: 'froidPlus30s' }), 'durée de l’épisode entier (42 s), pas celle du dernier appel (2 s)')
+    assert.equal(envois[0].init.keepalive, true, 'livraison keepalive')
+    assert.equal(envois[0].init.signal, undefined, 'aucun abandon artificiel à 5 s')
+    assert.deepEqual(stockage.donnees(), [], 'balise livrée : file vide')
+    assert.equal(deps.garde.peutSignaler(), false, 'garde marquée — après la livraison confirmée')
+    // Un deuxième réveil dans le même quart d’heure ne compte pas.
+    noterAppelLent('/commerces/c1/', t, 45_000, true, false, 'http://x/api/v1', envoyer, deps)
+    await attendreLivraison()
+    assert.equal(envois.length, 1)
+  })
+
+  test('succès lent direct (sans épisode) : balise de sa durée propre ; échec puis succès rapide : rien', async () => {
+    let t = 5_000_000
+    const { deps } = depsDeTest(() => t)
+    const envois: string[] = []
+    const envoyer = (async (url: string | URL | Request, init?: RequestInit) => {
+      envois.push(String(init?.body ?? ''))
+      return new Response('{}', { status: 202 })
+    }) as typeof fetch
+    // Panne réseau rapide puis réponse rapide : l’épisode entier reste sous le seuil.
+    noterAppelLent('/commerces/c1/', t, 2_000, false, false, 'http://x/api/v1', envoyer, deps)
+    noterAppelLent('/commerces/c1/', t + 3_000, 500, true, false, 'http://x/api/v1', envoyer, deps)
+    await attendreLivraison()
+    assert.equal(envois.length, 0, 'attente totale de 3,5 s : pas un démarrage à froid')
+    // Appel lent mais réussi du premier coup (délai propre 12 s) : signalé sans épisode.
     t += DELAI_MIN_ENTRE_SIGNAUX_MS
-    signalerSiFroid('/commerces/c1/', 45_000, envoyer, garde)
-    assert.deepEqual(envois[1], ['c1', 'froidPlus30s'], 'un réveil plus tard : une nouvelle balise')
+    noterAppelLent('/commerces/c1/', t, 12_000, true, false, 'http://x/api/v1', envoyer, deps)
+    await attendreLivraison()
+    assert.deepEqual(envois, [JSON.stringify({ type: 'froid10a30s' })])
   })
 
   test('garde : au plus un signalement par quart d’heure (horloge injectée)', () => {
@@ -95,34 +156,152 @@ describe('Démarrage à froid : seuils et tranches', () => {
     assert.equal(garde.peutSignaler(), true, 'un réveil plus tard, un nouvel événement est compté')
   })
 
-  test('noterAppelLent : balise POST avec l’URL, le corps et le délai ; rien sinon', () => {
-    const envois: { url: string; init: RequestInit }[] = []
-    const envoyer = ((url: string | URL | Request, init?: RequestInit) => {
-      envois.push({ url: String(url), init: init ?? {} })
-      return Promise.resolve(new Response('{}', { status: 200 }))
+  test('livraison différée : envoi en échec → balise en file, garde NON marquée ; renvoi au prochain appel réussi', async () => {
+    let t = 2_000_000
+    const { deps, stockage } = depsDeTest(() => t)
+    let joignable = false
+    const envois: string[] = []
+    const envoyer = (async (_url: string | URL | Request, init?: RequestInit) => {
+      if (!joignable) throw new Error('serveur encore endormi')
+      envois.push(String(init?.body ?? ''))
+      return new Response('{}', { status: 202 })
     }) as typeof fetch
-    const delais: number[] = []
-    const signalDelai = (ms: number) => {
-      delais.push(ms)
-      return undefined
-    }
-    const debut = Date.now() - 12_000
-    const garde = creerGardeFroid(() => Date.now())
-    noterAppelLent('/commerces/c1/', debut, false, 'http://x/api/v1', envoyer, signalDelai, garde)
-    assert.equal(envois.length, 1)
-    assert.equal(envois[0].url, 'http://x/api/v1/commerces/c1/evenements')
-    assert.equal(envois[0].init.method, 'POST')
-    assert.equal(envois[0].init.body, JSON.stringify({ type: 'froid10a30s' }))
-    assert.deepEqual(delais, [5_000], 'balise limitée à 5 s')
-    noterAppelLent('/commerces/c1/', Date.now() - 45_000, false, 'http://x/api/v1', envoyer, signalDelai, garde)
-    assert.equal(envois.length, 1, 'réessai du même réveil : garde du module, pas de deuxième balise')
-    noterAppelLent('/commerces/c1/', Date.now() - 500, false, 'http://x/api/v1', envoyer, signalDelai, creerGardeFroid())
-    noterAppelLent('/commerces/c1/', Date.now() - 45_000, true, 'http://x/api/v1', envoyer, signalDelai, creerGardeFroid())
-    noterAppelLent('/sante', Date.now() - 45_000, false, 'http://x/api/v1', envoyer, signalDelai, creerGardeFroid())
-    noterAppelLent('/commerces/c1/evenements', Date.now() - 45_000, false, 'http://x/api/v1', envoyer, signalDelai, creerGardeFroid())
-    assert.equal(envois.length, 1, 'appel rapide, marchand, sans commerce ou balise : rien')
+    // Appel lent réussi, mais la balise ne part pas (le serveur retombe / le réseau coupe) :
+    noterAppelLent('/commerces/c1/', t, 12_000, true, false, 'http://x/api/v1', envoyer, deps)
+    await attendreLivraison()
+    assert.equal(envois.length, 0)
+    assert.equal(stockage.donnees().length, 1, 'la balise attend dans la file persistée')
+    assert.equal(stockage.donnees()[0].tranche, 'froid10a30s')
+    assert.equal(deps.garde.peutSignaler(), true, 'garde non marquée : la livraison n’a pas été confirmée')
+    // Un deuxième réveil pendant que la première balise attend : pas de doublon en file.
+    noterAppelLent('/commerces/c1/', t, 20_000, true, false, 'http://x/api/v1', envoyer, deps)
+    await attendreLivraison()
+    assert.equal(stockage.donnees().length, 1, 'une balise en attente vaut signalement du réveil en cours')
+    // Le prochain appel réussi (même rapide, même un autre chemin public) déclenche le renvoi.
+    joignable = true
+    noterAppelLent('/sante', t, 300, true, false, 'http://x/api/v1', envoyer, deps)
+    await attendreLivraison()
+    assert.deepEqual(envois, [JSON.stringify({ type: 'froid10a30s' })], 'balise renvoyée et livrée')
+    assert.deepEqual(stockage.donnees(), [], 'file vidée après livraison')
+    assert.equal(deps.garde.peutSignaler(), false, 'garde marquée seulement maintenant')
+  })
+
+  test('refus du serveur (migration 0011 absente) : la balise reste en file, la garde n’est pas marquée', async () => {
+    const t = 3_000_000
+    const { deps, stockage } = depsDeTest(() => t)
+    const envoyer = (async () => new Response(JSON.stringify({ erreur: 'type refusé' }), { status: 400 })) as typeof fetch
+    noterAppelLent('/commerces/c1/', t, 45_000, true, false, 'http://x/api/v1', envoyer, deps)
+    await attendreLivraison()
+    assert.equal(stockage.donnees().length, 1, 'réponse non ok = pas livrée')
+    assert.equal(deps.garde.peutSignaler(), true)
+  })
+
+  test('livraison en vol : ni une deuxième livraison ni la fermeture de page ne renvoient la balise (pas de double comptage)', async () => {
+    const t = 8_000_000
+    const { deps, stockage } = depsDeTest(() => t)
+    deps.file.ajouter({ commerceId: 'c1', tranche: 'froid10a30s' })
+    const balise = deps.file.enAttente()[0]
+    let resoudre!: (r: Response) => void
+    let envois = 0
+    const envoyer = (async () => {
+      envois++
+      return new Promise<Response>((ok) => (resoudre = ok))
+    }) as typeof fetch
+    const livraison = livrerBalises('http://x/api/v1', envoyer, deps.file, deps.garde)
+    assert.equal(envois, 1, 'première livraison en vol')
+    assert.equal(await livrerBalises('http://x/api/v1', envoyer, deps.file, deps.garde), 0, 'deuxième livraison simultanée : la balise en vol est sautée')
+    assert.equal(envois, 1)
+    const beacons: string[] = []
+    viderEnUrgence('http://x/api/v1', (url) => (beacons.push(url), true), deps.file, deps.suivi, deps.garde, t)
+    assert.equal(beacons.length, 0, 'fermeture de page pendant l’envoi : pas de beacon en double')
+    assert.equal(stockage.donnees().length, 1, 'toujours en file tant que la livraison n’est pas confirmée')
+    resoudre(new Response('{}', { status: 202 }))
+    assert.equal(await livraison, 1, 'la livraison d’origine aboutit')
+    assert.deepEqual(stockage.donnees(), [], 'retirée une fois livrée')
+    assert.equal(deps.file.estEnCours(balise), false)
+  })
+
+  test('file persistée : une nouvelle instance sur le même stockage retrouve les balises (rechargement)', () => {
+    let t = 4_000_000
+    const stockage = fauxStockage()
+    const file1 = creerFileBalises(stockage, () => t)
+    assert.equal(file1.ajouter({ commerceId: 'c1', tranche: 'froidPlus30s' }), true)
+    const file2 = creerFileBalises(stockage, () => t)
+    assert.equal(file2.enAttente().length, 1, 'la balise survit au rechargement de la page')
+    assert.equal(file2.ajouter({ commerceId: 'c1', tranche: 'froid10a30s' }), false, 'doublon récent, même après rechargement')
+    t += DELAI_MIN_ENTRE_SIGNAUX_MS
+    assert.equal(file2.ajouter({ commerceId: 'c1', tranche: 'froid10a30s' }), true, 'un quart d’heure plus tard : nouveau dépôt possible')
+    assert.equal(file2.enAttente().length, 2)
+  })
+
+  test('fermeture de page : sendBeacon signale l’épisode encore ouvert et rejoue la file ; refusé = rien ne change', async () => {
+    let t = 6_000_000
+    const { deps, stockage } = depsDeTest(() => t)
+    // Épisode ouvert (appel sans réponse), jamais fermé : le client repart.
+    noterAppelLent('/commerces/c1/', t, 10_000, false, false, 'http://x/api/v1', (async () => new Response('{}')) as typeof fetch, deps)
+    // Et une balise plus ancienne encore en file (livraison jamais confirmée).
+    deps.file.ajouter({ commerceId: 'c2', tranche: 'froid10a30s' })
+    t += 45_000
+    const beacons: { url: string; corps: string }[] = []
+    viderEnUrgence('http://x/api/v1', (url, corps) => (beacons.push({ url, corps }), true), deps.file, deps.suivi, deps.garde, t)
+    assert.deepEqual(beacons, [
+      { url: 'http://x/api/v1/commerces/c1/evenements', corps: JSON.stringify({ type: 'froidPlus30s' }) },
+      { url: 'http://x/api/v1/commerces/c2/evenements', corps: JSON.stringify({ type: 'froid10a30s' }) },
+    ])
+    assert.deepEqual(deps.suivi.ouverts(), [], 'épisode signalé : fermé')
+    assert.deepEqual(stockage.donnees(), [], 'file rejouée : vidée')
+    // Beacon refusé par le navigateur : l’épisode reste ouvert, la balise reste en file.
+    const { deps: deps2, stockage: stockage2 } = depsDeTest(() => t)
+    deps2.suivi.ouvrir('c1', t)
+    deps2.file.ajouter({ commerceId: 'c1', tranche: 'froid10a30s' })
+    viderEnUrgence('http://x/api/v1', () => false, deps2.file, deps2.suivi, deps2.garde, t + 45_000)
+    assert.equal(deps2.suivi.ouverts().length, 1)
+    assert.equal(stockage2.donnees().length, 1)
+  })
+
+  test('noterAppelLent : rien pour un appel rapide, marchand, sans commerce ou la balise elle-même', async () => {
+    const t = 7_000_000
+    const envois: string[] = []
+    const envoyer = (async (url: string | URL | Request) => {
+      envois.push(String(url))
+      return new Response('{}', { status: 202 })
+    }) as typeof fetch
+    const fraiches = () => depsDeTest(() => t).deps
+    noterAppelLent('/commerces/c1/', t, 500, true, false, 'http://x/api/v1', envoyer, fraiches())
+    noterAppelLent('/commerces/c1/', t, 45_000, true, true, 'http://x/api/v1', envoyer, fraiches())
+    noterAppelLent('/sante', t, 45_000, true, false, 'http://x/api/v1', envoyer, fraiches())
+    noterAppelLent('/commerces/c1/evenements', t, 45_000, true, false, 'http://x/api/v1', envoyer, fraiches())
+    noterAppelLent('/cartes/k-1', t, 45_000, false, false, 'http://x/api/v1', envoyer, fraiches())
+    await attendreLivraison()
+    assert.equal(envois.length, 0, 'appel rapide, marchand, sans commerce ou balise : rien, pas même un épisode')
   })
 })
+
+/** Stockage en mémoire pour les tests de file (même contrat que le stockage navigateur). */
+function fauxStockage(): StockageBalises & { donnees: () => BaliseFroid[] } {
+  let donnees: BaliseFroid[] = []
+  return {
+    lire: () => [...donnees],
+    ecrire: (b) => {
+      donnees = [...b]
+    },
+    donnees: () => [...donnees],
+  }
+}
+
+/** Dépendances neuves et isolées pour un test (garde et file sur l’horloge fournie). */
+function depsDeTest(t: () => number): { deps: DependancesFroid; stockage: ReturnType<typeof fauxStockage> } {
+  const stockage = fauxStockage()
+  return {
+    deps: { garde: creerGardeFroid(t), suivi: creerSuiviReveil(), file: creerFileBalises(stockage, t) },
+    stockage,
+  }
+}
+
+/** Laisse la livraison asynchrone (jamais attendue par l’appelant) se terminer. */
+async function attendreLivraison(): Promise<void> {
+  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
+}
 
 // ---------- Types : les tranches froid sont des événements anonymes comme les autres ----------
 
@@ -163,6 +342,7 @@ describe('Client API : mesure du premier appel lent', () => {
   const dormir = (ms: number) => new Promise<void>((ok) => setTimeout(ok, ms))
 
   test('appel lent (10,2 s) sur un commerce → balise froid10a30s, appel d’origine inchangé', async () => {
+    definirDependancesFroid(depsDeTest(() => Date.now()).deps)
     const appels: { methode: string; url: string; corps: unknown }[] = []
     const fauxFetch: typeof fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       const corps = init?.body ? JSON.parse(String(init.body)) : undefined
@@ -179,6 +359,35 @@ describe('Client API : mesure du premier appel lent', () => {
     assert.deepEqual(
       appels.filter((a) => String(a.url).endsWith('/evenements')),
       [{ methode: 'POST', url: 'http://x/api/v1/commerces/c1/evenements', corps: { type: 'froid10a30s' } }],
+    )
+  })
+
+  test('premier appel abandonné (serveur endormi) puis réessai réussi → balise de l’épisode entier, rien avant la première réponse', async () => {
+    definirDependancesFroid(depsDeTest(() => Date.now()).deps)
+    const appels: { url: string; corps: unknown }[] = []
+    let premier = true
+    const fauxFetch: typeof fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const corps = init?.body ? JSON.parse(String(init.body)) : undefined
+      appels.push({ url: String(url), corps })
+      if (String(url).endsWith('/evenements')) return json({ ok: true, compte: true })
+      if (premier) {
+        premier = false
+        await dormir(10_200)
+        throw new Error('délai dépassé : le client abandonne, le serveur dort encore')
+      }
+      return json({ commerce: { id: 'c1' } })
+    }) as typeof fetch
+    const api = creerClientApi('http://x/api/v1', fauxFetch, 15_000)
+    await assert.rejects(api.commerce('c1'), 'premier appel sans réponse : erreur réseau pour l’appelant')
+    await dormir(300)
+    assert.equal(appels.filter((a) => a.url.endsWith('/evenements')).length, 0, 'aucune balise tant qu’aucune réponse n’est arrivée')
+    const commerce = await api.commerce('c1')
+    assert.deepEqual(commerce, { id: 'c1' })
+    for (let i = 0; i < 20 && !appels.some((a) => a.url.endsWith('/evenements')); i++) await dormir(100)
+    assert.deepEqual(
+      appels.filter((a) => a.url.endsWith('/evenements')),
+      [{ url: 'http://x/api/v1/commerces/c1/evenements', corps: { type: 'froid10a30s' } }],
+      'à la première réponse, la balise part avec la durée de l’épisode (≈10,5 s), pas avec un délai d’import',
     )
   })
 
@@ -262,20 +471,27 @@ describe('Serveur : balises de démarrage à froid', () => {
 // ---------- Sources : branchement, tableau de bord, migration, protocole ----------
 
 describe('Sources : branchement, affichage, migration 0011, protocole', () => {
-  test('api.ts mesure chaque appel lent (en-têtes reçues) et signale la tranche en arrière-plan, jamais bloquant', () => {
+  test('api.ts mesure chaque appel (durée propre calculée avant l’import différé) et signale en arrière-plan, jamais bloquant', () => {
     const api = source('src/data/api.ts')
     // Un seul point d'appel, dans le `finally` (réponse reçue ou abandon) : la librairie est chargée à la
     // demande, hors bundle initial (plafond).
-    assert.match(api, /finally \{[\s\S]{0,600}?import\('\.\.\/lib\/demarrageAFroid\.ts'\)/)
-    assert.match(api, /noterAppelLent\(chemin, debutAppel, !!options\.acces, base, f, signalDelai\)/)
+    assert.match(api, /finally \{[\s\S]{0,900}?import\('\.\.\/lib\/demarrageAFroid\.ts'\)/)
+    assert.match(api, /const delaiAppel = Date\.now\(\) - debutAppel/, 'durée propre calculée dans le finally')
+    assert.ok(api.indexOf('const delaiAppel') < api.indexOf("import('../lib/demarrageAFroid.ts')"), 'la durée est figée AVANT le chargement du module : il ne la fausse plus')
+    assert.match(api, /noterAppelLent\(chemin, debutAppel, delaiAppel, reponseRecue, !!options\.acces, base, f\)/)
     assert.equal(api.split('noterAppelLent').length - 1, 1, 'un seul appel à la mesure, dans le finally')
     assert.doesNotMatch(api, /await import\('\.\.\/lib\/demarrageAFroid\.ts'\)/, 'la balise n’est jamais attendue')
     assert.match(api, /type: 'scan' \| 'clicGoogle' \| 'froid10a30s' \| 'froidPlus30s'/)
     const module = source('src/lib/demarrageAFroid.ts')
     assert.match(module, /if \(acces\) return/, 'appels marchands exclus dans la librairie')
-    assert.match(module, /signalerSiFroid\(/, 'seuil, attribution et garde dans la librairie')
     assert.match(module, /`\$\{base\}\/commerces\/\$\{encodeURIComponent\(commerceId\)\}\/evenements`/)
-    assert.match(module, /signal: signalDelai\(5_000\)/, 'balise limitée à 5 s')
+    // Protocole corrigé (audit expert du 15/11/2026) : file persistée, livraison keepalive sans abandon
+    // artificiel, garde marquée après livraison, envoi d’urgence à la fermeture de la page.
+    assert.match(module, /localStorage/, 'file des balises persistée')
+    assert.match(module, /keepalive: true/, 'livraison keepalive')
+    assert.doesNotMatch(module, /signalDelai\(5_000\)/, 'plus d’abandon artificiel à 5 s de la balise')
+    assert.match(module, /file\.retirer\(b\)\n    garde\.marquer\(\)/, 'garde marquée après le retrait de la balise livrée, jamais avant l’envoi')
+    assert.match(module, /sendBeacon/, 'envoi d’urgence à la fermeture de la page')
   })
 
   test('tableau de bord : section « Démarrages à froid » avec les deux tranches, le total et la mention 0011', () => {

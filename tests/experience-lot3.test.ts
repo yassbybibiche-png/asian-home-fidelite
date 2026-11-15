@@ -109,12 +109,14 @@ describe('Lot 3 — logique de l’écran cuisine (src/lib/cuisine.ts)', () => {
     assert.equal(jourLisible('2026-11-13'), 'vendredi 13 novembre')
   })
 
-  test('« Nouveau » : rien au premier affichage ; puis les reçues apparues depuis, tant qu’elles sont reçues', () => {
+  test('« Nouveau » : signalées dès le premier affichage (commandes déjà en attente à l’ouverture) ; puis les reçues apparues depuis, tant qu’elles sont reçues', () => {
     const a = commande('a', 'recue', '2026-11-13T11:00:00.000Z')
     const b = commande('b', 'recue', '2026-11-13T11:05:00.000Z')
     const c = commande('c', 'acceptee', '2026-11-13T11:06:00.000Z')
-    // Premier affichage : tout est déjà dans « Nouvelles », rien n'est signalé.
-    assert.deepEqual([...nouvellesCommandes([a], null, new Set())], [])
+    // Premier affichage (audit 15/11, volet B) : une commande déjà « reçue » à l'ouverture est signalée —
+    // avant, elle n'avait ni pastille ni encart. Une déjà acceptée ne l'est pas.
+    assert.deepEqual([...nouvellesCommandes([a], null, new Set())], ['a'])
+    assert.deepEqual([...nouvellesCommandes([a, c], null, new Set())], ['a'])
     // Relecture : b est arrivée (signalée) ; c aussi mais déjà acceptée ailleurs (pas signalée).
     const s1 = nouvellesCommandes([a, b, c], new Set(['a']), new Set())
     assert.deepEqual([...s1], ['b'])
@@ -287,10 +289,12 @@ describe('Produit cycle 2 — alerte sonore + visuelle à l’arrivée d’une c
     const { journal, Ctx } = fauxAudio()
     const ctx = new Ctx()
     const alerte = creerAlerteCuisine(() => ctx)
-    // Avant tout geste : le contexte n'existe pas encore, rien ne sonne.
+    // Avant tout geste : le contexte n'existe pas encore, rien ne sonne — et l'écran le sait (libellé honnête).
+    assert.equal(alerte.contexteOuvert(), false)
     alerte.alerter()
     assert.equal(journal.oscillateurs.length, 0)
     alerte.deverrouiller()
+    assert.equal(alerte.contexteOuvert(), true)
     assert.equal(journal.contextes, 1)
     assert.equal(journal.reveils, 1)
     // Le deuxième geste ne recrée pas de contexte.
@@ -309,10 +313,11 @@ describe('Produit cycle 2 — alerte sonore + visuelle à l’arrivée d’une c
     alerte.actif = true
     alerte.alerter()
     assert.equal(journal.oscillateurs.length, 4, 'une nouvelle arrivée re-sonne')
-    // Sans WebAudio du tout : ni création ni erreur.
+    // Sans WebAudio du tout : ni création ni erreur — et le contexte n'est jamais « ouvert ».
     const muette = creerAlerteCuisine(() => undefined)
     muette.deverrouiller()
     muette.alerter()
+    assert.equal(muette.contexteOuvert(), false)
   })
 
   test('page #/cuisine : l’alerte ne sonne qu’aux arrivées ; interrupteur sonore ; encart persistant', () => {
@@ -325,7 +330,11 @@ describe('Produit cycle 2 — alerte sonore + visuelle à l’arrivée d’une c
     assert.match(page, /useState\(\(\) => sonCuisineActif\(stockageLocal\(\)\)\)/)
     assert.match(page, /memoriserSonCuisine\(stockageLocal\(\), prochain\)/)
     assert.match(page, /aria-pressed=\{son\} onClick=\{basculerSon\}>/)
-    assert.match(page, /\{son \? 'Son activé' : 'Son coupé'\}/)
+    // Libellé honnête (audit 15/11, volet B) : « Son activé » seulement quand l'audio est réellement débloqué ;
+    // avant le premier geste, « Son à débloquer » — et ce clic débloque au lieu de couper.
+    assert.match(page, /\{!son \? 'Son coupé' : audioPret \? 'Son activé' : 'Son à débloquer'\}/)
+    assert.match(page, /if \(son && alerte && !alerte\.contexteOuvert\(\)\) \{\s*alerte\.deverrouiller\(\)/)
+    assert.match(page, /setAudioPret\(alerteRef\.current\?\.contexteOuvert\(\) \?\? false\)/)
     // Déverrouillage audio au premier geste du personnel (appui ou touche), jamais au chargement.
     assert.match(page, /window\.addEventListener\('pointerdown', deverrouiller\)/)
     assert.match(page, /window\.addEventListener\('keydown', deverrouiller\)/)
