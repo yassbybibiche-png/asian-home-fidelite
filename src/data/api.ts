@@ -322,6 +322,8 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     // (signal annulé, pendant l'envoi ou la lecture du corps) d'une panne réseau.
     const injoignable = () => new ErreurApi(0, signal?.aborted ? MESSAGE_DELAI_REQUETE : MESSAGE_HORS_LIGNE)
     let r: Response
+    // P3-5 : le délai est mesuré jusqu'à l'arrivée des en-têtes (le réveil retarde la réponse, pas le corps).
+    const debutAppel = Date.now()
     try {
       r = await f(base + chemin, {
         method: methode,
@@ -332,6 +334,14 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
       })
     } catch {
       throw injoignable()
+    } finally {
+      // Démarrages à froid (P3-5) : la librairie n'est chargée qu'à la demande, quand un appel dépasse
+      // 10 s — elle ne pèse donc pas sur le bundle initial (plafond, voir tests/performance-bundle-p2-q2).
+      // La balise part en arrière-plan et n'attend jamais rien ; le `finally` couvre les deux issues
+      // (réponse reçue ou abandon) en un seul point d'appel.
+      void import('../lib/demarrageAFroid.ts')
+        .then((m) => m.noterAppelLent(chemin, debutAppel, !!options.acces, base, f, signalDelai))
+        .catch(() => {})
     }
     if (!r.ok) {
       let message = `Erreur du serveur (${r.status}).`
@@ -421,8 +431,9 @@ export function creerClientApi(base: string, f: typeof fetch = (...a) => fetch(.
     /**
      * Mesure anonyme (P2-Q3) : « page de jeu ouverte » ou « clic vers Google ». Le corps ne contient QUE le type —
      * jamais d'identifiant de carte ni de contact. Délai court : la page n'attend jamais cette requête.
+     * P3-5 : aussi les démarrages à froid (`froid10a30s` / `froidPlus30s`), signalés par `requete` elle-même.
      */
-    signalerEvenement: (commerceId: string, type: 'scan' | 'clicGoogle') =>
+    signalerEvenement: (commerceId: string, type: 'scan' | 'clicGoogle' | 'froid10a30s' | 'froidPlus30s') =>
       requete('POST', `/commerces/${enc(commerceId)}/evenements`, { corps: { type }, delaiMs: 5_000 }) as Promise<{ ok: boolean; compte: boolean }>,
     /** Le navigateur n'envoie qu'un contact : la visite du jour, le tirage du jour et le lot sont décidés par le serveur. */
     /** P0-S7 : `jeton` = jeton client du joueur (exigé par un serveur en mode strict ; le joueur est alors sa carte). */

@@ -314,6 +314,40 @@ describe('Migration Supabase exécutée sur Postgres (PGlite)', () => {
     await db.exec(sql('0010_compteurs_publics.sql'))
   })
 
+  test('0011_mesure_froid : rejouable ; CHECK élargi aux 2 tranches, anciens types et inconnus inchangés ; DOWN', async () => {
+    await db.exec(sql('0008_mesure.sql')) // table présente (CHECK d’origine, 4 types)
+    await db.exec(sql('0011_mesure_froid.sql'))
+    await db.exec(sql('0011_mesure_froid.sql'))
+    const def = await db.query<{ def: string }>(`select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'evenements_jour_type_check'`)
+    assert.equal(def.rows.length, 1, 'la contrainte garde son nom (0008)')
+    assert.match(def.rows[0].def, /froid10a30s/)
+    assert.match(def.rows[0].def, /froidPlus30s/)
+    await db.query(`insert into public.commerces (id, donnees, pin_hash, pin_sel) values ('c11', '{"id":"c11"}', 'h', 's')`)
+    await db.exec('set role service_role')
+    try {
+      const plus1 = (type: string, jour = '2026-11-10') => db.query(`select public.incrementer_evenement('c11', $1::date, $2)`, [jour, type])
+      await plus1('froid10a30s')
+      await plus1('froid10a30s')
+      await plus1('froidPlus30s')
+      await plus1('scan')
+      const { rows } = await db.query<{ type: string; n: number }>(`select type, n from public.evenements_jour where commerce_id = 'c11' order by type`)
+      assert.deepEqual(rows, [
+        { type: 'froid10a30s', n: 2 },
+        { type: 'froidPlus30s', n: 1 },
+        { type: 'scan', n: 1 },
+      ])
+      assert.equal(await codeErreur(plus1('pigeon')), '23514', 'type inconnu toujours refusé')
+    } finally {
+      await db.exec('reset role')
+    }
+    await db.query(`delete from public.commerces where id = 'c11'`)
+    await db.exec(sql('0011_mesure_froid.down.sql'))
+    await db.exec(sql('0011_mesure_froid.down.sql'))
+    const defApres = await db.query<{ def: string }>(`select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'evenements_jour_type_check'`)
+    assert.doesNotMatch(defApres.rows[0].def, /froid/, 'DOWN : CHECK d’origine (4 types) restauré')
+    await db.exec(sql('0011_mesure_froid.sql'))
+  })
+
   test('suppression d’un commerce : clients et tirages supprimés en cascade', async () => {
     await db.query(`delete from public.commerces where id = 'c1'`)
     const { rows } = await db.query<{ n: number }>(

@@ -3,18 +3,19 @@
 // • Séries par jour / semaine / mois, comparaison avec le mois précédent, export CSV.
 // • Entonnoir ANONYME : compteurs du serveur (scan, tirage, gain, clic Google) sans aucune identité.
 // • Test A/B « accroche » : variante décidée par le JOUR (jamais par le client).
-// Tous les jours sont des jours calendaires à Paris (AAAA-MM-JJ), comme le serveur (index unique des tirages).
-import type { Client, CommercePublic, CompteurEvenement, Lot, TestsAB, Tirage, TypeEvenement } from '../types'
+// L'accroche du jeu et le jour à Paris vivent dans `src/lib/accroche.ts` (page de jeu, bundle initial) ; ce module
+// ne garde que la mesure du tableau de bord — l'accroche est ré-exportée ici pour compatibilité (tests, serveur,
+// pages différées). Tous les jours sont des jours calendaires à Paris (AAAA-MM-JJ), comme le serveur (index unique des tirages).
+import type { Client, CompteurEvenement, Lot, TestsAB, Tirage, TypeEvenement } from '../types'
 import { celluleCsv } from './csv.ts'
-import { lotsJouables } from './roulette.ts'
-import { estGainPhysique, typeLot, typeTirage } from './lots.ts'
+import { estGainPhysique, typeTirage } from './lots.ts'
+import { jourParis, varianteDuJour, type Variante } from './accroche.ts'
+
+// Ré-exportés : la page de jeu importe directement `./accroche` ; tout le reste (tests, serveur, pages différées)
+// continue d'importer d'ici, sans changement.
+export { accrocheJeu, jourParis, lotAccroche, varianteDuJour, ACCROCHE_GENERIQUE, ACCROCHE_LOT, type Variante } from './accroche.ts'
 
 const JOUR_MS = 24 * 60 * 60 * 1000
-
-/** Jour calendaire à Paris d'une date (ISO ou Date) : AAAA-MM-JJ. */
-export function jourParis(d: Date | string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(typeof d === 'string' ? new Date(d) : d)
-}
 
 const versDate = (jour: string) => new Date(`${jour}T00:00:00Z`)
 const versJour = (d: Date) => d.toISOString().slice(0, 10)
@@ -152,7 +153,7 @@ export interface Totaux {
   evenements: Record<TypeEvenement, number>
 }
 
-const evenementsVides = (): Record<TypeEvenement, number> => ({ scan: 0, tirage: 0, gain: 0, clicGoogle: 0 })
+const evenementsVides = (): Record<TypeEvenement, number> => ({ scan: 0, tirage: 0, gain: 0, clicGoogle: 0, froid10a30s: 0, froidPlus30s: 0 })
 
 /** Totaux de la période [debut, fin] (jours à Paris, inclus). */
 export function totaux(d: DonneesMesure, debut: string, fin: string): Totaux {
@@ -352,41 +353,8 @@ export function formaterEuros(centimes: number): string {
   return `${euros(centimes)} €`
 }
 
-// ---------- Test A/B « accroche » (docs/TESTS-AB.md) ----------
-
-export type Variante = 'A' | 'B'
-
-/**
- * Variante du jour : jours pairs (comptés depuis le 1er janvier 1970) = A, impairs = B. Aucun identifiant, aucun
- * stockage, aucun hasard : tous les clients d'un même jour voient la même variante, et comme une semaine a 7 jours
- * (impair), chaque jour de la semaine passe d'une variante à l'autre d'une semaine sur l'autre (le lundi n'est pas
- * toujours A).
- */
-export function varianteDuJour(jour: string): Variante {
-  return Math.round(versDate(jour).getTime() / JOUR_MS) % 2 === 0 ? 'A' : 'B'
-}
-
-export const ACCROCHE_GENERIQUE = 'Tournez la roue et gagnez un cadeau !'
-export const ACCROCHE_LOT = 'Tournez la roue : {lot} à gagner !'
-
-/** Lot cité par la variante B : le 1er lot physique de la roue (jamais un perdant ni une consolation en points). */
-export function lotAccroche(lots: Pick<Lot, 'libelle' | 'type'>[]): string | null {
-  return lotsJouables(lots).find((l) => estGainPhysique(typeLot(l)))?.libelle ?? null
-}
-
-/**
- * Phrase sous le nom du commerce sur la page de jeu : modèle à traduire (`t`) et valeurs. Test actif = fiche publique
- * (`testAccroche`, mode serveur) ou réglage du commerce (`testsAB`, démo locale).
- */
-export function accrocheJeu(
-  commerce: Pick<CommercePublic, 'testAccroche'> & { lots: Pick<Lot, 'libelle' | 'type'>[]; testsAB?: TestsAB },
-  jour: string,
-): { modele: string; valeurs?: { lot: string } } {
-  const lot = lotAccroche(commerce.lots)
-  const actif = commerce.testAccroche || commerce.testsAB?.accroche?.actif
-  if (actif && lot && varianteDuJour(jour) === 'B') return { modele: ACCROCHE_LOT, valeurs: { lot } }
-  return { modele: ACCROCHE_GENERIQUE }
-}
+// ---------- Test A/B « accroche » (docs/TESTS-AB.md) : variante, accroche et lot cité vivent dans
+// `./accroche.ts` (page de jeu, bundle initial) — ré-exportés en tête de ce module. ----------
 
 /**
  * Activation / arrêt du test « accroche » : `depuis` = jour de l'activation (une réactivation repart de zéro),
@@ -448,6 +416,6 @@ export function resultatsAccroche(compteurs: CompteurEvenement[], test: TestsAB[
 
 // ---------- Événements anonymes : types acceptés ----------
 
-export const TYPES_EVENEMENT: TypeEvenement[] = ['scan', 'tirage', 'gain', 'clicGoogle']
+export const TYPES_EVENEMENT: TypeEvenement[] = ['scan', 'tirage', 'gain', 'clicGoogle', 'froid10a30s', 'froidPlus30s']
 /** Seuls événements que le navigateur peut signaler (POST public) ; tirage et gain sont comptés par le serveur lui-même. */
-export const EVENEMENTS_PUBLICS: TypeEvenement[] = ['scan', 'clicGoogle']
+export const EVENEMENTS_PUBLICS: TypeEvenement[] = ['scan', 'clicGoogle', 'froid10a30s', 'froidPlus30s']

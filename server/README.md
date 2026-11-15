@@ -462,6 +462,18 @@ n'est pas appliquée, et un ancien export à 14 tables se restaure sans elle. An
 fenêtres d'une minute — sans effet sur les données métier). La sauvegarde couvre désormais **15 tables** (la 0010
 ajoute `compteurs_publics` aux 14 de P0-S5).
 
+### Migration 0011 (mesure des démarrages à froid, P3-5) — à appliquer en production
+
+**Avant toute migration : une sauvegarde.** Même procédure que la 0010 ci-dessus. Puis Supabase → **SQL Editor**
+→ coller `supabase/migrations/0011_mesure_froid.sql` → **Run** (rejouable, après la 0008). Elle élargit
+seulement le CHECK de `evenements_jour.type` (`froid10a30s`, `froidPlus30s`) : aucune table créée, aucune
+donnée touchée. Vérifier : `select pg_get_constraintdef(oid) from pg_constraint where conname =
+'evenements_jour_type_check';` → contient `froid10a30s` et `froidPlus30s`. Sans elle, tout marche, mais les
+balises de démarrage à froid sont refusées par la contrainte et ignorées (compteur à 0 — voir
+`docs/VEILLE-RENDER.md`, qui porte aussi le protocole d'observation de 2 semaines et la règle de décision).
+Annulation : `0011_mesure_froid.down.sql` (remet le CHECK d'origine — refusé tant qu'il reste des compteurs
+froid).
+
 ### Migration 0003 (modules caisse / points / équipe / messages / menu) — à appliquer en production
 
 La base Supabase en ligne ne se met pas à jour toute seule. Depuis P0-S11, **le serveur refuse de démarrer** en Supabase
@@ -941,9 +953,9 @@ et [Infrastructure as Code](https://render.com/docs/infrastructure-as-code). Ceu
 2. Copier **tout** le contenu de `supabase/migrations/0001_schema_initial.sql` → **Run** → « Success. No rows returned ».
 3. Nouvelle requête, même chose avec `supabase/migrations/0002_rls.sql` → **Run**. **Dans cet ordre** (0002 modifie les
    tables créées par 0001). Les deux fichiers sont rejouables : une erreur → corriger et relancer sans risque.
-   Puis, dans l'ordre, `0003_cartiz.sql` à `0010_compteurs_publics.sql` (chacun : coller → **Run**). Pour la
-   production actuelle, 0001–0008 sont déjà appliquées (10/11/2026) et **0009–0010 restent à appliquer à la mise en
-   production finale** (voir `docs/DEPLOIEMENT.md` § 5) ; pour un nouveau projet ou le staging, appliquer les dix.
+   Puis, dans l'ordre, `0003_cartiz.sql` à `0011_mesure_froid.sql` (chacun : coller → **Run**). Pour la
+   production actuelle, 0001–0008 sont déjà appliquées (10/11/2026) et **0009–0011 restent à appliquer à la mise en
+   production finale** (voir `docs/DEPLOIEMENT.md` § 5) ; pour un nouveau projet ou le staging, appliquer les onze.
 4. Vérifier, dans une nouvelle requête :
    ```sql
    select relname as table_, relrowsecurity as rls
