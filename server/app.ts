@@ -813,7 +813,7 @@ function configCommande(v: unknown, existant: ConfigCommande | undefined): Confi
   return { active, tables, ...(services !== undefined ? { services } : {}) }
 }
 
-const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB', 'modeAccesRoue', 'limiteGainsMois', 'plagesOuverture', 'creneauxCreux', 'commande']
+const CHAMPS_REGLAGES = ['nom', 'type', 'logo', 'lienGoogle', 'coordonnees', 'lienDeliveroo', 'lienUberEats', 'recompense', 'seuilTampons', 'lots', 'reglesReponseAuto', 'actif', 'eurosParPoint', 'catalogue', 'messagesAuto', 'apparence', 'programme', 'relancesAuto', 'conservationMois', 'testsAB', 'modeAccesRoue', 'limiteGainsMois', 'plagesOuverture', 'creneauxCreux', 'commande', 'qrImprime']
 
 /**
  * Tests A/B (P2-Q3) : le navigateur n'envoie que `{ accroche: { actif } }` ; les dates de début et de fin sont posées
@@ -869,6 +869,8 @@ function appliquerReglages(c: Commerce, corps: Corps, autorises = CHAMPS_REGLAGE
     }
   }
   if ('actif' in corps) r.actif = booleen(corps.actif, 'actif')
+  // P3-3 : QR vitrine imprimé — déclaration du commerçant (booléen strict, jamais deviné).
+  if ('qrImprime' in corps) r.qrImprime = booleen(corps.qrImprime, 'qrImprime')
   if ('eurosParPoint' in corps) {
     const e = corps.eurosParPoint
     if (typeof e !== 'number' || !Number.isFinite(e) || e < 0.1 || e > 1000 || Math.round(e * 100) !== e * 100) {

@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type KeyboardEvent } from 'react'
-import { useAction, useStore } from '../store'
+import { MESSAGE_MODE_SERVEUR, useAction, useStore } from '../store'
 import type { Client, Commerce, ConfigProgramme, Lot, Palier, RecompensePoints, TypeCommerce } from '../types'
 import { TYPES_COMMERCE } from '../data/defaults'
 import { EnTete, Interrupteur, MessageErreur } from '../components/ui'
@@ -16,6 +16,7 @@ import { formaterParJour, JOURS_MOYENNE_TIRAGES, JOURS_PROJECTION, simulerCout, 
 import { libellesEnDouble, normaliserLots, nouvelIdLot } from '../lib/lots'
 import { LIMITE_GAINS_MOIS_DEFAUT, LIMITE_GAINS_MOIS_MAX, modeAccesRoue } from '../lib/roulette'
 import { CHOIX_TYPE_LOT, lotPourEnvoi, problemeLot, resumeModeAcces } from '../lib/reglagesRoue'
+import { etatDemarrage } from '../lib/demarrage'
 import { ApercuRoue } from '../components/ApercuRoue'
 import type { ModeAccesRoue, PlageOuverture, TypeLot } from '../types'
 import { INSTANTS_JOUR_MAX, PLAGES_MAX, plagesOuverture, problemePlages } from '../lib/instants'
@@ -107,6 +108,79 @@ function SimulateurCout({ simulation: s }: { simulation: SimulationCout }) {
 }
 
 type OngletReglages = 'commerce' | 'fidelite' | 'roulette' | 'messages' | 'carte' | 'donnees'
+
+/**
+ * Parcours « premiers réglages » (P3-3) : encadré de démarrage en haut de l'onglet Commerce — 3 vérifications lues
+ * sur l'état ENREGISTRÉ du commerce (lots, plafond du lot principal, QR). Le QR est une déclaration du commerçant :
+ * son bouton envoie le seul champ `qrImprime` (PATCH partiel, comme la commande à table) — le formulaire principal
+ * ne l'envoie jamais, pour qu'un brouillon ouvert avant la confirmation ne l'efface pas. En démo locale, la
+ * confirmation n'est pas enregistrable (pas de serveur).
+ */
+function EncadreDemarrage({ commerce }: { commerce: Commerce }) {
+  const { mode, avecPin } = useStore()
+  const { executer, enCours, erreur } = useAction()
+  // Comme ReglagesCommande : état local mis à jour par la réponse du PATCH, le store recharge en arrière-plan.
+  const [qrImprime, setQrImprime] = useState(commerce.qrImprime === true)
+  const etat = etatDemarrage({ ...commerce, qrImprime })
+
+  async function marquerQr(imprime: boolean) {
+    if (enCours) return
+    const r = await executer(() => avecPin((a, api) => api.majCommerce(commerce.id, a, { qrImprime: imprime })))
+    if (!r.ok) return
+    setQrImprime(r.valeur.qrImprime === true)
+  }
+
+  return (
+    <section className="carte space-y-3" aria-labelledby="demarrage-titre">
+      <h2 id="demarrage-titre" className="titre-carte">
+        Pour bien démarrer
+      </h2>
+      <p className="text-sm text-gray-600" role="status">
+        {etat.faites === etat.applicables
+          ? `Tout est prêt : ${etat.faites} vérification${etat.faites > 1 ? 's' : ''} sur ${etat.applicables}.`
+          : `${etat.faites} vérification${etat.faites > 1 ? 's' : ''} sur ${etat.applicables} — ce qu’il reste à régler pour que le jeu tourne :`}
+      </p>
+      <ul className="space-y-3">
+        {etat.verifications.map((v) => (
+          <li key={v.id} className="flex gap-3">
+            <span aria-hidden="true" className={v.etat === 'fait' ? 'font-bold text-green-800' : 'font-bold text-gray-700'}>
+              {v.etat === 'fait' ? '✓' : v.etat === 'sansObjet' ? '—' : '○'}
+            </span>
+            <div>
+              <p className="font-semibold">
+                <span className="sr-only">{v.etat === 'fait' ? 'Fait : ' : v.etat === 'sansObjet' ? 'Sans objet : ' : 'À faire : '}</span>
+                {v.libelle}
+              </p>
+              {v.etat === 'aFaire' ? <p className="text-sm text-gray-600">{v.aide}</p> : <p className="text-sm text-gray-600">{v.detail}</p>}
+              {v.id === 'qr' && v.etat === 'aFaire' && mode !== 'local' && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <a href="#/qr" className="bouton-secondaire">
+                    Voir le QR à imprimer
+                  </a>
+                  <button type="button" className="bouton" disabled={enCours} onClick={() => marquerQr(true)}>
+                    J’ai imprimé le QR
+                  </button>
+                </div>
+              )}
+              {v.id === 'qr' && v.etat === 'aFaire' && mode === 'local' && <p className="mt-1 text-sm text-gray-600">{MESSAGE_MODE_SERVEUR}</p>}
+              {v.id === 'qr' && v.etat === 'fait' && mode !== 'local' && (
+                <button
+                  type="button"
+                  className="mt-1 min-h-11 text-sm font-semibold text-gray-700 underline"
+                  disabled={enCours}
+                  onClick={() => marquerQr(false)}
+                >
+                  Marquer comme non imprimé
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {erreur && <MessageErreur>{erreur}</MessageErreur>}
+    </section>
+  )
+}
 
 /** Découpe P1-C7 : 6 onglets, un seul formulaire — aucun réglage supprimé, 2 fieldsets déplacés pour des onglets thématiques contigus (« Points » après « Programme », « Réponses aux avis » après « Messages automatiques »). */
 const ONGLETS_REGLAGES: { id: OngletReglages; libelle: string }[] = [
@@ -263,6 +337,7 @@ function FormulaireReglages({ commerce }: { commerce: Commerce }) {
       </div>
 
       <div id="reglages-commerce" role="tabpanel" aria-labelledby="onglet-commerce" hidden={onglet !== 'commerce'} className="space-y-6">
+      <EncadreDemarrage commerce={commerce} />
       <fieldset className="carte space-y-4">
         <legend className="sr-only">Le commerce</legend>
         <h2 className="titre-carte">Le commerce</h2>
