@@ -6,7 +6,7 @@ import { ErreurApi, MESSAGE_HORS_LIGNE, type ClientApi, type CommandeClient } fr
 import { formaterPrix } from '../lib/points'
 import { LogoCommerce, PiedPublic } from '../components/ui'
 import { SqueletteMenu } from '../components/Squelette'
-import { masquerPrixNonConfirmes, retirerPhotosDetachees } from '../data/menu-reel'
+import { avecIllustrations, masquerPrixNonConfirmes, retirerPhotosDetachees } from '../data/menu-reel'
 import { enregistrerTraductions } from '../lib/langue'
 import {
   ajouter,
@@ -340,9 +340,10 @@ function Prise({
   }, [vue])
 
   // Mêmes données et photos que #/menu (prix non confirmés masqués, photos détachées retirées) : uniquement le menu
-  // ENREGISTRÉ — c'est celui que le serveur relit pour calculer la commande.
+  // ENREGISTRÉ — c'est celui que le serveur relit pour calculer la commande. Version finale : photos d'illustration par-dessus
+  // (champ séparé, jamais envoyé au serveur ; le rail Signatures reste aux vraies photos).
   const categories = useMemo(
-    () => retirerPhotosDetachees(masquerPrixNonConfirmes(donnees.menu)).categories.filter((c) => c.produits.length),
+    () => avecIllustrations(retirerPhotosDetachees(masquerPrixNonConfirmes(donnees.menu))).categories.filter((c) => c.produits.length),
     [donnees.menu],
   )
   // Tous les plats dans l'ordre du menu (un plat présent dans deux catégories compte une fois) ; rail Signatures =
@@ -616,7 +617,7 @@ function Categorie({ categorie, panier, setPanier, ouvrir }: { categorie: Catego
 function LigneProduit({ produit: p, panier, setPanier, ouvrir }: { produit: Produit; panier: LignePanier[]; setPanier: SetPanier; ouvrir: (p: Produit) => void }) {
   const { t } = useLangue()
   const commandable = estCommandable(p)
-  const vignette = p.photoVignette ?? p.photo
+  const vignette = p.photoVignette ?? p.photo ?? p.illustrationVignette
 
   return (
     <li className="overflow-hidden rounded-2xl bg-white shadow-douce ring-1 ring-gray-900/5">
@@ -625,6 +626,8 @@ function LigneProduit({ produit: p, panier, setPanier, ouvrir }: { produit: Prod
           {vignette ? <img src={vignette} alt="" loading="lazy" className="h-16 w-16 shrink-0 rounded-xl object-cover" /> : null}
           <span className="min-w-0 flex-1">
             <span className="block font-semibold">{p.nom}</span>
+            {/* Version finale : vignette d'illustration (64 px, pastille illisible dessus) → étiquette sous le nom. */}
+            {!p.photo && p.illustration && <PastilleIllustration ligne />}
             {p.prix == null ? (
               <span className="block text-sm text-gray-600 italic">{t('Prix sur place')}</span>
             ) : (
@@ -746,6 +749,12 @@ function FichePlat({
       >
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {p.photo && <img src={p.photo} alt="" className="h-60 w-full object-cover" />}
+          {!p.photo && p.illustration && (
+            <div className="relative">
+              <img src={p.illustration} alt="" className="h-60 w-full object-cover" />
+              <PastilleIllustration />
+            </div>
+          )}
           <div className="space-y-4 px-4 pt-4 pb-5">
             <div className="flex items-start gap-3">
               <h2 className="min-w-0 flex-1 font-titre text-2xl font-bold">{p.nom}</h2>
@@ -759,6 +768,7 @@ function FichePlat({
               <p className="text-lg font-semibold text-magenta-700 tabular-nums">{formaterPrix(p.prix)}</p>
             )}
             {p.description && <p className="text-gray-700">{p.description}</p>}
+            {!p.photo && p.illustration && <p className="text-sm text-gray-600">{t('Cette image évoque le plat ; la présentation servie peut différer.')}</p>}
             {!commandable && (
               <p className="text-sm text-gray-600">{p.indisponible ? t('Ce plat n’est pas disponible pour le moment.') : t('Ce plat se commande directement auprès du personnel.')}</p>
             )}
@@ -828,6 +838,17 @@ function FichePlat({
 }
 
 /** − / + d'une quantité. `plancher` (fiche plat) : le − s'arrête à 1 au lieu de retirer la ligne du panier. */
+/**
+ * Pastille « Photo d’illustration » (version finale), affichée en permanence : sur la grande image de la fiche (coin
+ * haut-gauche), ou `ligne` = petite étiquette sous le nom du plat. Pastille (étiquette décorative) : text-xs, exception documentée (P2-Q1).
+ */
+function PastilleIllustration({ ligne }: { ligne?: boolean }) {
+  const { t } = useLangue()
+  return (
+    <span className={`${ligne ? 'mt-0.5 inline-block' : 'absolute top-3 left-3'} rounded-full bg-magenta-500 px-2 py-0.5 text-xs font-semibold text-white`}>{t('Photo d’illustration')}</span>
+  )
+}
+
 function Quantite({ quantite, nom, plancher, onMoins, onPlus }: { quantite: number; nom: string; plancher?: boolean; onMoins: () => void; onPlus: () => void }) {
   const { t } = useLangue()
   const rond = 'inline-flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-xl font-bold text-white ring-1 ring-white/30 active:scale-95 disabled:opacity-40'

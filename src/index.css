@@ -161,6 +161,14 @@ h3 {
   .alerte-succes {
     @apply rounded-xl bg-green-50 p-3 text-sm font-semibold text-green-900 ring-1 ring-green-200;
   }
+  /* Alertes ambre / verte — classes déplacées du TSX (version finale, bundle initial au plafond). Le fond reste dans le
+     TSX (`alerte-ambre bg-amber-50`) : les règles `.page-client .bg-…-50 .lien` le ciblent. */
+  .alerte-ambre {
+    @apply rounded-xl p-3 text-sm text-amber-900 ring-1 ring-amber-200;
+  }
+  .alerte-verte {
+    @apply rounded-xl p-3 text-sm text-green-900 ring-1 ring-green-200;
+  }
   /* Cases à cocher (P2-Q1) : case visible de 24 px dans une zone tactile de 44 × 44 px (marges négatives : la ligne garde sa hauteur). */
   .zone-case {
     @apply -my-2.5 -ml-2.5 inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center;

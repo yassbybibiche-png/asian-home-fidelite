@@ -26,6 +26,8 @@
 //   6 Maki Gold, Tiramisu, boissons, variantes makis / california / sashimi / sushi.
 // - menu-nouilles-crevettes.jpg (ancienne photo PROBABLE de Mi Prat) et
 //   menu-plat-riz.jpg (plat thaï non identifié) ne sont rattachées à aucun plat nommé.
+// - Les 70 plats sans photo reçoivent côté client une photo d'illustration étiquetée (ILLUSTRATIONS,
+//   champ séparé `illustration`, jamais `photo`).
 // - Ids : les plats déjà présents dans l'ancien menu gardent leur id `reel-cN-pM` ;
 //   les nouveaux plats ont un id `reel-o-…`.
 import type { Menu, Produit } from '../types'
@@ -85,6 +87,102 @@ export function retirerPhotosDetachees(menu: Menu): Menu {
         if (!p.photo || !(PHOTOS_DETACHEES as readonly string[]).includes(p.photo)) return p
         const { photo: _photo, photoVignette: _vignette, ...reste } = p
         return reste
+      }),
+    })),
+  }
+}
+
+/**
+ * Photos d'illustration (version finale, décision du 14/11/2026) : une image générée par plat SANS vraie photo de la
+ * carte officielle (70 plats, nom exact → id), fichiers `public/visuels/illustrations/<id>.webp` (800 px) et
+ * `<id>-vignette.webp` (384 px), provenance dans public/visuels/SOURCES.md. Toujours étiquetées « Photo d’illustration »
+ * à l'affichage ; jamais dans `photo` (rail Signatures, plat-star et héros de catégorie restent aux vraies photos).
+ */
+export const ILLUSTRATIONS: Readonly<Record<string, string>> = {
+  'Choux': 'reel-c1-p1',
+  'Edamame': 'reel-o-edamame',
+  'Wakame': 'reel-o-wakame',
+  'Soupe Miso': 'reel-c1-p2',
+  'Riz Nature': 'reel-c1-p3',
+  'Riz Thaï': 'reel-c1-p5',
+  'California Saumon Avocat': 'reel-o-california-saumon-avocat',
+  'California Saumon Cheese': 'reel-o-california-saumon-cheese',
+  'California Thon Cuit Mayo Avocat Concombre': 'reel-o-california-thon-cuit',
+  'California Poulet Avocat': 'reel-o-california-poulet-avocat',
+  'California Veggie Avocat Concombre': 'reel-o-california-veggie',
+  'California Crevettes Tempura Avocat': 'reel-o-california-crevettes-tempura',
+  'California Foie Gras Figue Amande': 'reel-o-california-foie-gras',
+  'Maki Green Saumon Avocat Menthe Coriandre': 'reel-o-green-saumon-avocat',
+  'Maki Green Thon Avocat Menthe Coriandre': 'reel-o-green-thon-avocat',
+  'Maki Green Saumon Cheese': 'reel-o-green-saumon-cheese',
+  'Maki Green Avocat Cheese': 'reel-o-green-avocat-cheese',
+  'Maki Green Tempura Avocat Mayo Menthe Coriandre': 'reel-o-green-tempura',
+  'Maki Green Crevettes Tempura Avocat Sauce Curry': 'reel-o-green-crevettes-tempura',
+  'Maki Black Saumon': 'reel-o-black-saumon',
+  'Maki Black Avocat': 'reel-o-black-avocat',
+  'Maki Black Thon': 'reel-o-black-thon',
+  'Maki Black Cheese': 'reel-o-black-cheese',
+  'Maki Black Saumon Cheese': 'reel-o-black-saumon-cheese',
+  'Maki Black Concombre': 'reel-o-black-concombre',
+  'Maki Neige Saumon Cheese': 'reel-o-neige-saumon-cheese',
+  'Maki Neige Saumon Avocat': 'reel-o-neige-saumon-avocat',
+  'Maki Neige Avocat Cheese': 'reel-o-neige-avocat-cheese',
+  'Maki Neige Thon Cuit Avocat Mayo': 'reel-o-neige-thon-cuit',
+  'Maki Pink Cheese': 'reel-o-pink-cheese',
+  'Maki Pink Avocat Cheese': 'reel-o-pink-avocat-cheese',
+  'Maki Pink Concombre Cheese': 'reel-o-pink-concombre-cheese',
+  'Maki Pink Saumon Mi-Cuit Cheese Oignon Frit': 'reel-o-pink-saumon-mi-cuit',
+  'Maki Pink Avocat Cheese Tomate Séchée': 'reel-o-pink-tomate-sechee',
+  'Sashimi Saumon 6 pièces': 'reel-c4-p6',
+  'Sashimi Saumon 12 pièces': 'reel-o-sashimi-saumon-12',
+  'Sashimi Thon 6 pièces': 'reel-c4-p7',
+  'Sashimi Thon 12 pièces': 'reel-o-sashimi-thon-12',
+  'Sushi Saumon x2': 'reel-o-sushi-saumon',
+  'Sushi Thon x2': 'reel-o-sushi-thon',
+  'Sushi Saumon Avocat x2': 'reel-o-sushi-saumon-avocat',
+  'Sushi Saumon Mi-Cuit x2': 'reel-o-sushi-saumon-mi-cuit',
+  'Gyoza Crevette ou Légume x4': 'reel-c2-p6',
+  'Nems au Poulet x4': 'reel-c2-p5',
+  'Crevettes Tempura x4': 'reel-c2-p7',
+  'Bœuf au Fromage Fait Maison x2': 'reel-c2-p4',
+  'Boulettes de Poulet Fait Maison x2': 'reel-o-boulettes-poulet',
+  'Brochette de Poulet Fait Maison x2': 'reel-o-brochette-poulet',
+  'Tartare Saumon Avocat': 'reel-c1-p4',
+  'Love Bao': 'reel-c2-p3',
+  'Midi Asian': 'reel-o-midi-asian',
+  'Asian Love': 'reel-o-midi-asian-love',
+  'Banh Mi': 'reel-o-midi-banh-mi',
+  'Menu Enfant': 'reel-o-midi-enfant',
+  '8 Maki Tiger': 'reel-c4-p10',
+  '8 Maki Chicken Dragon': 'reel-c4-p9',
+  '6 Maki Gold': 'reel-o-maki-gold',
+  'Tiramisu': 'reel-c6-p2',
+  'Dessert du jour': 'reel-o-dessert-du-jour',
+  'Evian / San Pellegrino': 'reel-o-eau',
+  'Soda': 'reel-o-soda',
+  'Asian Drink': 'reel-c7-p2',
+  'Calypso': 'reel-o-calypso',
+  'Bubble Tea': 'reel-o-bubble-tea',
+  'Piña Colada': 'reel-c7-p5',
+  'Cocktail Kohsamui': 'reel-c7-p3',
+  'Cocktail Tokyo': 'reel-c7-p4',
+  'Thaï-sty Krusty': 'reel-c2-p1',
+  'Bœuf Basilic': 'reel-c3-p9',
+  'Boisson 33cl': 'reel-c7-p1',
+}
+
+/**
+ * Pose `illustration` / `illustrationVignette` sur chaque plat SANS vraie photo dont le nom est dans ILLUSTRATIONS ;
+ * un plat photographié ou inconnu est rendu tel quel (la vraie photo gagne toujours). Ne modifie pas le menu d'origine.
+ */
+export function avecIllustrations(menu: Menu): Menu {
+  return {
+    ...menu,
+    categories: menu.categories.map((c) => ({
+      ...c,
+      produits: c.produits.map((p) => {
+        const id = !p.photo && Object.hasOwn(ILLUSTRATIONS, p.nom) ? ILLUSTRATIONS[p.nom] : undefined
+        return id ? { ...p, illustration: `/visuels/illustrations/${id}.webp`, illustrationVignette: `/visuels/illustrations/${id}-vignette.webp` } : p
       }),
     })),
   }

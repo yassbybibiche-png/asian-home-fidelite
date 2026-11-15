@@ -215,7 +215,7 @@ function ConservationDonnees() {
     <section className="carte mb-4 space-y-3" aria-label="Données personnelles">
       <h2 className="titre-carte">Données personnelles (RGPD)</h2>
       {demandes.length > 0 && (
-        <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+        <div className="alerte-ambre bg-amber-50">
           <p className="font-semibold">
             {demandes.length} demande{demandes.length > 1 ? 's' : ''} de suppression reçue{demandes.length > 1 ? 's' : ''} depuis la carte :
           </p>

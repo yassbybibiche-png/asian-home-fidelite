@@ -79,7 +79,7 @@ export function Verrou() {
       </div>
 
       {verrouillage && (
-        <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="alert" data-verrouillage>
+        <div className="alerte-ambre bg-amber-50" role="alert" data-verrouillage>
           {verrouillage.message}
           {verrouillage.coffre && (
             <button type="button" className="ml-2 min-h-11 font-semibold underline" onClick={() => void relireAcces()}>
