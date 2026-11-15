@@ -104,7 +104,7 @@ export default function TableauDeBord() {
       </div>
 
       {rappelPurge && rappelPurge.aPurger > 0 && (
-        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="alert">
+        <p className="alerte-ambre bg-amber-50" role="alert">
           <a href="#/clients" className="font-semibold underline">
             {rappelPurge.aPurger} carte{rappelPurge.aPurger > 1 ? 's' : ''} à purger
           </a>

@@ -376,8 +376,14 @@ export const TRADUCTIONS_EN: Record<string, string> = {
   '★ Plat signature — l’un des best-sellers du restaurant.': '★ Signature dish — one of the restaurant’s best-sellers.',
   'Allergènes : demandez conseil à l’équipe en cas de doute.': 'Allergens: ask the team for advice if in doubt.',
   'Photo du plat : {nom}': 'Photo of the dish: {nom}',
+  // Version finale : photos d'illustration des plats sans vraie photo (#/menu et #/commande — clés partagées, donc ici).
+  'Photo d’illustration': 'Illustration photo',
+  'Cette image évoque le plat ; la présentation servie peut différer.': 'This image evokes the dish; the served presentation may differ.',
+  'Les images marquées « Photo d’illustration » évoquent les plats ; la présentation servie peut différer.': 'Images marked “Illustration photo” evoke the dishes; the served presentation may differ.',
   // Menu visuel (13/11/2026) : rail « En photos », grandes cartes photo, pastille de la catégorie midi.
   'En photos': 'In pictures',
+  // Rail « Signatures » (Menu Appétit) : #/menu (lot 3) et #/commande (lot 2) — clé partagée, donc ici.
+  'Signatures': 'Signatures',
   'Voir le plat : {nom}': 'See the dish: {nom}',
   '🍱 Menu Midi': '🍱 Lunch menu',
   // Expérience 10/10 (lot 2) : barre « commande à table » du menu et lien vers l'accueil #/bienvenue.

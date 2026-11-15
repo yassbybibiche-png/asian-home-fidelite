@@ -36,6 +36,7 @@ export function programmePublic(c: Pick<Commerce, 'programme' | 'seuilTampons'>)
  * `heuresCreuses` sont publiés et `bonusCreux` est posé ; hors créneau, ces lots sont absents comme un lot à 0 %.
  * `menuDisponible` (Déblocage C-bis) : le menu public a au moins un produit — seule GET /commerces/:id le calcule.
  * `commandeActive` (Expérience 10/10) : module commande à table activé avec au moins une table.
+ * `servicesCommande` (Menu Appétit) : idem, avec les demandes de service à 0 € activées (`commande.services`).
  */
 export function commercePublic(c: Commerce, plafonnes: ReadonlySet<string> = new Set(), creux = false, menuDisponible = false): CommercePublic {
   const { couleur, fond, banniere } = c.apparence ?? {}
@@ -66,6 +67,8 @@ export function commercePublic(c: Commerce, plafonnes: ReadonlySet<string> = new
     ...(menuDisponible ? { menuDisponible: true as const } : {}),
     // Commande à table : seulement « activée avec au moins une table » — jamais les tables ni leurs jetons.
     ...(c.commande?.active && c.commande.tables.length ? { commandeActive: true as const } : {}),
+    // Menu Appétit : demandes de service à 0 € seulement si la commande à table est publiée ET `services` est vrai.
+    ...(c.commande?.active && c.commande.services && c.commande.tables.length ? { servicesCommande: true as const } : {}),
     actif: c.actif,
     demo: !!c.demo,
     ...(c.catalogue ? { catalogue: c.catalogue.map((r) => ({ nom: r.nom, cout: r.cout, ...(r.description ? { description: r.description } : {}) })) } : {}),

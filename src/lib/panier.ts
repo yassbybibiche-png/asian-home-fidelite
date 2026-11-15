@@ -4,7 +4,8 @@
 // qu'un affichage ; le panier n'envoie que des identifiants, des quantités, des noms d'options et des instructions.
 // Pas d'import de commande.ts ici : il réexporte `jourParis` de relances.ts, qui tirerait la fidélité dans le
 // fichier de la page.
-import type { OptionProduit, Produit } from '../types'
+import type { LigneCommande, Menu, OptionProduit, Produit } from '../types'
+import { serviceParId, type ServiceCommande } from './servicesCommande.ts'
 
 /** Quantité par ligne : 1 à 20, comme le serveur (`LIMITES_COMMANDE.quantite`, vérifié par le test). */
 export const QUANTITE_MIN = 1
@@ -57,6 +58,58 @@ export function ajouter(panier: readonly LignePanier[], produit: Pick<Produit, '
   if (panier.some((l) => l.cle === cle)) return panier.map((l) => (l.cle === cle ? { ...l, quantite: borner(l.quantite + quantite) } : l))
   if (panier.length >= LIGNES_MAX) return [...panier]
   return [...panier, { cle, produitId: produit.id, nom: produit.nom, prix: produit.prix, quantite: borner(quantite), options: options.map((o) => ({ nom: o.nom, prix: o.prix })) }]
+}
+
+/**
+ * Demande de service à 0 € (Menu Appétit, src/lib/servicesCommande.ts) : une ligne par service, clé = id du service,
+ * sans option. Déjà présente : la quantité augmente (plafonnée à 20) ; panier à 30 lignes : inchangé.
+ */
+export function ajouterService(panier: readonly LignePanier[], service: Pick<ServiceCommande, 'id' | 'nom'>, quantite = 1): LignePanier[] {
+  if (panier.some((l) => l.cle === service.id)) return panier.map((l) => (l.cle === service.id ? { ...l, quantite: borner(l.quantite + quantite) } : l))
+  if (panier.length >= LIGNES_MAX) return [...panier]
+  return [...panier, { cle: service.id, produitId: service.id, nom: service.nom, prix: 0, quantite: borner(quantite), options: [] }]
+}
+
+/**
+ * « Encore la même » (Menu Appétit, lot 2) : panier rebâti depuis les lignes d'une commande passée, aux prix du menu
+ * COURANT (jamais ceux de l'ancienne commande). Rien n'est substitué : un plat absent du menu, devenu non commandable,
+ * dont une option n'est plus proposée, ou qui ne tient plus (30 lignes), et un service quand le module est coupé, vont
+ * dans `ignores` (noms de l'ancienne commande) — au client de choisir autre chose.
+ */
+export function reconstruirePanier(
+  lignes: readonly LigneCommande[],
+  menu: Pick<Menu, 'categories'>,
+  servicesActifs: boolean,
+): { panier: LignePanier[]; ignores: string[] } {
+  const produits = new Map(menu.categories.flatMap((c) => c.produits.map((p) => [p.id, p] as const)))
+  let panier: LignePanier[] = []
+  const ignores: string[] = []
+  for (const l of lignes) {
+    const service = serviceParId(l.produitId)
+    const produit = service ? undefined : produits.get(l.produitId)
+    const cle = service ? service.id : produit && cleLigne(produit.id, (produit.options ?? []).filter((o) => l.options.some((x) => x.nom === o.nom)))
+    const optionsRetrouvees = !!produit && l.options.every((o) => produit.options?.some((x) => x.nom === o.nom))
+    const tient = !!cle && (panier.length < LIGNES_MAX || panier.some((x) => x.cle === cle))
+    if (service && servicesActifs && tient) panier = ajouterService(panier, service, l.quantite)
+    else if (produit && estCommandable(produit) && optionsRetrouvees && tient) {
+      panier = ajouter(panier, produit, l.options.map((o) => o.nom), l.quantite)
+      if (l.instructions?.trim()) panier = majInstructions(panier, cle!, l.instructions)
+    } else ignores.push(l.nom)
+  }
+  return { panier, ignores }
+}
+
+/**
+ * « À découvrir aussi » sous la fiche d'un plat : le premier plat photographié et commandable APRÈS celui-ci dans
+ * l'ordre du menu (en bouclant), autre que lui. Choix stable, sans statistique ni classement ; aucun → null.
+ */
+export function suggestionApres<P extends Pick<Produit, 'id' | 'photo' | 'prix' | 'indisponible'>>(plats: readonly P[], courant: Pick<Produit, 'id'>): P | null {
+  const i = plats.findIndex((p) => p.id === courant.id)
+  for (let k = 1; k <= plats.length; k++) {
+    const p = plats[(i + k) % plats.length]
+    if (p.id !== courant.id && p.photo && estCommandable(p)) return p
+  }
+  return null
 }
 
 /** Nouvelle quantité, bornée à 1–20 (retirer une ligne passe par `retirer`). */
